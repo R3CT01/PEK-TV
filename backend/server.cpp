@@ -9,6 +9,8 @@
 #include <map>
 #include <algorithm>
 #include <cctype>
+#include <atomic>
+#include <chrono>
 
 namespace fs = std::filesystem;
 
@@ -101,6 +103,17 @@ std::string normalizeName(const std::string& s) {
     std::string out;
     for (unsigned char c : s) if (std::isalnum(c)) out += static_cast<char>(std::tolower(c));
     return out;
+}
+
+// Rescan throttle: at most one manual rescan per 10 seconds, and
+// never two at once. Enforced here so it can't be bypassed from the browser.
+std::atomic<bool> g_rescan_running{false};
+std::atomic<long long> g_last_rescan_ms{0};
+constexpr long long kRescanCooldownMs = 10000;
+
+long long nowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
 // TMDb lookups go through our Cloudflare Worker, which holds the API key.
@@ -393,8 +406,31 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     // 7. Manually trigger a rescan (e.g. a "Refresh Library" button).
     //    Runs in the background so the request returns immediately.
     svr.Post("/api/rescan", [scanner](const httplib::Request& req, httplib::Response& res) {
-        std::thread([scanner]() { scanner->scan(); }).detach();
+        long long now = nowMs();
+        long long last = g_last_rescan_ms.load();
+        if (last != 0 && now - last < kRescanCooldownMs) {
+            long long wait_s = (kRescanCooldownMs - (now - last) + 999) / 1000;
+            res.status = 429;
+            res.set_header("Retry-After", std::to_string(wait_s));
+            res.set_content("{\"error\": \"Too soon\", \"retry_after\": " + std::to_string(wait_s) + "}", "application/json");
+            return;
+        }
+        bool expected = false;
+        if (!g_rescan_running.compare_exchange_strong(expected, true)) {
+            res.set_content("{\"status\": \"already scanning\"}", "application/json");
+            return;
+        }
+        g_last_rescan_ms.store(now);
+        std::thread([scanner]() {
+            scanner->scan();
+            g_rescan_running.store(false);
+        }).detach();
         res.set_content("{\"status\": \"rescan started\"}", "application/json");
+    });
+
+    // 7b. Lets the UI wait for a manual rescan to finish before reloading.
+    svr.Get("/api/scan-status", [](const httplib::Request& req, httplib::Response& res) {
+        res.set_content(std::string("{\"scanning\": ") + (g_rescan_running.load() ? "true" : "false") + "}", "application/json");
     });
 
     // 8. Directory picker: lists subfolders of ?path=..., or a default
