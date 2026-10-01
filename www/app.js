@@ -2,7 +2,7 @@
 // Hesper App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v5';
+window.HESPER_APP_BUILD = 'v6';
 
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -89,6 +89,8 @@ class MainApp extends HesperComponent {
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
             showNav: { show: null, season: null },   // TV Shows drill-down: null/null = show folders, show only = seasons, both = episodes
+            detail: null,         // null = closed, else { title, subtitle, overview, image, loading, error }
+            showInfo: {},         // showTitle -> { overview, poster } | { loading } | { error }
             weatherText: this._readWeather()
         };
     }
@@ -230,10 +232,78 @@ class MainApp extends HesperComponent {
         this.loadLibrary(id);
     }
 
+    // ---------------- Details (TMDb via the backend) ----------------
+
+    closeDetail() { this.setState({ detail: null }); }
+
+    async _fetchJson(url) {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!res.ok || data.error) throw new Error(data.error || 'Request failed');
+        return data;
+    }
+
+    async openMovieDetail(m) {
+        const base = { title: m.title, subtitle: m.year ? String(m.year) : '', overview: '', image: '', loading: true, error: '' };
+        this.setState({ detail: base });
+        try {
+            const d = await this._fetchJson(`/api/movie-details?id=${encodeURIComponent(m.id)}`);
+            if (!this.state.detail || this.state.detail.title !== m.title) return;
+            this.setState({ detail: { ...base, overview: d.overview || '', image: d.poster || '', loading: false } });
+        } catch (err) {
+            if (!this.state.detail || this.state.detail.title !== m.title) return;
+            this.setState({ detail: { ...base, loading: false, error: 'Could not load details.' } });
+        }
+    }
+
+    async openEpisodeDetail(showTitle, ep) {
+        const label = `Episode ${ep.episode}`;
+        const base = { title: label, subtitle: `${showTitle} \u00b7 Season ${ep.season}`, overview: '', image: '', loading: true, error: '' };
+        this.setState({ detail: base });
+        try {
+            const q = `show=${encodeURIComponent(showTitle)}&season=${ep.season}&episode=${ep.episode}`;
+            const d = await this._fetchJson(`/api/episode-details?${q}`);
+            if (!this.state.detail || this.state.detail.subtitle !== base.subtitle) return;
+            this.setState({ detail: { ...base, title: d.name ? `${label}: ${d.name}` : label, overview: d.overview || '', image: d.still || '', loading: false } });
+        } catch (err) {
+            if (!this.state.detail || this.state.detail.subtitle !== base.subtitle) return;
+            this.setState({ detail: { ...base, loading: false, error: 'Could not load details.' } });
+        }
+    }
+
+    // Loads a show's bio once; the seasons screen shows it above the grid.
+    async loadShowInfo(showTitle) {
+        if (this.state.showInfo[showTitle]) return;
+        this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { loading: true } } });
+        try {
+            const d = await this._fetchJson(`/api/show-details?title=${encodeURIComponent(showTitle)}`);
+            this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { overview: d.overview || '', poster: d.poster || '' } } });
+        } catch (err) {
+            this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { error: true } } });
+        }
+    }
+
+    _renderDetailModal() {
+        const d = this.state.detail;
+        if (!d) return null;
+        const { createElement, ui } = this.props.engine;
+        let text;
+        if (d.loading) text = 'Loading\u2026';
+        else if (d.error) text = d.error;
+        else text = d.overview || 'No synopsis available.';
+        const body = createElement('div', {},
+            d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
+            d.image ? createElement('img', { src: d.image, alt: '', style: { maxWidth: '100%', borderRadius: '8px', margin: '8px 0' } }) : null,
+            createElement('p', {}, text)
+        );
+        return ui.modal(d.title, body, () => this.closeDetail());
+    }
+
     // ---------------- TV Shows drill-down: show -> season -> episodes ----------------
 
     openShow(showTitle) {
         this.setState({ showNav: { show: showTitle, season: null } });
+        this.loadShowInfo(showTitle);
     }
 
     openSeason(seasonNumber) {
@@ -246,6 +316,18 @@ class MainApp extends HesperComponent {
         if (season !== null) { this.setState({ showNav: { show, season: null } }); return true; }
         if (show !== null) { this.setState({ showNav: { show: null, season: null } }); return true; }
         return false;
+    }
+
+    _renderShowBio(showTitle) {
+        const { createElement } = this.props.engine;
+        const info = this.state.showInfo[showTitle];
+        if (!info) return null;
+        if (info.loading) return createElement('p', { className: 'sub' }, 'Loading synopsis\u2026');
+        if (info.error || !info.overview) return null;
+        return createElement('div', { style: { display: 'flex', gap: '12px', margin: '8px 0 16px' } },
+            info.poster ? createElement('img', { src: info.poster, alt: '', style: { width: '90px', borderRadius: '8px', alignSelf: 'flex-start' } }) : null,
+            createElement('p', { style: { margin: 0 } }, info.overview)
+        );
     }
 
     _renderShows(data) {
@@ -278,6 +360,7 @@ class MainApp extends HesperComponent {
                     ui.button('\u2190 All Shows', () => this.showBack())
                 ),
                 createElement('h2', { className: 'sub-heading' }, show.showTitle),
+                this._renderShowBio(show.showTitle),
                 ui.grid(
                     show.seasons.map(se => ui.card(
                         `Season ${se.season}`,
@@ -296,7 +379,7 @@ class MainApp extends HesperComponent {
             ),
             createElement('h2', { className: 'sub-heading' }, `${show.showTitle} \u00b7 Season ${season.season}`),
             createElement('div', { className: 'plugin-list' },
-                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, e.filename))
+                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, e.filename, () => this.openEpisodeDetail(show.showTitle, e)))
             )
         );
     }
@@ -371,7 +454,7 @@ class MainApp extends HesperComponent {
             const movies = data.movies || [];
             if (!movies.length) return this._renderEmptyLibrary('movies');
             return ui.grid(
-                movies.map(m => ui.card(m.title, m.year ? String(m.year) : m.filename)),
+                movies.map(m => ui.card(m.title, m.year ? String(m.year) : m.filename, () => this.openMovieDetail(m))),
                 { minColWidth: '200px' }
             );
         }
@@ -500,6 +583,7 @@ class MainApp extends HesperComponent {
             ),
             createElement('div', { className: 'hesper-content' }, mainContent),
             themeModal,
+            this._renderDetailModal(),
             this._renderPicker()
         );
     }

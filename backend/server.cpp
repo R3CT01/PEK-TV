@@ -103,18 +103,24 @@ std::string normalizeName(const std::string& s) {
     return out;
 }
 
+// TMDb lookups go through our Cloudflare Worker, which holds the API key.
+// Override with the TMDB_PROXY_URL env var if needed.
+static std::string tmdbProxyUrl() {
+    const char* env = std::getenv("TMDB_PROXY_URL");
+    if (env && *env) return env;
+    return "https://hesper-tmdb.aquariusibeats.workers.dev";
+}
+
 } // namespace
 
 std::string HesperServer::resolveShowName(const std::string& guess) {
-    const char* api_key_env = std::getenv("TMDB_API_KEY");
-    if (!api_key_env || !*api_key_env || guess.empty()) return "";
+    if (guess.empty()) return "";
 
-    httplib::Client client("https://api.themoviedb.org");
+    httplib::Client client(tmdbProxyUrl());
     client.set_connection_timeout(5);
     client.set_read_timeout(5);
 
-    std::string query = "/3/search/tv?api_key=" + std::string(api_key_env) +
-                         "&query=" + httplib::encode_uri(guess);
+    std::string query = "/search/tv?query=" + httplib::encode_uri(guess);
     auto res = client.Get(query.c_str());
     if (!res || res->status != 200) return "";
 
@@ -278,7 +284,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     //    a movie card, not during the scan — keeps the bulk scan
     //    network-free (see MediaScanner) while still getting a poster
     //    and synopsis for whatever the user is currently looking at.
-    //    Requires a TMDB_API_KEY environment variable and cpp-httplib
+    //    Goes through the Cloudflare Worker proxy (no key needed here); needs cpp-httplib
     //    built with CPPHTTPLIB_OPENSSL_SUPPORT (TMDb is HTTPS-only).
     svr.Get("/api/movie-details", [scanner](const httplib::Request& req, httplib::Response& res) {
         std::string id = req.get_param_value("id");
@@ -289,19 +295,11 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             return;
         }
 
-        const char* api_key_env = std::getenv("TMDB_API_KEY");
-        if (!api_key_env) {
-            res.status = 500;
-            res.set_content("{\"error\": \"TMDB_API_KEY not set on the server\"}", "application/json");
-            return;
-        }
-
-        httplib::Client client("https://api.themoviedb.org");
+        httplib::Client client(tmdbProxyUrl());
         client.set_connection_timeout(5);
         client.set_read_timeout(5);
 
-        std::string query = "/3/search/movie?api_key=" + std::string(api_key_env) +
-                             "&query=" + httplib::encode_uri(entry.title);
+        std::string query = "/search/movie?query=" + httplib::encode_uri(entry.title);
         if (entry.year > 0) query += "&year=" + std::to_string(entry.year);
 
         auto tmdb_res = client.Get(query.c_str());
@@ -326,6 +324,69 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
                             "\", \"year\": " + std::to_string(entry.year) +
                             ", \"overview\": \"" + jsonEscape(overview) +
                             "\", \"poster\": \"" + jsonEscape(poster_url) + "\"}";
+        res.set_content(json, "application/json");
+    });
+
+    // 6b. TV show bio (poster + synopsis) — fires only when the user opens a show.
+    svr.Get("/api/show-details", [](const httplib::Request& req, httplib::Response& res) {
+        std::string title = req.get_param_value("title");
+        if (title.empty()) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Missing title\"}", "application/json");
+            return;
+        }
+        httplib::Client client(tmdbProxyUrl());
+        client.set_connection_timeout(5);
+        client.set_read_timeout(5);
+        auto tmdb_res = client.Get(("/search/tv?query=" + httplib::encode_uri(title)).c_str());
+        if (!tmdb_res || tmdb_res->status != 200) {
+            res.status = 502;
+            res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
+            return;
+        }
+        const std::string& body = tmdb_res->body;
+        size_t results_pos = body.find("\"results\"");
+        std::string first_result = results_pos != std::string::npos ? body.substr(results_pos) : body;
+        std::string overview = extractJsonString(first_result, "overview");
+        std::string poster_path = extractJsonString(first_result, "poster_path");
+        std::string poster_url = poster_path.empty() ? "" : ("https://image.tmdb.org/t/p/w342" + poster_path);
+        std::string json = "{\"title\": \"" + jsonEscape(title) +
+                            "\", \"overview\": \"" + jsonEscape(overview) +
+                            "\", \"poster\": \"" + jsonEscape(poster_url) + "\"}";
+        res.set_content(json, "application/json");
+    });
+
+    // 6c. Episode bio (title + synopsis + still image). The Worker does the
+    //     show lookup and episode fetch and returns a trimmed object.
+    svr.Get("/api/episode-details", [](const httplib::Request& req, httplib::Response& res) {
+        std::string show = req.get_param_value("show");
+        std::string season = req.get_param_value("season");
+        std::string episode = req.get_param_value("episode");
+        if (show.empty() || season.empty() || episode.empty()) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Missing show, season or episode\"}", "application/json");
+            return;
+        }
+        httplib::Client client(tmdbProxyUrl());
+        client.set_connection_timeout(5);
+        client.set_read_timeout(8);
+        std::string q = "/episode?query=" + httplib::encode_uri(show) +
+                        "&season=" + httplib::encode_uri(season) +
+                        "&episode=" + httplib::encode_uri(episode);
+        auto tmdb_res = client.Get(q.c_str());
+        if (!tmdb_res || tmdb_res->status != 200) {
+            res.status = 502;
+            res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
+            return;
+        }
+        const std::string& body = tmdb_res->body;
+        std::string name = extractJsonString(body, "name");
+        std::string overview = extractJsonString(body, "overview");
+        std::string still = extractJsonString(body, "still_path");
+        std::string still_url = still.empty() ? "" : ("https://image.tmdb.org/t/p/w300" + still);
+        std::string json = "{\"name\": \"" + jsonEscape(name) +
+                            "\", \"overview\": \"" + jsonEscape(overview) +
+                            "\", \"still\": \"" + jsonEscape(still_url) + "\"}";
         res.set_content(json, "application/json");
     });
 
