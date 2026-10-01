@@ -1,0 +1,533 @@
+// ============================================================
+// Hesper App Shell
+// ============================================================
+
+window.HESPER_APP_BUILD = 'v5';
+
+const NAV_ITEMS = [
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'movies', label: 'Movies' },
+    { id: 'shows', label: 'TV Shows' },
+    { id: 'music', label: 'Music' },
+    { id: 'unknown', label: 'Unknown' },
+    { id: 'plugins', label: 'Plugins' },
+    { id: 'settings', label: 'Settings' }
+];
+
+// Library tabs -> backend endpoint (see server.cpp)
+const LIBRARY_ENDPOINTS = {
+    movies: '/api/movies',
+    shows: '/api/shows',
+    unknown: '/api/unknown'
+};
+
+// The Weather plugin (plugins/weather/ui.js) writes its formatted reading
+// (e.g. "84°F") here and fires a window 'storage' event whenever it changes.
+const WEATHER_TEMP_KEY = 'hesper_weather_current_temp';
+
+class ThemePanel extends HesperComponent {
+    render() {
+        const { engine, onClose } = this.props;
+        const { createElement, ui } = engine;
+        const presetNames = engine.theme.listPresets();
+        const currentTokens = engine.theme.getAll();
+
+        const presetCards = presetNames.map(name => {
+            const tokens = engine.theme.presets[name];
+            return createElement('div', {
+                className: `preset-card focusable ${engine.theme.get('bg') === tokens.bg ? 'active-preset' : ''}`,
+                onClick: () => {
+                    engine.theme.applyPreset(name);
+                    if (this.props.onRefresh) this.props.onRefresh();
+                }
+            },
+                createElement('div', {
+                    className: 'preset-preview-swatch',
+                    style: { background: `linear-gradient(135deg, ${tokens.bg} 0%, ${tokens.surface} 50%, ${tokens.accent} 100%)` }
+                }),
+                createElement('div', { className: 'preset-name' }, name)
+            );
+        });
+
+        const colorPickers = [
+            { key: 'accent', label: 'Accent Color' },
+            { key: 'bg', label: 'Background' },
+            { key: 'surface', label: 'Surface' },
+            { key: 'text', label: 'Text Color' }
+        ].map(({ key, label }) => {
+            return createElement('div', { className: 'theme-row' },
+                createElement('label', {}, label),
+                createElement('input', {
+                    type: 'color',
+                    value: currentTokens[key] || '#000000',
+                    onInput: (e) => {
+                        // No re-render here: rebuilding the <input> mid-drag would close the native color picker.
+                        engine.theme.set(key, e.target.value);
+                    }
+                })
+            );
+        });
+
+        const content = createElement('div', {},
+            createElement('p', { className: 'sub' }, 'Select a visual theme or customize token colors:'),
+            createElement('div', { className: 'preset-container' }, ...presetCards),
+            createElement('div', { className: 'color-grid' }, ...colorPickers)
+        );
+
+        return ui.modal('Theme Settings', content, onClose);
+    }
+}
+
+class MainApp extends HesperComponent {
+    constructor(props) {
+        super(props);
+        this.state = {
+            activeTab: 'dashboard',
+            showThemePanel: false,
+            pluginsList: [],
+            sources: [],
+            library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
+            picker: null,         // null = closed, else { path, parent, dirs, loading, error }
+            showNav: { show: null, season: null },   // TV Shows drill-down: null/null = show folders, show only = seasons, both = episodes
+            weatherText: this._readWeather()
+        };
+    }
+
+    componentDidMount() {
+        const { engine } = this.props;
+        engine.plugins.discover().then(plugins => {
+            this.setState({ pluginsList: plugins });
+            this._warmWeatherPlugin(plugins);
+        });
+        this.loadSources();
+
+        // Live-update the header badge when the weather plugin publishes a new reading.
+        window.addEventListener('storage', () => {
+            const text = this._readWeather();
+            if (text !== this.state.weatherText) this.setState({ weatherText: text });
+        });
+    }
+
+    // ---------------- Weather (driven by the Weather plugin) ----------------
+
+    _readWeather() {
+        try { return localStorage.getItem(WEATHER_TEMP_KEY) || '--°'; } catch (e) { return '--°'; }
+    }
+
+    _findWeatherPlugin(plugins) {
+        return (plugins || this.state.pluginsList).find(p =>
+            p.folder === 'weather' || /weather/i.test(p.app_name || '')
+        );
+    }
+
+    // The plugin only publishes a reading once its render() has run, so run it
+    // once in the background (detached node, never shown) at boot.
+    _warmWeatherPlugin(plugins) {
+        const p = this._findWeatherPlugin(plugins);
+        if (!p || typeof p.render !== 'function') return;
+        try { p.render(this.props.engine); } catch (err) {
+            console.warn('[Hesper] Weather plugin failed to warm up:', err);
+        }
+    }
+
+    // ---------------- Media sources / folder picker ----------------
+
+    async loadSources() {
+        try {
+            const res = await fetch('/api/sources');
+            const data = await res.json();
+            this.setState({ sources: data.sources || [] });
+        } catch (err) {
+            console.warn('[Hesper] Could not load sources:', err);
+        }
+    }
+
+    async openPicker(path) {
+        const previous = this.state.picker || {};
+        this.setState({ picker: { ...previous, loading: true, error: null } });
+        try {
+            const url = '/api/browse' + (path ? `?path=${encodeURIComponent(path)}` : '');
+            const res = await fetch(url);
+            const data = await res.json();
+            if (!this.state.picker) return; // closed while loading
+            this.setState({
+                picker: {
+                    loading: false,
+                    error: null,
+                    path: data.path,
+                    parent: data.parent,
+                    dirs: data.directories || []
+                }
+            });
+        } catch (err) {
+            if (!this.state.picker) return;
+            this.setState({
+                picker: { loading: false, error: 'Could not reach /api/browse', path: path || '', parent: '', dirs: [] }
+            });
+        }
+    }
+
+    closePicker() {
+        this.setState({ picker: null });
+    }
+
+    async addSource(path) {
+        try {
+            const res = await fetch(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'POST' });
+            if (!res.ok) throw new Error('Server rejected folder');
+            this.closePicker();
+            await this.loadSources();
+            // The scan runs in the background on the server; refresh the library shortly after.
+            setTimeout(() => this.refreshLibrary(), 4000);
+        } catch (err) {
+            this.setState({ picker: { ...this.state.picker, error: 'Could not add that folder.' } });
+        }
+    }
+
+    async removeSource(path) {
+        try {
+            await fetch(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+        } catch (err) {
+            console.warn('[Hesper] Could not remove source:', err);
+        }
+        await this.loadSources();
+        this.refreshLibrary();
+    }
+
+    async rescan() {
+        try {
+            await fetch('/api/rescan', { method: 'POST' });
+        } catch (err) {
+            console.warn('[Hesper] Rescan failed:', err);
+        }
+        setTimeout(() => this.refreshLibrary(), 4000);
+    }
+
+    // ---------------- Library (Movies / Shows / Unknown) ----------------
+
+    async loadLibrary(tab, force = false) {
+        const endpoint = LIBRARY_ENDPOINTS[tab];
+        if (!endpoint) return;
+        if (!force && this.state.library[tab]) return;
+        try {
+            const res = await fetch(endpoint);
+            const data = await res.json();
+            this.setState({ library: { ...this.state.library, [tab]: data } });
+        } catch (err) {
+            this.setState({ library: { ...this.state.library, [tab]: { error: true } } });
+        }
+    }
+
+    refreshLibrary() {
+        this.setState({ library: {} });
+        this.loadLibrary(this.state.activeTab, true);
+    }
+
+    selectTab(id) {
+        // Tapping "TV Shows" always returns to the top-level show folders.
+        const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
+        this.setState({ activeTab: id, showNav });
+        this.loadLibrary(id);
+    }
+
+    // ---------------- TV Shows drill-down: show -> season -> episodes ----------------
+
+    openShow(showTitle) {
+        this.setState({ showNav: { show: showTitle, season: null } });
+    }
+
+    openSeason(seasonNumber) {
+        this.setState({ showNav: { show: this.state.showNav.show, season: seasonNumber } });
+    }
+
+    // One level up: episodes -> seasons -> show folders. Returns true if it moved.
+    showBack() {
+        const { show, season } = this.state.showNav;
+        if (season !== null) { this.setState({ showNav: { show, season: null } }); return true; }
+        if (show !== null) { this.setState({ showNav: { show: null, season: null } }); return true; }
+        return false;
+    }
+
+    _renderShows(data) {
+        const { createElement, ui } = this.props.engine;
+        const shows = data.shows || [];
+        if (!shows.length) return this._renderEmptyLibrary('TV shows');
+
+        const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+        const { show: showTitle, season: seasonNumber } = this.state.showNav;
+        const show = showTitle !== null ? shows.find(s => s.showTitle === showTitle) : null;
+
+        // Level 1: one folder card per show.
+        if (!show) {
+            return ui.grid(
+                shows.map(s => ui.card(
+                    s.showTitle,
+                    `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`,
+                    () => this.openShow(s.showTitle)
+                )),
+                { minColWidth: '200px' }
+            );
+        }
+
+        const season = seasonNumber !== null ? show.seasons.find(x => x.season === seasonNumber) : null;
+
+        // Level 2: the seasons you have for this show.
+        if (!season) {
+            return createElement('div', {},
+                createElement('div', { className: 'section-actions' },
+                    ui.button('\u2190 All Shows', () => this.showBack())
+                ),
+                createElement('h2', { className: 'sub-heading' }, show.showTitle),
+                ui.grid(
+                    show.seasons.map(se => ui.card(
+                        `Season ${se.season}`,
+                        plural(se.episodes.length, 'episode'),
+                        () => this.openSeason(se.season)
+                    )),
+                    { minColWidth: '200px' }
+                )
+            );
+        }
+
+        // Level 3: the episodes you have in that season.
+        return createElement('div', {},
+            createElement('div', { className: 'section-actions' },
+                ui.button(`\u2190 ${show.showTitle}`, () => this.showBack())
+            ),
+            createElement('h2', { className: 'sub-heading' }, `${show.showTitle} \u00b7 Season ${season.season}`),
+            createElement('div', { className: 'plugin-list' },
+                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, e.filename))
+            )
+        );
+    }
+
+    // ---------------- Plugins ----------------
+
+    openPlugin(p) {
+        const { engine } = this.props;
+        const { createElement, ui } = engine;
+
+        let node = null;
+        try {
+            node = typeof p.render === 'function' ? p.render(engine) : null;
+        } catch (err) {
+            console.error(`[Hesper] Plugin "${p.folder}" render() threw:`, err);
+            node = ui.card('Plugin error', String((err && err.message) || err));
+        }
+        if (!node) {
+            node = ui.card(
+                p.app_name,
+                'This plugin loaded, but its ui.js does not define window.render = (sx) => domNode, so there is no screen to show.'
+            );
+        }
+
+        engine.windows.create(class extends HesperWindow {
+            render() {
+                return createElement('div', { className: 'plugin-window' },
+                    createElement('div', { className: 'plugin-window-bar' },
+                        ui.button('Back', () => engine.windows.back()),
+                        createElement('h2', {}, p.app_name)
+                    ),
+                    createElement('div', { className: 'plugin-window-body' }, node)
+                );
+            }
+        });
+    }
+
+    // ---------------- Rendering ----------------
+
+    _renderHeader(title) {
+        const { createElement } = this.props.engine;
+        const weatherPlugin = this._findWeatherPlugin();
+
+        return createElement('div', { className: 'content-header' },
+            createElement('h1', { className: 'content-title' }, title),
+            createElement('button', {
+                className: 'weather-badge focusable',
+                title: weatherPlugin ? 'Open Weather Widget' : 'Weather plugin not installed',
+                onClick: () => { if (weatherPlugin) this.openPlugin(weatherPlugin); }
+            }, this.state.weatherText)
+        );
+    }
+
+    _renderEmptyLibrary(what) {
+        const { createElement, ui } = this.props.engine;
+        return createElement('div', {},
+            ui.card(`No ${what} yet`, 'Add a media folder and Hesper will scan it and sort your videos here.'),
+            createElement('div', { className: 'section-actions' },
+                ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' })
+            )
+        );
+    }
+
+    _renderLibrary(tab) {
+        const { createElement, ui } = this.props.engine;
+        const data = this.state.library[tab];
+
+        if (!data) return ui.card('Loading…', 'Fetching your library.');
+        if (data.error) return ui.card('Could not load library', 'The backend did not respond. Is the server running?');
+
+        if (tab === 'movies') {
+            const movies = data.movies || [];
+            if (!movies.length) return this._renderEmptyLibrary('movies');
+            return ui.grid(
+                movies.map(m => ui.card(m.title, m.year ? String(m.year) : m.filename)),
+                { minColWidth: '200px' }
+            );
+        }
+
+        if (tab === 'shows') return this._renderShows(data);
+
+        // unknown
+        const files = data.files || [];
+        if (!files.length) {
+            return ui.card('Nothing here', 'Every scanned file was classified as a movie or TV episode.');
+        }
+        return createElement('div', { className: 'plugin-list' },
+            ...files.map(f => ui.listRow(f.filename, f.path))
+        );
+    }
+
+    _renderPicker() {
+        const { picker } = this.state;
+        if (!picker) return null;
+        const { createElement, ui } = this.props.engine;
+
+        let body;
+        if (picker.loading && !picker.path) {
+            body = createElement('p', { className: 'sub' }, 'Loading folders…');
+        } else {
+            const rows = [];
+            if (picker.parent && picker.parent !== picker.path) {
+                rows.push(ui.listRow('.. (up one level)', picker.parent, () => this.openPicker(picker.parent)));
+            }
+            (picker.dirs || []).forEach(d => {
+                rows.push(ui.listRow(d.name, null, () => this.openPicker(d.path)));
+            });
+            if (!(picker.dirs || []).length) {
+                rows.push(createElement('p', { className: 'sub' }, 'No subfolders here.'));
+            }
+
+            body = createElement('div', {},
+                createElement('p', { className: 'sub' }, 'Current folder:'),
+                createElement('div', { className: 'browse-path' }, picker.path || ''),
+                picker.error ? createElement('p', { className: 'browse-error' }, picker.error) : null,
+                createElement('div', { className: 'browse-list plugin-list' }, ...rows),
+                createElement('div', { className: 'section-actions' },
+                    ui.button('Add this folder', () => this.addSource(picker.path), { variant: 'primary' })
+                )
+            );
+        }
+
+        return ui.modal('Choose a Media Folder', body, () => this.closePicker());
+    }
+
+    render() {
+        const { engine } = this.props;
+        const { createElement, ui } = engine;
+        const { activeTab, showThemePanel, pluginsList, sources } = this.state;
+
+        // Sidebar Navigation
+        const navElements = NAV_ITEMS.map(item => {
+            return createElement('button', {
+                className: `nav-item focusable ${activeTab === item.id ? 'active' : ''}`,
+                onClick: () => this.selectTab(item.id)
+            }, item.label);
+        });
+
+        const currentLabel = NAV_ITEMS.find(i => i.id === activeTab)?.label || 'Hesper';
+
+        // Tab View Content
+        let mainContent;
+        if (activeTab === 'settings') {
+            const sourceRows = sources.length
+                ? sources.map(path => ui.listRow(path, 'Tap to remove this source', () => this.removeSource(path)))
+                : [createElement('p', { className: 'sub' }, 'No media folders added yet.')];
+
+            mainContent = createElement('div', {},
+                this._renderHeader('Settings'),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Media Sources'),
+                    createElement('div', { className: 'plugin-list' }, ...sourceRows),
+                    createElement('div', { className: 'section-actions' },
+                        ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' }),
+                        ui.button('Rescan Library', () => this.rescan())
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Appearance & Themes'),
+                    createElement('button', {
+                        className: 'theme-launch-btn focusable',
+                        onClick: () => this.setState({ showThemePanel: true })
+                    }, 'Customize Theme')
+                )
+            );
+        } else if (activeTab === 'plugins') {
+            const pluginRows = pluginsList.length > 0
+                ? pluginsList.map(p => ui.listRow(p.app_name, p.folder, () => this.openPlugin(p), { statusDot: true }))
+                : [ui.card('No Plugins Found', 'Add custom plugins to your plugins/ directory.')];
+
+            mainContent = createElement('div', {},
+                this._renderHeader('Plugins'),
+                createElement('div', { className: 'plugin-list' }, ...pluginRows)
+            );
+        } else if (LIBRARY_ENDPOINTS[activeTab]) {
+            mainContent = createElement('div', {},
+                this._renderHeader(currentLabel),
+                this._renderLibrary(activeTab)
+            );
+        } else {
+            mainContent = createElement('div', {},
+                this._renderHeader(currentLabel),
+                ui.card(`Welcome to ${currentLabel}`, 'Select items or configure plugins to populate this section.')
+            );
+        }
+
+        // Theme Modal Overlay
+        const themeModal = showThemePanel ? new ThemePanel({
+            engine,
+            onClose: () => this.setState({ showThemePanel: false }),
+            onRefresh: () => this.setState({})
+        }).render() : null;
+
+        return createElement('div', { className: 'hesper-shell' },
+            createElement('div', { className: 'hesper-sidebar' },
+                createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
+                createElement('div', { className: 'sidebar-nav' }, ...navElements),
+                createElement('div', { className: 'sidebar-footer' },
+                    createElement('span', { className: 'status-badge' }, 'System Online')
+                )
+            ),
+            createElement('div', { className: 'hesper-content' }, mainContent),
+            themeModal,
+            this._renderPicker()
+        );
+    }
+}
+
+// Bootstrapping
+document.addEventListener('DOMContentLoaded', () => {
+    const appRoot = document.getElementById('app');
+    if (!appRoot) {
+        console.error('[Hesper] Missing #app element in index.html');
+        return;
+    }
+
+    const engine = new HesperEngine(appRoot);
+    const app = new MainApp({ engine });
+    engine.mount(app);
+    if (typeof app.componentDidMount === 'function') {
+        app.componentDidMount();
+    }
+
+    // Escape closes the top plugin window (remote "Back" equivalent).
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        if (engine.windows.activeWindow) {
+            engine.windows.back();
+        } else if (app.state.activeTab === 'shows' && !app.state.picker && !app.state.showThemePanel) {
+            // Back inside the TV Shows folders: episodes -> seasons -> shows.
+            app.showBack();
+        }
+    });
+});
