@@ -634,7 +634,7 @@ class MainApp extends HesperComponent {
             ),
             createElement('h2', { className: 'sub-heading' }, `${show.showTitle} \u00b7 Season ${season.season}`),
             createElement('div', { className: 'plugin-list' },
-                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, e.filename, () => this.openEpisodeDetail(show.showTitle, e)))
+                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, null, () => this.openEpisodeDetail(show.showTitle, e), { onLongPress: () => ui.toast(e.filename) }))
             )
         );
     }
@@ -755,7 +755,7 @@ class MainApp extends HesperComponent {
             const movies = data.movies || [];
             if (!movies.length) return this._renderEmptyLibrary('movies');
             return ui.grid(
-                movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : m.filename, this.state.posters['m:' + m.id], () => this.openMovieDetail(m))),
+                movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : '', this.state.posters['m:' + m.id], () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })),
                 { minColWidth: '200px', className: 'sx-poster-grid' }
             );
         }

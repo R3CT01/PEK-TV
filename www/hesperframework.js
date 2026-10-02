@@ -307,20 +307,21 @@ class HesperUIKit {
     }
 
     /** A clickable content tile, e.g. a movie poster placeholder or a plugin screen. */
-    card(title, subtitle, onClick) {
-        return this.engine.createElement('div', {
+    card(title, subtitle, onClick, opts = {}) {
+        const el = this.engine.createElement('div', {
             className: 'empty-state focusable sx-card',
             onClick: onClick || (() => {})
         },
             this.engine.createElement('h3', { className: 'empty-heading' }, title),
             subtitle ? this.engine.createElement('p', {}, subtitle) : null
         );
+        return this._longPress(el, opts.onLongPress);
     }
 
     /** A poster-art tile. Falls back to the plain titled card when there is
      *  no poster, or if the image fails to load. */
-    posterCard(title, subtitle, posterUrl, onClick) {
-        if (!posterUrl) return this.card(title, subtitle, onClick);
+    posterCard(title, subtitle, posterUrl, onClick, opts = {}) {
+        if (!posterUrl) return this.card(title, subtitle, onClick, opts);
         const wrap = this.engine.createElement('div', {
             className: 'focusable sx-card sx-poster-card',
             title: title,
@@ -328,14 +329,51 @@ class HesperUIKit {
         });
         const img = this.engine.createElement('img', { className: 'sx-poster-img', src: posterUrl, alt: title });
         img.addEventListener('error', () => {
-            const plain = this.card(title, subtitle, onClick);
+            const plain = this.card(title, subtitle, onClick, opts);
             if (wrap.parentNode) {
                 wrap.parentNode.replaceChild(plain, wrap);
                 this.engine.refreshFocusList();
             }
         });
         wrap.appendChild(img);
-        return wrap;
+        return this._longPress(wrap, opts.onLongPress);
+    }
+
+    /** Adds a press-and-hold action to an element (touch/mouse hold, or hold OK on a
+     *  remote - the engine's key handler looks at el._hesperLongPress). */
+    _longPress(el, handler) {
+        if (!handler) return el;
+        el.classList.add('sx-longpress');
+        el._hesperLongPress = handler;
+        if (!HesperUIKit._lpInstalled) {
+            HesperUIKit._lpInstalled = true;
+            // After a long press fires, swallow the click that follows the release.
+            document.addEventListener('click', (ev) => {
+                const t = ev.target && ev.target.closest ? ev.target.closest('.sx-longpress') : null;
+                if (t && t._lpSuppress) { t._lpSuppress = false; ev.stopPropagation(); ev.preventDefault(); }
+            }, true);
+        }
+        let timer = null;
+        const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+        el.addEventListener('pointerdown', () => {
+            cancel();
+            timer = setTimeout(() => { timer = null; el._lpSuppress = true; handler(); }, 550);
+        });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => el.addEventListener(n, () => {
+            cancel();
+            if (el._lpSuppress) setTimeout(() => { el._lpSuppress = false; }, 350);
+        }));
+        el.addEventListener('contextmenu', (ev) => ev.preventDefault());
+        return el;
+    }
+
+    /** A small themed message at the bottom of the screen that fades away. */
+    toast(text, ms = 3500) {
+        const old = document.querySelector('.sx-toast');
+        if (old && old.parentNode) old.parentNode.removeChild(old);
+        const el = this.engine.createElement('div', { className: 'sx-toast' }, text);
+        document.body.appendChild(el);
+        setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, ms);
     }
 
     /** A horizontal row of children, e.g. a set of cards. */
@@ -353,7 +391,7 @@ class HesperUIKit {
 
     /** A single-line list row, matching the plugin-list look used elsewhere in the app. */
     listRow(title, subtitle, onClick, opts = {}) {
-        return this.engine.createElement('div', {
+        const el = this.engine.createElement('div', {
             className: 'plugin-row focusable sx-list-row',
             onClick: onClick || (() => {})
         },
@@ -363,6 +401,7 @@ class HesperUIKit {
             ),
             opts.statusDot ? this.engine.createElement('div', { className: 'plugin-status-dot' }) : null
         );
+        return this._longPress(el, opts.onLongPress);
     }
 
     /** A themed modal overlay. bodyNode is any DOM node, e.g. built from other kit calls. */
@@ -899,9 +938,30 @@ class HesperEngine {
                 if (active) {
                     // A text field needs real DOM focus (not a click) to open the keyboard.
                     if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) active.focus();
-                    else active.click();
+                    else if (active._hesperLongPress) {
+                        // Hold OK for the long-press action; a short press clicks on release.
+                        if (!e.repeat && !this._lpTimer && !this._lpFiredByKey) {
+                            this._lpTarget = active;
+                            this._lpTimer = setTimeout(() => {
+                                this._lpTimer = null; this._lpTarget = null;
+                                this._lpFiredByKey = true;
+                                active._hesperLongPress();
+                            }, 550);
+                        }
+                    } else active.click();
                 }
                 e.preventDefault();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key !== 'Enter') return;
+            this._lpFiredByKey = false;
+            if (this._lpTimer) {
+                clearTimeout(this._lpTimer);
+                this._lpTimer = null;
+                const t = this._lpTarget; this._lpTarget = null;
+                if (t && t.isConnected) t.click();
             }
         });
     }
