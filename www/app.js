@@ -407,8 +407,8 @@ class MainApp extends HesperComponent {
         else text = d.overview || 'No synopsis available.';
         const body = createElement('div', {},
             d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
-            d.image ? createElement('img', { src: d.image, alt: '', style: { maxWidth: '100%', borderRadius: '8px', margin: '8px 0' } }) : null,
-            createElement('p', {}, text)
+            d.image ? createElement('img', { className: 'detail-image', src: d.image, alt: '' }) : null,
+            createElement('div', { className: 'glass-panel' }, createElement('p', {}, text))
         );
         return ui.modal(d.title, body, () => this.closeDetail());
     }
@@ -456,6 +456,32 @@ class MainApp extends HesperComponent {
         );
     }
 
+    // Glass "hero" card for a show: blurred poster backdrop, poster, title,
+    // meta line and synopsis. Falls back to a plain heading until the bio loads.
+    _renderShowHero(show, meta) {
+        const { createElement } = this.props.engine;
+        const info = this.state.showInfo[show.showTitle];
+        const ready = info && !info.loading && !info.error && info.overview;
+        if (!ready) {
+            return createElement('div', {},
+                createElement('h2', { className: 'sub-heading' }, show.showTitle),
+                info && info.loading ? createElement('p', { className: 'sub' }, 'Loading synopsis\u2026') : null
+            );
+        }
+        return createElement('div', { className: 'hero' },
+            info.poster ? createElement('div', { className: 'hero-backdrop', style: { backgroundImage: 'url("' + info.poster + '")' } }) : null,
+            createElement('div', { className: 'hero-glass' },
+                info.poster ? createElement('img', { className: 'hero-poster', src: info.poster, alt: '' }) : null,
+                createElement('div', { className: 'hero-text' },
+                    createElement('h2', { className: 'hero-title' }, show.showTitle),
+                    createElement('div', { className: 'hero-meta' }, meta),
+                    createElement('div', { className: 'hero-rule' }),
+                    createElement('p', { className: 'hero-overview' }, info.overview)
+                )
+            )
+        );
+    }
+
     _renderShows(data) {
         const { createElement, ui } = this.props.engine;
         const shows = data.shows || [];
@@ -485,8 +511,7 @@ class MainApp extends HesperComponent {
                 createElement('div', { className: 'section-actions' },
                     ui.button('\u2190 All Shows', () => this.showBack())
                 ),
-                createElement('h2', { className: 'sub-heading' }, show.showTitle),
-                this._renderShowBio(show.showTitle),
+                this._renderShowHero(show, `${plural(show.seasons.length, 'season')} \u00b7 ${plural(show.episodeCount, 'episode')}`),
                 ui.grid(
                     show.seasons.map(se => ui.card(
                         `Season ${se.season}`,
