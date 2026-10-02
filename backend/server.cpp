@@ -127,10 +127,23 @@ static std::string tmdbProxyUrl() {
 
 } // namespace
 
+// Android: use the CA bundle shipped inside the app (SSL_CERT_FILE) for
+// HTTPS to the TMDb proxy. No-op everywhere else.
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+static void applyTls(httplib::Client& c) {
+    const char* f = std::getenv("SSL_CERT_FILE");
+    if (f && *f) c.set_ca_cert_path(f, "");
+}
+#else
+static void applyTls(httplib::Client&) {}
+#endif
+
 std::string HesperServer::resolveShowName(const std::string& guess) {
     if (guess.empty()) return "";
 
     httplib::Client client(tmdbProxyUrl());
+
+    applyTls(client);
     client.set_connection_timeout(5);
     client.set_read_timeout(5);
 
@@ -456,6 +469,8 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         }
 
         httplib::Client client(tmdbProxyUrl());
+
+        applyTls(client);
         client.set_connection_timeout(5);
         client.set_read_timeout(5);
 
@@ -496,6 +511,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             return;
         }
         httplib::Client client(tmdbProxyUrl());
+        applyTls(client);
         client.set_connection_timeout(5);
         client.set_read_timeout(5);
         auto tmdb_res = client.Get(("/search/tv?query=" + httplib::encode_uri(title)).c_str());
@@ -528,6 +544,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             return;
         }
         httplib::Client client(tmdbProxyUrl());
+        applyTls(client);
         client.set_connection_timeout(5);
         client.set_read_timeout(8);
         std::string q = "/episode?query=" + httplib::encode_uri(show) +
