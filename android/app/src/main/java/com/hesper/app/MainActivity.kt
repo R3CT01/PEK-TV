@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -27,13 +28,10 @@ class MainActivity : Activity() {
         setContentView(webView)
 
         Thread {
-            // Copy www/skins/plugins out of the APK into app storage
-            // (the C++ server serves from a real folder).
             val root = File(filesDir, "hesper")
             copyAssetDir("hesper", root)
             NativeBridge.startServer(root.absolutePath)
 
-            // Wait until the server answers, then load the UI.
             var ready = false
             for (i in 0 until 50) {
                 try {
@@ -48,17 +46,23 @@ class MainActivity : Activity() {
                 if (ready) webView.loadUrl("http://127.0.0.1:8080/")
                 else webView.loadData("Server failed to start", "text/plain", "utf-8")
             }
+
+            // TEMPORARY: show the HTTPS test result on screen
+            val diag = NativeBridge.tlsDiag()
+            runOnUiThread {
+                Toast.makeText(this, "TLS test (v2)\n$diag", Toast.LENGTH_LONG).show()
+            }
         }.start()
     }
 
     private fun copyAssetDir(assetPath: String, dest: File) {
         val children = assets.list(assetPath) ?: return
-        if (children.isEmpty()) {            // it's a file
+        if (children.isEmpty()) {
             dest.parentFile?.mkdirs()
             assets.open(assetPath).use { input ->
                 dest.outputStream().use { input.copyTo(it) }
             }
-        } else {                             // it's a folder
+        } else {
             dest.mkdirs()
             for (name in children) copyAssetDir("$assetPath/$name", File(dest, name))
         }
