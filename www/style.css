@@ -936,3 +936,32 @@ body {
     from { opacity: 0; transform: translate(-50%, 8px); }
     to   { opacity: 1; transform: translate(-50%, 0); }
 }
+
+
+/* Title strip along the bottom of poster cards */
+.sx-poster-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 30px 10px 10px;
+    background: linear-gradient(to top, rgba(5, 8, 14, 0.92), rgba(5, 8, 14, 0));
+    color: #f0f6fc;
+    color: var(--sx-text, #f0f6fc);
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: left;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    pointer-events: none;
+}
+
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-poster-caption {
+        padding: 20px 7px 7px;
+        font-size: 0.78rem;
+    }
+}
