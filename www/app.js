@@ -2,13 +2,14 @@
 // Hesper App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v11';
+window.HESPER_APP_BUILD = 'v14';
 
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'movies', label: 'Movies' },
     { id: 'shows', label: 'TV Shows' },
     { id: 'music', label: 'Music' },
+    { id: 'duplicates', label: 'Duplicates' },
     { id: 'unknown', label: 'Unknown' },
     { id: 'plugins', label: 'Plugins' },
     { id: 'settings', label: 'Settings' }
@@ -18,12 +19,21 @@ const NAV_ITEMS = [
 const LIBRARY_ENDPOINTS = {
     movies: '/api/movies',
     shows: '/api/shows',
+    duplicates: '/api/duplicates',
     unknown: '/api/unknown'
 };
 
 // The Weather plugin (plugins/weather/ui.js) writes its formatted reading
 // (e.g. "84°F") here and fires a window 'storage' event whenever it changes.
 const WEATHER_TEMP_KEY = 'hesper_weather_current_temp';
+
+function hesperFormatBytes(n) {
+    if (!n) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return `${n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
+}
 
 // ---------------- Skins ----------------
 // A skin is a folder in skins/<id>/ with skin.json (+ optional skin.css).
@@ -415,6 +425,18 @@ class MainApp extends HesperComponent {
     }
 
     // One level up: episodes -> seasons -> show folders. Returns true if it moved.
+    // One "Back" for the whole app, used by the keyboard, the remote and the
+    // browser's own Back button. Returns true if it closed or stepped out of something.
+    goBack() {
+        const { engine } = this.props;
+        if (engine.windows.activeWindow) { engine.windows.back(); return true; }
+        if (this.state.detail) { this.closeDetail(); return true; }
+        if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
+        if (this.state.picker) { this.closePicker(); return true; }
+        if (this.state.activeTab === 'shows') return this.showBack();
+        return false;
+    }
+
     showBack() {
         const { show, season } = this.state.showNav;
         if (season !== null) { this.setState({ showNav: { show, season: null } }); return true; }
@@ -569,6 +591,30 @@ class MainApp extends HesperComponent {
         );
     }
 
+    _renderDuplicates(data) {
+        const { createElement, ui } = this.props.engine;
+        const groups = data.groups || [];
+        if (!groups.length) {
+            return ui.card('No duplicates found', 'Every movie and episode in your library appears only once.');
+        }
+        const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+        const kindLabel = { movie: 'Same movie', episode: 'Same episode', size: 'Same size, different names' };
+
+        return createElement('div', {},
+            ui.card(
+                `${plural(groups.length, 'duplicate group')} found`,
+                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. Hesper only lists duplicates; delete files from your file manager.`
+            ),
+            ...groups.map(g => createElement('div', { className: 'settings-section' },
+                createElement('h2', {}, g.kind === 'size' ? `${g.label}: ${hesperFormatBytes(g.files[0].size)}` : g.label),
+                createElement('p', { className: 'sub' }, `${kindLabel[g.kind] || 'Duplicate'} \u00b7 ${plural(g.files.length, 'copy')} \u00b7 up to ${hesperFormatBytes(g.wasted)} to free`),
+                createElement('div', { className: 'plugin-list' },
+                    ...g.files.map(f => ui.listRow(f.filename, `${hesperFormatBytes(f.size)} \u00b7 ${f.path}`))
+                )
+            ))
+        );
+    }
+
     _renderLibrary(tab) {
         const { createElement, ui } = this.props.engine;
         const data = this.state.library[tab];
@@ -586,6 +632,7 @@ class MainApp extends HesperComponent {
         }
 
         if (tab === 'shows') return this._renderShows(data);
+        if (tab === 'duplicates') return this._renderDuplicates(data);
 
         // unknown
         const files = data.files || [];
@@ -741,14 +788,41 @@ document.addEventListener('DOMContentLoaded', () => {
         app.componentDidMount();
     }
 
-    // Escape closes the top plugin window (remote "Back" equivalent).
+    // Diagnostic: open the app with ?keys=1 to see what the remote sends.
+    if (/[?&]keys=1/.test(location.search)) {
+        const box = document.createElement('div');
+        box.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;background:#000c;color:#0f0;padding:6px 10px;font:14px monospace;border-radius:6px;max-width:90vw';
+        box.textContent = 'press a key\u2026';
+        document.body.appendChild(box);
+        window.addEventListener('keydown', (e) => { box.textContent = `key=${e.key} code=${e.code} keyCode=${e.keyCode}`; }, true);
+        window.addEventListener('popstate', () => { box.textContent = 'popstate (browser Back)'; }, true);
+    }
+
+    // Back: Escape / Backspace / the remote's Back key (when the browser sends it
+    // as a key), plus the browser's own history-back, which is what many TV
+    // browsers do when the remote's Back button is pressed.
+    const BACK_KEYS = ['Escape', 'GoBack', 'BrowserBack', 'XF86Back'];
     window.addEventListener('keydown', (e) => {
-        if (e.key !== 'Escape') return;
-        if (engine.windows.activeWindow) {
-            engine.windows.back();
-        } else if (app.state.activeTab === 'shows' && !app.state.picker && !app.state.showThemePanel) {
-            // Back inside the TV Shows folders: episodes -> seasons -> shows.
-            app.showBack();
-        }
+        const t = e.target;
+        const typing = t && t.matches && t.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])');
+        const isBack = BACK_KEYS.includes(e.key) || e.keyCode === 4 || (e.key === 'Backspace' && !typing);
+        if (!isBack) return;
+        if (typing && t.blur) t.blur();
+        if (app.goBack()) e.preventDefault();
     });
+
+    // History guard: the page keeps one extra history entry on top, so a browser
+    // "Back" fires popstate instead of leaving. If the app has something to close
+    // we close it and re-arm the guard; otherwise we let Back leave as normal.
+    try {
+        const marker = history.state && history.state.hesper;
+        if (!marker) history.replaceState({ hesper: 'root' }, '');
+        if (marker !== 'guard') history.pushState({ hesper: 'guard' }, '');
+        window.addEventListener('popstate', () => {
+            if (app.goBack()) history.pushState({ hesper: 'guard' }, '');
+            else history.back();
+        });
+    } catch (err) {
+        console.warn('[Hesper] History guard unavailable:', err);
+    }
 });

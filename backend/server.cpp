@@ -9,6 +9,7 @@
 #include <map>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <atomic>
 #include <chrono>
 
@@ -324,6 +325,118 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             json += "]}";
         }
         json += "]}";
+        res.set_content(json, "application/json");
+    });
+
+    // 5b. Duplicate finder (read-only): groups the same movie, the same
+    //     episode, or byte-size-identical files that appear more than once.
+    //     "wasted" = everything in a group except its largest file, i.e.
+    //     what you could free by keeping just one copy.
+    svr.Get("/api/duplicates", [scanner](const httplib::Request& req, httplib::Response& res) {
+        auto movies = scanner->getMovies();
+        auto episodes = scanner->getEpisodes();
+        auto unknown = scanner->getUnclassified();
+
+        struct Group {
+            std::string kind;     // "movie" | "episode" | "size"
+            std::string label;
+            std::vector<MediaEntry> files;
+            uint64_t wasted = 0;
+        };
+        std::vector<Group> groups;
+        std::map<std::string, size_t> groupOf;   // entry id -> index of the name-based group it is in
+
+        auto finish = [&](Group& g) {
+            std::sort(g.files.begin(), g.files.end(), [](const MediaEntry& a, const MediaEntry& b) {
+                return a.size_bytes != b.size_bytes ? a.size_bytes > b.size_bytes : a.path < b.path;
+            });
+            uint64_t total = 0;
+            for (const auto& f : g.files) total += f.size_bytes;
+            g.wasted = total - g.files.front().size_bytes;
+        };
+
+        // Same movie: normalized title + year.
+        std::map<std::string, std::vector<MediaEntry>> byMovie;
+        for (const auto& m : movies) {
+            std::string t = normalizeName(m.title);
+            if (t.empty()) continue;
+            byMovie[t + "|" + std::to_string(m.year)].push_back(m);
+        }
+        for (auto& [key, files] : byMovie) {
+            if (files.size() < 2) continue;
+            Group g;
+            g.kind = "movie";
+            g.label = files.front().title + (files.front().year ? " (" + std::to_string(files.front().year) + ")" : "");
+            g.files = files;
+            finish(g);
+            for (const auto& f : g.files) groupOf[f.id] = groups.size();
+            groups.push_back(std::move(g));
+        }
+
+        // Same episode: normalized show + season + episode (skips unparsed numbers).
+        std::map<std::string, std::vector<MediaEntry>> byEpisode;
+        for (const auto& e : episodes) {
+            std::string t = normalizeName(e.show_title);
+            if (t.empty() || e.episode <= 0) continue;
+            byEpisode[t + "|" + std::to_string(e.season) + "|" + std::to_string(e.episode)].push_back(e);
+        }
+        for (auto& [key, files] : byEpisode) {
+            if (files.size() < 2) continue;
+            char tag[32];
+            std::snprintf(tag, sizeof(tag), " S%02dE%02d", files.front().season, files.front().episode);
+            Group g;
+            g.kind = "episode";
+            g.label = files.front().show_title + tag;
+            g.files = files;
+            finish(g);
+            for (const auto& f : g.files) groupOf[f.id] = groups.size();
+            groups.push_back(std::move(g));
+        }
+
+        // Same size (>= 1 MB) under different names, e.g. one file copied to two folders.
+        // Skipped when every file in the size group is already in one name-based group.
+        std::map<uint64_t, std::vector<MediaEntry>> bySize;
+        for (const auto* list : {&movies, &episodes, &unknown}) {
+            for (const auto& f : *list) {
+                if (f.size_bytes >= 1024 * 1024) bySize[f.size_bytes].push_back(f);
+            }
+        }
+        for (auto& [size, files] : bySize) {
+            if (files.size() < 2) continue;
+            bool allSame = true;
+            auto first = groupOf.find(files.front().id);
+            for (const auto& f : files) {
+                auto it = groupOf.find(f.id);
+                if (first == groupOf.end() || it == groupOf.end() || it->second != first->second) { allSame = false; break; }
+            }
+            if (allSame) continue;
+            Group g;
+            g.kind = "size";
+            g.label = "Identical file size";
+            g.files = files;
+            finish(g);
+            groups.push_back(std::move(g));
+        }
+
+        std::sort(groups.begin(), groups.end(), [](const Group& a, const Group& b) { return a.wasted > b.wasted; });
+
+        uint64_t wasted_total = 0;
+        std::string json = "{\"groups\": [";
+        for (size_t gi = 0; gi < groups.size(); ++gi) {
+            const auto& g = groups[gi];
+            wasted_total += g.wasted;
+            json += "{\"kind\": \"" + g.kind + "\", \"label\": \"" + jsonEscape(g.label) +
+                    "\", \"wasted\": " + std::to_string(g.wasted) + ", \"files\": [";
+            for (size_t i = 0; i < g.files.size(); ++i) {
+                const auto& f = g.files[i];
+                json += "{\"id\": \"" + f.id + "\", \"filename\": \"" + jsonEscape(f.filename) +
+                        "\", \"path\": \"" + jsonEscape(f.path) + "\", \"size\": " + std::to_string(f.size_bytes) + "}";
+                if (i + 1 < g.files.size()) json += ",";
+            }
+            json += "]}";
+            if (gi + 1 < groups.size()) json += ",";
+        }
+        json += "], \"wastedTotal\": " + std::to_string(wasted_total) + "}";
         res.set_content(json, "application/json");
     });
 

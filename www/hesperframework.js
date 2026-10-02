@@ -496,6 +496,7 @@ class HesperWindowManager {
     #container;
     #active = null;
     #stack = [];
+    #returnIndex = null;   // D-pad position to restore when the last window closes
 
     constructor(engine, container) {
         this.#engine = engine;
@@ -522,6 +523,13 @@ class HesperWindowManager {
             if (this.#engine.gsap) {
                 this.#engine.gsap.from(el, { opacity: 0, duration: 0.2, ease: 'power1.out' });
             }
+        } else {
+            // Last window closed: the D-pad list still points at the window's removed
+            // buttons, so rebuild it from the main screen or the D-pad stops working.
+            // Put the highlight back on whatever opened the window.
+            if (this.#returnIndex !== null) this.#engine.currentIndex = this.#returnIndex;
+            this.#returnIndex = null;
+            this.#engine.refreshFocusList();
         }
         return true;
     }
@@ -529,6 +537,7 @@ class HesperWindowManager {
     get activeWindow() { return this.#active; }
 
     #push(instance) {
+        if (!this.#active) this.#returnIndex = this.#engine.currentIndex;
         if (this.#active) {
             this.#active._unmount();
             this.#stack.push(this.#active);
@@ -629,6 +638,53 @@ class HesperNav {
         }
         return Math.abs(dx) + Math.abs(dy) * 2;
     }
+}
+
+/* ============================================================
+   Spatial D-pad navigation
+   Picks the focusable element that is nearest to `from` in the
+   pressed direction, so Right/Left move sideways and Up/Down move
+   vertically, whatever order the elements sit in the DOM.
+   Elements lined up with the current one win over diagonal ones.
+   ============================================================ */
+function hesperSpatialTarget(from, elements, dir) {
+    const EPS = 4;                                   // tolerate slight overlap between neighbours
+    const f = from.getBoundingClientRect();
+    const horizontal = dir === 'left' || dir === 'right';
+    // Up/Down stay inside the same area (sidebar or content) so you can't
+    // jump from a card to a far-away menu item; Left/Right cross between areas.
+    const regionOf = (el) => (el.closest && el.closest('.hesper-sidebar, .hesper-content')) || null;
+    const fromRegion = regionOf(from);
+    let best = null;
+    let bestScore = Infinity;
+
+    for (const el of elements) {
+        if (el === from || el.disabled) continue;
+        if (!horizontal && regionOf(el) !== fromRegion) continue;
+        const r = el.getBoundingClientRect();
+        if (!r.width || !r.height) continue;            // hidden / not rendered
+
+        let primary, gapAcross, centreAcross;
+        if (horizontal) {
+            // Must sit fully on that side, so a wide card never counts as "to the right" of itself.
+            if (dir === 'right' ? r.left < f.right - EPS : r.right > f.left + EPS) continue;
+            primary = dir === 'right' ? Math.max(0, r.left - f.right) : Math.max(0, f.left - r.right);
+            gapAcross = Math.max(0, r.top - f.bottom, f.top - r.bottom);   // 0 when rows overlap
+            centreAcross = Math.abs((r.top + r.height / 2) - (f.top + f.height / 2));
+        } else {
+            if (dir === 'down' ? r.top < f.bottom - EPS : r.bottom > f.top + EPS) continue;
+            primary = dir === 'down' ? Math.max(0, r.top - f.bottom) : Math.max(0, f.top - r.bottom);
+            gapAcross = Math.max(0, r.left - f.right, f.left - r.right);   // 0 when columns overlap
+            centreAcross = Math.abs((r.left + r.width / 2) - (f.left + f.width / 2));
+        }
+
+        const score = primary + gapAcross * 3 + centreAcross * 0.5;
+        if (score < bestScore) {
+            bestScore = score;
+            best = el;
+        }
+    }
+    return best;
 }
 
 /* ============================================================
@@ -804,17 +860,26 @@ class HesperEngine {
             const typing = t && t.matches && t.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])');
             if (typing && ['ArrowLeft', 'ArrowRight', 'Enter'].includes(e.key)) return;
 
-            if (['ArrowRight', 'ArrowDown'].includes(e.key)) {
-                this.currentIndex = (this.currentIndex + 1) % this.focusableElements.length;
-                this._applyFocus();
-                e.preventDefault();
-            } else if (['ArrowLeft', 'ArrowUp'].includes(e.key)) {
-                this.currentIndex = (this.currentIndex - 1 + this.focusableElements.length) % this.focusableElements.length;
+            const dirs = { ArrowRight: 'right', ArrowLeft: 'left', ArrowDown: 'down', ArrowUp: 'up' };
+            if (dirs[e.key]) {
+                // Leaving a text field with Up/Down hides the keyboard.
+                if (typing && t.blur) t.blur();
+                // First press just shows the highlight; after that, move spatially.
+                const hasFocus = this.focusableElements.some(el => el.classList.contains('focused'));
+                if (hasFocus) {
+                    const current = this.focusableElements[this.currentIndex];
+                    const target = current ? hesperSpatialTarget(current, this.focusableElements, dirs[e.key]) : null;
+                    if (target) this.currentIndex = this.focusableElements.indexOf(target);
+                }
                 this._applyFocus();
                 e.preventDefault();
             } else if (e.key === 'Enter') {
                 const active = this.focusableElements[this.currentIndex];
-                if (active) active.click();
+                if (active) {
+                    // A text field needs real DOM focus (not a click) to open the keyboard.
+                    if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) active.focus();
+                    else active.click();
+                }
                 e.preventDefault();
             }
         });
