@@ -1,4 +1,5 @@
 #include "server.h"
+#include "playback.h"
 #include "httplib.h"
 #include <iostream>
 #include <functional>
@@ -157,6 +158,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
                            MediaScanner* scanner) {
     httplib::Server svr;
 
+    registerPlaybackRoutes(svr, scanner);   // /api/stream/<id>
     // 1a. Serve plugin folders (ui.js / backend.js) at /plugins — registered
     //     before the catch-all below so it's matched directly, without
     //     needing to fail against www_dir first.
