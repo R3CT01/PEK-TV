@@ -574,7 +574,7 @@ class MainApp extends HesperComponent {
             return ui.grid(
                 shows.map(s => ui.posterCard(s.showTitle,
                     `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`, this.state.posters['s:' + s.showTitle], () => this.openShow(s.showTitle))),
-                { minColWidth: '200px' }
+                { minColWidth: '200px', className: 'sx-poster-grid' }
             );
         }
 
@@ -727,7 +727,7 @@ class MainApp extends HesperComponent {
             if (!movies.length) return this._renderEmptyLibrary('movies');
             return ui.grid(
                 movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : m.filename, this.state.posters['m:' + m.id], () => this.openMovieDetail(m))),
-                { minColWidth: '200px' }
+                { minColWidth: '200px', className: 'sx-poster-grid' }
             );
         }
 
