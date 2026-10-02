@@ -877,3 +877,22 @@ body {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+
+
+/* ============================================================
+   Compact poster grids on small screens (phones, either rotation).
+   TVs and tablets keep the large layout.
+   !important is needed because the grid sets its column size inline.
+   ============================================================ */
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-poster-grid {
+        --sx-grid-min: 110px !important;
+        gap: 0.6rem;
+    }
+    .sx-poster-grid .sx-poster-card { border-radius: 10px; }
+    /* plain (no poster) cards sitting in the same grid */
+    .sx-poster-grid .sx-card { padding: 0.75rem; }
+    .sx-poster-grid .sx-card h3 { font-size: 0.95rem; }
+    .sx-poster-grid .sx-card p { font-size: 0.8rem; }
+    .sx-poster-grid .sx-poster-card { padding: 150% 0 0 0; }
+}

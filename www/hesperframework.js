@@ -346,7 +346,7 @@ class HesperUIKit {
     /** A responsive multi-column grid of children, e.g. posters. */
     grid(children, opts = {}) {
         return this.engine.createElement('div', {
-            className: 'sx-grid',
+            className: 'sx-grid' + (opts.className ? ' ' + opts.className : ''),
             style: opts.minColWidth ? { '--sx-grid-min': opts.minColWidth } : {}
         }, ...children);
     }
