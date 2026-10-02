@@ -23,6 +23,19 @@ jobs:
         with:
           gradle-version: 8.7
 
+      # OpenSSL takes a few minutes to compile, so it is cached and
+      # only rebuilt if the script changes.
+      - name: Cache OpenSSL
+        id: openssl-cache
+        uses: actions/cache@v4
+        with:
+          path: android/openssl
+          key: openssl-${{ hashFiles('android/scripts/build-openssl.sh') }}
+
+      - name: Build OpenSSL for Android
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        run: bash android/scripts/build-openssl.sh
+
       - name: Copy the web frontend into the app
         run: |
           mkdir -p android/app/src/main/assets/hesper

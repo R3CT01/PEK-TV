@@ -1,6 +1,7 @@
 // Android replacement for main() in core.cpp (core.cpp itself is NOT
 // compiled into the app yet because it embeds Python).
 #include <jni.h>
+#include <stdlib.h>
 #include <atomic>
 #include <string>
 #include <thread>
@@ -14,6 +15,10 @@ static std::atomic<bool> g_started{false};
 extern "C" JNIEXPORT void JNICALL
 Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) {
     if (g_started.exchange(true)) return;   // only start once per process
+
+    // Tell OpenSSL where Android keeps its trusted HTTPS certificates,
+    // otherwise every https:// request (TMDb) fails verification.
+    setenv("SSL_CERT_DIR", "/system/etc/security/cacerts", 1);
 
     const char* c = env->GetStringUTFChars(jRoot, nullptr);
     std::string root(c);
