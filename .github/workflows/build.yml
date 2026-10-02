@@ -41,6 +41,7 @@ jobs:
           mkdir -p android/app/src/main/assets/hesper
           cp -r www skins plugins android/app/src/main/assets/hesper/
           find android/app/src/main/assets -name __pycache__ -type d -exec rm -rf {} +
+          curl -fsSL https://curl.se/ca/cacert.pem -o android/app/src/main/assets/hesper/cacert.pem
 
       - name: Build debug APK
         working-directory: android

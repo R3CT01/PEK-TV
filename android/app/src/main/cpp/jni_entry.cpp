@@ -25,6 +25,10 @@ Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot)
     std::string root(c);
     env->ReleaseStringUTFChars(jRoot, c);
 
+    // Bundled Mozilla CA list (downloaded by the workflow). Works on any
+    // Android version, even if the device's own certificate store is old.
+    setenv("SSL_CERT_FILE", (root + "/cacert.pem").c_str(), 1);
+
     std::string www     = root + "/www";
     std::string plugins = root + "/plugins";
     std::string skins   = root + "/skins";
@@ -51,12 +55,17 @@ Java_com_hesper_app_NativeBridge_tlsDiag(JNIEnv* env, jclass) {
         cli.set_read_timeout(8);
         if (mode == 1) cli.set_ca_cert_path("", "/system/etc/security/cacerts");
         if (mode == 2) cli.enable_server_certificate_verification(false);
+        if (mode == 3) {
+            const char* f = getenv("SSL_CERT_FILE");
+            cli.set_ca_cert_path(f ? f : "", "");
+        }
         auto r = cli.Get("/search/tv?query=friends");
         if (!r) return httplib::to_string(r.error());
         return "HTTP " + std::to_string(r->status);
     };
     std::string out = "default: " + probe(0) +
                       "\ncacerts dir: " + probe(1) +
+                      "\nbundled file: " + probe(3) +
                       "\nno verify: " + probe(2);
     return env->NewStringUTF(out.c_str());
 }

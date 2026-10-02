@@ -5,7 +5,7 @@ import android.os.Bundle
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.Toast
+import android.app.AlertDialog
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -50,7 +50,7 @@ class MainActivity : Activity() {
             // TEMPORARY: show the HTTPS test result on screen
             val diag = NativeBridge.tlsDiag()
             runOnUiThread {
-                Toast.makeText(this, "TLS test (v2)\n$diag", Toast.LENGTH_LONG).show()
+                AlertDialog.Builder(this).setTitle("TLS test (v3)").setMessage(diag).setPositiveButton("OK", null).show()
             }
         }.start()
     }
