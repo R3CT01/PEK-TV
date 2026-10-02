@@ -2,7 +2,7 @@
 // Hesper App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v6';
+window.HESPER_APP_BUILD = 'v10';
 
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -24,6 +24,27 @@ const LIBRARY_ENDPOINTS = {
 // The Weather plugin (plugins/weather/ui.js) writes its formatted reading
 // (e.g. "84°F") here and fires a window 'storage' event whenever it changes.
 const WEATHER_TEMP_KEY = 'hesper_weather_current_temp';
+
+// ---------------- Skins ----------------
+// A skin is a folder in skins/<id>/ with skin.json (+ optional skin.css).
+// The saved skin's CSS is injected immediately at load so the page never
+// flashes the default look first.
+const SKIN_KEY = 'hesper-skin';
+const SKIN_ID_RE = /^[A-Za-z0-9_-]+$/;
+
+function hesperSetSkinCss(id, bust) {
+    const old = document.getElementById('hesper-skin-css');
+    if (old) old.remove();
+    if (!id || id === 'default' || !SKIN_ID_RE.test(id)) return;
+    const link = document.createElement('link');
+    link.id = 'hesper-skin-css';
+    link.rel = 'stylesheet';
+    link.href = `/skins/${id}/skin.css` + (bust ? `?t=${Date.now()}` : '');
+    link.onerror = () => link.remove();   // a skin without a skin.css is fine
+    document.head.appendChild(link);
+}
+
+try { hesperSetSkinCss(localStorage.getItem(SKIN_KEY)); } catch (e) { /* storage unavailable */ }
 
 class ThemePanel extends HesperComponent {
     render() {
@@ -89,6 +110,10 @@ class MainApp extends HesperComponent {
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
             showNav: { show: null, season: null },   // TV Shows drill-down: null/null = show folders, show only = seasons, both = episodes
+            skins: [],            // [{ id, name, author, version, description, tokens }]
+            activeSkin: (() => { try { return localStorage.getItem(SKIN_KEY) || 'default'; } catch (e) { return 'default'; } })(),
+            refreshCooldown: 0,   // seconds left before another refresh is allowed
+            refreshing: false,    // true while the server is rescanning
             detail: null,         // null = closed, else { title, subtitle, overview, image, loading, error }
             showInfo: {},         // showTitle -> { overview, poster } | { loading } | { error }
             weatherText: this._readWeather()
@@ -102,6 +127,7 @@ class MainApp extends HesperComponent {
             this._warmWeatherPlugin(plugins);
         });
         this.loadSources();
+        this.loadSkins();
 
         // Live-update the header badge when the weather plugin publishes a new reading.
         window.addEventListener('storage', () => {
@@ -196,13 +222,91 @@ class MainApp extends HesperComponent {
         this.refreshLibrary();
     }
 
+    // Manual refresh: rate limited to once per 10 seconds (the server enforces
+    // the same limit), then waits for the scan to finish and reloads the list.
+    _startCooldown(seconds) {
+        clearInterval(this._cooldownTimer);
+        this.setState({ refreshCooldown: seconds });
+        this._cooldownTimer = setInterval(() => {
+            const left = this.state.refreshCooldown - 1;
+            if (left <= 0) {
+                clearInterval(this._cooldownTimer);
+                this.setState({ refreshCooldown: 0 });
+            } else {
+                this.setState({ refreshCooldown: left });
+            }
+        }, 1000);
+    }
+
     async rescan() {
+        if (this.state.refreshCooldown > 0 || this.state.refreshing) return;
+        this._startCooldown(10);
+        this.setState({ refreshing: true });
         try {
-            await fetch('/api/rescan', { method: 'POST' });
+            const res = await fetch('/api/rescan', { method: 'POST' });
+            if (res.status === 429) {
+                const d = await res.json().catch(() => ({}));
+                this._startCooldown(d.retry_after || 10);
+            } else {
+                // Poll until the server says the scan is done (max ~60 s).
+                for (let i = 0; i < 60; i++) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    const st = await fetch('/api/scan-status').then(r => r.json()).catch(() => ({ scanning: false }));
+                    if (!st.scanning) break;
+                }
+            }
         } catch (err) {
             console.warn('[Hesper] Rescan failed:', err);
         }
-        setTimeout(() => this.refreshLibrary(), 4000);
+        this.setState({ refreshing: false });
+        this.refreshLibrary();
+    }
+
+    // ---------------- Skins ----------------
+
+    async loadSkins() {
+        const builtIn = { id: 'default', name: 'Hesper Default', author: 'Hesper', description: 'The standard look.' };
+        let skins = [];
+        try {
+            const res = await fetch('/api/skins');
+            const data = await res.json();
+            const manifests = await Promise.all((data.skins || []).map(async ({ id }) => {
+                if (!SKIN_ID_RE.test(id)) return null;
+                try {
+                    const m = await fetch(`/skins/${id}/skin.json`).then(r => r.json());
+                    return { ...m, id, name: m.name || id };
+                } catch (err) {
+                    console.warn(`[Hesper] Skipping skin "${id}": bad skin.json`, err);
+                    return null;
+                }
+            }));
+            skins = manifests.filter(Boolean);
+        } catch (err) {
+            console.warn('[Hesper] Could not load skins:', err);
+        }
+        if (!skins.some(s => s.id === 'default')) skins.unshift(builtIn);
+        this.setState({ skins });
+    }
+
+    // Choosing a skin sets its colours (tokens) and swaps its stylesheet.
+    // The theme is reset first so one skin's colours never linger in the next.
+    applySkin(id) {
+        const skin = this.state.skins.find(s => s.id === id);
+        if (!skin) return;
+        const theme = this.props.engine.theme;
+        try {
+            theme.reset();
+            if (skin.tokens && typeof skin.tokens === 'object') theme.setTokens(skin.tokens);
+            hesperSetSkinCss(id, true);
+            localStorage.setItem(SKIN_KEY, id);
+        } catch (err) {
+            console.warn('[Hesper] Could not apply skin, reverting to default:', err);
+            theme.reset();
+            hesperSetSkinCss('default');
+            id = 'default';
+            try { localStorage.setItem(SKIN_KEY, 'default'); } catch (e) { /* ignore */ }
+        }
+        this.setState({ activeSkin: id });
     }
 
     // ---------------- Library (Movies / Shows / Unknown) ----------------
@@ -419,17 +523,39 @@ class MainApp extends HesperComponent {
 
     // ---------------- Rendering ----------------
 
-    _renderHeader(title) {
+    _renderHeader(title, showRefresh = false) {
         const { createElement } = this.props.engine;
         const weatherPlugin = this._findWeatherPlugin();
+        const { refreshCooldown, refreshing } = this.state;
+
+        let refreshBtn = null;
+        if (showRefresh) {
+            const blocked = refreshing || refreshCooldown > 0;
+            const label = refreshing ? 'Scanning\u2026'
+                : refreshCooldown > 0 ? `Refresh (${refreshCooldown}s)`
+                : 'Refresh';
+            const attrs = {
+                className: 'theme-launch-btn refresh-btn focusable',
+                title: 'Rescan your media folders for new files',
+                onClick: () => this.rescan()
+            };
+            if (blocked) attrs.disabled = 'disabled';   // never pass disabled: false (it would still disable)
+            refreshBtn = createElement('button', attrs,
+                createElement('span', { className: `refresh-icon${refreshing ? ' spinning' : ''}` }, '\u21bb'),
+                createElement('span', {}, label)
+            );
+        }
 
         return createElement('div', { className: 'content-header' },
             createElement('h1', { className: 'content-title' }, title),
-            createElement('button', {
-                className: 'weather-badge focusable',
-                title: weatherPlugin ? 'Open Weather Widget' : 'Weather plugin not installed',
-                onClick: () => { if (weatherPlugin) this.openPlugin(weatherPlugin); }
-            }, this.state.weatherText)
+            createElement('div', { className: 'header-actions' },
+                refreshBtn,
+                createElement('button', {
+                    className: 'weather-badge focusable',
+                    title: weatherPlugin ? 'Open Weather Widget' : 'Weather plugin not installed',
+                    onClick: () => { if (weatherPlugin) this.openPlugin(weatherPlugin); }
+                }, this.state.weatherText)
+            )
         );
     }
 
@@ -534,7 +660,7 @@ class MainApp extends HesperComponent {
                     createElement('div', { className: 'plugin-list' }, ...sourceRows),
                     createElement('div', { className: 'section-actions' },
                         ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' }),
-                        ui.button('Rescan Library', () => this.rescan())
+                        ui.button(this.state.refreshing ? 'Scanning\u2026' : this.state.refreshCooldown > 0 ? `Rescan Library (${this.state.refreshCooldown}s)` : 'Rescan Library', () => this.rescan())
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -543,6 +669,17 @@ class MainApp extends HesperComponent {
                         className: 'theme-launch-btn focusable',
                         onClick: () => this.setState({ showThemePanel: true })
                     }, 'Customize Theme')
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Skins'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...this.state.skins.map(s => ui.listRow(
+                            s.name,
+                            [s.author ? `by ${s.author}` : '', s.description || ''].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
+                            () => this.applySkin(s.id),
+                            { statusDot: s.id === this.state.activeSkin }
+                        ))
+                    )
                 )
             );
         } else if (activeTab === 'plugins') {
@@ -556,7 +693,7 @@ class MainApp extends HesperComponent {
             );
         } else if (LIBRARY_ENDPOINTS[activeTab]) {
             mainContent = createElement('div', {},
-                this._renderHeader(currentLabel),
+                this._renderHeader(currentLabel, true),
                 this._renderLibrary(activeTab)
             );
         } else {

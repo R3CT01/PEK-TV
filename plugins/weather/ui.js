@@ -1,5 +1,5 @@
 // ============================================================
-// StreamX Plugin — "Weather Widget" (Loop-Broken & Stable)
+// Hesper Plugin — "Weather Widget" (Loop-Broken & Stable)
 // ============================================================
 
 window.app_name = 'Weather Widget';
@@ -8,8 +8,8 @@ window.app_version = '1.0.3';
 window.render = function (engine) {
     const { createElement, ui } = engine;
 
-    let unit = localStorage.getItem('streamx_weather_unit') || 'F';
-    let currentCity = localStorage.getItem('streamx_weather_city') || 'St. Louis, MO';
+    let unit = localStorage.getItem('hesper_weather_unit') || 'F';
+    let currentCity = localStorage.getItem('hesper_weather_city') || 'St. Louis, MO';
     
     let weatherData = {
         city: currentCity,
@@ -46,9 +46,9 @@ window.render = function (engine) {
         subText.textContent = `${weatherData.condition} \u2014 ${weatherData.city}`;
 
         // Algorithmic Upgrade: Conditional state check destroys the infinite re-render loop
-        const previousTemp = localStorage.getItem('streamx_weather_current_temp');
+        const previousTemp = localStorage.getItem('hesper_weather_current_temp');
         if (previousTemp !== tempStr) {
-            localStorage.setItem('streamx_weather_current_temp', tempStr);
+            localStorage.setItem('hesper_weather_current_temp', tempStr);
             window.dispatchEvent(new Event('storage'));
         }
     };
@@ -126,7 +126,7 @@ window.render = function (engine) {
                         onClick: () => {
                             cityInput.value = label;
                             currentCity = label;
-                            localStorage.setItem('streamx_weather_city', label);
+                            localStorage.setItem('hesper_weather_city', label);
                             suggestionBox.style.display = 'none';
                             fetchLiveWeatherForCoords(loc.latitude, loc.longitude, label);
                         }
@@ -172,7 +172,7 @@ window.render = function (engine) {
         unit,
         (id) => {
             unit = id;
-            localStorage.setItem('streamx_weather_unit', id);
+            localStorage.setItem('hesper_weather_unit', id);
             updateUI();
         }
     );

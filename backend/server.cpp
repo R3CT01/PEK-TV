@@ -151,6 +151,7 @@ std::string HesperServer::resolveShowName(const std::string& guess) {
 }
 
 void HesperServer::start(int port, const std::string& www_dir, const std::string& plugins_dir,
+                           const std::string& skins_dir,
                            std::function<std::vector<std::string>()> get_plugins,
                            MediaScanner* scanner) {
     httplib::Server svr;
@@ -182,6 +183,39 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         
         json_response += "]}";
 
+        res.set_content(json_response, "application/json");
+    });
+
+    // 2b. Skins: each subfolder of skins_dir holds skin.json (+ optional
+    //     skin.css). Files are served at /skins/<id>/..., and /api/skins
+    //     lists the folders that have a skin.json. The frontend reads each
+    //     manifest itself, so no JSON parsing is needed here.
+    svr.set_mount_point("/skins", skins_dir);
+    svr.Get("/api/skins", [skins_dir](const httplib::Request& req, httplib::Response& res) {
+        std::string json_response = "{\"skins\": [";
+        bool first = true;
+        try {
+            if (fs::exists(skins_dir) && fs::is_directory(skins_dir)) {
+                for (const auto& entry : fs::directory_iterator(skins_dir)) {
+                    if (!entry.is_directory()) continue;
+                    std::string id = entry.path().filename().string();
+                    if (id.empty() || id[0] == '.') continue;
+                    // Only plain names (letters, digits, - and _) so an id can never escape the folder.
+                    bool safe = true;
+                    for (unsigned char c : id) {
+                        if (!(std::isalnum(c) || c == '-' || c == '_')) { safe = false; break; }
+                    }
+                    if (!safe || !fs::exists(entry.path() / "skin.json")) continue;
+                    if (!first) json_response += ",";
+                    json_response += "{\"id\": \"" + jsonEscape(id) + "\"}";
+                    first = false;
+                }
+            }
+        } catch (const std::exception&) {
+            res.set_content("{\"error\": \"Could not read skins directory\"}", "application/json");
+            return;
+        }
+        json_response += "]}";
         res.set_content(json_response, "application/json");
     });
 

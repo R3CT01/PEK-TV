@@ -147,6 +147,7 @@ std::string getExecutionDirectory(char* argv0) {
 int main(int argc, char* argv[]) {
     std::string www_dir = "/storage/emulated/0/Documents/media_core/hesper/www";
     std::string plugin_dir = "/storage/emulated/0/Documents/media_core/hesper/plugins";
+    std::string skins_dir = "/storage/emulated/0/Documents/media_core/hesper/skins";
 
     HesperCore hesper("0.1.0");
 
@@ -174,8 +175,8 @@ int main(int argc, char* argv[]) {
     scan_thread.detach();
 
     // Launch HTTP server with a lambda callback to dynamically serve scanned plugins to JS
-    std::thread server_thread([&hesper, www_dir, plugin_dir, &scanner]() {
-        HesperServer::start(8080, www_dir, plugin_dir, [&hesper]() {
+    std::thread server_thread([&hesper, www_dir, plugin_dir, skins_dir, &scanner]() {
+        HesperServer::start(8080, www_dir, plugin_dir, skins_dir, [&hesper]() {
             return hesper.getPlugins();
         }, &scanner);
     });
