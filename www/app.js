@@ -2,7 +2,7 @@
 // Hesper App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v10';
+window.HESPER_APP_BUILD = 'v11';
 
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -668,7 +668,7 @@ class MainApp extends HesperComponent {
                     createElement('button', {
                         className: 'theme-launch-btn focusable',
                         onClick: () => this.setState({ showThemePanel: true })
-                    }, 'Customize Theme')
+                    }, 'Customize Colors')
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
