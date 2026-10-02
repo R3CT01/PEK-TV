@@ -1,6 +1,7 @@
 package com.hesper.app
 
 import android.app.Activity
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.View
@@ -24,6 +25,7 @@ class PlayerActivity : Activity() {
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private var resumePositionMs: Long = 0
+    private var confirmDialog: AlertDialog? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,6 +92,25 @@ class PlayerActivity : Activity() {
         playerView.player = null
         p.release()
         player = null
+    }
+
+    // Back (button or remote): pause and ask before leaving the video.
+    // A second Back while the prompt is open counts as "Keep watching".
+    override fun onBackPressed() {
+        if (confirmDialog?.isShowing == true) return
+        val wasPlaying = player?.playWhenReady == true
+        player?.playWhenReady = false
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Stop watching?")
+            .setMessage("Do you want to exit the video?")
+            .setPositiveButton("Exit") { _, _ -> finish() }
+            .setNegativeButton("Keep watching") { d, _ -> d.dismiss() }
+            .create()
+        dialog.setOnDismissListener {
+            if (!isFinishing) player?.playWhenReady = wasPlaying
+        }
+        confirmDialog = dialog
+        dialog.show()
     }
 
     // D-pad / remote keys go to the player controls first.
