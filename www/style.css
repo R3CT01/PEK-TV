@@ -868,3 +868,12 @@ body {
     -webkit-transform: scale(1.04);
     transform: scale(1.04);
 }
+
+/* Long filenames / titles must not push cards past the screen edge */
+.sx-card { min-width: 0; overflow: hidden; }
+.sx-card h3 { word-break: break-word; overflow-wrap: break-word; }
+.sx-card p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
