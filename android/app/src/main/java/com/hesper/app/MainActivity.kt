@@ -72,12 +72,13 @@ class MainActivity : Activity() {
 /** Exposed to the web UI as window.HesperAndroid. */
 class HesperBridge(private val activity: Activity) {
     @JavascriptInterface
-    fun play(url: String, title: String) {
+    fun play(url: String, title: String, theme: String) {
         activity.runOnUiThread {
             activity.startActivity(
                 Intent(activity, PlayerActivity::class.java)
                     .putExtra("url", url)
                     .putExtra("title", title)
+                    .putExtra("theme", theme)
             )
         }
     }
