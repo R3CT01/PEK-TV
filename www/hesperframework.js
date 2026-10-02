@@ -317,6 +317,27 @@ class HesperUIKit {
         );
     }
 
+    /** A poster-art tile. Falls back to the plain titled card when there is
+     *  no poster, or if the image fails to load. */
+    posterCard(title, subtitle, posterUrl, onClick) {
+        if (!posterUrl) return this.card(title, subtitle, onClick);
+        const wrap = this.engine.createElement('div', {
+            className: 'focusable sx-card sx-poster-card',
+            title: title,
+            onClick: onClick || (() => {})
+        });
+        const img = this.engine.createElement('img', { className: 'sx-poster-img', src: posterUrl, alt: title });
+        img.addEventListener('error', () => {
+            const plain = this.card(title, subtitle, onClick);
+            if (wrap.parentNode) {
+                wrap.parentNode.replaceChild(plain, wrap);
+                this.engine.refreshFocusList();
+            }
+        });
+        wrap.appendChild(img);
+        return wrap;
+    }
+
     /** A horizontal row of children, e.g. a set of cards. */
     row(...children) {
         return this.engine.createElement('div', { className: 'sx-row' }, ...children);

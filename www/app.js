@@ -126,6 +126,7 @@ class MainApp extends HesperComponent {
             refreshing: false,    // true while the server is rescanning
             detail: null,         // null = closed, else { title, subtitle, overview, image, loading, error }
             showInfo: {},         // showTitle -> { overview, poster } | { loading } | { error }
+            posters: this._readPosters(),   // 'm:<id>' / 's:<title>' -> poster url ('' = none found)
             weatherText: this._readWeather()
         };
     }
@@ -329,6 +330,7 @@ class MainApp extends HesperComponent {
             const res = await fetch(endpoint);
             const data = await res.json();
             this.setState({ library: { ...this.state.library, [tab]: data } });
+            this._queuePostersFor(tab, data);
         } catch (err) {
             this.setState({ library: { ...this.state.library, [tab]: { error: true } } });
         }
@@ -344,6 +346,68 @@ class MainApp extends HesperComponent {
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
         this.setState({ activeTab: id, showNav });
         this.loadLibrary(id);
+    }
+
+    // ---------------- Poster art for cards ----------------
+    _readPosters() {
+        try { return JSON.parse(localStorage.getItem('hesper_posters_v1') || '{}') || {}; }
+        catch (e) { return {}; }
+    }
+
+    _queuePostersFor(tab, data) {
+        if (tab === 'movies') {
+            this._queuePosters((data.movies || []).map(m => ({
+                key: 'm:' + m.id, url: '/api/movie-details?id=' + encodeURIComponent(m.id)
+            })));
+        } else if (tab === 'shows') {
+            this._queuePosters((data.shows || []).map(s => ({
+                key: 's:' + s.showTitle, url: '/api/show-details?title=' + encodeURIComponent(s.showTitle)
+            })));
+        }
+    }
+
+    // Fetches posters we don't have yet, 3 at a time, and publishes results in
+    // batches so the grid is not rebuilt for every single image.
+    _queuePosters(items) {
+        if (!this._posterQueue) {
+            this._posterQueue = []; this._posterActive = 0; this._posterPending = {}; this._posterSeen = {}; this._posterTimer = null;
+        }
+        items.forEach(it => {
+            if (this.state.posters[it.key] !== undefined || this._posterSeen[it.key]) return;
+            this._posterSeen[it.key] = true;
+            this._posterQueue.push(it);
+        });
+        this._pumpPosters();
+    }
+
+    _pumpPosters() {
+        while (this._posterActive < 3 && this._posterQueue.length) {
+            const it = this._posterQueue.shift();
+            this._posterActive++;
+            this._fetchJson(it.url).then(d => d.poster || '', () => '').then(poster => {
+                this._posterPending[it.key] = poster;
+                this._posterActive--;
+                if (!this._posterTimer) {
+                    this._posterTimer = setTimeout(() => { this._posterTimer = null; this._flushPosters(); }, 600);
+                }
+                this._pumpPosters();
+            });
+        }
+    }
+
+    _flushPosters() {
+        const pending = this._posterPending;
+        this._posterPending = {};
+        const keys = Object.keys(pending);
+        if (!keys.length) return;
+        const posters = { ...this.state.posters };
+        keys.forEach(k => { posters[k] = pending[k]; });
+        this.setState({ posters });
+        try {
+            const keep = {};
+            Object.keys(posters).forEach(k => { if (posters[k]) keep[k] = posters[k]; });
+            localStorage.setItem('hesper_posters_v1', JSON.stringify(keep));
+        } catch (e) { /* storage unavailable: posters just reload next time */ }
     }
 
     // ---------------- Details (TMDb via the backend) ----------------
@@ -494,11 +558,8 @@ class MainApp extends HesperComponent {
         // Level 1: one folder card per show.
         if (!show) {
             return ui.grid(
-                shows.map(s => ui.card(
-                    s.showTitle,
-                    `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`,
-                    () => this.openShow(s.showTitle)
-                )),
+                shows.map(s => ui.posterCard(s.showTitle,
+                    `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`, this.state.posters['s:' + s.showTitle], () => this.openShow(s.showTitle))),
                 { minColWidth: '200px' }
             );
         }
@@ -651,7 +712,7 @@ class MainApp extends HesperComponent {
             const movies = data.movies || [];
             if (!movies.length) return this._renderEmptyLibrary('movies');
             return ui.grid(
-                movies.map(m => ui.card(m.title, m.year ? String(m.year) : m.filename, () => this.openMovieDetail(m))),
+                movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : m.filename, this.state.posters['m:' + m.id], () => this.openMovieDetail(m))),
                 { minColWidth: '200px' }
             );
         }
