@@ -20,7 +20,7 @@ build_one() {   # $1 = openssl target, $2 = android abi name
   local target="$1" abi="$2"
   mkdir -p "$WORK/$abi" && tar xzf "$WORK/openssl.tar.gz" -C "$WORK/$abi" --strip-components=1
   ( cd "$WORK/$abi"
-    ./Configure "$target" -D__ANDROID_API__=$API no-shared no-tests no-docs \
+    ./Configure "$target" -D__ANDROID_API__=$API no-shared no-tests \
       --prefix="$OUT/$abi" --openssldir="$OUT/$abi/ssl" --libdir=lib
     make -j"$(nproc)" build_libs
     make install_dev )
