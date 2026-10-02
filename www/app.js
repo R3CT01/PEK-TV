@@ -414,6 +414,19 @@ class MainApp extends HesperComponent {
 
     closeDetail() { this.setState({ detail: null }); }
 
+    // Hands a library file to the native player on Android (HesperAndroid is
+    // injected by the app). Elsewhere it just opens the stream URL.
+    playMedia(id, title) {
+        const url = window.location.origin + '/api/stream/' + encodeURIComponent(id);
+        try {
+            if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
+                window.HesperAndroid.play(url, title || '');
+                return;
+            }
+        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        window.open(url, '_blank');
+    }
+
     async _fetchJson(url) {
         const res = await fetch(url);
         const data = await res.json();
@@ -422,7 +435,7 @@ class MainApp extends HesperComponent {
     }
 
     async openMovieDetail(m) {
-        const base = { title: m.title, subtitle: m.year ? String(m.year) : '', overview: '', image: '', loading: true, error: '' };
+        const base = { playId: m.id, title: m.title, subtitle: m.year ? String(m.year) : '', overview: '', image: '', loading: true, error: '' };
         this.setState({ detail: base });
         try {
             const d = await this._fetchJson(`/api/movie-details?id=${encodeURIComponent(m.id)}`);
@@ -436,7 +449,7 @@ class MainApp extends HesperComponent {
 
     async openEpisodeDetail(showTitle, ep) {
         const label = `Episode ${ep.episode}`;
-        const base = { title: label, subtitle: `${showTitle} \u00b7 Season ${ep.season}`, overview: '', image: '', loading: true, error: '' };
+        const base = { playId: ep.id, title: label, subtitle: `${showTitle} \u00b7 Season ${ep.season}`, overview: '', image: '', loading: true, error: '' };
         this.setState({ detail: base });
         try {
             const q = `show=${encodeURIComponent(showTitle)}&season=${ep.season}&episode=${ep.episode}`;
@@ -472,7 +485,8 @@ class MainApp extends HesperComponent {
         const body = createElement('div', {},
             d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
             d.image ? createElement('img', { className: 'detail-image', src: d.image, alt: '' }) : null,
-            createElement('div', { className: 'glass-panel' }, createElement('p', {}, text))
+            createElement('div', { className: 'glass-panel' }, createElement('p', {}, text)),
+            d.playId ? createElement('div', { style: { margin: '14px 0 6px' } }, ui.button('\u25b6  Play', () => this.playMedia(d.playId, d.title), { variant: 'primary' })) : null
         );
         return ui.modal(d.title, body, () => this.closeDetail());
     }

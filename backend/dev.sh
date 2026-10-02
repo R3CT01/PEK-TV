@@ -27,7 +27,7 @@ if [ "$1" != "--run" ]; then
     echo "==> Building to $ROOT/bin/hesper ..."
     g++ -std=c++17 -O1 \
         -DCPPHTTPLIB_OPENSSL_SUPPORT \
-        core.cpp server.cpp media_scanner.cpp \
+        core.cpp server.cpp media_scanner.cpp playback.cpp\
         -o "$ROOT/bin/hesper" \
         $(python3-config --cflags --embed) \
         $(python3-config --ldflags --embed) \
