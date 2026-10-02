@@ -1,11 +1,12 @@
 package com.hesper.app
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
+import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.app.AlertDialog
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -25,6 +26,7 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
         webView.webViewClient = WebViewClient()
+        webView.addJavascriptInterface(HesperBridge(this), "HesperAndroid")
         setContentView(webView)
 
         Thread {
@@ -46,12 +48,6 @@ class MainActivity : Activity() {
                 if (ready) webView.loadUrl("http://127.0.0.1:8080/")
                 else webView.loadData("Server failed to start", "text/plain", "utf-8")
             }
-
-            // TEMPORARY: show the HTTPS test result on screen
-            val diag = NativeBridge.tlsDiag()
-            runOnUiThread {
-                AlertDialog.Builder(this).setTitle("TLS test (v3)").setMessage(diag).setPositiveButton("OK", null).show()
-            }
         }.start()
     }
 
@@ -70,5 +66,19 @@ class MainActivity : Activity() {
 
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+}
+
+/** Exposed to the web UI as window.HesperAndroid. */
+class HesperBridge(private val activity: Activity) {
+    @JavascriptInterface
+    fun play(url: String, title: String) {
+        activity.runOnUiThread {
+            activity.startActivity(
+                Intent(activity, PlayerActivity::class.java)
+                    .putExtra("url", url)
+                    .putExtra("title", title)
+            )
+        }
     }
 }

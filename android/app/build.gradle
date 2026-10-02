@@ -32,3 +32,9 @@ android {
     }
     kotlinOptions { jvmTarget = '17' }
 }
+
+dependencies {
+    // Native video player (hardware decoding via MediaCodec, MKV/MP4/etc.)
+    implementation 'androidx.media3:media3-exoplayer:1.4.1'
+    implementation 'androidx.media3:media3-ui:1.4.1'
+}

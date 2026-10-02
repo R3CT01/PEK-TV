@@ -14,6 +14,7 @@ add_library(hesper SHARED
     jni_entry.cpp
     ${BACKEND}/server.cpp
     ${BACKEND}/media_scanner.cpp
+    ${BACKEND}/playback.cpp
 )
 
 target_include_directories(hesper PRIVATE ${BACKEND} ${OPENSSL_ROOT}/include)
