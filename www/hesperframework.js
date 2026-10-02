@@ -336,6 +336,7 @@ class HesperUIKit {
             }
         });
         wrap.appendChild(img);
+        wrap.appendChild(this.engine.createElement('div', { className: 'sx-poster-caption' }, title));
         return this._longPress(wrap, opts.onLongPress);
     }
 
