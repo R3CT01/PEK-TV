@@ -574,6 +574,20 @@ class MainApp extends HesperComponent {
 
     closeDetail() { this.setState({ detail: null }); }
 
+    // The shared player (player.js) with a <video> backend: used where there is
+    // no native player, such as the web/dev build.
+    _openWebPlayer(url, title) {
+        if (this._player) return;
+        this.setState({ detail: null });
+        const player = new window.HesperPlayer({
+            title: title || '',
+            backend: new window.HtmlVideoBackend(),
+            onClose: () => { this._player = null; }
+        });
+        this._player = player;
+        player.open(url, 0);
+    }
+
     // Reads the active theme's colors (so skins work) and returns them as JSON
     // with #AARRGGBB values for the native player's dialogs.
     _themeForNative() {
@@ -613,6 +627,7 @@ class MainApp extends HesperComponent {
                 return;
             }
         } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title); return; }
         window.open(url, '_blank');
     }
 
@@ -696,6 +711,7 @@ class MainApp extends HesperComponent {
     // browser's own Back button. Returns true if it closed or stepped out of something.
     goBack() {
         const { engine } = this.props;
+        if (this._player) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) { engine.windows.back(); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
