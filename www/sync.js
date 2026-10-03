@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var API = 'https://hesper-sync.aquariusibeats.workers.dev';
+    var API = 'https://hesper-sync-9275.aquariusibeats.workers.dev';
     var K = {
         key: 'hesper_sync_key',
         cursor: 'hesper_sync_cursor_v1',
