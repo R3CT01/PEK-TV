@@ -576,12 +576,12 @@ class MainApp extends HesperComponent {
 
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
-    _openWebPlayer(url, title) {
+    _openWebPlayer(url, title, backend) {
         if (this._player) return;
         this.setState({ detail: null });
         const player = new window.HesperPlayer({
             title: title || '',
-            backend: new window.HtmlVideoBackend(),
+            backend: backend || new window.HtmlVideoBackend(),
             onClose: () => { this._player = null; }
         });
         this._player = player;
@@ -621,6 +621,11 @@ class MainApp extends HesperComponent {
     // injected by the app). Elsewhere it just opens the stream URL.
     playMedia(id, title) {
         const url = window.location.origin + '/api/stream/' + encodeURIComponent(id);
+        // Android with libmpv: the shared controls (player.js) drive a native mpv surface.
+        if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
+            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }));
+            return;
+        }
         try {
             if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
                 window.HesperAndroid.play(url, title || '', this._themeForNative());

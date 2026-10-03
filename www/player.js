@@ -31,6 +31,8 @@
 .hp-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20000; overflow: hidden;
     background: #000; color: #f0f6fc; color: var(--sx-text, #f0f6fc); font-family: inherit; }
 .hp-root.hp-transparent { background: transparent; }
+html.hp-mpv, html.hp-mpv body { background: transparent !important; }
+html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 .hp-root.hp-idle { cursor: none; }
 .hp-video-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .hp-video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
@@ -217,6 +219,35 @@
             v.removeAttribute('src');
             if (v.load) v.load();
             if (v.parentNode) v.parentNode.removeChild(v);
+        }
+    }
+
+    // Android: libmpv draws on a native surface behind the page (see MpvController.kt).
+    // This class only forwards the controls above to the app's HesperAndroid bridge and
+    // turns the native events back into the contract events.
+    class MpvBackend extends HesperPlayerBackend {
+        constructor(opts) {
+            super();
+            opts = opts || {};
+            this.title = opts.title || '';
+            this.theme = opts.theme || '';
+            window.__hesperMpv = (ev, data) => this.emit(ev, data);
+        }
+        static available() {
+            return !!(window.HesperAndroid && typeof window.HesperAndroid.mpvLoad === 'function');
+        }
+        get drawsBehindPage() { return true; }
+        attach() { document.documentElement.classList.add('hp-mpv'); }
+        load(url, startSec) { window.HesperAndroid.mpvLoad(url, startSec || 0, this.title, this.theme); }
+        play() { window.HesperAndroid.mpvPlay(); }
+        pause() { window.HesperAndroid.mpvPause(); }
+        seek(sec) { window.HesperAndroid.mpvSeek(sec); }
+        setAudioTrack(id) { window.HesperAndroid.mpvSetAudio(id); }
+        setSubtitleTrack(id) { window.HesperAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
+        destroy() {
+            try { window.HesperAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
+            window.__hesperMpv = null;
+            document.documentElement.classList.remove('hp-mpv');
         }
     }
 
@@ -618,6 +649,7 @@
 
     window.HesperPlayerBackend = HesperPlayerBackend;
     window.HtmlVideoBackend = HtmlVideoBackend;
+    window.MpvBackend = MpvBackend;
     window.HesperPlayer = HesperPlayer;
     window.HesperPlayerUtil = { fmtTime: fmtTime, normKey: normKey };
 })();

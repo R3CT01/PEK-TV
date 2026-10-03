@@ -2,7 +2,11 @@ package com.hesper.app
 
 import android.app.Activity
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
+import android.view.SurfaceView
+import android.view.View
+import android.widget.FrameLayout
 import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -14,11 +18,17 @@ import java.net.Socket
 class MainActivity : Activity() {
 
     private lateinit var webView: WebView
+    private lateinit var mpv: MpvController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // mpv draws on this surface, BEHIND the (transparent) WebView.
+        val surfaceView = SurfaceView(this)
+        surfaceView.visibility = View.GONE
         webView = WebView(this)
+        webView.setBackgroundColor(Color.TRANSPARENT)
+        mpv = MpvController(this, surfaceView, webView)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -26,8 +36,12 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
         webView.webViewClient = WebViewClient()
-        webView.addJavascriptInterface(HesperBridge(this), "HesperAndroid")
-        setContentView(webView)
+        webView.addJavascriptInterface(HesperBridge(this, mpv), "HesperAndroid")
+        val layout = FrameLayout(this)
+        layout.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
+        layout.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        setContentView(layout)
+        webView.requestFocus()
 
         Thread {
             val root = File(filesDir, "hesper")
@@ -64,13 +78,25 @@ class MainActivity : Activity() {
         }
     }
 
+    override fun onStop() {
+        mpv.onActivityStop()
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        mpv.destroy()
+        super.onDestroy()
+    }
+
     override fun onBackPressed() {
         if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
     }
 }
 
 /** Exposed to the web UI as window.HesperAndroid. */
-class HesperBridge(private val activity: Activity) {
+class HesperBridge(private val activity: Activity, private val mpv: MpvController) {
+
+    // ExoPlayer screen: used only as the fallback when mpv can't play a file.
     @JavascriptInterface
     fun play(url: String, title: String, theme: String) {
         activity.runOnUiThread {
@@ -82,4 +108,18 @@ class HesperBridge(private val activity: Activity) {
             )
         }
     }
+
+    // libmpv backend for the web player (player.js MpvBackend). JS calls arrive on a
+    // background thread, so each one hops to the UI thread.
+    @JavascriptInterface
+    fun mpvLoad(url: String, startSec: Double, title: String, theme: String) {
+        activity.runOnUiThread { mpv.load(url, startSec, title, theme) }
+    }
+
+    @JavascriptInterface fun mpvPlay() { activity.runOnUiThread { mpv.play() } }
+    @JavascriptInterface fun mpvPause() { activity.runOnUiThread { mpv.pause() } }
+    @JavascriptInterface fun mpvSeek(sec: Double) { activity.runOnUiThread { mpv.seek(sec) } }
+    @JavascriptInterface fun mpvSetAudio(id: Int) { activity.runOnUiThread { mpv.setAudio(id) } }
+    @JavascriptInterface fun mpvSetSubtitle(id: Int) { activity.runOnUiThread { mpv.setSubtitle(id) } }
+    @JavascriptInterface fun mpvDestroy() { activity.runOnUiThread { mpv.destroy() } }
 }
