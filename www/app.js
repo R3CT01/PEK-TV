@@ -2,7 +2,7 @@
 // Hesper App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v14';
+window.HESPER_APP_BUILD = 'v16';
 
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
@@ -14,6 +14,12 @@ const NAV_ITEMS = [
     { id: 'plugins', label: 'Plugins' },
     { id: 'settings', label: 'Settings' }
 ];
+
+// "Resume Watching" is added after Dashboard only once something has been watched.
+const RESUME_NAV_ITEM = { id: 'resume', label: 'Resume Watching' };
+const PROGRESS_KEY = 'hesper_progress_v1';
+const RESUME_MIN_SEC = 30;        // watched less than this: nothing to resume
+const RESUME_DONE_RATIO = 0.95;   // watched this much: counts as finished
 
 // Library tabs -> backend endpoint (see server.cpp)
 const LIBRARY_ENDPOINTS = {
@@ -174,7 +180,8 @@ class MainApp extends HesperComponent {
             posters: this._readPosters(),   // 'm:<id>' / 's:<title>' -> poster url ('' = none found)
             clock: this._readClock(),        // { hour12, showDate, tz }
             showClockSettings: false,
-            weatherText: this._readWeather()
+            weatherText: this._readWeather(),
+            progress: this._readProgress()   // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
         };
     }
 
@@ -187,6 +194,7 @@ class MainApp extends HesperComponent {
         this.loadSources();
         this.loadSkins();
         this._startClockTicker();
+        this._queueResumeArt();
 
         // Live-update the header badge when the weather plugin publishes a new reading.
         window.addEventListener('storage', () => {
@@ -506,6 +514,7 @@ class MainApp extends HesperComponent {
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
         this.setState({ activeTab: id, showNav });
         this.loadLibrary(id);
+        if (id === 'resume') this._queueResumeArt();
     }
 
     // ---------------- Poster art for cards ----------------
@@ -544,7 +553,7 @@ class MainApp extends HesperComponent {
         while (this._posterActive < 3 && this._posterQueue.length) {
             const it = this._posterQueue.shift();
             this._posterActive++;
-            this._fetchJson(it.url).then(d => d.poster || '', () => '').then(poster => {
+            this._fetchJson(it.url).then(d => d.poster || d.still || '', () => '').then(poster => {
                 this._posterPending[it.key] = poster;
                 this._posterActive--;
                 if (!this._posterTimer) {
@@ -570,22 +579,128 @@ class MainApp extends HesperComponent {
         } catch (e) { /* storage unavailable: posters just reload next time */ }
     }
 
+    // ---------------- Resume watching ----------------
+
+    _readProgress() {
+        try {
+            const o = JSON.parse(localStorage.getItem(PROGRESS_KEY) || '{}');
+            return (o && typeof o === 'object') ? o : {};
+        } catch (e) { return {}; }
+    }
+
+    _writeProgress(map) {
+        try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(map)); }
+        catch (e) { /* storage unavailable: resume simply won't persist */ }
+    }
+
+    // Items with something worth resuming, most recently watched first.
+    _resumeItems() {
+        const map = this.state.progress || {};
+        return Object.keys(map).map(k => map[k])
+            .filter(it => it && it.id && it.position >= RESUME_MIN_SEC)
+            .sort((x, y) => (y.updated || 0) - (x.updated || 0));
+    }
+
+    _navItems() {
+        const items = NAV_ITEMS.slice();
+        if (this._resumeItems().length) items.splice(1, 0, RESUME_NAV_ITEM);
+        return items;
+    }
+
+    // Called by the player every ~10s and when it closes. Writes straight to storage
+    // (no re-render while a video is playing); the screen catches up when the player closes.
+    _saveProgress(id, meta, position, duration) {
+        const map = this._readProgress();
+        const finished = duration > 0 && position / duration >= RESUME_DONE_RATIO;
+        if (finished || !(position >= RESUME_MIN_SEC)) {
+            delete map[id];
+        } else {
+            map[id] = Object.assign({}, meta, { id: id, position: position, duration: duration > 0 ? duration : 0, updated: Date.now() });
+        }
+        this._writeProgress(map);
+    }
+
+    _removeProgress(id) {
+        const map = this._readProgress();
+        delete map[id];
+        this._writeProgress(map);
+        const left = Object.keys(map).some(k => map[k] && map[k].position >= RESUME_MIN_SEC);
+        this.setState({ progress: map, activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
+    }
+
+    _resumeFor(id) {
+        const it = (this.state.progress || {})[id];
+        return it && it.position >= RESUME_MIN_SEC ? it : null;
+    }
+
+    // Art for the Resume Watching cards: movie posters, episode stills (show poster as backup).
+    _queueResumeArt() {
+        const items = this._resumeItems();
+        const jobs = [];
+        items.forEach(it => {
+            if (it.kind === 'movie') {
+                jobs.push({ key: 'm:' + it.id, url: '/api/movie-details?id=' + encodeURIComponent(it.id) });
+            } else {
+                jobs.push({ key: 'e:' + it.id, url: '/api/episode-details?show=' + encodeURIComponent(it.showTitle) + '&season=' + it.season + '&episode=' + it.episode });
+                jobs.push({ key: 's:' + it.showTitle, url: '/api/show-details?title=' + encodeURIComponent(it.showTitle) });
+            }
+        });
+        if (jobs.length) this._queuePosters(jobs);
+    }
+
+    _fmtLeft(it) {
+        if (!(it.duration > 0)) return '';
+        const mins = Math.max(1, Math.round((it.duration - it.position) / 60));
+        return mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m left` : `${mins}m left`;
+    }
+
+    _renderResume() {
+        const { ui } = this.props.engine;
+        const items = this._resumeItems();
+        if (!items.length) return ui.card('Nothing to resume', 'Things you start watching will show up here.');
+        return ui.grid(
+            items.map(it => {
+                const isMovie = it.kind === 'movie';
+                const title = isMovie ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
+                const sub = [isMovie && it.year ? String(it.year) : '', this._fmtLeft(it)].filter(Boolean).join(' \u00b7 ');
+                const img = isMovie
+                    ? this.state.posters['m:' + it.id]
+                    : (this.state.posters['e:' + it.id] || this.state.posters['s:' + it.showTitle]);
+                return ui.posterCard(title, sub, img, () => this.resumeItem(it), { onLongPress: () => ui.toast(title + (sub ? ' \u00b7 ' + sub : '')) });
+            }),
+            { minColWidth: '200px', className: 'sx-poster-grid' }
+        );
+    }
+
+    resumeItem(it) {
+        const isMovie = it.kind === 'movie';
+        const title = isMovie ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
+        this.playMedia(it.id, title, it, it.position);
+    }
+
     // ---------------- Details (TMDb via the backend) ----------------
 
     closeDetail() { this.setState({ detail: null }); }
 
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
-    _openWebPlayer(url, title) {
+    _openWebPlayer(url, title, backend, track) {
         if (this._player) return;
         this.setState({ detail: null });
         const player = new window.HesperPlayer({
             title: title || '',
-            backend: new window.HtmlVideoBackend(),
-            onClose: () => { this._player = null; }
+            backend: backend || new window.HtmlVideoBackend(),
+            onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
+            onClose: () => {
+                this._player = null;
+                const prog = this._readProgress();
+                const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
+                this.setState({ progress: prog, activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
+                this._queueResumeArt();
+            }
         });
         this._player = player;
-        player.open(url, 0);
+        player.open(url, (track && track.startSec) || 0);
     }
 
     // Reads the active theme's colors (so skins work) and returns them as JSON
@@ -619,15 +734,39 @@ class MainApp extends HesperComponent {
 
     // Hands a library file to the native player on Android (HesperAndroid is
     // injected by the app). Elsewhere it just opens the stream URL.
-    playMedia(id, title) {
+    // meta describes what is playing (for Resume Watching); startSec > 0 resumes.
+    async playMedia(id, title, meta, startSec) {
         const url = window.location.origin + '/api/stream/' + encodeURIComponent(id);
+        const { ui } = this.props.engine;
+        startSec = startSec > 0 ? startSec : 0;
+
+        // Make sure the file is still there before opening the player.
+        let missing = false;
+        try {
+            const probe = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+            missing = probe.status === 404;
+        } catch (e) { /* server unreachable: let the player report it */ }
+        if (missing) {
+            ui.toast("Can't play file");
+            this.setState({ detail: null });
+            this._removeProgress(id);
+            return;
+        }
+
+        const track = meta ? { id: id, meta: meta, startSec: startSec } : null;
+
+        // Android with libmpv: the shared controls (player.js) drive a native mpv surface.
+        if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
+            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track);
+            return;
+        }
         try {
             if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
                 window.HesperAndroid.play(url, title || '', this._themeForNative());
                 return;
             }
         } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
-        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title); return; }
+        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track); return; }
         window.open(url, '_blank');
     }
 
@@ -639,7 +778,7 @@ class MainApp extends HesperComponent {
     }
 
     async openMovieDetail(m) {
-        const base = { playId: m.id, title: m.title, subtitle: m.year ? String(m.year) : '', overview: '', image: '', loading: true, error: '' };
+        const base = { playId: m.id, meta: { kind: 'movie', title: m.title, year: m.year || 0 }, title: m.title, subtitle: m.year ? String(m.year) : '', overview: '', image: '', loading: true, error: '' };
         this.setState({ detail: base });
         try {
             const d = await this._fetchJson(`/api/movie-details?id=${encodeURIComponent(m.id)}`);
@@ -653,7 +792,7 @@ class MainApp extends HesperComponent {
 
     async openEpisodeDetail(showTitle, ep) {
         const label = `Episode ${ep.episode}`;
-        const base = { playId: ep.id, title: label, subtitle: `${showTitle} \u00b7 Season ${ep.season}`, overview: '', image: '', loading: true, error: '' };
+        const base = { playId: ep.id, meta: { kind: 'episode', showTitle: showTitle, season: ep.season, episode: ep.episode }, title: label, subtitle: `${showTitle} \u00b7 Season ${ep.season}`, overview: '', image: '', loading: true, error: '' };
         this.setState({ detail: base });
         try {
             const q = `show=${encodeURIComponent(showTitle)}&season=${ep.season}&episode=${ep.episode}`;
@@ -678,6 +817,20 @@ class MainApp extends HesperComponent {
         }
     }
 
+    // Play, or Resume + Start over when there is a saved position for this file.
+    _renderPlayButtons(d) {
+        const { createElement, ui } = this.props.engine;
+        const saved = this._resumeFor(d.playId);
+        if (!saved) {
+            return createElement('div', { style: { margin: '14px 0 6px' } },
+                ui.button('\u25b6  Play', () => this.playMedia(d.playId, d.title, d.meta, 0), { variant: 'primary' }));
+        }
+        const at = window.HesperPlayerUtil ? window.HesperPlayerUtil.fmtTime(saved.position) : Math.round(saved.position) + 's';
+        return createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
+            ui.button('\u25b6  Resume from ' + at, () => this.playMedia(d.playId, d.title, d.meta, saved.position), { variant: 'primary' }),
+            ui.button('Start over', () => this.playMedia(d.playId, d.title, d.meta, 0)));
+    }
+
     _renderDetailModal() {
         const d = this.state.detail;
         if (!d) return null;
@@ -690,7 +843,7 @@ class MainApp extends HesperComponent {
             d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
             d.image ? createElement('img', { className: 'detail-image', src: d.image, alt: '' }) : null,
             createElement('div', { className: 'glass-panel' }, createElement('p', {}, text)),
-            d.playId ? createElement('div', { style: { margin: '14px 0 6px' } }, ui.button('\u25b6  Play', () => this.playMedia(d.playId, d.title), { variant: 'primary' })) : null
+            d.playId ? this._renderPlayButtons(d) : null
         );
         return ui.modal(d.title, body, () => this.closeDetail());
     }
@@ -991,14 +1144,15 @@ class MainApp extends HesperComponent {
         const { activeTab, showThemePanel, pluginsList, sources } = this.state;
 
         // Sidebar Navigation
-        const navElements = NAV_ITEMS.map(item => {
+        const navItems = this._navItems();
+        const navElements = navItems.map(item => {
             return createElement('button', {
                 className: `nav-item focusable ${activeTab === item.id ? 'active' : ''}`,
                 onClick: () => this.selectTab(item.id)
             }, item.label);
         });
 
-        const currentLabel = NAV_ITEMS.find(i => i.id === activeTab)?.label || 'Hesper';
+        const currentLabel = navItems.find(i => i.id === activeTab)?.label || 'Hesper';
 
         // Tab View Content
         let mainContent;
@@ -1044,6 +1198,11 @@ class MainApp extends HesperComponent {
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),
                 createElement('div', { className: 'plugin-list' }, ...pluginRows)
+            );
+        } else if (activeTab === 'resume') {
+            mainContent = createElement('div', {},
+                this._renderHeader('Resume Watching'),
+                this._renderResume()
             );
         } else if (LIBRARY_ENDPOINTS[activeTab]) {
             mainContent = createElement('div', {},
