@@ -258,6 +258,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.title = opts.title || '';
             this.backend = opts.backend;
             this.onClose = opts.onClose || function () {};
+            this.onProgress = opts.onProgress || null;   // (position, duration) every ~10s and on close
+            this._lastProgress = 0;
             this.state = { playing: false, buffering: true, position: 0, duration: 0, audio: [], subtitles: [] };
             this.mode = 'hidden';          // hidden | controls | menu | confirm
             this.focus = 'play';
@@ -287,6 +289,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 this.state.duration = d.duration > 0 && isFinite(d.duration) ? d.duration : 0;
                 if (!this._dragging) this.state.position = d.position || 0;
                 this._updateTime();
+                this._reportProgress(false);
             });
             b.on('state', (d) => {
                 this.state.playing = !!d.playing;
@@ -318,11 +321,24 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             if (this._closed) return;
             this._closed = true;
             clearTimeout(this._hideTimer);
+            this._reportProgress(true);
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
             if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
             this.onClose();
+        }
+
+        // Tells the app where we are, at most every 10 seconds (and always on close),
+        // so it can offer "Resume" next time.
+        _reportProgress(force) {
+            if (!this.onProgress) return;
+            const now = Date.now();
+            if (!force && now - this._lastProgress < 10000) return;
+            if (!force && !(this.state.position > 0)) return;
+            this._lastProgress = now;
+            try { this.onProgress(this.state.position, this.state.duration); }
+            catch (e) { console.error('[HesperPlayer] onProgress', e); }
         }
 
         // The app's Back handler calls this while the player is open.
