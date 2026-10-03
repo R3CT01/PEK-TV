@@ -194,12 +194,32 @@ class MainApp extends HesperComponent {
         this.loadSources();
         this.loadSkins();
         this._startClockTicker();
+        this._watchNetwork();
         this._queueResumeArt();
 
         // Live-update the header badge when the weather plugin publishes a new reading.
         window.addEventListener('storage', () => {
             const text = this._readWeather();
             if (text !== this.state.weatherText) this.setState({ weatherText: text });
+        });
+    }
+
+    // ---------------- Online / offline ----------------
+    // net.js draws the green/red dot and reports changes. Offline mode: the local
+    // library keeps working, internet-only things wait until the network is back.
+    _watchNetwork() {
+        const net = window.HesperNet;
+        if (!net) return;
+        const { ui } = this.props.engine;
+        net.onChange((online) => {
+            ui.toast(online ? 'Back online' : 'Offline mode: your local library only');
+            if (online) {
+                // fetch the poster art that was skipped while offline
+                ['movies', 'shows'].forEach(t => {
+                    const d = this.state.library[t];
+                    if (d && !d.error) this._queuePostersFor(t, d);
+                });
+            }
         });
     }
 
@@ -538,6 +558,7 @@ class MainApp extends HesperComponent {
     // Fetches posters we don't have yet, 3 at a time, and publishes results in
     // batches so the grid is not rebuilt for every single image.
     _queuePosters(items) {
+        if (window.HesperNet && !window.HesperNet.isOnline()) return;   // offline: poster art waits for the network
         if (!this._posterQueue) {
             this._posterQueue = []; this._posterActive = 0; this._posterPending = {}; this._posterSeen = {}; this._posterTimer = null;
         }
