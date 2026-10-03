@@ -90,7 +90,7 @@ class MpvController(
         val u = pendingUrl ?: return
         pendingUrl = null
         try {
-            val m = MPVLib.create(activity)
+            val m = MPVLib.create(activity) ?: throw IllegalStateException("mpv create returned null")
             m.setOptionString("vo", "gpu")
             m.setOptionString("gpu-context", "android")
             m.setOptionString("opengl-es", "yes")
