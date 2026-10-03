@@ -52,3 +52,39 @@ jobs:
         with:
           name: hesper-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # TEMPORARY: record libmpv's real Java API from the downloaded library,
+      # so the player code can be written against it exactly.
+      - name: Inspect libmpv API
+        continue-on-error: true
+        run: |
+          set +e
+          OUT="$GITHUB_WORKSPACE/mpv-api.txt"
+          echo "inspection started" > "$OUT"
+          AAR=$(find "$HOME/.gradle" /home/runner -name 'libmpv-*.aar' 2>/dev/null | head -1)
+          echo "AAR: $AAR" >> "$OUT"
+          if [ -z "$AAR" ]; then
+            echo "AAR not found. Folders under HOME:" >> "$OUT"
+            find "$HOME" -maxdepth 3 -type d 2>/dev/null | head -60 >> "$OUT"
+            exit 0
+          fi
+          rm -rf /tmp/mpvaar && mkdir -p /tmp/mpvaar && cd /tmp/mpvaar && unzip -q -o "$AAR"
+          echo "--- aar contents (bytes, path)" >> "$OUT"
+          find . -type f | sort | while read f; do echo "$(stat -c %s "$f") $f" >> "$OUT"; done
+          echo "--- classes" >> "$OUT"
+          unzip -Z1 classes.jar >> "$OUT" 2>&1
+          echo "--- public API" >> "$OUT"
+          for c in $(unzip -Z1 classes.jar | grep '\.class$' | sed 's/\.class$//' | tr '/' '.'); do
+            javap -public -cp classes.jar "$c" >> "$OUT" 2>&1
+          done
+          echo "--- manifest" >> "$OUT"
+          cat AndroidManifest.xml >> "$OUT" 2>&1
+          exit 0
+
+      - name: Upload libmpv API listing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpv-api
+          path: mpv-api.txt
+          if-no-files-found: ignore
