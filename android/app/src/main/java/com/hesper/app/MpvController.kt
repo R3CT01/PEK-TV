@@ -1,10 +1,10 @@
 package com.hesper.app
 
 import android.app.Activity
-import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -22,8 +22,8 @@ import org.json.JSONObject
  * this class only plays the file and reports time / state / tracks / end back to
  * the page through window.__hesperMpv(event, data).
  *
- * If mpv can't start or can't open the file, the video is handed to the ExoPlayer
- * PlayerActivity instead and the web player is told the video ended.
+ * If mpv can't start or can't open the file, the player is closed and the user is
+ * told to restart (there is no second player to fall back to).
  */
 class MpvController(
     private val activity: Activity,
@@ -35,9 +35,6 @@ class MpvController(
     private var mpv: MPVLib? = null
     private var surfaceReady = false
 
-    private var url = ""
-    private var title = ""
-    private var theme = ""
     private var pendingUrl: String? = null
     private var startSec = 0.0
 
@@ -54,11 +51,9 @@ class MpvController(
 
     // ---------------- calls from the page (already on the UI thread) ----------------
 
+    @Suppress("UNUSED_PARAMETER")
     fun load(url: String, startSec: Double, title: String, theme: String) {
         stopEngine()
-        this.url = url
-        this.title = title
-        this.theme = theme
         this.startSec = startSec
         loaded = false
         paused = false
@@ -107,7 +102,8 @@ class MpvController(
             mpv = m
             m.command(arrayOf("loadfile", u))
         } catch (t: Throwable) {
-            fallBack("mpv failed to start (" + t.javaClass.simpleName + ")")
+            Log.e("Hesper", "mpv failed to start", t)
+            fail()
         }
     }
 
@@ -122,16 +118,11 @@ class MpvController(
         } catch (t: Throwable) { /* already gone */ }
     }
 
-    private fun fallBack(reason: String) {
+    // mpv failed: close the player and tell the user. No second player to fall back to.
+    private fun fail() {
         stopEngine()
         surfaceView.visibility = View.GONE
-        Toast.makeText(activity, reason + " - using the standard player", Toast.LENGTH_LONG).show()
-        activity.startActivity(
-            Intent(activity, PlayerActivity::class.java)
-                .putExtra("url", url)
-                .putExtra("title", title)
-                .putExtra("theme", theme)
-        )
+        Toast.makeText(activity, "Player has crashed - please restart", Toast.LENGTH_LONG).show()
         emit("ended", JSONObject())          // closes the web player layer
     }
 
@@ -187,7 +178,7 @@ class MpvController(
                 MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                     if (mpv == null) return@post                       // we stopped it ourselves
                     if (loaded) emit("ended", JSONObject())
-                    else fallBack("mpv couldn't play this file")
+                    else fail()
                 }
             }
         }

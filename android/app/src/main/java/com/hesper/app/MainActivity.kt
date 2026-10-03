@@ -1,7 +1,6 @@
 package com.hesper.app
 
 import android.app.Activity
-import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import android.view.SurfaceView
@@ -95,19 +94,6 @@ class MainActivity : Activity() {
 
 /** Exposed to the web UI as window.HesperAndroid. */
 class HesperBridge(private val activity: Activity, private val mpv: MpvController) {
-
-    // ExoPlayer screen: used only as the fallback when mpv can't play a file.
-    @JavascriptInterface
-    fun play(url: String, title: String, theme: String) {
-        activity.runOnUiThread {
-            activity.startActivity(
-                Intent(activity, PlayerActivity::class.java)
-                    .putExtra("url", url)
-                    .putExtra("title", title)
-                    .putExtra("theme", theme)
-            )
-        }
-    }
 
     // libmpv backend for the web player (player.js MpvBackend). JS calls arrive on a
     // background thread, so each one hops to the UI thread.
