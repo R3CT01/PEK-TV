@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
@@ -14,6 +15,8 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import java.io.File
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -50,6 +53,7 @@ class MainActivity : Activity() {
             val root = File(filesDir, "hesper")
             copyAssetDir("hesper", root)
             NativeBridge.startServer(root.absolutePath)
+            startPythonPlugins(File(root, "plugins"))
 
             var ready = false
             for (i in 0 until 50) {
@@ -64,6 +68,20 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (ready) webView.loadUrl("http://127.0.0.1:8080/")
                 else webView.loadData("Server failed to start", "text/plain", "utf-8")
+            }
+        }.start()
+    }
+
+    // Runs plugins/<name>/backend.py (the same job core.cpp does on desktop) through
+    // Chaquopy. Own thread, so a slow plugin (network) never delays the UI.
+    private fun startPythonPlugins(pluginsDir: File) {
+        Thread {
+            try {
+                if (!Python.isStarted()) Python.start(AndroidPlatform(applicationContext))
+                Python.getInstance().getModule("hesper_runner")
+                    .callAttr("run_all", pluginsDir.absolutePath)
+            } catch (e: Throwable) {
+                Log.e("Hesper", "Python plugins failed", e)
             }
         }.start()
     }

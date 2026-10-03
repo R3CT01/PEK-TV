@@ -18,6 +18,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Chaquopy compiles the app's Python to bytecode with a build Python
+      # whose major.minor matches the app's (3.11, see app/build.gradle).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
