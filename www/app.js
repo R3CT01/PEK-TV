@@ -706,7 +706,10 @@ class MainApp extends HesperComponent {
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
     _openWebPlayer(url, title, backend, track) {
-        if (this._player) return;
+        if (this._player) {
+            if (this._player.mini) this._player.close();   // starting something new replaces the mini player
+            else return;
+        }
         this.setState({ detail: null });
         const player = new window.HesperPlayer({
             title: title || '',
@@ -714,6 +717,7 @@ class MainApp extends HesperComponent {
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
                 this._player = null;
+                this._playingId = null;
                 const prog = this._readProgress();
                 const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
                 this.setState({ progress: prog, activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
@@ -721,6 +725,7 @@ class MainApp extends HesperComponent {
             }
         });
         this._player = player;
+        this._playingId = track ? track.id : null;
         player.open(url, (track && track.startSec) || 0);
     }
 
@@ -760,6 +765,13 @@ class MainApp extends HesperComponent {
         const url = window.location.origin + '/api/stream/' + encodeURIComponent(id);
         const { ui } = this.props.engine;
         startSec = startSec > 0 ? startSec : 0;
+
+        // Already playing this exact file in the mini player: just bring it back up.
+        if (this._player && this._player.mini && this._playingId === id) {
+            this.setState({ detail: null });
+            this._player.expand();
+            return;
+        }
 
         // Make sure the file is still there before opening the player.
         let missing = false;
@@ -885,7 +897,8 @@ class MainApp extends HesperComponent {
     // browser's own Back button. Returns true if it closed or stepped out of something.
     goBack() {
         const { engine } = this.props;
-        if (this._player) { this._player.onBack(); return true; }
+        // while minimized the player is just a bar; Back belongs to the app
+        if (this._player && !this._player.mini) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) { engine.windows.back(); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }

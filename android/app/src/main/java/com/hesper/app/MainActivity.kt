@@ -1,6 +1,10 @@
 package com.hesper.app
 
 import android.app.Activity
+import android.app.UiModeManager
+import android.content.Context
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
 import android.view.SurfaceView
@@ -101,6 +105,26 @@ class HesperBridge(private val activity: Activity, private val mpv: MpvControlle
     fun mpvLoad(url: String, startSec: Double, title: String, theme: String) {
         activity.runOnUiThread { mpv.load(url, startSec, title, theme) }
     }
+
+    // True on a phone / tablet, false on Android TV and other no-touch leanback boxes.
+    // The web player only offers the mini player when this is true.
+    private val phone: Boolean by lazy {
+        val ui = activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        val pm = activity.packageManager
+        val isTv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        !isTv && pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+    }
+
+    @JavascriptInterface fun isPhone(): Boolean = phone
+
+    // Mini player: park the video surface under the mini bar's see-through thumbnail
+    // cell (CSS px, converted in MpvController), or send it back to full screen.
+    @JavascriptInterface
+    fun mpvSetRect(left: Double, top: Double, width: Double, height: Double) {
+        activity.runOnUiThread { mpv.setMiniRect(left, top, width, height) }
+    }
+    @JavascriptInterface fun mpvFullscreen() { activity.runOnUiThread { mpv.setFullscreen() } }
 
     @JavascriptInterface fun mpvPlay() { activity.runOnUiThread { mpv.play() } }
     @JavascriptInterface fun mpvPause() { activity.runOnUiThread { mpv.pause() } }

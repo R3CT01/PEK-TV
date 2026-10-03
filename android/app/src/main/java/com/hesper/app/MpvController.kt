@@ -5,14 +5,17 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
 import android.webkit.WebView
+import android.widget.FrameLayout
 import android.widget.Toast
 import dev.jdtech.mpv.MPVLib
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 /**
  * libmpv engine for the shared web player (player.js).
@@ -61,6 +64,7 @@ class MpvController(
         position = 0.0
         duration = 0.0
         pendingUrl = url
+        setFullscreen()                     // a new video always starts full screen
         surfaceView.visibility = View.VISIBLE
         if (surfaceReady) startPending()      // otherwise surfaceCreated() starts it
     }
@@ -70,6 +74,26 @@ class MpvController(
     fun seek(sec: Double) { mpv?.command(arrayOf("seek", sec.toString(), "absolute")) }
     fun setAudio(id: Int) { mpv?.setPropertyString("aid", id.toString()) }
     fun setSubtitle(id: Int) { mpv?.setPropertyString("sid", if (id < 0) "no" else id.toString()) }
+
+    // Mini player: shrink the picture into a rectangle given in the page's CSS px.
+    // The surface sits in the same FrameLayout as the WebView, so the page's
+    // coordinates line up with it directly (CSS px * density = device px).
+    fun setMiniRect(left: Double, top: Double, width: Double, height: Double) {
+        val d = activity.resources.displayMetrics.density.toDouble()
+        val lp = FrameLayout.LayoutParams(
+            (width * d).roundToInt().coerceAtLeast(1),
+            (height * d).roundToInt().coerceAtLeast(1)
+        )
+        lp.gravity = Gravity.TOP or Gravity.START
+        lp.leftMargin = (left * d).roundToInt()
+        lp.topMargin = (top * d).roundToInt()
+        surfaceView.layoutParams = lp
+    }
+
+    fun setFullscreen() {
+        surfaceView.layoutParams = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+    }
 
     fun destroy() {
         stopEngine()

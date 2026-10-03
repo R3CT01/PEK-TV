@@ -13,6 +13,10 @@
      destroy()
      drawsBehindPage      getter, true when the video is a native surface behind
                           the page (the page then stays transparent)
+     supportsMini         getter, true when the backend can shrink its picture into
+                          a docked mini player (Android phones only, never TV)
+     setMiniRect(rect)    rect = {left, top, width, height} in CSS px: move the native
+                          picture there. null = back to full screen
    The backend reports back with this.emit(...):
      'time'   { position, duration }          seconds
      'state'  { playing, buffering }
@@ -104,6 +108,44 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     color: #f0f6fc; color: var(--sx-text, #f0f6fc); background: #161b22; background: var(--sx-surface, #161b22);
     border: 1px solid #30363d; border: 1px solid var(--sx-border, #30363d); }
 
+/* minimize button (top-left of the full-screen player; phones only) */
+.hp-top { display: flex; align-items: center; gap: 12px; }
+.hp-top-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-min { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; pointer-events: none;
+    color: #f0f6fc; color: var(--sx-text, #f0f6fc); background: rgba(22, 27, 34, 0.7);
+    border: 1px solid #30363d; border: 1px solid var(--sx-border, #30363d); }
+.hp-show .hp-min { pointer-events: auto; }
+.hp-min svg { width: 22px; height: 22px; }
+
+/* mini player: a bar docked at the bottom. The thumbnail cell is deliberately
+   see-through: the native video surface is moved right under it. Nothing else
+   in this bar may paint behind that cell. */
+:root { --hp-mini-h: 68px; }
+.hp-mini { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9500; display: flex; flex-direction: column;
+    color: #f0f6fc; color: var(--sx-text, #f0f6fc); font-family: inherit; }
+.hp-mini-progress { position: relative; height: 4px; background: #30363d; background: var(--sx-border, #30363d);
+    border-top: 1px solid #30363d; border-top: 1px solid var(--sx-border, #30363d); }
+.hp-mini-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background: #58a6ff; background: var(--sx-accent, #58a6ff); }
+.hp-mini-row { display: flex; align-items: stretch; height: 64px; }
+.hp-mini-thumb { flex: none; width: 114px; height: 64px; background: transparent; cursor: pointer; }
+.hp-mini-rest { flex: 1; min-width: 0; display: flex; align-items: center;
+    background: #0d121e; background: var(--sx-bg-elevated, #0d121e); }
+.hp-mini-info { flex: 1; min-width: 0; padding: 0 10px; cursor: pointer; }
+.hp-mini-title { font-size: 0.95rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hp-mini-sub { margin-top: 2px; font-size: 0.8rem; white-space: nowrap;
+    color: #8b949e; color: var(--sx-text-muted, #8b949e); }
+.hp-mini-btn { flex: none; width: 48px; height: 48px; padding: 0; border: 0; background: transparent; cursor: pointer;
+    font: inherit; font-size: 1.15rem; color: inherit; border-radius: 50%; }
+.hp-mini-btn:active { background: rgba(88, 166, 255, 0.25); }
+html.hp-mini-on, html.hp-mini-on body { background: transparent !important; }
+html.hp-mini-on body { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
+html.hp-mini-on .hesper-shell { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
+html.hp-mini-on::before { content: ''; position: fixed; left: 0; right: 0; top: 0; bottom: var(--hp-mini-h);
+    background: #090d16; background: var(--sx-bg, #090d16); z-index: -1; }
+html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: var(--hp-mini-h); }
+
 @media (max-width: 700px) {
     .hp-top { padding: 14px 16px 36px; font-size: 1rem; }
     .hp-bottom { padding: 36px 14px 14px; }
@@ -162,6 +204,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             list.slice().forEach(fn => { try { fn(data); } catch (e) { console.error('[HesperPlayer]', e); } });
         }
         get drawsBehindPage() { return false; }
+        get supportsMini() { return false; }
+        setMiniRect(rect) {}
         load(url, startSec) {}
         play() {}
         pause() {}
@@ -231,12 +275,23 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             opts = opts || {};
             this.title = opts.title || '';
             this.theme = opts.theme || '';
-            window.__hesperMpv = (ev, data) => this.emit(ev, data);
+            this._cb = (ev, data) => this.emit(ev, data);
+            window.__hesperMpv = this._cb;
+        }
+        // Phone = not a TV / leanback box and has a touchscreen (decided natively).
+        static isPhone() {
+            try { return !!(window.HesperAndroid && typeof window.HesperAndroid.isPhone === 'function' && window.HesperAndroid.isPhone()); }
+            catch (e) { return false; }
         }
         static available() {
             return !!(window.HesperAndroid && typeof window.HesperAndroid.mpvLoad === 'function');
         }
         get drawsBehindPage() { return true; }
+        get supportsMini() { return MpvBackend.isPhone() && typeof window.HesperAndroid.mpvSetRect === 'function'; }
+        setMiniRect(r) {
+            if (r) window.HesperAndroid.mpvSetRect(r.left, r.top, r.width, r.height);
+            else window.HesperAndroid.mpvFullscreen();
+        }
         attach() { document.documentElement.classList.add('hp-mpv'); }
         load(url, startSec) { window.HesperAndroid.mpvLoad(url, startSec || 0, this.title, this.theme); }
         play() { window.HesperAndroid.mpvPlay(); }
@@ -246,7 +301,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         setSubtitleTrack(id) { window.HesperAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
         destroy() {
             try { window.HesperAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
-            window.__hesperMpv = null;
+            // only clear the hook if it is still ours (a newer player may already own it)
+            if (window.__hesperMpv === this._cb) window.__hesperMpv = null;
             document.documentElement.classList.remove('hp-mpv');
         }
     }
@@ -269,6 +325,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._hideTimer = null;
             this._dragging = false;
             this._closed = false;
+            this.mini = false;             // true while shrunk into the docked mini player
+            this.miniSupported = opts.allowMini !== false && !!this.backend.supportsMini;
         }
 
         open(url, startSec) {
@@ -324,9 +382,109 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._reportProgress(true);
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
+            this._leaveMiniLayout();
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
             if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
             this.onClose();
+        }
+
+        // ---- mini player (phones only) ----
+        // Full screen -> a bar docked at the bottom of the app. The page below stays usable.
+        minimize() {
+            if (!this.miniSupported || this.mini || this._closed) return;
+            this.confirmEl.classList.remove('hp-open');
+            this._closeMenu(true);
+            clearTimeout(this._hideTimer);
+            this.mode = 'hidden';
+            this.root.classList.remove('hp-show');
+            this.mini = true;
+            // the remote / keyboard belong to the app again while minimized
+            window.removeEventListener('keydown', this._onKey, true);
+            window.removeEventListener('keyup', this._onKeyUp, true);
+            this.root.style.display = 'none';
+            const html = document.documentElement;
+            html.classList.remove('hp-mpv');
+            html.classList.add('hp-mini-on');
+            if (!this.miniEl) this._buildMini();
+            document.body.appendChild(this.miniEl);
+            html.style.setProperty('--hp-mini-h', this.miniEl.offsetHeight + 'px');
+            this._updateMini();
+            this._onResize = () => this._sendMiniRect();
+            window.addEventListener('resize', this._onResize);
+            // wait for the page to re-flow around the bar, then park the picture in its thumbnail cell
+            const raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+            raf(() => raf(() => { if (this.mini) this._sendMiniRect(); }));
+        }
+
+        // Mini bar -> full screen again.
+        expand() {
+            if (!this.mini || this._closed) return;
+            this._leaveMiniLayout();
+            if (this.backend.drawsBehindPage) document.documentElement.classList.add('hp-mpv');
+            this.backend.setMiniRect(null);
+            this.root.style.display = '';
+            window.addEventListener('keydown', this._onKey, true);
+            window.addEventListener('keyup', this._onKeyUp, true);
+            this.mode = 'hidden';
+            this._show();
+        }
+
+        _leaveMiniLayout() {
+            if (!this.mini) return;
+            this.mini = false;
+            if (this._onResize) { window.removeEventListener('resize', this._onResize); this._onResize = null; }
+            if (this.miniEl && this.miniEl.parentNode) this.miniEl.parentNode.removeChild(this.miniEl);
+            const html = document.documentElement;
+            html.classList.remove('hp-mini-on');
+            html.style.removeProperty('--hp-mini-h');
+        }
+
+        _sendMiniRect() {
+            if (!this.mini || !this.miniThumb) return;
+            const r = this.miniThumb.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                this.backend.setMiniRect({ left: r.left, top: r.top, width: r.width, height: r.height });
+            }
+        }
+
+        _buildMini() {
+            const bar = el('div', 'hp-mini');
+            const prog = el('div', 'hp-mini-progress');
+            this.miniFill = el('div', 'hp-mini-fill');
+            prog.appendChild(this.miniFill);
+
+            const row = el('div', 'hp-mini-row');
+            this.miniThumb = el('div', 'hp-mini-thumb');          // see-through: the video shows here
+            this.miniThumb.addEventListener('click', () => this.expand());
+            const rest = el('div', 'hp-mini-rest');
+            const info = el('div', 'hp-mini-info');
+            this.miniTitle = el('div', 'hp-mini-title', this.title);
+            this.miniSub = el('div', 'hp-mini-sub', '');
+            info.appendChild(this.miniTitle);
+            info.appendChild(this.miniSub);
+            info.addEventListener('click', () => this.expand());
+            this.miniPlay = el('button', 'hp-mini-btn', '\u275a\u275a');
+            this.miniPlay.setAttribute('aria-label', 'Play or pause');
+            this.miniPlay.addEventListener('click', (ev) => { ev.stopPropagation(); this._toggle(); });
+            const closeBtn = el('button', 'hp-mini-btn', '\u2715');
+            closeBtn.setAttribute('aria-label', 'Close player');
+            closeBtn.addEventListener('click', (ev) => { ev.stopPropagation(); this.close(); });
+            rest.appendChild(info);
+            rest.appendChild(this.miniPlay);
+            rest.appendChild(closeBtn);
+            row.appendChild(this.miniThumb);
+            row.appendChild(rest);
+            bar.appendChild(prog);
+            bar.appendChild(row);
+            this.miniEl = bar;
+        }
+
+        _updateMini() {
+            if (!this.mini || !this.miniEl) return;
+            const d = this.state.duration, p = this.state.position;
+            this.miniFill.style.width = (d > 0 ? Math.min(100, Math.max(0, (p / d) * 100)) : 0) + '%';
+            this.miniSub.textContent = fmtTime(p) + (d > 0 ? ' / ' + fmtTime(d) : '');
+            this.miniPlay.textContent = this.state.playing ? '\u275a\u275a' : '\u25b6';
         }
 
         // Tells the app where we are, at most every 10 seconds (and always on close),
@@ -356,7 +514,26 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.spinner = el('div', 'hp-spinner hp-on');
             this.errorBox = el('div', 'hp-error');
 
-            const top = el('div', 'hp-top', this.title);
+            const top = el('div', 'hp-top');
+            if (this.miniSupported) {
+                const mb = el('button', 'hp-min');
+                mb.setAttribute('aria-label', 'Minimize player');
+                const NS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(NS, 'svg');
+                svg.setAttribute('viewBox', '0 0 24 24');
+                const path = document.createElementNS(NS, 'path');
+                path.setAttribute('d', 'M6 9l6 6 6-6');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('stroke', 'currentColor');
+                path.setAttribute('stroke-width', '2.4');
+                path.setAttribute('stroke-linecap', 'round');
+                path.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(path);
+                mb.appendChild(svg);
+                mb.addEventListener('click', (ev) => { ev.stopPropagation(); this.minimize(); });
+                top.appendChild(mb);
+            }
+            top.appendChild(el('div', 'hp-top-title', this.title));
             const bottom = el('div', 'hp-bottom');
 
             // seek bar
@@ -492,6 +669,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.seekKnob.style.left = pct + '%';
             this.timeLeft.textContent = fmtTime(p);
             this.timeRight.textContent = d > 0 ? fmtTime(d) : '--:--';
+            this._updateMini();
         }
 
         _focusOrder() {
@@ -510,6 +688,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.spinner.classList.toggle('hp-on', waiting);
             if (this._focusOrder().indexOf(this.focus) < 0) this.focus = 'play';
             this._updateFocus();
+            this._updateMini();
         }
 
         _updateFocus() {
