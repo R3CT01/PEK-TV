@@ -23,3 +23,4 @@ target_link_libraries(hesper
     ${OPENSSL_ROOT}/lib/libssl.a
     ${OPENSSL_ROOT}/lib/libcrypto.a
     log)
+target_compile_definitions(hesper PRIVATE _FILE_OFFSET_BITS=64)
