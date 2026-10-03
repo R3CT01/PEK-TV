@@ -17,6 +17,7 @@ const NAV_ITEMS = [
 
 // "Resume Watching" is added after Dashboard only once something has been watched.
 const RESUME_NAV_ITEM = { id: 'resume', label: 'Resume Watching' };
+const HISTORY_NAV_ITEM = { id: 'history', label: 'Watch History' };   // shown once something has been finished
 const PROGRESS_KEY = 'hesper_progress_v1';
 const RESUME_MIN_SEC = 30;        // watched less than this: nothing to resume
 const RESUME_DONE_RATIO = 0.95;   // watched this much: counts as finished
@@ -181,7 +182,9 @@ class MainApp extends HesperComponent {
             clock: this._readClock(),        // { hour12, showDate, tz }
             showClockSettings: false,
             weatherText: this._readWeather(),
-            progress: this._readProgress()   // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
+            progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
+            history: this._readHistory(),    // finished items, newest first (see sync.js)
+            syncUi: { busy: false, linking: false, showKey: false, confirmDelete: false, confirmClear: false, msg: '' }
         };
     }
 
@@ -196,6 +199,7 @@ class MainApp extends HesperComponent {
         this._startClockTicker();
         this._watchNetwork();
         this._queueResumeArt();
+        this._startAutoSync();
 
         // Live-update the header badge when the weather plugin publishes a new reading.
         window.addEventListener('storage', () => {
@@ -214,6 +218,7 @@ class MainApp extends HesperComponent {
         net.onChange((online) => {
             ui.toast(online ? 'Back online' : 'Offline mode: your local library only');
             if (online) {
+                this._autoSync();
                 // fetch the poster art that was skipped while offline
                 ['movies', 'shows'].forEach(t => {
                     const d = this.state.library[t];
@@ -624,7 +629,9 @@ class MainApp extends HesperComponent {
 
     _navItems() {
         const items = NAV_ITEMS.slice();
-        if (this._resumeItems().length) items.splice(1, 0, RESUME_NAV_ITEM);
+        let at = 1;
+        if (this._resumeItems().length) { items.splice(at, 0, RESUME_NAV_ITEM); at++; }
+        if ((this.state.history || []).length) items.splice(at, 0, HISTORY_NAV_ITEM);
         return items;
     }
 
@@ -633,6 +640,7 @@ class MainApp extends HesperComponent {
     _saveProgress(id, meta, position, duration) {
         const map = this._readProgress();
         const finished = duration > 0 && position / duration >= RESUME_DONE_RATIO;
+        if (finished && window.HesperSync) window.HesperSync.recordWatched(meta);
         if (finished || !(position >= RESUME_MIN_SEC)) {
             delete map[id];
         } else {
@@ -652,6 +660,181 @@ class MainApp extends HesperComponent {
     _resumeFor(id) {
         const it = (this.state.progress || {})[id];
         return it && it.position >= RESUME_MIN_SEC ? it : null;
+    }
+
+    // ---------------- Watch history + cloud sync (see sync.js, cloud/worker.js) ----------------
+
+    _readHistory() { return window.HesperSync ? window.HesperSync.listHistory() : []; }
+
+    _setSyncUi(patch) { this.setState({ syncUi: Object.assign({}, this.state.syncUi, patch) }); }
+
+    // Looks up this device's own file id for an item synced from another device.
+    async _resolveLocalId(meta) {
+        const S = window.HesperSync;
+        const fresh = this._libIndex && Date.now() - this._libIndex.t < 120000;
+        if (!fresh) {
+            const map = {};
+            try {
+                const [mv, sh] = await Promise.all([
+                    fetch('/api/movies').then(r => r.json()),
+                    fetch('/api/shows').then(r => r.json())
+                ]);
+                (mv.movies || []).forEach(m => {
+                    const k = S.histKey({ kind: 'movie', title: m.title, year: m.year || 0 });
+                    if (k && !map[k]) map[k] = m.id;
+                });
+                (sh.shows || []).forEach(show => (show.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
+                    const k = S.histKey({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
+                    if (k && !map[k]) map[k] = e.id;
+                })));
+            } catch (err) { return null; }
+            this._libIndex = { t: Date.now(), map: map };
+        }
+        const key = S.histKey(meta);
+        return (key && this._libIndex.map[key]) || null;
+    }
+
+    _syncMessage(err) {
+        return ({
+            offline: 'Could not reach Hesper Cloud. Check your connection.',
+            no_account: 'No account found for that key.',
+            bad_key: 'That key is not valid.',
+            too_large: 'Too much data to sync at once.',
+            not_linked: 'Not linked yet.'
+        })[err] || 'Hesper Cloud is having trouble. Try again later.';
+    }
+
+    // opts: { create, manual }. Updates the screen when something changed.
+    async _runSync(opts) {
+        const S = window.HesperSync;
+        if (!S || !S.isLinked() || this._syncing) return { ok: false, error: 'busy' };
+        opts = opts || {};
+        this._syncing = true;
+        if (opts.manual) this._setSyncUi({ busy: true, msg: '' });
+        let res;
+        try {
+            res = await S.sync({ create: !!opts.create, resolve: (m) => this._resolveLocalId(m) });
+        } catch (e) { res = { ok: false, error: 'offline' }; }
+        this._syncing = false;
+        const refresh = res.ok && res.changed && !this._player;
+        const patch = {};
+        if (opts.manual) { patch.busy = false; patch.msg = res.ok ? '' : this._syncMessage(res.error); }
+        if (refresh || opts.manual) {
+            this.setState({
+                progress: refresh ? this._readProgress() : this.state.progress,
+                history: this._readHistory(),
+                syncUi: Object.assign({}, this.state.syncUi, patch)
+            });
+            if (refresh) this._queueResumeArt();
+        }
+        return res;
+    }
+
+    // Quiet background sync: on start, after playback, when back online, every 10 minutes.
+    _autoSync(delayMs) {
+        const S = window.HesperSync;
+        if (!S || !S.isLinked()) return;
+        clearTimeout(this._autoSyncTimer);
+        this._autoSyncTimer = setTimeout(() => {
+            if (this.state.syncUi.linking || this._player) return;   // don't rebuild the screen under a text box or a video
+            this._runSync({});
+        }, delayMs || 0);
+    }
+
+    _startAutoSync() {
+        this._autoSync(2500);
+        if (!this._syncTimer) this._syncTimer = setInterval(() => this._autoSync(0), 10 * 60 * 1000);
+    }
+
+    async createSyncAccount() {
+        const S = window.HesperSync;
+        if (!S) return;
+        S.setKey(S.newKey());
+        this._setSyncUi({ busy: true, showKey: true, linking: false, msg: 'Save this key somewhere safe: it is the only way to sign in on another device.' });
+        const res = await this._runSync({ create: true, manual: true });
+        if (!res.ok && res.error !== 'busy') { S.unlink(); this._setSyncUi({ busy: false, showKey: false, msg: this._syncMessage(res.error) }); }
+        else this._setSyncUi({ msg: 'Save this key somewhere safe: it is the only way to sign in on another device.' });
+    }
+
+    async linkSyncAccount() {
+        const S = window.HesperSync;
+        const typed = this._syncKeyInput || '';
+        if (!S) return;
+        if (!S.validKey(typed)) { this._setSyncUi({ msg: 'That key looks too short. It has 25 letters and numbers.' }); return; }
+        S.setKey(typed);
+        this._syncKeyInput = '';
+        this._setSyncUi({ linking: false, busy: true, msg: '' });
+        const res = await this._runSync({ manual: true });
+        if (!res.ok && res.error !== 'busy') { S.unlink(); this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); }
+        else this.props.engine.ui.toast('Linked. Your history is syncing.');
+    }
+
+    unlinkSyncDevice() {
+        window.HesperSync.unlink();
+        this._setSyncUi({ showKey: false, confirmDelete: false, msg: 'This device is no longer synced. Your local history is kept.' });
+    }
+
+    async deleteCloudData() {
+        if (!this.state.syncUi.confirmDelete) { this._setSyncUi({ confirmDelete: true }); return; }
+        this._setSyncUi({ busy: true });
+        const res = await window.HesperSync.deleteAccount();
+        this._setSyncUi({ busy: false, confirmDelete: false, showKey: false, msg: res.ok ? 'Your cloud account and its data were deleted.' : this._syncMessage(res.error) });
+    }
+
+    clearWatchHistory() {
+        if (!this.state.syncUi.confirmClear) { this._setSyncUi({ confirmClear: true }); return; }
+        window.HesperSync.clearHistory();
+        this.setState({ history: this._readHistory(), activeTab: 'dashboard', syncUi: Object.assign({}, this.state.syncUi, { confirmClear: false }) });
+        this._autoSync(500);
+    }
+
+    _renderHistory() {
+        const { createElement, ui } = this.props.engine;
+        const items = (this.state.history || []).slice(0, 300);
+        if (!items.length) return ui.card('No watch history yet', 'Things you finish watching will be listed here.');
+        const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
+        const rows = items.map(it => {
+            const title = it.kind === 'movie' ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
+            const sub = [it.kind === 'movie' && it.year ? String(it.year) : '', 'Watched ' + fmt(it.watchedAt), it.count > 1 ? `${it.count} times` : ''].filter(Boolean).join(' \u00b7 ');
+            return ui.listRow(title, sub);
+        });
+        return createElement('div', {},
+            createElement('div', { className: 'plugin-list' }, ...rows),
+            createElement('div', { className: 'section-actions' },
+                ui.button(this.state.syncUi.confirmClear ? 'Tap again to clear all history' : 'Clear Watch History', () => this.clearWatchHistory()))
+        );
+    }
+
+    _renderSyncSettings() {
+        const { createElement, ui } = this.props.engine;
+        const S = window.HesperSync;
+        const u = this.state.syncUi;
+        const parts = [createElement('h2', {}, 'Cloud Sync')];
+        if (!S) {
+            parts.push(createElement('p', { className: 'sub' }, 'Sync is not available in this build.'));
+        } else if (!S.isLinked()) {
+            parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices. Nothing is uploaded until you turn it on.'));
+            parts.push(createElement('div', { className: 'section-actions' },
+                ui.button(u.busy ? 'Working\u2026' : 'Create Sync Account', () => { if (!u.busy) this.createSyncAccount(); }, { variant: 'primary' }),
+                ui.button(u.linking ? 'Cancel' : 'Link Existing Account', () => this._setSyncUi({ linking: !u.linking, msg: '' }))));
+            if (u.linking) {
+                parts.push(ui.textInput('Sync key', this._syncKeyInput || '', (v) => { this._syncKeyInput = v; }, { placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX' }));
+                parts.push(createElement('div', { className: 'section-actions' }, ui.button('Link This Device', () => this.linkSyncAccount(), { variant: 'primary' })));
+            }
+        } else {
+            const last = S.lastSync();
+            parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
+                last ? 'Last synced ' + new Date(last).toLocaleString() : 'Not synced yet', null, { statusDot: !u.busy && !!last }));
+            if (u.showKey) parts.push(ui.listRow('Your sync key', S.getKey(), null));
+            parts.push(createElement('div', { className: 'section-actions' },
+                ui.button(u.busy ? 'Syncing\u2026' : 'Sync Now', () => { if (!u.busy) this._runSync({ manual: true }); }, { variant: 'primary' }),
+                ui.button(u.showKey ? 'Hide Sync Key' : 'Show Sync Key', () => this._setSyncUi({ showKey: !u.showKey }))));
+            parts.push(createElement('div', { className: 'section-actions' },
+                ui.button('Unlink This Device', () => this.unlinkSyncDevice()),
+                ui.button(u.confirmDelete ? 'Tap again to delete cloud data' : 'Delete Cloud Data', () => this.deleteCloudData())));
+        }
+        if (u.msg) parts.push(createElement('p', { className: 'sub' }, u.msg));
+        return createElement('div', { className: 'settings-section' }, ...parts);
     }
 
     // Art for the Resume Watching cards: movie posters, episode stills (show poster as backup).
@@ -720,7 +903,8 @@ class MainApp extends HesperComponent {
                 this._playingId = null;
                 const prog = this._readProgress();
                 const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
-                this.setState({ progress: prog, activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
+                this.setState({ progress: prog, history: this._readHistory(), activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
+                this._autoSync(1500);
                 this._queueResumeArt();
             }
         });
@@ -1205,6 +1389,7 @@ class MainApp extends HesperComponent {
                         ui.button(this.state.refreshing ? 'Scanning\u2026' : this.state.refreshCooldown > 0 ? `Rescan Library (${this.state.refreshCooldown}s)` : 'Rescan Library', () => this.rescan())
                     )
                 ),
+                this._renderSyncSettings(),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Appearance & Themes'),
                     createElement('button', {
@@ -1232,6 +1417,11 @@ class MainApp extends HesperComponent {
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),
                 createElement('div', { className: 'plugin-list' }, ...pluginRows)
+            );
+        } else if (activeTab === 'history') {
+            mainContent = createElement('div', {},
+                this._renderHeader('Watch History'),
+                this._renderHistory()
             );
         } else if (activeTab === 'resume') {
             mainContent = createElement('div', {},
