@@ -1,6 +1,14 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id 'com.android.application'
     id 'org.jetbrains.kotlin.android'
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }
 
 android {
@@ -9,7 +17,7 @@ android {
 
     defaultConfig {
         applicationId 'com.hesper.app'
-        minSdk 21
+        minSdk 26
         // 28 keeps old-style storage access working for reading media
         // folders; this app is sideloaded, not on Play.
         targetSdk 28
@@ -30,7 +38,6 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = '17' }
 }
 
 dependencies {
