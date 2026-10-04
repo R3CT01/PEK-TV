@@ -4,6 +4,11 @@
 
 window.HESPER_APP_BUILD = 'v16';
 
+// Phones (narrow screens) get a bottom tab bar with these tabs plus a "More" sheet
+// holding every other tab. Wider screens and TVs keep the left sidebar.
+const PHONE_MQ = '(max-width: 720px)';
+const PHONE_PRIMARY_TABS = ['dashboard', 'movies', 'shows', 'music'];
+
 const NAV_ITEMS = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'movies', label: 'Movies' },
@@ -183,6 +188,7 @@ class MainApp extends HesperComponent {
             posters: this._readPosters(),   // 'm:<id>' / 's:<title>' -> poster url ('' = none found)
             clock: this._readClock(),        // { hour12, showDate, tz }
             showClockSettings: false,
+            moreOpen: false,      // phone bottom bar: the "More" sheet
             weatherText: this._readWeather(),
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
             history: this._readHistory(),    // finished items, newest first (see sync.js)
@@ -197,6 +203,18 @@ class MainApp extends HesperComponent {
             this.setState({ pluginsList: plugins });
             this._warmWeatherPlugin(plugins);
         });
+        // Switching between phone and wide layout (rotation, split screen) swaps the nav.
+        try {
+            const mq = window.matchMedia(PHONE_MQ);
+            const onChange = () => this.setState({ moreOpen: false });
+            if (mq.addEventListener) mq.addEventListener('change', onChange); else mq.addListener(onChange);
+        } catch (e) { /* no matchMedia: layout just won't switch live */ }
+        // Hide the bottom bar while a text field is focused, so the on-screen keyboard
+        // never pushes it up over the field.
+        const isField = (el) => el && el.matches && el.matches('input, textarea, select');
+        document.addEventListener('focusin', (e) => { if (isField(e.target)) document.documentElement.classList.add('hp-typing'); });
+        document.addEventListener('focusout', () => document.documentElement.classList.remove('hp-typing'));
+
         this.loadSources();
         this.loadSkins();
         this._startClockTicker();
@@ -745,7 +763,7 @@ class MainApp extends HesperComponent {
     selectTab(id) {
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
-        this.setState({ activeTab: id, showNav });
+        this.setState({ activeTab: id, showNav, moreOpen: false });
         this.loadLibrary(id);
         if (id === 'resume') this._queueResumeArt();
         if (id === 'history') this._refreshHistoryAvailability();
@@ -1309,6 +1327,7 @@ class MainApp extends HesperComponent {
         if (engine.windows.activeWindow) { engine.windows.back(); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
+        if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
         if (this.state.netPicker) { this.netBack(); return true; }
         if (this.state.picker) { this.closePicker(); return true; }
@@ -1753,18 +1772,46 @@ class MainApp extends HesperComponent {
             onRefresh: () => this.setState({})
         }).render() : null;
 
-        const sidebar = createElement('div', { className: 'hesper-sidebar' },
+        const isPhone = window.matchMedia(PHONE_MQ).matches;
+        const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
                 createElement('div', { className: 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
                     createElement('span', { className: 'status-badge' }, 'System Online')
                 )
             );
-        sidebar.dataset.keepScroll = 'sidebar';   // keep the phone tab strip where it was across repaints
+        if (sidebar) sidebar.dataset.keepScroll = 'sidebar';
+
+        let bottomBar = null;
+        if (isPhone) {
+            const tabBtn = (item) => createElement('button', {
+                className: `bb-item focusable ${activeTab === item.id ? 'active' : ''}`,
+                onClick: () => this.selectTab(item.id)
+            }, item.label);
+            const moreItems = navItems.filter(i => !PHONE_PRIMARY_TABS.includes(i.id));
+            const moreActive = moreItems.some(i => i.id === activeTab);
+            const sheet = this.state.moreOpen ? [
+                createElement('div', { className: 'bb-backdrop', onClick: () => this.setState({ moreOpen: false }) }),
+                createElement('div', { className: 'bb-sheet' }, ...moreItems.map(item =>
+                    createElement('button', {
+                        className: `nav-item bb-sheet-item focusable ${activeTab === item.id ? 'active' : ''}`,
+                        onClick: () => this.selectTab(item.id)
+                    }, item.label)))
+            ] : [null, null];
+            bottomBar = createElement('div', { className: 'hesper-bottombar' },
+                ...navItems.filter(i => PHONE_PRIMARY_TABS.includes(i.id)).map(tabBtn),
+                createElement('button', {
+                    className: `bb-item focusable ${moreActive || this.state.moreOpen ? 'active' : ''}`,
+                    onClick: () => this.setState({ moreOpen: !this.state.moreOpen })
+                }, 'More'),
+                ...sheet
+            );
+        }
 
         return createElement('div', { className: 'hesper-shell' },
             sidebar,
             createElement('div', { className: 'hesper-content' }, mainContent),
+            bottomBar,
             themeModal,
             this._renderDetailModal(),
             this._renderClockSettings(),

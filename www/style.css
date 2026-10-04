@@ -665,6 +665,63 @@ body {
         padding: 1rem;
     }
 
+    /* Bottom tab bar (rendered only on phones, see PHONE_MQ in app.js). It is the last
+       child of the shell, so it sits above the docked mini player automatically. */
+    .hesper-bottombar {
+        position: relative;
+        z-index: 20;
+        flex: none;
+        display: flex;
+        align-items: stretch;
+        background: var(--sx-bg-elevated);
+        border-top: 1px solid var(--sx-border);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    html.hp-typing .hesper-bottombar { display: none; }
+
+    .bb-item {
+        position: relative;
+        z-index: 2;
+        flex: 1;
+        min-width: 0;
+        min-height: 56px;
+        padding: 0.4rem 0.15rem;
+        background: transparent;
+        border: 0;
+        border-top: 2px solid transparent;
+        color: var(--sx-text-muted);
+        font: inherit;
+        font-size: 0.72rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+    }
+    .bb-item.active {
+        color: var(--sx-accent);
+        border-top-color: var(--sx-accent);
+    }
+
+    .bb-backdrop {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: 1;
+        background: rgba(0, 0, 0, 0.45);
+    }
+    .bb-sheet {
+        position: absolute;
+        left: 0; right: 0; bottom: 100%;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: var(--sx-bg-elevated);
+        border-top: 1px solid var(--sx-border);
+        border-radius: 14px 14px 0 0;
+    }
+    .bb-sheet-item { justify-content: center; }
+
     .content-title {
         font-size: 1.5rem;
     }
