@@ -18,6 +18,13 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Chaquopy compiles the app's Python to bytecode with a build Python
+      # whose major.minor matches the app's (3.11, see app/build.gradle).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
       - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -35,6 +42,12 @@ jobs:
       - name: Build OpenSSL for Android
         if: steps.openssl-cache.outputs.cache-hit != 'true'
         run: bash android/scripts/build-openssl.sh
+
+      # SMB support for network shares. If this step fails the app still builds
+      # (CMake just reports "SMB support OFF").
+      - name: Get libsmb2
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libsmb2.git android/libsmb2
 
       - name: Copy the web frontend into the app
         run: |
@@ -56,6 +69,7 @@ jobs:
       # TEMPORARY: record libmpv's real Java API from the downloaded library,
       # so the player code can be written against it exactly.
       - name: Inspect libmpv API
+        if: always()
         continue-on-error: true
         run: |
           set +e
