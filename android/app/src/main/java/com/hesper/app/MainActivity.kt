@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.util.Log
 import android.view.SurfaceView
@@ -25,6 +26,7 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var mpv: MpvController
+    private lateinit var bridge: HesperBridge
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,7 +44,8 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
         webView.webViewClient = WebViewClient()
-        webView.addJavascriptInterface(HesperBridge(this, mpv), "HesperAndroid")
+        bridge = HesperBridge(this, mpv)
+        webView.addJavascriptInterface(bridge, "HesperAndroid")
         val layout = FrameLayout(this)
         layout.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
         layout.addView(webView, FrameLayout.LayoutParams(-1, -1))
@@ -105,6 +108,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        bridge.setMulticast(false)
         mpv.destroy()
         super.onDestroy()
     }
@@ -135,6 +139,28 @@ class HesperBridge(private val activity: Activity, private val mpv: MpvControlle
     }
 
     @JavascriptInterface fun isPhone(): Boolean = phone
+
+    // Network folder discovery (mDNS) only works while Wi-Fi multicast is allowed.
+    // The web UI turns this on while it searches and off again afterwards.
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    @JavascriptInterface
+    @Synchronized
+    fun setMulticast(on: Boolean) {
+        try {
+            if (on) {
+                if (multicastLock == null) {
+                    val wifi = activity.applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                    multicastLock = wifi?.createMulticastLock("hesper-discovery")?.apply { setReferenceCounted(false) }
+                }
+                multicastLock?.let { if (!it.isHeld) it.acquire() }
+            } else {
+                multicastLock?.let { if (it.isHeld) it.release() }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("Hesper", "multicast lock failed", e)   // the port scan still works without it
+        }
+    }
 
     // Mini player: park the video surface under the mini bar's see-through thumbnail
     // cell (CSS px, converted in MpvController), or send it back to full screen.

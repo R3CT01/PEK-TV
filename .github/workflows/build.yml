@@ -43,6 +43,12 @@ jobs:
         if: steps.openssl-cache.outputs.cache-hit != 'true'
         run: bash android/scripts/build-openssl.sh
 
+      # SMB support for network shares. If this step fails the app still builds
+      # (CMake just reports "SMB support OFF").
+      - name: Get libsmb2
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libsmb2.git android/libsmb2
+
       - name: Copy the web frontend into the app
         run: |
           mkdir -p android/app/src/main/assets/hesper

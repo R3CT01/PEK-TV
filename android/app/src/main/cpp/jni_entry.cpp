@@ -9,6 +9,7 @@
 #include "httplib.h"
 #include "server.h"
 #include "media_scanner.h"
+#include "vfs.h"
 
 static MediaScanner* g_scanner = nullptr;
 static std::atomic<bool> g_started{false};
@@ -32,6 +33,9 @@ Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot)
     std::string www     = root + "/www";
     std::string plugins = root + "/plugins";
     std::string skins   = root + "/skins";
+
+    // SMB logins: app-private storage, one line per host.
+    vfs::init(root + "/net_credentials.tsv");
 
     g_scanner = new MediaScanner(root + "/sources.tsv", root + "/media_cache.tsv");
     g_scanner->loadFromDisk();
