@@ -1,4 +1,5 @@
 #include <iostream>
+#include <cstdlib>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -7,6 +8,7 @@
 #include <Python.h>
 #include "server.h"
 #include "media_scanner.h"
+#include "vfs.h"
 
 namespace fs = std::filesystem;
 
@@ -163,6 +165,16 @@ int main(int argc, char* argv[]) {
     // metadata (ffprobe tags) first, then folder/filename. Source
     // folders are chosen at runtime via the "Add Source" picker UI
     // (POST /api/sources) rather than hardcoded here.
+    // Network-share logins live in Termux's private home folder (not on shared
+    // storage, where any app could read them).
+    {
+        const char* home = std::getenv("HOME");
+        std::string dir = home ? std::string(home) + "/.hesper" : "/storage/emulated/0/Documents/media_core";
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        vfs::init(dir + "/net_credentials.tsv");
+    }
+
     MediaScanner scanner(
         "/storage/emulated/0/Documents/media_core/sources.tsv",
         "/storage/emulated/0/Documents/media_core/media_cache.tsv"

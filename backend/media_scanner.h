@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include "vfs.h"
 
 enum class MediaKind {
     Movie,
@@ -108,6 +109,14 @@ private:
     bool dirHasNomedia(const std::string& dir_path);
     bool isVideoFile(const std::string& extension);
     void scanDirectory(const std::string& dir_path, std::vector<MediaEntry>& found);
+
+    // Network (smb://) sources. Returns false only when the share could not be
+    // reached at all, so scan() can keep the old entries instead of wiping them
+    // while a NAS is switched off. Files are classified from their names/folders
+    // only (ffprobe can't open smb:// URLs).
+    bool scanRemote(const std::string& root_url, std::vector<MediaEntry>& found);
+    bool scanRemoteDir(vfs::Share& share, const vfs::Url& base, const std::string& rel,
+                       std::vector<MediaEntry>& found, int depth);
 
     // Runs `ffprobe -show_format -print_format json` on the file and
     // fills in kind/title/year/show_title/season/episode from
