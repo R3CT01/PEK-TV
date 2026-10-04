@@ -177,6 +177,7 @@ class MainApp extends HesperComponent {
             activeSkin: (() => { try { return localStorage.getItem(SKIN_KEY) || 'default'; } catch (e) { return 'default'; } })(),
             refreshCooldown: 0,   // seconds left before another refresh is allowed
             refreshing: false,    // true while the server is rescanning
+            busy: '',             // text for the full-screen loading ring ('' = hidden)
             detail: null,         // null = closed, else { title, subtitle, overview, image, loading, error }
             showInfo: {},         // showTitle -> { overview, poster } | { loading } | { error }
             posters: this._readPosters(),   // 'm:<id>' / 's:<title>' -> poster url ('' = none found)
@@ -405,7 +406,7 @@ class MainApp extends HesperComponent {
         this.setState({ picker: null });
     }
 
-    async addSource(path) {
+    async _addSourceImpl(path) {
         try {
             const res = await fetch(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'POST' });
             if (!res.ok) throw new Error('Server rejected folder');
@@ -552,7 +553,7 @@ class MainApp extends HesperComponent {
         this.closeNetPicker();
     }
 
-    async addNetSource(url) {
+    async _addNetSourceImpl(url) {
         const body = new URLSearchParams({ path: url });
         if (this._netUser) { body.set('user', this._netUser); body.set('pass', this._netPass || ''); }
         try {
@@ -596,6 +597,57 @@ class MainApp extends HesperComponent {
                 this.setState({ refreshCooldown: left });
             }
         }, 1000);
+    }
+
+    // ---------------- Loading ring ----------------
+    _ring(big) {
+        return this.props.engine.createElement('div', { className: 'hs-ring' + (big ? ' lg' : '') });
+    }
+
+    _loadingBlock(text) {
+        const { createElement } = this.props.engine;
+        return createElement('div', { className: 'hs-loading' }, this._ring(false), createElement('span', { className: 'sub' }, text));
+    }
+
+    _setBusy(msg) { this.setState({ busy: msg || '' }); }
+
+    // Waits for the server's background scan to finish (checks once a second).
+    async _waitForScan(maxSec) {
+        for (let i = 0; i < maxSec; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const st = await fetch('/api/scan-status').then(r => r.json()).catch(() => ({ scanning: false }));
+            if (!st.scanning) break;
+        }
+    }
+
+    _renderBusy() {
+        const { createElement } = this.props.engine;
+        const np = this.state.netPicker;
+        const text = this.state.busy
+            || (this.state.refreshing ? 'Scanning your library\u2026' : '')
+            || (np && np.loading ? 'Connecting\u2026' : '');
+        if (!text) return null;
+        return createElement('div', { className: 'hs-busy' }, this._ring(true), createElement('div', {}, text));
+    }
+
+    async addSource(path) {
+        this._setBusy('Adding folder\u2026');
+        try {
+            await this._addSourceImpl(path);
+            this._setBusy('Scanning your library\u2026');
+            await this._waitForScan(60);
+            this.refreshLibrary();
+        } finally { this._setBusy(''); }
+    }
+
+    async addNetSource(url) {
+        this._setBusy('Adding network folder\u2026');
+        try {
+            await this._addNetSourceImpl(url);
+            this._setBusy('Scanning your library\u2026');
+            await this._waitForScan(120);
+            this.refreshLibrary();
+        } finally { this._setBusy(''); }
     }
 
     async rescan() {
@@ -1457,7 +1509,7 @@ class MainApp extends HesperComponent {
         const { createElement, ui } = this.props.engine;
         const data = this.state.library[tab];
 
-        if (!data) return ui.card('Loading…', 'Fetching your library.');
+        if (!data) return this._loadingBlock('Loading your library\u2026');
         if (data.error) return ui.card('Could not load library', 'The backend did not respond. Is the server running?');
 
         if (tab === 'movies') {
@@ -1489,7 +1541,7 @@ class MainApp extends HesperComponent {
 
         let body;
         if (picker.loading && !picker.path) {
-            body = createElement('p', { className: 'sub' }, 'Loading folders…');
+            body = this._loadingBlock('Loading folders\u2026');
         } else {
             const rows = [];
             if (picker.parent && picker.parent !== picker.path) {
@@ -1701,7 +1753,8 @@ class MainApp extends HesperComponent {
             this._renderDetailModal(),
             this._renderClockSettings(),
             this._renderPicker(),
-            this._renderNetPicker()
+            this._renderNetPicker(),
+            this._renderBusy()
         );
     }
 }
