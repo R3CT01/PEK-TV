@@ -9,11 +9,12 @@
 # contains a bin/ folder; if none exists, bin/ is created next to this script.
 #
 # Network folders: discovery, FTP, WebDAV and DLNA/UPnP always work (no extra
-# libraries). SMB and NFS need their libraries installed, then opt in:
-#   HESPER_SMB=1 bash dev.sh      (needs libsmb2)
-#   HESPER_NFS=1 bash dev.sh      (needs libnfs)
-#   HESPER_SMB=1 HESPER_NFS=1 bash dev.sh   (both)
-# Without them the app says "no SMB support" / "no NFS support" for those types.
+# libraries). SMB (libsmb2) and NFS (libnfs) are AUTO-DETECTED: if their
+# headers are installed they are built in, otherwise skipped with a note, so
+# the same script behaves the same on Termux, Linux and Windows (MSYS2/WSL).
+# Override with HESPER_SMB=0|1 and HESPER_NFS=0|1 (1 = required, 0 = skip).
+# SMB share listing is only enabled when libsmb2 still ships its old
+# DCE/RPC headers; newer libsmb2 lacks them and share listing is skipped.
 #
 # Needs (Termux): pkg install clang python openssl, and httplib.h in the
 # source folder. For TMDb: export TMDB_API_KEY=your_key (before running).
@@ -34,13 +35,33 @@ if [ "$1" != "--run" ]; then
     echo "==> Building to $ROOT/bin/hesper ..."
     SMB_FLAGS=""
     SMB_SRC=""
-    if [ "$HESPER_SMB" = "1" ]; then
-        SMB_FLAGS="$SMB_FLAGS -DHESPER_SMB -DHESPER_SMB_SHARE_ENUM -lsmb2"
-        SMB_SRC="$SMB_SRC vfs_smb.cpp"
+
+    # has_header <header>: does the compiler find it?
+    has_header() { echo "#include <$1>" | g++ -x c++ -fsyntax-only - >/dev/null 2>&1; }
+
+    want_smb="${HESPER_SMB:-auto}"
+    if [ "$want_smb" = "auto" ]; then
+        if has_header smb2/libsmb2.h; then want_smb=1; else want_smb=0; echo "==> SMB: libsmb2 not found, building without SMB"; fi
     fi
-    if [ "$HESPER_NFS" = "1" ]; then
+    if [ "$want_smb" = "1" ]; then
+        SMB_FLAGS="$SMB_FLAGS -DHESPER_SMB -lsmb2"
+        SMB_SRC="$SMB_SRC vfs_smb.cpp"
+        if has_header smb2/libsmb2-dcerpc-srvsvc.h; then
+            SMB_FLAGS="$SMB_FLAGS -DHESPER_SMB_SHARE_ENUM"
+            echo "==> SMB: on (with share listing)"
+        else
+            echo "==> SMB: on (share listing off: libsmb2 has no DCE/RPC headers)"
+        fi
+    fi
+
+    want_nfs="${HESPER_NFS:-auto}"
+    if [ "$want_nfs" = "auto" ]; then
+        if has_header nfsc/libnfs.h; then want_nfs=1; else want_nfs=0; echo "==> NFS: libnfs not found, building without NFS"; fi
+    fi
+    if [ "$want_nfs" = "1" ]; then
         SMB_FLAGS="$SMB_FLAGS -DHESPER_NFS -lnfs"
         SMB_SRC="$SMB_SRC vfs_nfs.cpp"
+        echo "==> NFS: on"
     fi
     g++ -std=c++17 -O1 \
         -DCPPHTTPLIB_OPENSSL_SUPPORT \
