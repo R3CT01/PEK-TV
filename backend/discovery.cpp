@@ -1,4 +1,5 @@
 #include "discovery.h"
+#include "vfs_backends.h"
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -194,7 +195,44 @@ std::vector<NetHost> g_results;
 
 } // namespace
 
+namespace {
+struct Service { const char* mdns; const char* protocol; int defaultPort; };
+const Service kServices[] = {
+    {"_smb._tcp", "smb", 445},
+    {"_nfs._tcp", "nfs", 2049},
+    {"_ftp._tcp", "ftp", 21},
+    {"_webdav._tcp", "dav", 80},
+    {"_webdavs._tcp", "davs", 443},
+};
+const Service* serviceForOwner(const std::string& owner) {
+    for (const auto& s : kServices) if (owner.find(s.mdns) != std::string::npos) return &s;
+    return nullptr;
+}
+int defaultPortFor(const std::string& protocol) {
+    for (const auto& s : kServices) if (protocol == s.protocol) return s.defaultPort;
+    return 0;
+}
+} // namespace
+
 namespace discovery_detail {
+
+std::string hostUrl(const std::string& protocol, const std::string& address, int port) {
+    std::string u = protocol + "://" + address;
+    if (port > 0 && port != defaultPortFor(protocol)) u += ":" + std::to_string(port);
+    return u;
+}
+
+std::string parseSsdpLocation(const std::string& packet) {
+    // Only answers that are (or claim to be) MediaServers.
+    std::string low = lower(packet);
+    if (low.find("mediaserver") == std::string::npos) return "";
+    size_t p = low.find("location:");
+    if (p == std::string::npos) return "";
+    size_t e = packet.find_first_of("\r\n", p);
+    std::string v = packet.substr(p + 9, e == std::string::npos ? std::string::npos : e - p - 9);
+    size_t a = v.find_first_not_of(" \t");
+    return a == std::string::npos ? "" : v.substr(a);
+}
 
 std::vector<uint8_t> buildMdnsQuery(const std::string& name, uint16_t qtype) {
     std::vector<uint8_t> q;
@@ -244,19 +282,21 @@ void MdnsAccumulator::feed(const uint8_t* d, size_t len) {
         if (type == 12) {                         // PTR
             size_t p = rdata;
             std::string target;
-            if (readName(d, len, p, target) && lower(owner).find("_smb._tcp") != std::string::npos) {
+            const Service* svc = serviceForOwner(owner);
+            if (svc && readName(d, len, p, target)) {
                 std::string key = lower(target);
                 bool known = false;
-                for (auto& e : instances_) if (e.first == key) known = true;
-                if (!known) instances_.push_back({key, firstLabel(target)});
+                for (auto& e : instances_) if (e.fqdn == key) known = true;
+                if (!known) instances_.push_back({key, firstLabel(target), svc->protocol});
             }
         } else if (type == 33 && rdlen >= 7) {    // SRV
             size_t p = rdata + 6;
+            int port = getU16(d + rdata + 4);
             std::string target;
             if (readName(d, len, p, target)) {
                 bool known = false;
-                for (auto& e : srv_) if (e.first == owner) { e.second = lower(target); known = true; }
-                if (!known) srv_.push_back({owner, lower(target)});
+                for (auto& e : srv_) if (e.instance == owner) { e.target = lower(target); e.port = port; known = true; }
+                if (!known) srv_.push_back({owner, lower(target), port});
             }
         } else if (type == 1 && rdlen == 4) {     // A
             char buf[INET_ADDRSTRLEN];
@@ -274,14 +314,17 @@ void MdnsAccumulator::feed(const uint8_t* d, size_t len) {
 std::vector<NetHost> MdnsAccumulator::hosts() const {
     std::vector<NetHost> out;
     for (const auto& inst : instances_) {
-        std::string target;
-        for (const auto& s : srv_) if (s.first == inst.first) target = s.second;
-        if (target.empty()) continue;
+        const Srv* srv = nullptr;
+        for (const auto& s : srv_) if (s.instance == inst.fqdn) srv = &s;
+        if (!srv) continue;
         for (const auto& a : addr_) {
-            if (a.first == target) {
+            if (a.first == srv->target) {
                 NetHost h;
-                h.name = inst.second;
+                h.name = inst.label;
                 h.address = a.second;
+                h.protocol = inst.protocol;
+                h.port = srv->port ? srv->port : defaultPortFor(inst.protocol);
+                h.url = hostUrl(h.protocol, h.address, h.port);
                 h.via = "mdns";
                 out.push_back(h);
                 break;
@@ -295,8 +338,8 @@ std::vector<std::string> MdnsAccumulator::unresolvedTargets() const {
     std::vector<std::string> out;
     for (const auto& s : srv_) {
         bool have = false;
-        for (const auto& a : addr_) if (a.first == s.second) have = true;
-        if (!have && std::find(out.begin(), out.end(), s.second) == out.end()) out.push_back(s.second);
+        for (const auto& a : addr_) if (a.first == s.target) have = true;
+        if (!have && std::find(out.begin(), out.end(), s.target) == out.end()) out.push_back(s.target);
     }
     return out;
 }
@@ -376,7 +419,7 @@ std::vector<NetHost> runMdns(const std::vector<Iface>& ifaces, int timeout_ms) {
         if (left <= 0) break;
         int sinceStart = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count());
         if (nextSend < 3 && sinceStart >= resendAt[nextSend]) {
-            sendAll(buildMdnsQuery("_smb._tcp.local", 12));
+            for (const auto& svc : kServices) sendAll(buildMdnsQuery(std::string(svc.mdns) + ".local", 12));
             for (const auto& t : acc.unresolvedTargets()) {
                 if (asked.insert(t).second) sendAll(buildMdnsQuery(t, 1));
             }
@@ -402,19 +445,95 @@ std::vector<NetHost> runMdns(const std::vector<Iface>& ifaces, int timeout_ms) {
 
 } // namespace
 
-std::vector<NetHost> discoverSmbHosts(int timeout_ms) {
+namespace {
+
+// UPnP/DLNA media servers: SSDP search, then read each device description.
+std::vector<NetHost> runSsdp(const std::vector<Iface>& ifaces, int timeout_ms) {
+    std::vector<NetHost> out;
+    int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return out;
+    sockaddr_in me;
+    std::memset(&me, 0, sizeof me);
+    me.sin_family = AF_INET;
+    me.sin_addr.s_addr = htonl(INADDR_ANY);
+    if (::bind(fd, reinterpret_cast<sockaddr*>(&me), sizeof me) != 0) { ::close(fd); return out; }
+    unsigned char ttl = 4;
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+
+    sockaddr_in group;
+    std::memset(&group, 0, sizeof group);
+    group.sin_family = AF_INET;
+    group.sin_port = htons(1900);
+    inet_pton(AF_INET, "239.255.255.250", &group.sin_addr);
+    const std::string search =
+        "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\n"
+        "ST: urn:schemas-upnp-org:device:MediaServer:1\r\n\r\n";
+
+    std::set<std::string> locations;
+    auto deadline = Clock::now() + std::chrono::milliseconds(std::min(timeout_ms, 3000));
+    auto lastSend = Clock::now() - std::chrono::seconds(10);
+    char buf[2048];
+    while (true) {
+        int left = msLeft(deadline);
+        if (left <= 0) break;
+        if (Clock::now() - lastSend > std::chrono::milliseconds(1200)) {
+            for (const auto& f : ifaces) {
+                in_addr ifa;
+                ifa.s_addr = htonl(f.ip);
+                setsockopt(fd, IPPROTO_IP, IP_MULTICAST_IF, &ifa, sizeof ifa);
+                ::sendto(fd, search.data(), search.size(), 0, reinterpret_cast<sockaddr*>(&group), sizeof group);
+            }
+            lastSend = Clock::now();
+        }
+        pollfd p;
+        p.fd = fd; p.events = POLLIN; p.revents = 0;
+        if (::poll(&p, 1, std::min(left, 200)) > 0 && (p.revents & POLLIN)) {
+            ssize_t n = ::recv(fd, buf, sizeof buf - 1, 0);
+            if (n > 0) {
+                std::string loc = discovery_detail::parseSsdpLocation(std::string(buf, static_cast<size_t>(n)));
+                if (!loc.empty()) locations.insert(loc);
+            }
+        }
+    }
+    ::close(fd);
+
+    std::set<std::string> seen;
+    for (const auto& loc : locations) {
+        std::string name, hostPort, control;
+        if (!vfs::upnpDescribe(loc, name, hostPort, control)) continue;
+        std::string ip = hostPort.substr(0, hostPort.rfind(':'));
+        if (!seen.insert(hostPort + control).second) continue;
+        NetHost h;
+        h.name = name;
+        h.address = ip;
+        h.protocol = "upnp";
+        size_t colon = hostPort.rfind(':');
+        h.port = colon == std::string::npos ? 80 : std::atoi(hostPort.c_str() + colon + 1);
+        h.url = "upnp://" + hostPort + "/" + vfs::urlEncode(control);
+        h.via = "ssdp";
+        out.push_back(h);
+    }
+    return out;
+}
+
+} // namespace
+
+std::vector<NetHost> discoverHosts(int timeout_ms) {
     std::vector<NetHost> merged;
     try {
         auto ifaces = localInterfaces();
         if (ifaces.empty()) return merged;
 
-        std::vector<NetHost> mdns;
+        std::vector<NetHost> mdns, ssdp;
         std::thread mdnsThread([&]() { mdns = runMdns(ifaces, timeout_ms); });
+        std::thread ssdpThread([&]() { ssdp = runSsdp(ifaces, timeout_ms); });
 
         std::vector<std::string> own;
         for (const auto& f : ifaces) own.push_back(ipToString(f.ip));
+        // protocol, address -> found by scan
+        std::vector<std::pair<std::string, std::string>> open;
+        const struct { const char* protocol; int port; } scanPorts[] = {{"smb", 445}, {"nfs", 2049}, {"ftp", 21}};
         std::set<std::string> scanned;
-        std::vector<std::string> open;
         for (const auto& f : ifaces) {
             uint32_t net24 = f.ip & 0xFFFFFF00u;
             // Scan the device's own /24 (or the real subnet if it is narrower).
@@ -427,37 +546,43 @@ std::vector<NetHost> discoverSmbHosts(int timeout_ms) {
                 if (!scanned.insert(s).second) continue;
                 targets.push_back(s);
             }
-            auto r = connectBatch(targets, 445, 800);
-            for (size_t i = 0; i < targets.size(); ++i) if (r[i]) open.push_back(targets[i]);
+            for (const auto& sp : scanPorts) {
+                auto r = connectBatch(targets, sp.port, 800);
+                for (size_t i = 0; i < targets.size(); ++i) if (r[i]) open.push_back({sp.protocol, targets[i]});
+            }
         }
         mdnsThread.join();
+        ssdpThread.join();
 
-        std::map<std::string, NetHost> byAddr;
-        for (const auto& h : mdns) {
-            byAddr[h.address] = h;
-        }
-        for (const auto& a : open) {
-            auto it = byAddr.find(a);
-            if (it != byAddr.end()) {
+        std::map<std::string, NetHost> byKey;          // "protocol|address[|url]"
+        for (const auto& h : mdns) byKey[h.protocol + "|" + h.address] = h;
+        for (const auto& pa : open) {
+            std::string key = pa.first + "|" + pa.second;
+            auto it = byKey.find(key);
+            if (it != byKey.end()) {
                 it->second.via = "mdns+scan";
             } else {
                 NetHost h;
-                h.name = a;
-                h.address = a;
+                h.name = pa.second;
+                h.address = pa.second;
+                h.protocol = pa.first;
+                h.port = defaultPortFor(pa.first);
+                h.url = discovery_detail::hostUrl(h.protocol, h.address, h.port);
                 h.via = "scan";
-                byAddr[a] = h;
+                byKey[key] = h;
             }
         }
-        // An mDNS answer for a host that doesn't actually accept connections on
-        // 445 (e.g. a stale cache entry) is dropped.
-        for (auto& kv : byAddr) {
-            if (kv.second.via == "mdns") {
-                if (!discovery_detail::probeTcp(kv.first, 445, 800)) continue;
-            }
+        for (const auto& h : ssdp) byKey["upnp|" + h.address + "|" + h.url] = h;
+
+        for (auto& kv : byKey) {
+            // An mDNS answer for a host that doesn't actually accept connections
+            // (e.g. a stale cache entry) is dropped.
+            if (kv.second.via == "mdns" && !discovery_detail::probeTcp(kv.second.address, kv.second.port, 800)) continue;
             merged.push_back(kv.second);
         }
         std::sort(merged.begin(), merged.end(), [](const NetHost& a, const NetHost& b) {
-            return lower(a.name) < lower(b.name);
+            if (lower(a.name) != lower(b.name)) return lower(a.name) < lower(b.name);
+            return a.protocol < b.protocol;
         });
     } catch (const std::exception& e) {
         std::cout << "[Discovery] failed: " << e.what() << std::endl;
@@ -469,7 +594,7 @@ bool DiscoveryService::start(int timeout_ms) {
     bool expected = false;
     if (!g_running.compare_exchange_strong(expected, true)) return false;
     std::thread([timeout_ms]() {
-        auto found = discoverSmbHosts(timeout_ms);
+        auto found = discoverHosts(timeout_ms);
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             g_results = std::move(found);

@@ -5,25 +5,32 @@
 #include <vector>
 #include <cstdint>
 
-// Finds machines on the local network that offer SMB (Windows / NAS / Samba)
-// file shares - the same job Kodi's "Add network location" browser does.
-//
-// Two methods run together and their results are merged by IP address:
-//   1. mDNS / Bonjour: asks the network "who offers _smb._tcp?". Gives friendly
-//      names (e.g. "MY-NAS"). Needs multicast; on Android the app must hold a
-//      WifiManager.MulticastLock while this runs (see HesperAndroid.setMulticast).
-//   2. Port scan: tries TCP port 445 on every address of the device's own
-//      subnet(s). Works without multicast, finds hosts that don't advertise.
-// Pure POSIX sockets, no extra libraries.
+// Finds machines on the local network that share files - the same job Kodi's
+// "Add network location" browser does. Finds SMB (Windows / NAS / Samba), NFS,
+// FTP, WebDAV and UPnP/DLNA media servers. Three methods run together and their
+// results are merged by protocol + address:
+//   1. mDNS / Bonjour: asks the network "who offers _smb._tcp, _nfs._tcp,
+//      _ftp._tcp, _webdav._tcp ...?". Gives friendly names (e.g. "MY-NAS") and
+//      the only automatic way to find WebDAV. Needs multicast; on Android the
+//      app must hold a WifiManager.MulticastLock while this runs
+//      (see HesperAndroid.setMulticast).
+//   2. SSDP: the UPnP/DLNA "who is a media server?" broadcast (also multicast).
+//   3. Port scan: tries TCP 445 (SMB), 2049 (NFS) and 21 (FTP) on every address
+//      of the device's own subnet(s). Works without multicast and finds hosts
+//      that don't advertise.
+// Plain POSIX sockets; the UPnP description fetch uses httplib (vfs_http.cpp).
 
 struct NetHost {
     std::string name;      // friendly name when known, otherwise == address
     std::string address;   // dotted IPv4
-    std::string via;       // "mdns", "scan" or "mdns+scan"
+    std::string protocol;  // smb, nfs, ftp, dav, davs, upnp
+    int port = 0;
+    std::string url;       // where to start browsing, e.g. smb://192.168.1.5
+    std::string via;       // "mdns", "scan", "ssdp" or "mdns+scan"
 };
 
 // Blocking: returns after about timeout_ms. Never throws.
-std::vector<NetHost> discoverSmbHosts(int timeout_ms = 4000);
+std::vector<NetHost> discoverHosts(int timeout_ms = 4000);
 
 // Background runner used by the HTTP API (POST /api/discover starts it,
 // GET /api/discover reads it). Only one run at a time.
@@ -44,21 +51,25 @@ class MdnsAccumulator {
 public:
     // Reads one packet. Malformed or truncated packets are ignored safely.
     void feed(const uint8_t* data, size_t len);
-    // Hosts that have all three pieces. Safe to call repeatedly.
+    // Hosts that have all three pieces (name, port, address). Safe to call repeatedly.
     std::vector<NetHost> hosts() const;
     // SRV targets seen but with no A record yet (to ask for explicitly).
     std::vector<std::string> unresolvedTargets() const;
 private:
-    struct Impl;
-    std::vector<std::pair<std::string, std::string>> instances_;   // fqdn, display label
-    std::vector<std::pair<std::string, std::string>> srv_;         // instance fqdn -> target host
+    struct Instance { std::string fqdn, label, protocol; };
+    struct Srv { std::string instance, target; int port; };
+    std::vector<Instance> instances_;
+    std::vector<Srv> srv_;
     std::vector<std::pair<std::string, std::string>> addr_;        // host (lowercase) -> IPv4
-    friend struct Impl;
 };
 // Convenience for one packet.
 size_t parseMdnsResponse(const uint8_t* data, size_t len, std::vector<NetHost>& out);
 // Builds an mDNS question for `name` (e.g. "_smb._tcp.local"); qtype 12 = PTR, 1 = A.
 std::vector<uint8_t> buildMdnsQuery(const std::string& name, uint16_t qtype = 12);
+// Pulls the LOCATION URL out of an SSDP reply ("" if it isn't a media-server reply).
+std::string parseSsdpLocation(const std::string& packet);
+// Start URL for a host: smb://1.2.3.4, ftp://1.2.3.4:2121, ...
+std::string hostUrl(const std::string& protocol, const std::string& address, int port);
 // True if a TCP connect to addr:port succeeds within timeout_ms.
 bool probeTcp(const std::string& addr, int port, int timeout_ms);
 // Scans every host address in a.b.c.0/24 around `base` (any address inside it)

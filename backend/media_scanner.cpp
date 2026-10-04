@@ -298,7 +298,8 @@ bool MediaScanner::addMediaDir(const std::string& path) {
         // Reachability is checked by the API route before this; here the URL
         // only has to be well formed and name a share (smb://host/share[/folder]).
         vfs::Url u;
-        if (!vfs::parseUrl(path, u) || u.share.empty()) return false;
+        if (!vfs::parseUrl(path, u)) return false;
+        if (vfs::hasShares(u.scheme) && u.share.empty()) return false;
     } else {
         std::error_code ec;
         if (!fs::exists(path, ec) || !fs::is_directory(path, ec)) return false;
@@ -500,9 +501,10 @@ void MediaScanner::scanDirectory(const std::string& dir_path, std::vector<MediaE
 
 bool MediaScanner::scanRemote(const std::string& root_url, std::vector<MediaEntry>& found) {
     vfs::Url u;
-    if (!vfs::parseUrl(root_url, u) || u.share.empty()) return false;
+    if (!vfs::parseUrl(root_url, u)) return false;
+    if (vfs::hasShares(u.scheme) && u.share.empty()) return false;
     vfs::Error err;
-    auto share = vfs::connectShare(u.host, u.share, err);
+    auto share = vfs::connect(u, err);
     if (!share) {
         std::cout << "[MediaScanner] Cannot reach " << root_url << ": " << err.msg << std::endl;
         return false;
@@ -516,13 +518,13 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
     std::vector<vfs::Entry> list;
     vfs::Error err;
     if (!share.list(rel, list, err)) {
-        std::cout << "[MediaScanner] Cannot read " << vfs::buildUrl({base.host, base.share, rel})
+        std::cout << "[MediaScanner] Cannot read " << vfs::buildUrl({base.scheme, base.host, base.share, rel})
                   << ": " << err.msg << std::endl;
         return depth > 0;     // only a failing top folder means "unreachable"
     }
     for (const auto& e : list) {
         if (e.name == ".nomedia") {
-            std::cout << "[MediaScanner] Skipping (.nomedia): " << vfs::buildUrl({base.host, base.share, rel}) << std::endl;
+            std::cout << "[MediaScanner] Skipping (.nomedia): " << vfs::buildUrl({base.scheme, base.host, base.share, rel}) << std::endl;
             return true;
         }
     }
@@ -536,7 +538,7 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
         }
         if (!isVideoFile(fs::path(e.name).extension().string())) continue;
         MediaEntry entry;
-        entry.path = vfs::buildUrl({base.host, base.share, child});
+        entry.path = vfs::buildUrl({base.scheme, base.host, base.share, child});
         entry.filename = e.name;
         entry.id = makeId(entry.path);
         entry.size_bytes = e.size;

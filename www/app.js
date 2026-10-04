@@ -418,7 +418,7 @@ class MainApp extends HesperComponent {
         }
     }
 
-    // ---------------- Network folders (SMB shares found on the local network) ----------------
+    // ---------------- Network folders (SMB, NFS, FTP, WebDAV and DLNA found on the local network) ----------------
 
     // Wi-Fi drops multicast packets unless Android is told to let them through
     // (the app holds a MulticastLock only while searching).
@@ -430,9 +430,9 @@ class MainApp extends HesperComponent {
 
     async openNetPicker() {
         this._netUser = ''; this._netPass = ''; this._netManual = ''; this._netShare = ''; this._netTried = false;
-        this._netHosts = [];
+        this._netHosts = []; this._netUnsupported = [];
         this._netSig = '';
-        this.setState({ netPicker: { stage: 'hosts', scanning: true, hosts: [], smbAvailable: true, error: null } });
+        this.setState({ netPicker: { stage: 'hosts', scanning: true, hosts: [], unsupported: [], error: null } });
         await this._startDiscovery();
     }
 
@@ -457,18 +457,21 @@ class MainApp extends HesperComponent {
             const np = this.state.netPicker;
             if (!np) { this._multicast(false); return; }
             this._netHosts = data.hosts || [];
+            this._netUnsupported = data.unsupported || [];
             // Re-render only when something visible changed: every re-render replays
             // the window's fade-in, which showed up as the window blinking once a second.
-            const sig = JSON.stringify([this._netHosts, !!data.scanning, data.smbAvailable !== false]);
+            const sig = JSON.stringify([this._netHosts, !!data.scanning, this._netUnsupported]);
             if (sig !== this._netSig) {
                 this._netSig = sig;
-                this.setState({ netPicker: { ...np, hosts: this._netHosts, scanning: !!data.scanning, smbAvailable: data.smbAvailable !== false } });
+                if (np.stage === 'hosts') {
+                    this.setState({ netPicker: { ...np, hosts: this._netHosts, scanning: !!data.scanning, unsupported: this._netUnsupported } });
+                }
             }
             if (data.scanning && n < 20) { setTimeout(() => this._pollDiscovery(n + 1), 1000); return; }
         } catch (e) { /* stop searching */ }
         this._multicast(false);
         const np = this.state.netPicker;
-        if (np && np.scanning) this.setState({ netPicker: { ...np, scanning: false } });
+        if (np && np.stage === 'hosts' && np.scanning) this.setState({ netPicker: { ...np, scanning: false } });
     }
 
     closeNetPicker() {
@@ -476,33 +479,33 @@ class MainApp extends HesperComponent {
         this.setState({ netPicker: null });
     }
 
-    // Splits smb://host[/share[/folder...]] into the parts the server wants.
-    _netParse(url) {
-        const rest = String(url || '').replace(/^smb:\/\//, '');
-        const parts = rest.split('/');
-        const host = parts.shift() || '';
-        const share = parts.shift() || '';
-        return { host, share, path: parts.join('/') };
+    // What the user typed in "Or type an address": a full URL (ftp://nas, dav://nas:8080/files,
+    // nfs://nas ...) is used as is; a bare name or IP means an SMB share.
+    _netTypedUrl(text) {
+        const t = String(text || '').trim();
+        if (!t) return '';
+        return /^[a-z]+:\/\//i.test(t) ? t : 'smb://' + t;
     }
 
-    _netGo(url) {
-        const u = this._netParse(url);
-        return this.netBrowse(u.host, u.share, u.path, false);
+    _netOpenTyped() {
+        this._netUser = ''; this._netPass = ''; this._netTried = false;
+        const url = this._netTypedUrl(this._netManual);
+        if (!url) {
+            this.setState({ netPicker: { ...this.state.netPicker, error: 'Enter the address of the device first.' } });
+            return;
+        }
+        return this.netBrowse(url, false);
     }
 
     _netOpenHost(host) {
         this._netUser = ''; this._netPass = ''; this._netTried = false;
-        return this.netBrowse(host, '', '', false);
+        return this.netBrowse(host.url, false);
     }
 
-    // Shows the shares of a host (share = '') or the folders inside a share.
-    async netBrowse(host, share, path, withCreds) {
-        if (!host) {
-            this.setState({ netPicker: { ...this.state.netPicker, error: 'Enter the address of the device first.' } });
-            return;
-        }
+    // Shows the shares of a host or the folders inside a location (url = smb://..., ftp://..., etc.).
+    async netBrowse(url, withCreds) {
         this.setState({ netPicker: { ...this.state.netPicker, loading: true, error: null } });
-        const body = new URLSearchParams({ host, share: share || '', path: path || '' });
+        const body = new URLSearchParams({ url });
         if (withCreds) { body.set('user', this._netUser || ''); body.set('pass', this._netPass || ''); }
         try {
             const res = await fetch('/api/net/browse', { method: 'POST', body });
@@ -510,18 +513,18 @@ class MainApp extends HesperComponent {
             if (!this.state.netPicker) return;
             if (!data.ok) {
                 if (data.auth) {
-                    this.setState({ netPicker: { stage: 'login', host, share: share || '', path: path || '', loading: false,
+                    this.setState({ netPicker: { stage: 'login', url, loading: false,
                         error: this._netTried ? 'Wrong user name or password.' : null } });
-                } else if (!share && data.canTypeShare) {
-                    this.setState({ netPicker: { stage: 'share', host, loading: false, error: data.error } });
+                } else if (data.canTypeShare) {
+                    this.setState({ netPicker: { stage: 'share', url, loading: false, error: data.error } });
                 } else {
                     this.setState({ netPicker: { ...this.state.netPicker, loading: false, error: data.error || 'Could not open that location.' } });
                 }
                 return;
             }
             this.setState({ netPicker: {
-                stage: 'browse', loading: false, error: null, host: data.host, share: data.share,
-                path: data.path, parent: data.parent, shares: data.shares || [], dirs: data.directories || []
+                stage: 'browse', loading: false, error: null, scheme: data.scheme,
+                path: data.path, parent: data.parent, addable: !!data.addable, shares: data.shares || [], dirs: data.directories || []
             } });
         } catch (err) {
             if (!this.state.netPicker) return;
@@ -532,18 +535,20 @@ class MainApp extends HesperComponent {
     netSignIn() {
         const np = this.state.netPicker;
         this._netTried = true;
-        return this.netBrowse(np.host, np.share, np.path, true);
+        return this.netBrowse(np.url, true);
+    }
+
+    // The window goes back to the device list: re-render it with what was found.
+    _netToHosts() {
+        this.setState({ netPicker: { stage: 'hosts', scanning: false, hosts: this._netHosts || [], unsupported: this._netUnsupported || [], error: null } });
     }
 
     // Back inside the network picker: up a folder, then back to the device list, then close.
     netBack() {
         const np = this.state.netPicker;
         if (!np) return;
-        if (np.stage === 'browse' && np.parent) { this._netGo(np.parent); return; }
-        if (np.stage !== 'hosts') {
-            this.setState({ netPicker: { stage: 'hosts', scanning: false, hosts: this._netHosts || [], smbAvailable: true, error: null } });
-            return;
-        }
+        if (np.stage === 'browse' && np.parent) { this.netBrowse(np.parent, false); return; }
+        if (np.stage !== 'hosts') { this._netToHosts(); return; }
         this.closeNetPicker();
     }
 
@@ -1533,7 +1538,7 @@ class MainApp extends HesperComponent {
 
         if (np.stage === 'hosts') {
             const hosts = np.hosts || [];
-            const rows = hosts.map(h => ui.listRow(h.name, h.name === h.address ? 'Network share' : h.address, () => this._netOpenHost(h.address)));
+            const rows = hosts.map(h => ui.listRow(h.name, `${h.label}${h.name === h.address ? '' : ' \u00b7 ' + h.address}`, () => this._netOpenHost(h)));
             if (!hosts.length) {
                 rows.push(createElement('p', { className: 'sub' }, np.scanning
                     ? 'Searching your network\u2026'
@@ -1541,22 +1546,23 @@ class MainApp extends HesperComponent {
             } else if (np.scanning) {
                 rows.push(createElement('p', { className: 'sub' }, 'Still searching\u2026'));
             }
+            const missing = (np.unsupported || []).map(x => x.toUpperCase());
             body = createElement('div', {},
-                np.smbAvailable === false
-                    ? createElement('p', { className: 'browse-error' }, 'This build can find devices but cannot open shares (no SMB support).')
+                missing.length
+                    ? createElement('p', { className: 'browse-error' }, `This build can find ${missing.join(' / ')} devices but cannot open them (no ${missing.join(' / ')} support).`)
                     : null,
                 createElement('p', { className: 'sub' }, 'Devices sharing files on your network:'),
                 createElement('div', { className: 'browse-list plugin-list' }, ...rows),
                 err,
-                ui.textInput('Or type an address', this._netManual || '', (v) => { this._netManual = v; }, { placeholder: '192.168.1.20 or my-nas' }),
+                ui.textInput('Or type an address', this._netManual || '', (v) => { this._netManual = v; }, { placeholder: 'my-nas   or   ftp://192.168.1.20   or   dav://nas:8080' }),
                 createElement('div', { className: 'section-actions' },
-                    ui.button('Open', () => this._netOpenHost((this._netManual || '').trim()), { variant: 'primary' }),
+                    ui.button('Open', () => this._netOpenTyped(), { variant: 'primary' }),
                     ui.button(np.scanning ? 'Searching\u2026' : 'Search again', () => this.searchNetwork())
                 )
             );
         } else if (np.stage === 'login') {
             body = createElement('div', {},
-                createElement('p', { className: 'sub' }, `Sign in to ${np.host}`),
+                createElement('p', { className: 'sub' }, `Sign in to ${np.url}`),
                 err,
                 ui.textInput('User name', this._netUser || '', (v) => { this._netUser = v; }, { placeholder: 'user or DOMAIN\\user' }),
                 ui.textInput('Password', this._netPass || '', (v) => { this._netPass = v; }, { type: 'password' }),
@@ -1566,29 +1572,35 @@ class MainApp extends HesperComponent {
                 )
             );
         } else if (np.stage === 'share') {
+            const base = String(np.url || '').replace(/\/+$/, '');
             body = createElement('div', {},
-                createElement('p', { className: 'sub' }, `Could not list the shares on ${np.host}. Type the share name instead.`),
+                createElement('p', { className: 'sub' }, `Could not list the shares on ${base}. Type the share name instead.`),
                 np.error ? createElement('p', { className: 'browse-error' }, np.error) : null,
                 ui.textInput('Share name', this._netShare || '', (v) => { this._netShare = v; }, { placeholder: 'Media' }),
                 createElement('div', { className: 'section-actions' },
-                    ui.button('Open', () => this.netBrowse(np.host, (this._netShare || '').trim(), '', false), { variant: 'primary' }),
+                    ui.button('Open', () => {
+                        const name = (this._netShare || '').trim().replace(/^\/+/, '');
+                        // NFS exports are paths (/srv/media); the server expects them percent-encoded.
+                        const seg = base.startsWith('nfs://') ? encodeURIComponent(name.startsWith('/') ? name : '/' + name) : name;
+                        if (name) this.netBrowse(base + '/' + seg, false);
+                    }, { variant: 'primary' }),
                     ui.button('Back', () => this.netBack())
                 )
             );
         } else {
             const rows = [];
             rows.push(ui.listRow(np.parent ? '.. (up one level)' : '.. (back to devices)', np.parent || null, () => this.netBack()));
-            (np.shares || []).forEach(s => rows.push(ui.listRow(s.name, 'Share', () => this._netGo(s.path))));
-            (np.dirs || []).forEach(d => rows.push(ui.listRow(d.name, null, () => this._netGo(d.path))));
+            (np.shares || []).forEach(sh => rows.push(ui.listRow(sh.name, 'Share', () => this.netBrowse(sh.path, false))));
+            (np.dirs || []).forEach(d => rows.push(ui.listRow(d.name, null, () => this.netBrowse(d.path, false))));
             if (!(np.shares || []).length && !(np.dirs || []).length) {
-                rows.push(createElement('p', { className: 'sub' }, np.share ? 'No subfolders here.' : 'No shares found on this device.'));
+                rows.push(createElement('p', { className: 'sub' }, np.addable ? 'No subfolders here.' : 'No shares found on this device.'));
             }
             body = createElement('div', {},
-                createElement('p', { className: 'sub' }, np.share ? 'Current folder:' : 'Choose a share:'),
+                createElement('p', { className: 'sub' }, np.addable ? 'Current folder:' : 'Choose a share:'),
                 createElement('div', { className: 'browse-path' }, np.path || ''),
                 err,
                 createElement('div', { className: 'browse-list plugin-list' }, ...rows),
-                np.share
+                np.addable
                     ? createElement('div', { className: 'section-actions' },
                         ui.button('Add this folder', () => this.addNetSource(np.path), { variant: 'primary' }))
                     : null

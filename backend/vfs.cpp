@@ -1,4 +1,5 @@
 #include "vfs.h"
+#include "vfs_backends.h"
 
 #include <sys/stat.h>
 #include <algorithm>
@@ -11,16 +12,20 @@
 namespace vfs {
 
 namespace {
-const std::string kScheme = "smb://";
+const char* const kSchemes[] = {"smb", "nfs", "ftp", "dav", "davs", "upnp"};
 
 std::mutex g_mutex;
 std::string g_file;
-std::map<std::string, std::pair<std::string, std::string>> g_saved;     // host -> user, pass (on disk)
-std::map<std::string, std::pair<std::string, std::string>> g_session;   // host -> user, pass (this run)
+std::map<std::string, std::pair<std::string, std::string>> g_saved;     // "scheme://host" -> user, pass (on disk)
+std::map<std::string, std::pair<std::string, std::string>> g_session;   // same, this run only
 
-std::string lowerHost(std::string s) {
+std::string lower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
     return s;
+}
+
+std::string credKey(const std::string& scheme, const std::string& host) {
+    return lower(scheme) + "://" + lower(host);
 }
 
 // A field in the credentials file may not contain tab or newline.
@@ -41,46 +46,96 @@ void writeFileLocked() {
     out.close();
     chmod(g_file.c_str(), 0600);      // owner only (no effect on some Android storage, which is app-private anyway)
 }
+
+std::string schemeOf(const std::string& url) {
+    size_t p = url.find("://");
+    return p == std::string::npos ? "" : lower(url.substr(0, p));
+}
 } // namespace
 
+bool knownScheme(const std::string& scheme) {
+    for (const char* s : kSchemes) if (scheme == s) return true;
+    return false;
+}
+
 bool isRemote(const std::string& path) {
-    return path.compare(0, kScheme.size(), kScheme) == 0;
+    return knownScheme(schemeOf(path));
+}
+
+bool hasShares(const std::string& scheme) {
+    return scheme == "smb" || scheme == "nfs" || scheme == "upnp";
+}
+
+std::string schemeLabel(const std::string& scheme) {
+    if (scheme == "smb") return "SMB";
+    if (scheme == "nfs") return "NFS";
+    if (scheme == "ftp") return "FTP";
+    if (scheme == "dav" || scheme == "davs") return "WebDAV";
+    if (scheme == "upnp") return "DLNA";
+    return scheme;
+}
+
+std::string urlEncode(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') out += static_cast<char>(c);
+        else { out += '%'; out += hex[c >> 4]; out += hex[c & 15]; }
+    }
+    return out;
+}
+
+std::string urlDecode(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '%' && i + 2 < s.size() &&
+            std::isxdigit(static_cast<unsigned char>(s[i + 1])) && std::isxdigit(static_cast<unsigned char>(s[i + 2]))) {
+            out += static_cast<char>(std::stoi(s.substr(i + 1, 2), nullptr, 16));
+            i += 2;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
 }
 
 bool parseUrl(const std::string& url, Url& out) {
-    if (!isRemote(url)) return false;
-    std::string rest = url.substr(kScheme.size());
+    std::string scheme = schemeOf(url);
+    if (!knownScheme(scheme)) return false;
+    std::string rest = url.substr(scheme.size() + 3);
     size_t slash = rest.find('/');
+    out = Url();
+    out.scheme = scheme;
     out.host = rest.substr(0, slash);
-    out.share.clear();
-    out.path.clear();
     if (out.host.empty()) return false;
     if (slash == std::string::npos) return true;
     rest = rest.substr(slash + 1);
-    size_t s2 = rest.find('/');
-    out.share = rest.substr(0, s2);
-    if (s2 != std::string::npos) out.path = rest.substr(s2 + 1);
-    // Normalise: no trailing slash, no empty or ".." segments (a share URL must
+
+    std::string pathPart = rest;
+    if (hasShares(scheme)) {
+        size_t s2 = rest.find('/');
+        out.share = rest.substr(0, s2);
+        pathPart = (s2 == std::string::npos) ? "" : rest.substr(s2 + 1);
+    }
+    // Normalise: no trailing slash, no empty or ".." segments (a URL must
     // never be able to climb out of its share).
     std::vector<std::string> parts;
-    std::stringstream ss(out.path);
+    std::stringstream ss(pathPart);
     std::string seg;
     while (std::getline(ss, seg, '/')) {
         if (seg.empty() || seg == ".") continue;
         if (seg == "..") return false;
         parts.push_back(seg);
     }
-    out.path.clear();
     for (size_t i = 0; i < parts.size(); ++i) out.path += (i ? "/" : "") + parts[i];
+    if (urlDecode(out.share) == "..") return false;
     return true;
 }
 
 std::string buildUrl(const Url& u) {
-    std::string s = kScheme + u.host;
-    if (!u.share.empty()) {
-        s += "/" + u.share;
-        if (!u.path.empty()) s += "/" + u.path;
-    }
+    std::string s = u.scheme + "://" + u.host;
+    if (!u.share.empty()) s += "/" + u.share;
+    if (!u.path.empty()) s += "/" + u.path;
     return s;
 }
 
@@ -93,8 +148,12 @@ std::string join(const std::string& dirUrl, const std::string& name) {
 std::string parent(const std::string& url) {
     Url u;
     if (!parseUrl(url, u)) return "";
-    if (u.share.empty()) return "";
-    if (u.path.empty()) { u.share.clear(); return buildUrl(u); }
+    if (u.path.empty()) {
+        if (u.share.empty()) return "";
+        if (u.scheme == "upnp") return "";      // a media server has no list of shares above it
+        u.share.clear();
+        return buildUrl(u);
+    }
     size_t slash = u.path.rfind('/');
     u.path = (slash == std::string::npos) ? "" : u.path.substr(0, slash);
     return buildUrl(u);
@@ -108,58 +167,113 @@ void init(const std::string& credentialsFile) {
     std::string line;
     while (std::getline(in, line)) {
         std::istringstream iss(line);
-        std::string host, user, pass;
-        if (std::getline(iss, host, '\t') && std::getline(iss, user, '\t')) {
+        std::string key, user, pass;
+        if (std::getline(iss, key, '\t') && std::getline(iss, user, '\t')) {
             std::getline(iss, pass);
-            g_saved[lowerHost(host)] = {user, pass};
+            if (key.find("://") != std::string::npos) g_saved[lower(key)] = {user, pass};
         }
     }
 }
 
-void setCredentials(const std::string& host, const std::string& user, const std::string& pass, bool persist) {
+void setCredentials(const std::string& scheme, const std::string& host,
+                    const std::string& user, const std::string& pass, bool persist) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::string h = lowerHost(host);
-    g_session[h] = {clean(user), clean(pass)};
+    std::string k = credKey(scheme, host);
+    g_session[k] = {clean(user), clean(pass)};
     if (persist) {
-        g_saved[h] = g_session[h];
+        g_saved[k] = g_session[k];
         writeFileLocked();
     }
 }
 
-void persistCredentials(const std::string& host) {
+void persistCredentials(const std::string& scheme, const std::string& host) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::string h = lowerHost(host);
-    auto it = g_session.find(h);
+    std::string k = credKey(scheme, host);
+    auto it = g_session.find(k);
     if (it == g_session.end()) return;
-    g_saved[h] = it->second;
+    g_saved[k] = it->second;
     writeFileLocked();
 }
 
-bool getCredentials(const std::string& host, std::string& user, std::string& pass) {
+bool getCredentials(const std::string& scheme, const std::string& host, std::string& user, std::string& pass) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::string h = lowerHost(host);
-    auto it = g_session.find(h);
+    std::string k = credKey(scheme, host);
+    auto it = g_session.find(k);
     if (it != g_session.end()) { user = it->second.first; pass = it->second.second; return true; }
-    auto saved = g_saved.find(h);
+    auto saved = g_saved.find(k);
     if (saved != g_saved.end()) { user = saved->second.first; pass = saved->second.second; return true; }
     return false;
 }
 
-#ifndef HESPER_SMB
-// Built without libsmb2: discovery still works, but connecting says why it can't.
-bool smbAvailable() { return false; }
+// ---------------------------------------------------------------- dispatch
 
-std::unique_ptr<Share> connectShare(const std::string&, const std::string&, Error& err) {
+#ifndef HESPER_SMB
+std::unique_ptr<Share> smbConnect(const Url&, Error& err) {
     err.auth = false;
     err.msg = "This build of Hesper has no SMB support.";
     return nullptr;
 }
-
-bool listShares(const std::string&, std::vector<std::string>&, Error& err) {
+bool smbListShares(const Url&, std::vector<std::string>&, Error& err) {
     err.auth = false;
     err.msg = "This build of Hesper has no SMB support.";
     return false;
 }
 #endif
+
+#ifndef HESPER_NFS
+std::unique_ptr<Share> nfsConnect(const Url&, Error& err) {
+    err.auth = false;
+    err.msg = "This build of Hesper has no NFS support.";
+    return nullptr;
+}
+bool nfsListShares(const Url&, std::vector<std::string>&, Error& err) {
+    err.auth = false;
+    err.msg = "This build of Hesper has no NFS support.";
+    return false;
+}
+#endif
+
+bool available(const std::string& scheme) {
+    if (scheme == "smb") {
+#ifdef HESPER_SMB
+        return true;
+#else
+        return false;
+#endif
+    }
+    if (scheme == "nfs") {
+#ifdef HESPER_NFS
+        return true;
+#else
+        return false;
+#endif
+    }
+    return knownScheme(scheme);
+}
+
+std::unique_ptr<Share> connect(const Url& u, Error& err) {
+    if (hasShares(u.scheme) && u.share.empty()) {
+        err.auth = false;
+        err.msg = "Pick a share first.";
+        return nullptr;
+    }
+    if (u.scheme == "smb") return smbConnect(u, err);
+    if (u.scheme == "nfs") return nfsConnect(u, err);
+    if (u.scheme == "ftp") return ftpConnect(u, err);
+    if (u.scheme == "dav" || u.scheme == "davs") return davConnect(u, err);
+    if (u.scheme == "upnp") return upnpConnect(u, err);
+    err.auth = false;
+    err.msg = "Unknown network type.";
+    return nullptr;
+}
+
+bool listShares(const Url& u, std::vector<std::string>& shares, Error& err) {
+    if (u.scheme == "smb") return smbListShares(u, shares, err);
+    if (u.scheme == "nfs") return nfsListShares(u, shares, err);
+    err.auth = false;
+    err.msg = u.scheme == "upnp" ? "Choose the media server from the list of devices."
+                                  : "This type of location has no list of shares.";
+    return false;
+}
 
 } // namespace vfs

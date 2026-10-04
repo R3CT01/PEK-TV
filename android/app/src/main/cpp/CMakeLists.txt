@@ -17,6 +17,8 @@ add_library(hesper SHARED
     ${BACKEND}/playback.cpp
     ${BACKEND}/discovery.cpp
     ${BACKEND}/vfs.cpp
+    ${BACKEND}/vfs_ftp.cpp     # FTP
+    ${BACKEND}/vfs_http.cpp    # WebDAV + UPnP/DLNA
 )
 
 # SMB (network shares) via libsmb2. The CI workflow clones it to android/libsmb2;
@@ -48,3 +50,22 @@ target_link_libraries(hesper
     ${OPENSSL_ROOT}/lib/libcrypto.a
     log)
 target_compile_definitions(hesper PRIVATE _FILE_OFFSET_BITS=64)
+
+# NFS via libnfs: off by default so a libnfs build problem can never break the
+# app. To turn it on, clone https://github.com/sahlberg/libnfs into android/libnfs
+# (the workflow has a ready-made step to un-comment).
+set(LIBNFS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../libnfs)
+if(EXISTS ${LIBNFS_DIR}/CMakeLists.txt)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(ENABLE_UTILS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${LIBNFS_DIR} libnfs EXCLUDE_FROM_ALL)
+    target_sources(hesper PRIVATE ${BACKEND}/vfs_nfs.cpp)
+    target_include_directories(hesper PRIVATE ${LIBNFS_DIR}/include)
+    target_compile_definitions(hesper PRIVATE HESPER_NFS)
+    target_link_libraries(hesper nfs)
+    message(STATUS "Hesper: NFS support ON (libnfs)")
+else()
+    message(STATUS "Hesper: NFS support OFF (android/libnfs not found)")
+endif()

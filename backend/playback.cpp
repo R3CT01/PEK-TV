@@ -28,17 +28,17 @@ void jsonError(httplib::Response& res, int status, const std::string& msg) {
     res.set_content("{\"error\": \"" + msg + "\"}", "application/json");
 }
 
-// Streams a file that lives on an SMB share. The player still just opens
+// Streams a file that lives on a network share (SMB, NFS, FTP, WebDAV, DLNA). The player still just opens
 // /api/stream/<id>; this reads the bytes from the share on demand, and httplib
 // turns the player's Range requests into the right slices (seeking works).
 void serveRemote(const MediaEntry& entry, httplib::Response& res) {
     vfs::Url u;
-    if (!vfs::parseUrl(entry.path, u) || u.share.empty() || u.path.empty()) {
+    if (!vfs::parseUrl(entry.path, u) || (vfs::hasShares(u.scheme) && u.share.empty()) || u.path.empty()) {
         jsonError(res, 404, "Bad network path");
         return;
     }
     vfs::Error err;
-    std::shared_ptr<vfs::Share> share = vfs::connectShare(u.host, u.share, err);
+    std::shared_ptr<vfs::Share> share = vfs::connect(u, err);
     if (!share) { jsonError(res, 502, "Network share is not reachable"); return; }
     if (!share->open(u.path, err)) { jsonError(res, 404, "File is missing"); return; }
     uint64_t size = share->fileSize();

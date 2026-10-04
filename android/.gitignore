@@ -7,3 +7,4 @@ app/.cxx/
 openssl/
 app/src/main/assets/hesper/
 libsmb2/
+libnfs/

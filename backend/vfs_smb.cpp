@@ -4,6 +4,7 @@
 #ifdef HESPER_SMB
 
 #include "vfs.h"
+#include "vfs_backends.h"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -48,7 +49,7 @@ smb2_context* openContext(const std::string& host, const std::string& share, Err
     if (!ctx) { err.auth = false; err.msg = "Out of memory"; return nullptr; }
 
     std::string rawUser, pass;
-    if (!getCredentials(host, rawUser, pass)) { rawUser.clear(); pass.clear(); }
+    if (!getCredentials("smb", host, rawUser, pass)) { rawUser.clear(); pass.clear(); }
     std::string user, domain;
     splitUser(rawUser, user, domain);
     if (user.empty()) user = "Guest";          // anonymous / guest access
@@ -172,15 +173,14 @@ void shareEnumCb(smb2_context*, int status, void* command_data, void* cb_data) {
 
 } // namespace
 
-bool smbAvailable() { return true; }
-
-std::unique_ptr<Share> connectShare(const std::string& host, const std::string& share, Error& err) {
-    smb2_context* ctx = openContext(host, share, err);
+std::unique_ptr<Share> smbConnect(const Url& u, Error& err) {
+    smb2_context* ctx = openContext(u.host, urlDecode(u.share), err);
     if (!ctx) return nullptr;
     return std::unique_ptr<Share>(new SmbShare(ctx));
 }
 
-bool listShares(const std::string& host, std::vector<std::string>& shares, Error& err) {
+bool smbListShares(const Url& u, std::vector<std::string>& shares, Error& err) {
+    const std::string& host = u.host;
 #ifdef HESPER_SMB_SHARE_ENUM
     smb2_context* ctx = openContext(host, "IPC$", err);
     if (!ctx) return false;

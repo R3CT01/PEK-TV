@@ -638,8 +638,9 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
-    // 8b. Network sources (SMB). Discovery runs in the background; the UI
-    //     starts it with POST, then polls GET until "scanning" is false.
+    // 8b. Network sources (SMB, NFS, FTP, WebDAV, DLNA). Discovery runs in the
+    //     background; the UI starts it with POST, then polls GET until
+    //     "scanning" is false.
     static DiscoveryService discovery;
     svr.Post("/api/discover", [](const httplib::Request&, httplib::Response& res) {
         bool started = discovery.start(4000);
@@ -647,10 +648,16 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     });
     svr.Get("/api/discover", [](const httplib::Request&, httplib::Response& res) {
         auto hosts = discovery.results();
+        std::string missing;
+        for (const char* sch : {"smb", "nfs"}) {
+            if (!vfs::available(sch)) missing += std::string(missing.empty() ? "" : ",") + "\"" + sch + "\"";
+        }
         std::string json = std::string("{\"scanning\": ") + (discovery.isRunning() ? "true" : "false") +
-                           ", \"smbAvailable\": " + (vfs::smbAvailable() ? "true" : "false") + ", \"hosts\": [";
+                           ", \"unsupported\": [" + missing + "], \"hosts\": [";
         for (size_t i = 0; i < hosts.size(); ++i) {
             json += "{\"name\": \"" + jsonEscape(hosts[i].name) + "\", \"address\": \"" + jsonEscape(hosts[i].address) +
+                    "\", \"protocol\": \"" + jsonEscape(hosts[i].protocol) + "\", \"label\": \"" +
+                    jsonEscape(vfs::schemeLabel(hosts[i].protocol)) + "\", \"url\": \"" + jsonEscape(hosts[i].url) +
                     "\", \"via\": \"" + jsonEscape(hosts[i].via) + "\"}";
             if (i + 1 < hosts.size()) json += ",";
         }
@@ -658,33 +665,40 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
-    // Folder picker for a network host: no share = list the host's shares,
-    // otherwise the sub-folders of share/path. Optional user/pass are kept for
-    // the host (in memory) so the following calls reuse them.
+    // Folder picker for a network location, given as a URL (smb://, nfs://, ftp://,
+    // dav://, davs://, upnp://). A host with shares and no share chosen lists its
+    // shares; otherwise the sub-folders of the location. Optional user/pass are
+    // kept for that host (in memory) so the following calls reuse them.
     svr.Post("/api/net/browse", [](const httplib::Request& req, httplib::Response& res) {
         auto fail = [&res](const std::string& msg, bool auth, bool canTypeShare) {
             res.set_content("{\"ok\": false, \"auth\": " + std::string(auth ? "true" : "false") +
                             ", \"canTypeShare\": " + (canTypeShare ? "true" : "false") +
                             ", \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
         };
-        std::string host = req.get_param_value("host");
-        if (!validNetHost(host)) { fail("Enter a valid host name or IP address.", false, false); return; }
-        if (req.has_param("user")) {
-            vfs::setCredentials(host, req.get_param_value("user"), req.get_param_value("pass"), false);
+        vfs::Url u;
+        if (!vfs::parseUrl(req.get_param_value("url"), u) || !validNetHost(u.host)) {
+            fail("That is not a valid network address.", false, false);
+            return;
         }
-        std::string share = req.get_param_value("share");
-        std::string path = req.get_param_value("path");
+        if (req.has_param("user")) {
+            vfs::setCredentials(u.scheme, u.host, req.get_param_value("user"), req.get_param_value("pass"), false);
+        }
         vfs::Error err;
 
-        if (share.empty()) {
+        if (vfs::hasShares(u.scheme) && u.share.empty()) {
             std::vector<std::string> shares;
-            if (!vfs::listShares(host, shares, err)) { fail(err.msg, err.auth, true); return; }
+            if (!vfs::listShares(u, shares, err)) {
+                fail(err.msg, err.auth, u.scheme == "smb" || u.scheme == "nfs");
+                return;
+            }
             std::sort(shares.begin(), shares.end());
-            std::string json = "{\"ok\": true, \"host\": \"" + jsonEscape(host) + "\", \"share\": \"\", \"path\": \"smb://" +
-                               jsonEscape(host) + "\", \"parent\": \"\", \"shares\": [";
+            std::string base = vfs::buildUrl(u);
+            std::string json = "{\"ok\": true, \"scheme\": \"" + jsonEscape(u.scheme) + "\", \"path\": \"" + jsonEscape(base) +
+                               "\", \"parent\": \"\", \"addable\": false, \"shares\": [";
             for (size_t i = 0; i < shares.size(); ++i) {
-                json += "{\"name\": \"" + jsonEscape(shares[i]) + "\", \"path\": \"" +
-                        jsonEscape(vfs::buildUrl({host, shares[i], ""})) + "\"}";
+                vfs::Url su = u;
+                su.share = u.scheme == "smb" ? shares[i] : vfs::urlEncode(shares[i]);
+                json += "{\"name\": \"" + jsonEscape(shares[i]) + "\", \"path\": \"" + jsonEscape(vfs::buildUrl(su)) + "\"}";
                 if (i + 1 < shares.size()) json += ",";
             }
             json += "], \"directories\": []}";
@@ -692,23 +706,17 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             return;
         }
 
-        vfs::Url here{host, share, ""};
-        // Re-parse through the URL code so ".." and doubled slashes are cleaned out.
-        vfs::Url cleaned;
-        if (!vfs::parseUrl(vfs::buildUrl({host, share, path}), cleaned)) { fail("Bad folder path.", false, false); return; }
-        here = cleaned;
-        auto conn = vfs::connectShare(host, share, err);
+        auto conn = vfs::connect(u, err);
         if (!conn) { fail(err.msg, err.auth, false); return; }
         std::vector<vfs::Entry> list;
-        if (!conn->list(here.path, list, err)) { fail(err.msg, err.auth, false); return; }
+        if (!conn->list(u.path, list, err)) { fail(err.msg, err.auth, false); return; }
         std::vector<vfs::Entry> dirs;
         for (const auto& e : list) if (e.is_dir && !e.name.empty() && e.name[0] != '.') dirs.push_back(e);
         std::sort(dirs.begin(), dirs.end(), [](const vfs::Entry& a, const vfs::Entry& b) { return a.name < b.name; });
 
-        std::string url = vfs::buildUrl(here);
-        std::string json = "{\"ok\": true, \"host\": \"" + jsonEscape(host) + "\", \"share\": \"" + jsonEscape(share) +
-                           "\", \"path\": \"" + jsonEscape(url) + "\", \"parent\": \"" + jsonEscape(vfs::parent(url)) +
-                           "\", \"shares\": [], \"directories\": [";
+        std::string url = vfs::buildUrl(u);
+        std::string json = "{\"ok\": true, \"scheme\": \"" + jsonEscape(u.scheme) + "\", \"path\": \"" + jsonEscape(url) +
+                           "\", \"parent\": \"" + jsonEscape(vfs::parent(url)) + "\", \"addable\": true, \"shares\": [], \"directories\": [";
         for (size_t i = 0; i < dirs.size(); ++i) {
             json += "{\"name\": \"" + jsonEscape(dirs[i].name) + "\", \"path\": \"" +
                     jsonEscape(vfs::join(url, dirs[i].name)) + "\"}";
@@ -739,18 +747,18 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         std::string path = req.get_param_value("path");
         if (vfs::isRemote(path)) {
             vfs::Url u;
-            if (!vfs::parseUrl(path, u) || u.share.empty() || !validNetHost(u.host)) {
+            if (!vfs::parseUrl(path, u) || (vfs::hasShares(u.scheme) && u.share.empty()) || !validNetHost(u.host)) {
                 res.status = 400;
                 res.set_content("{\"status\": \"error\", \"message\": \"Invalid network folder\"}", "application/json");
                 return;
             }
             if (req.has_param("user")) {
-                vfs::setCredentials(u.host, req.get_param_value("user"), req.get_param_value("pass"), false);
+                vfs::setCredentials(u.scheme, u.host, req.get_param_value("user"), req.get_param_value("pass"), false);
             }
             // Prove the folder can be opened before saving it, so a typo or a wrong
             // password is reported now rather than as an empty library later.
             vfs::Error err;
-            auto conn = vfs::connectShare(u.host, u.share, err);
+            auto conn = vfs::connect(u, err);
             std::vector<vfs::Entry> probe;
             if (!conn || !conn->list(u.path, probe, err)) {
                 res.status = 400;
@@ -763,7 +771,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
                 res.set_content("{\"status\": \"error\", \"message\": \"Invalid network folder\"}", "application/json");
                 return;
             }
-            vfs::persistCredentials(u.host);
+            vfs::persistCredentials(u.scheme, u.host);
             std::thread([scanner]() { scanner->scan(); }).detach();
             res.set_content("{\"status\": \"ok\"}", "application/json");
             return;
