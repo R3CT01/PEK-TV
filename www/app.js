@@ -1753,14 +1753,17 @@ class MainApp extends HesperComponent {
             onRefresh: () => this.setState({})
         }).render() : null;
 
-        return createElement('div', { className: 'hesper-shell' },
-            createElement('div', { className: 'hesper-sidebar' },
+        const sidebar = createElement('div', { className: 'hesper-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
                 createElement('div', { className: 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
                     createElement('span', { className: 'status-badge' }, 'System Online')
                 )
-            ),
+            );
+        sidebar.dataset.keepScroll = 'sidebar';   // keep the phone tab strip where it was across repaints
+
+        return createElement('div', { className: 'hesper-shell' },
+            sidebar,
             createElement('div', { className: 'hesper-content' }, mainContent),
             themeModal,
             this._renderDetailModal(),
