@@ -49,6 +49,14 @@ jobs:
         continue-on-error: true
         run: git clone --depth 1 https://github.com/sahlberg/libsmb2.git android/libsmb2
 
+      # Diagnostic: shows which libsmb2 commit was cloned and which headers exist.
+      - name: Inspect libsmb2 headers
+        continue-on-error: true
+        run: |
+          git -C android/libsmb2 log -1 --oneline
+          ls android/libsmb2/include/smb2
+          grep -rln "srvsvc" android/libsmb2/include || true
+
       # NFS support (optional, off by default). To try it, remove the leading "#"
       # from the next three lines. If the build then fails, put the "#" back.
       # - name: Get libnfs

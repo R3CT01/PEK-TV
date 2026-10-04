@@ -25,7 +25,10 @@ add_library(hesper SHARED
 # when that folder is missing the app still builds and runs - discovery works,
 # and connecting to a share reports "no SMB support".
 set(LIBSMB2_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../libsmb2)
-option(HESPER_SHARE_ENUM "List a host's shares with libsmb2's share-enum call" ON)
+# OFF by default: share enumeration needs libsmb2's DCE/RPC headers
+# (smb2/libsmb2-dcerpc.h), which were missing from the CI clone and broke the
+# build. Turn ON with -DHESPER_SHARE_ENUM=ON once the headers are confirmed.
+option(HESPER_SHARE_ENUM "List a host's shares with libsmb2's share-enum call" OFF)
 if(EXISTS ${LIBSMB2_DIR}/CMakeLists.txt)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
