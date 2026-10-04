@@ -513,12 +513,23 @@ class HesperWindow {
 
     #repaint() {
         if (!this.#mounted) return;
+        // Repainting builds brand-new elements, so any scrollable strip (e.g. the
+        // phone tab bar) would snap back to 0. Elements marked data-keep-scroll
+        // get their scroll position carried over to their replacement.
+        const kept = new Map();
+        this.#rootElement.querySelectorAll('[data-keep-scroll]').forEach(el => {
+            kept.set(el.dataset.keepScroll, [el.scrollLeft, el.scrollTop]);
+        });
         const next = this.render();
         if (this.#engine.gsap) {
             this.#engine.gsap.fromTo(next, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
         }
         this.#rootElement.replaceWith(next);
         this.#rootElement = next;
+        next.querySelectorAll('[data-keep-scroll]').forEach(el => {
+            const pos = kept.get(el.dataset.keepScroll);
+            if (pos) { el.scrollLeft = pos[0]; el.scrollTop = pos[1]; }
+        });
         this.#engine.refreshFocusList();
     }
 
