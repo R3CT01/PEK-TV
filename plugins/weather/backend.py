@@ -6,8 +6,13 @@ def get_weather_desc(code):
     codes = {
         0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
         45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle',
-        55: 'Dense drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
-        71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow', 95: 'Thunderstorm'
+        55: 'Dense drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+        61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+        66: 'Freezing rain', 67: 'Freezing rain',
+        71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow', 77: 'Snow grains',
+        80: 'Light showers', 81: 'Showers', 82: 'Heavy showers',
+        85: 'Snow showers', 86: 'Heavy snow showers',
+        95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail'
     }
     return codes.get(code, 'Clear')
 
@@ -20,7 +25,7 @@ def run():
     url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code"
     
     try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'StreamX-Weather-Plugin'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'Hesper-Weather-Plugin'})
         with urllib.request.urlopen(req, timeout=5) as response:
             data = json.loads(response.read().decode('utf-8'))
             current = data.get('current', {})
