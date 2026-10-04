@@ -113,6 +113,43 @@ function hesperSetSkinCss(id, bust) {
 
 try { hesperSetSkinCss(localStorage.getItem(SKIN_KEY)); } catch (e) { /* storage unavailable */ }
 
+// ---------------- Layouts ----------------
+// A layout is a built-in preset of structure (where the menu sits, how big the
+// posters are), separate from a skin (colours). It is applied as data-layout and
+// data-poster attributes on <html>; style.css does the rest. Phones always use
+// the bottom tab bar, so on a phone a layout only changes poster size.
+const LAYOUT_KEY = 'hesper-layout';
+const POSTER_SIZE_KEY = 'hesper-poster-size';
+const VIEW_MODE_KEY = 'hesper-view';
+const LAYOUTS = [
+    { id: 'classic', name: 'Classic', poster: 'm', description: 'Menu on the left, medium posters.' },
+    { id: 'topbar',  name: 'Top bar', poster: 'm', description: 'Menu across the top, like Arctic. Phones keep the bottom bar.' },
+    { id: 'wall',    name: 'Wall',    poster: 'l', description: 'Big posters and a slimmer menu.' },
+    { id: 'compact', name: 'Compact', poster: 's', description: 'Smaller posters and tighter spacing, so more fits on screen.' }
+];
+const POSTER_SIZES = [
+    { id: 'auto', label: 'Auto' }, { id: 's', label: 'Small' }, { id: 'm', label: 'Medium' }, { id: 'l', label: 'Large' }
+];
+
+function hesperReadPref(key, fallback, allowed) {
+    try {
+        const v = localStorage.getItem(key);
+        return v && allowed.includes(v) ? v : fallback;
+    } catch (e) { return fallback; }
+}
+
+function hesperApplyLayout(layoutId, posterSize) {
+    const layout = LAYOUTS.find(l => l.id === layoutId) || LAYOUTS[0];
+    const poster = posterSize && posterSize !== 'auto' ? posterSize : layout.poster;
+    document.documentElement.setAttribute('data-layout', layout.id);
+    document.documentElement.setAttribute('data-poster', poster);
+}
+
+hesperApplyLayout(
+    hesperReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
+    hesperReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id))
+);
+
 class ThemePanel extends HesperComponent {
     render() {
         const { engine, onClose } = this.props;
@@ -180,6 +217,9 @@ class MainApp extends HesperComponent {
             showNav: { show: null, season: null },   // TV Shows drill-down: null/null = show folders, show only = seasons, both = episodes
             skins: [],            // [{ id, name, author, version, description, tokens }]
             activeSkin: (() => { try { return localStorage.getItem(SKIN_KEY) || 'default'; } catch (e) { return 'default'; } })(),
+            layout: hesperReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
+            posterSize: hesperReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id)),
+            viewMode: hesperReadPref(VIEW_MODE_KEY, 'grid', ['grid', 'list']),   // Movies / TV Shows: poster grid or text list
             refreshCooldown: 0,   // seconds left before another refresh is allowed
             refreshing: false,    // true while the server is rescanning
             busy: '',             // text for the full-screen loading ring ('' = hidden)
@@ -737,6 +777,28 @@ class MainApp extends HesperComponent {
             try { localStorage.setItem(SKIN_KEY, 'default'); } catch (e) { /* ignore */ }
         }
         this.setState({ activeSkin: id });
+    }
+
+    // ---------------- Layouts ----------------
+
+    setLayout(id) {
+        if (!LAYOUTS.some(l => l.id === id)) return;
+        try { localStorage.setItem(LAYOUT_KEY, id); } catch (e) { /* lasts until restart */ }
+        hesperApplyLayout(id, this.state.posterSize);
+        this.setState({ layout: id });
+    }
+
+    setPosterSize(size) {
+        if (!POSTER_SIZES.some(z => z.id === size)) return;
+        try { localStorage.setItem(POSTER_SIZE_KEY, size); } catch (e) { /* lasts until restart */ }
+        hesperApplyLayout(this.state.layout, size);
+        this.setState({ posterSize: size });
+    }
+
+    setViewMode(mode) {
+        if (mode !== 'grid' && mode !== 'list') return;
+        try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) { /* lasts until restart */ }
+        this.setState({ viewMode: mode });
     }
 
     // ---------------- Library (Movies / Shows / Unknown) ----------------
@@ -1391,6 +1453,11 @@ class MainApp extends HesperComponent {
 
         // Level 1: one folder card per show.
         if (!show) {
+            if (this.state.viewMode === 'list') {
+                return createElement('div', { className: 'plugin-list' },
+                    ...shows.map(s => ui.listRow(s.showTitle,
+                        `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`, () => this.openShow(s.showTitle))));
+            }
             return ui.grid(
                 shows.map(s => ui.posterCard(s.showTitle,
                     `${plural(s.seasons.length, 'season')} \u00b7 ${plural(s.episodeCount, 'episode')}`, this.state.posters['s:' + s.showTitle], () => this.openShow(s.showTitle))),
@@ -1547,6 +1614,10 @@ class MainApp extends HesperComponent {
         if (tab === 'movies') {
             const movies = data.movies || [];
             if (!movies.length) return this._renderEmptyLibrary('movies');
+            if (this.state.viewMode === 'list') {
+                return createElement('div', { className: 'plugin-list' },
+                    ...movies.map(m => ui.listRow(m.title, m.year ? String(m.year) : '', () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })));
+            }
             return ui.grid(
                 movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : '', this.state.posters['m:' + m.id], () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })),
                 { minColWidth: '200px', className: 'sx-poster-grid' }
@@ -1723,6 +1794,21 @@ class MainApp extends HesperComponent {
                     }, 'Customize Colors')
                 ),
                 createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Layout'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...LAYOUTS.map(l => ui.listRow(l.name, l.description, () => this.setLayout(l.id), { statusDot: l.id === this.state.layout }))
+                    ),
+                    createElement('p', { className: 'sub' }, 'Poster size'),
+                    createElement('div', { className: 'section-actions' },
+                        ...POSTER_SIZES.map(z => ui.button(z.label, () => this.setPosterSize(z.id), { variant: this.state.posterSize === z.id ? 'primary' : 'secondary' }))
+                    ),
+                    createElement('p', { className: 'sub' }, 'Movies and TV Shows view'),
+                    createElement('div', { className: 'section-actions' },
+                        ui.button('Grid', () => this.setViewMode('grid'), { variant: this.state.viewMode === 'grid' ? 'primary' : 'secondary' }),
+                        ui.button('List', () => this.setViewMode('list'), { variant: this.state.viewMode === 'list' ? 'primary' : 'secondary' })
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
                     createElement('div', { className: 'plugin-list' },
                         ...this.state.skins.map(s => ui.listRow(
@@ -1808,9 +1894,13 @@ class MainApp extends HesperComponent {
             );
         }
 
+        const contentPane = createElement('div', { className: 'hesper-content' }, mainContent);
+        // New tab or drill-down level => new key => starts at the top; same screen => keeps its place.
+        contentPane.dataset.keepScroll = `content:${activeTab}:${this.state.showNav.show}:${this.state.showNav.season}`;
+
         return createElement('div', { className: 'hesper-shell' },
             sidebar,
-            createElement('div', { className: 'hesper-content' }, mainContent),
+            contentPane,
             bottomBar,
             themeModal,
             this._renderDetailModal(),

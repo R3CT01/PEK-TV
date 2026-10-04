@@ -1083,3 +1083,44 @@ body {
     pointer-events: none;   /* never traps taps, so Close/Back always work */
 }
 @keyframes hs-ring-spin { to { transform: rotate(360deg); } }
+
+
+/* ============================================================
+   Layouts (see LAYOUTS in app.js): <html data-layout=... data-poster=...>
+   data-poster only needs rules for s and l; m is the base size.
+   !important is needed because the grid sets its column size inline.
+   ============================================================ */
+html[data-poster="s"] .sx-poster-grid { --sx-grid-min: 140px !important; }
+html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 280px !important; }
+@media (max-width: 700px), (max-height: 500px) {
+    html[data-poster="s"] .sx-poster-grid { --sx-grid-min: 90px !important; }
+    html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 160px !important; }
+}
+
+/* Wide screens only: phones always use the bottom tab bar. */
+@media (min-width: 721px) {
+    html[data-layout="wall"] .hesper-sidebar { width: 200px; padding: 1.25rem 0.75rem; }
+    html[data-layout="wall"] .hesper-content,
+    html[data-layout="compact"] .hesper-content { padding: 1.25rem; }
+    html[data-layout="wall"] .sx-poster-grid,
+    html[data-layout="compact"] .sx-poster-grid { gap: 0.6rem; }
+    html[data-layout="compact"] .hesper-sidebar { width: 220px; }
+}
+
+/* Top bar: not on short (landscape phone) screens, where height is precious. */
+@media (min-width: 721px) and (min-height: 501px) {
+    html[data-layout="topbar"] .hesper-shell { flex-direction: column; }
+    html[data-layout="topbar"] .hesper-sidebar {
+        width: 100%;
+        flex-direction: row;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 0.6rem 1.5rem;
+        border-right: none;
+        border-bottom: 1px solid var(--sx-border);
+    }
+    html[data-layout="topbar"] .sidebar-brand { margin: 0; padding: 0; }
+    html[data-layout="topbar"] .sidebar-nav { flex-direction: row; flex-wrap: wrap; gap: 0.25rem; }
+    html[data-layout="topbar"] .sidebar-footer { margin-left: auto; padding: 0; border-top: none; }
+    html[data-layout="topbar"] .nav-item { padding: 0.5rem 0.9rem; }
+}
