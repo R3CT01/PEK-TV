@@ -266,9 +266,15 @@ public:
         if (!user.empty()) cli_.set_basic_auth(user, pass);
     }
 
+    // Early check that the server is reachable and the login works. Many servers keep
+    // WebDAV in a sub-folder (Nextcloud: /remote.php/dav/files/<user>/), so the top "/"
+    // answering 404 or an HTML page is normal and must not stop the connection: the
+    // folder that is actually opened is listed afterwards and reports its own errors.
     bool probe(Error& err) {
         std::vector<Entry> tmp;
-        return list("", tmp, err);
+        if (list("", tmp, err)) return true;
+        if (!err.auth && lastStatus_ != 0) return true;     // got an answer, just not WebDAV at "/"
+        return false;                                       // unreachable, or a real 401/403
     }
 
     bool list(const std::string& path, std::vector<Entry>& out, Error& err) override {
@@ -282,6 +288,7 @@ public:
         req.body = "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
                    "<d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:getcontentlength/><d:getlastmodified/></d:prop></d:propfind>";
         auto res = cli_.send(req);
+        lastStatus_ = res ? res->status : 0;
         if (!res) { err.auth = false; err.msg = "Could not reach the WebDAV server"; return false; }
         if (res->status == 401 || res->status == 403) { err.auth = true; err.msg = "Wrong user name or password"; return false; }
         if (res->status == 404) { err.auth = false; err.msg = "Folder not found"; return false; }
@@ -324,6 +331,7 @@ public:
 
 private:
     httplib::Client cli_;
+    int lastStatus_ = 0;
     std::string path_;
     uint64_t size_ = 0;
 };
