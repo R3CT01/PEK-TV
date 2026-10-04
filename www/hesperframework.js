@@ -17,9 +17,20 @@ class HesperComponent {
 
     _update() {
         if (this.element && this.element.parentNode) {
+            // A repaint builds brand-new elements, which would reset every scroll position.
+            // Elements marked data-keep-scroll="key" get theirs carried over to the
+            // replacement that has the same key.
+            const kept = new Map();
+            this.element.querySelectorAll('[data-keep-scroll]').forEach(el => {
+                kept.set(el.dataset.keepScroll, [el.scrollLeft, el.scrollTop]);
+            });
             const newElem = this.render();
             this.element.parentNode.replaceChild(newElem, this.element);
             this.element = newElem;
+            newElem.querySelectorAll('[data-keep-scroll]').forEach(el => {
+                const pos = kept.get(el.dataset.keepScroll);
+                if (pos) { el.scrollLeft = pos[0]; el.scrollTop = pos[1]; }
+            });
             window.hesperFramework.refreshFocusList();
         }
     }
@@ -823,7 +834,48 @@ class HesperPluginLoader {
         });
     }
 
+    // Plugins allowed to run their ui.js directly in this page (full access, the old
+    // way). Only what ships with Hesper. Every other plugin runs in the sandbox
+    // (plugin_sandbox.js). To trust one you wrote yourself while developing, run in the
+    // browser console:  localStorage.setItem('hesper-trusted-plugins', '["my_plugin"]')
+    static isTrusted(folder) {
+        if (folder === 'weather') return true;
+        try {
+            const list = JSON.parse(localStorage.getItem('hesper-trusted-plugins') || '[]');
+            return Array.isArray(list) && list.includes(folder);
+        } catch (e) { return false; }
+    }
+
+    async _loadSandboxed(folder, hasBackend) {
+        const base = `${this.pluginsBasePath}/${encodeURIComponent(folder)}`;
+        let raw = null;
+        try {
+            const r = await fetch(`${base}/plugin.json`, { cache: 'no-store' });
+            if (r.ok) raw = await r.json();
+        } catch (e) { /* no manifest: no permissions */ }
+        const manifest = HesperSandbox.normalizeManifest(raw);
+
+        let source = '';
+        try {
+            const r = await fetch(`${base}/ui.js`, { cache: 'no-store' });
+            if (r.ok) source = await r.text();
+        } catch (e) { /* no UI */ }
+        if (!source) throw new Error('no ui.js');
+
+        return {
+            folder,
+            app_name: manifest.name || folder,
+            app_version: manifest.version,
+            hasBackend: !!hasBackend,
+            sandboxed: true,
+            manifest,
+            sandbox: new HesperSandbox(folder, manifest, source),
+            render: null
+        };
+    }
+
     async _loadOne(folder, hasBackend) {
+        if (!HesperPluginLoader.isTrusted(folder)) return this._loadSandboxed(folder, hasBackend);
         // Clear the previous plugin's globals so a plugin that forgets
         // to set one doesn't accidentally inherit the last plugin's
         // values (app_name, app_version, and its render hook).

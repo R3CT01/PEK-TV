@@ -15,10 +15,71 @@
 #include <cstdio>
 #include <atomic>
 #include <chrono>
+#include <random>
 
 namespace fs = std::filesystem;
 
 namespace {
+
+// ---- Network exposure ------------------------------------------------------
+// By default the server only answers this device (127.0.0.1). Other devices on the
+// network can use it only if HESPER_BIND is set to an address such as 0.0.0.0, and
+// then every request from another machine must carry a secret token
+// (HESPER_TOKEN, or one generated and printed at startup).
+
+bool isLoopbackAddr(const std::string& a) {
+    return a == "127.0.0.1" || a == "::1" || a == "::ffff:127.0.0.1" || a.rfind("127.", 0) == 0;
+}
+
+// "127.0.0.1:8080" / "localhost" / "[::1]:8080" -> is the host part this device?
+bool isLoopbackHostHeader(std::string h) {
+    if (!h.empty() && h[0] == '[') {                       // [::1]:8080
+        size_t end = h.find(']');
+        if (end == std::string::npos) return false;
+        h = h.substr(1, end - 1);
+    } else {
+        size_t colon = h.find(':');
+        if (colon != std::string::npos) h = h.substr(0, colon);
+    }
+    for (auto& c : h) c = (char)std::tolower((unsigned char)c);
+    return h == "localhost" || h == "::1" || h.rfind("127.", 0) == 0;
+}
+
+// Host part of an Origin header ("http://evil.example:80" -> "evil.example:80").
+std::string originAuthority(const std::string& origin) {
+    size_t scheme = origin.find("://");
+    return scheme == std::string::npos ? origin : origin.substr(scheme + 3);
+}
+
+bool constantTimeEquals(const std::string& a, const std::string& b) {
+    if (a.size() != b.size()) return false;
+    unsigned char diff = 0;
+    for (size_t i = 0; i < a.size(); ++i) diff |= (unsigned char)(a[i] ^ b[i]);
+    return diff == 0;
+}
+
+std::string cookieValue(const std::string& cookieHeader, const std::string& name) {
+    size_t pos = 0;
+    while (pos < cookieHeader.size()) {
+        size_t end = cookieHeader.find(';', pos);
+        if (end == std::string::npos) end = cookieHeader.size();
+        std::string part = cookieHeader.substr(pos, end - pos);
+        size_t b = part.find_first_not_of(' ');
+        if (b != std::string::npos) part = part.substr(b);
+        if (part.compare(0, name.size() + 1, name + "=") == 0) return part.substr(name.size() + 1);
+        pos = end + 1;
+    }
+    return "";
+}
+
+std::string makeRandomToken() {
+    std::random_device rd;
+    static const char* hex = "0123456789abcdef";
+    std::string t;
+    for (int i = 0; i < 24; ++i) { unsigned v = rd() & 0xff; t += hex[v >> 4]; t += hex[v & 15]; }
+    return t;
+}
+
 
 // Minimal JSON string escaping — titles/filenames can contain
 // quotes or backslashes, and the rest of this file builds JSON via
@@ -182,6 +243,65 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
                            std::function<std::vector<std::string>()> get_plugins,
                            MediaScanner* scanner) {
     httplib::Server svr;
+
+    // ---- Who may talk to this server -------------------------------------
+    const char* bindEnv = std::getenv("HESPER_BIND");
+    const std::string bindAddr = (bindEnv && *bindEnv) ? bindEnv : "127.0.0.1";
+    const bool remoteOpen = !isLoopbackAddr(bindAddr);
+    std::string token;
+    if (remoteOpen) {
+        const char* t = std::getenv("HESPER_TOKEN");
+        token = (t && *t) ? t : makeRandomToken();
+        std::cout << "[Hesper Server] REMOTE ACCESS IS ON (" << bindAddr << "). Other devices must open "
+                  << "http://<this-device-ip>:" << port << "/?token=" << token << std::endl;
+    }
+
+    // Browser-based attacks on a local server: a web page you visit can ask your own
+    // device to do things (CSRF) or point a hostile name at 127.0.0.1 (DNS rebinding).
+    // So: when bound locally, only accept loopback Host headers; and never accept a
+    // state-changing request whose Origin is a different site.
+    svr.set_pre_routing_handler([remoteOpen, token](const httplib::Request& req, httplib::Response& res) {
+        const bool fromLoopback = isLoopbackAddr(req.remote_addr);
+
+        if (!remoteOpen && !isLoopbackHostHeader(req.get_header_value("Host"))) {
+            res.status = 403;
+            res.set_content("{\"error\": \"Forbidden host\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+
+        if (req.method != "GET" && req.method != "HEAD" && req.method != "OPTIONS") {
+            const std::string origin = req.get_header_value("Origin");
+            if (!origin.empty() && originAuthority(origin) != req.get_header_value("Host")) {
+                res.status = 403;
+                res.set_content("{\"error\": \"Cross-site request blocked\"}", "application/json");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
+
+        if (remoteOpen && !fromLoopback) {
+            const std::string viaHeader = req.get_header_value("X-Hesper-Token");
+            const std::string viaCookie = cookieValue(req.get_header_value("Cookie"), "hesper_token");
+            if (constantTimeEquals(viaHeader, token) || constantTimeEquals(viaCookie, token))
+                return httplib::Server::HandlerResponse::Unhandled;
+
+            // First visit with ?token=...: remember it in a cookie, then drop it from the URL.
+            if (req.has_param("token") && constantTimeEquals(req.get_param_value("token"), token)) {
+                res.set_header("Set-Cookie", "hesper_token=" + token + "; Path=/; HttpOnly; SameSite=Strict");
+                res.set_redirect(req.path.empty() ? "/" : req.path);
+                return httplib::Server::HandlerResponse::Handled;
+            }
+            res.status = 401;
+            res.set_content("{\"error\": \"Access token required\"}", "application/json");
+            return httplib::Server::HandlerResponse::Handled;
+        }
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+
+    svr.set_default_headers({
+        {"X-Content-Type-Options", "nosniff"},
+        {"X-Frame-Options", "DENY"},
+        {"Referrer-Policy", "no-referrer"}
+    });
 
     registerPlaybackRoutes(svr, scanner);   // /api/stream/<id>
     // 1a. Serve plugin folders (ui.js / backend.js) at /plugins — registered
@@ -806,6 +926,6 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
-    std::cout << "[Hesper Server] Local web UI & API online at http://localhost:" << port << std::endl;
-    svr.listen("0.0.0.0", port);
+    std::cout << "[Hesper Server] Web UI & API online at http://" << (remoteOpen ? bindAddr : std::string("127.0.0.1")) << ":" << port << std::endl;
+    svr.listen(bindAddr, port);
 }

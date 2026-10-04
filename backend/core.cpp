@@ -71,7 +71,40 @@ public:
         return loaded_plugins;
     }
 
+    // Where hesper_guard.py lives (set from main()).
+    void setGuardDir(const std::string& dir) { guard_dir = dir; }
+
+    // Every plugin backend goes through hesper_guard.py, which decides whether it may
+    // run and applies the manifest permissions, static scan and runtime backstop (see
+    // that file). If the guard itself cannot be loaded this FAILS CLOSED: only the
+    // plugins that ship with Hesper still run, everything else is refused.
     void executePluginModule(const std::string& module_name, const std::string& plugins_path) {
+        std::string safe_guard;
+        for (char c : guard_dir) {
+            if (c == '\\' || c == '\'') safe_guard += '\\';
+            safe_guard += c;
+        }
+        PyRun_SimpleString(("import sys\nif '" + safe_guard + "' not in sys.path: sys.path.insert(0, '" + safe_guard + "')\n").c_str());
+
+        PyObject* guard = PyImport_ImportModule("hesper_guard");
+        if (guard != nullptr) {
+            PyObject* r = PyObject_CallMethod(guard, "run_plugin", "ss", module_name.c_str(), plugins_path.c_str());
+            if (r == nullptr) PyErr_Print(); else Py_DECREF(r);
+            Py_DECREF(guard);
+            return;
+        }
+        PyErr_Print();
+        std::string id = (module_name == "backend") ? fs::path(plugins_path).filename().string() : module_name;
+        if (id != "weather" && id != "sample_scraper") {
+            std::cout << "[Hesper Plugin Guard] hesper_guard.py not found in '" << guard_dir
+                      << "' - REFUSING to run plugin '" << id << "'." << std::endl;
+            return;
+        }
+        std::cout << "[Hesper Plugin Guard] hesper_guard.py not found; running bundled plugin '" << id << "' only." << std::endl;
+        executePluginModuleUnguarded(module_name, plugins_path);
+    }
+
+    void executePluginModuleUnguarded(const std::string& module_name, const std::string& plugins_path) {
         // Folder-based plugins all use the same filename (backend.py), so
         // Python's module cache must be cleared each time — otherwise the
         // second plugin's "import backend" would silently return the
@@ -135,6 +168,8 @@ public:
         }
     }
 
+    std::string guard_dir;
+
     void status() {
         std::lock_guard<std::mutex> lock(plugin_mutex);
         std::cout << "[Hesper Backend] Active registered plugins count: " << loaded_plugins.size() << std::endl;
@@ -152,6 +187,7 @@ int main(int argc, char* argv[]) {
     std::string skins_dir = "/storage/emulated/0/Documents/media_core/hesper/skins";
 
     HesperCore hesper("0.1.0");
+    hesper.setGuardDir((fs::path(plugin_dir).parent_path() / "backend").string());
 
     // Legacy loose-file Python plugins (e.g. plugins/sample_scraper.py)
     hesper.startPluginScanAsync(plugin_dir);
