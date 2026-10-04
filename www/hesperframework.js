@@ -920,7 +920,9 @@ class HesperEngine {
         this.focusableElements = Array.from(this._focusScope().querySelectorAll('.focusable'));
         if (this.focusableElements.length > 0) {
             this.currentIndex = Math.min(this.currentIndex, this.focusableElements.length - 1);
-            this._applyFocus();
+            // A repaint only re-marks the focused element; it must not scroll to it,
+            // or the phone tab strip snaps back to the first tab after every repaint.
+            this._applyFocus(false);
         }
     }
 
@@ -978,11 +980,11 @@ class HesperEngine {
         });
     }
 
-    _applyFocus() {
+    _applyFocus(scroll = true) {
         this.focusableElements.forEach((el, idx) => {
             if (idx === this.currentIndex) {
                 el.classList.add('focused');
-                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                if (scroll) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             } else {
                 el.classList.remove('focused');
             }
