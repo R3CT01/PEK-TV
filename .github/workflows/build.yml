@@ -59,9 +59,9 @@ jobs:
 
       # NFS support (optional, off by default). To try it, remove the leading "#"
       # from the next three lines. If the build then fails, put the "#" back.
-      # - name: Get libnfs
-      #   continue-on-error: true
-      #   run: git clone --depth 1 https://github.com/sahlberg/libnfs.git android/libnfs
+      - name: Get libnfs
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libnfs.git android/libnfs
 
       - name: Copy the web frontend into the app
         run: |
