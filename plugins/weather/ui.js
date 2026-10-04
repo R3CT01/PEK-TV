@@ -3,13 +3,21 @@
 // ============================================================
 
 window.app_name = 'Weather Widget';
-window.app_version = '1.0.3';
+window.app_version = '1.0.4';
 
 window.render = function (engine) {
     const { createElement, ui } = engine;
 
+    const CITY_KEY = 'hesper_weather_city';
+    const COORDS_KEY = 'hesper_weather_coords';   // {lat, lon, label} of the city you picked
+    const LAST_KEY = 'hesper_weather_last';       // last good reading, used if the network is down
+
     let unit = localStorage.getItem('hesper_weather_unit') || 'F';
-    let currentCity = localStorage.getItem('hesper_weather_city') || 'St. Louis, MO';
+    let currentCity = localStorage.getItem(CITY_KEY) || 'St. Louis, MO';
+
+    const readJson = (key) => {
+        try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+    };
     
     let weatherData = {
         city: currentCity,
@@ -24,22 +32,33 @@ window.render = function (engine) {
     const tempCard = createElement('div', {
         className: 'focusable',
         style: 'background: var(--sx-surface-alt, rgba(255,255,255,0.05)); padding: 16px; border-radius: 12px; border: 1px solid var(--sx-border, rgba(255,255,255,0.1)); cursor: pointer; transition: background 0.2s;',
-        onClick: () => fetchWeatherCache()
+        onClick: () => refreshWeather()
     }, titleText, subText);
 
     const getWeatherDescription = (code) => {
         const codes = {
             0: 'Clear sky', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
             45: 'Foggy', 48: 'Rime fog', 51: 'Light drizzle', 53: 'Moderate drizzle',
-            55: 'Dense drizzle', 61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
-            71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow', 95: 'Thunderstorm'
+            55: 'Dense drizzle', 56: 'Freezing drizzle', 57: 'Freezing drizzle',
+            61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+            66: 'Freezing rain', 67: 'Freezing rain',
+            71: 'Slight snow', 73: 'Moderate snow', 75: 'Heavy snow', 77: 'Snow grains',
+            80: 'Light showers', 81: 'Showers', 82: 'Heavy showers',
+            85: 'Snow showers', 86: 'Heavy snow showers',
+            95: 'Thunderstorm', 96: 'Thunderstorm with hail', 99: 'Thunderstorm with hail'
         };
         return codes[code] || 'Clear';
     };
 
     const updateUI = () => {
-        const tempC = parseFloat(weatherData.temp_c) || 22;
-        const tempF = weatherData.temp_f !== undefined ? weatherData.temp_f : Math.round((tempC * 9/5) + 32);
+        const tempC = Number(weatherData.temp_c);
+        if (weatherData.temp_c === undefined || weatherData.temp_c === null || !Number.isFinite(tempC)) {
+            // No reading yet (e.g. offline): show a placeholder and keep the last shared temperature.
+            titleText.textContent = '--\u00B0';
+            subText.textContent = `${weatherData.condition || 'Weather unavailable'} \u2014 ${weatherData.city}`;
+            return;
+        }
+        const tempF = Number.isFinite(Number(weatherData.temp_f)) ? Number(weatherData.temp_f) : Math.round((tempC * 9/5) + 32);
         const tempStr = unit === 'F' ? `${tempF}\u00B0F` : `${Math.round(tempC)}\u00B0C`;
         
         titleText.textContent = tempStr;
@@ -88,6 +107,37 @@ window.render = function (engine) {
         return response;
     };
 
+    // Uses the city you picked (if any). The weather.json cache from backend.py is only
+    // the default for when no city has been chosen, so it can no longer overwrite your pick.
+    async function refreshWeather() {
+        const saved = readJson(COORDS_KEY);
+        if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.label) {
+            currentCity = saved.label;
+            cityInput.value = currentCity;
+            return fetchLiveWeatherForCoords(saved.lat, saved.lon, saved.label);
+        }
+        const label = localStorage.getItem(CITY_KEY);
+        if (label) {
+            // A city picked before coordinates were saved: look it up once and remember it.
+            try {
+                const name = label.split(/[,(]/)[0].trim();
+                const res = await fetchWithTimeout(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=5&language=en&format=json`, 3000);
+                const data = await res.json();
+                const results = (data && data.results) || [];
+                const match = results.find(r => label.indexOf(r.name) === 0 && (!r.admin1 || label.indexOf(r.admin1) !== -1)) || results[0];
+                if (match) {
+                    localStorage.setItem(COORDS_KEY, JSON.stringify({ lat: match.latitude, lon: match.longitude, label }));
+                    currentCity = label;
+                    cityInput.value = label;
+                    return fetchLiveWeatherForCoords(match.latitude, match.longitude, label);
+                }
+            } catch (err) {
+                console.warn('[Weather Widget] Could not look up saved city:', err);
+            }
+        }
+        return fetchWeatherCache();
+    }
+
     async function fetchWeatherCache() {
         try {
             titleText.textContent = 'Updating...';
@@ -126,7 +176,8 @@ window.render = function (engine) {
                         onClick: () => {
                             cityInput.value = label;
                             currentCity = label;
-                            localStorage.setItem('hesper_weather_city', label);
+                            localStorage.setItem(CITY_KEY, label);
+                            localStorage.setItem(COORDS_KEY, JSON.stringify({ lat: loc.latitude, lon: loc.longitude, label }));
                             suggestionBox.style.display = 'none';
                             fetchLiveWeatherForCoords(loc.latitude, loc.longitude, label);
                         }
@@ -160,8 +211,14 @@ window.render = function (engine) {
                 temp_f: Math.round((tempC * 9/5) + 32),
                 condition: getWeatherDescription(current.weather_code)
             };
+            localStorage.setItem(LAST_KEY, JSON.stringify(weatherData));
         } catch (err) {
             console.error('[Weather Widget] Live fetch error:', err);
+            // Offline: show the last good reading for this same city if we have one.
+            const last = readJson(LAST_KEY);
+            weatherData = (last && last.city === displayName)
+                ? last
+                : { city: displayName, condition: 'Weather unavailable' };
         } finally {
             updateUI();
         }
@@ -177,7 +234,7 @@ window.render = function (engine) {
         }
     );
 
-    fetchWeatherCache();
+    refreshWeather();
 
     return createElement('div', {},
         tabRow,
