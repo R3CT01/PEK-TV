@@ -19,6 +19,10 @@ extern "C" {
 namespace vfs {
 namespace {
 
+// NFSv3 file types (RFC 1813), matching libnfs's ftype3 enum.
+constexpr uint32_t kNf3Dir = 2;
+constexpr uint32_t kNf3Lnk = 5;
+
 class NfsShare : public Share {
 public:
     explicit NfsShare(nfs_context* c) : ctx_(c) {}
@@ -39,10 +43,10 @@ public:
         while ((ent = nfs_readdir(ctx_, dir)) != nullptr) {
             if (!ent->name) continue;
             if (std::strcmp(ent->name, ".") == 0 || std::strcmp(ent->name, "..") == 0) continue;
-            if (ent->type == NF3LNK) continue;                      // avoid loops
+            if (ent->type == kNf3Lnk) continue;                      // avoid loops
             Entry e;
             e.name = ent->name;
-            e.is_dir = ent->type == NF3DIR;
+            e.is_dir = ent->type == kNf3Dir;
             e.size = ent->size;
             e.mtime = static_cast<int64_t>(ent->mtime.tv_sec);
             out.push_back(std::move(e));
