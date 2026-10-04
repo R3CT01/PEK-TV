@@ -1,5 +1,7 @@
 #include "server.h"
 #include "playback.h"
+#include "discovery.h"
+#include "vfs.h"
 #include "httplib.h"
 #include <iostream>
 #include <functional>
@@ -22,6 +24,16 @@ namespace {
 // quotes or backslashes, and the rest of this file builds JSON via
 // plain concatenation, so every dynamic string needs this before
 // being interpolated.
+// Host part of a network source: a name or IPv4/IPv6 literal, nothing that could
+// smuggle in a path, a scheme or a shell character.
+bool validNetHost(const std::string& h) {
+    if (h.empty() || h.size() > 253) return false;
+    for (unsigned char c : h) {
+        if (!(std::isalnum(c) || c == '.' || c == '-' || c == '_' || c == ':')) return false;
+    }
+    return true;
+}
+
 std::string jsonEscape(const std::string& s) {
     std::string out;
     out.reserve(s.size());
@@ -626,6 +638,86 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
+    // 8b. Network sources (SMB). Discovery runs in the background; the UI
+    //     starts it with POST, then polls GET until "scanning" is false.
+    static DiscoveryService discovery;
+    svr.Post("/api/discover", [](const httplib::Request&, httplib::Response& res) {
+        bool started = discovery.start(4000);
+        res.set_content(std::string("{\"status\": \"") + (started ? "started" : "running") + "\"}", "application/json");
+    });
+    svr.Get("/api/discover", [](const httplib::Request&, httplib::Response& res) {
+        auto hosts = discovery.results();
+        std::string json = std::string("{\"scanning\": ") + (discovery.isRunning() ? "true" : "false") +
+                           ", \"smbAvailable\": " + (vfs::smbAvailable() ? "true" : "false") + ", \"hosts\": [";
+        for (size_t i = 0; i < hosts.size(); ++i) {
+            json += "{\"name\": \"" + jsonEscape(hosts[i].name) + "\", \"address\": \"" + jsonEscape(hosts[i].address) +
+                    "\", \"via\": \"" + jsonEscape(hosts[i].via) + "\"}";
+            if (i + 1 < hosts.size()) json += ",";
+        }
+        json += "]}";
+        res.set_content(json, "application/json");
+    });
+
+    // Folder picker for a network host: no share = list the host's shares,
+    // otherwise the sub-folders of share/path. Optional user/pass are kept for
+    // the host (in memory) so the following calls reuse them.
+    svr.Post("/api/net/browse", [](const httplib::Request& req, httplib::Response& res) {
+        auto fail = [&res](const std::string& msg, bool auth, bool canTypeShare) {
+            res.set_content("{\"ok\": false, \"auth\": " + std::string(auth ? "true" : "false") +
+                            ", \"canTypeShare\": " + (canTypeShare ? "true" : "false") +
+                            ", \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
+        };
+        std::string host = req.get_param_value("host");
+        if (!validNetHost(host)) { fail("Enter a valid host name or IP address.", false, false); return; }
+        if (req.has_param("user")) {
+            vfs::setCredentials(host, req.get_param_value("user"), req.get_param_value("pass"), false);
+        }
+        std::string share = req.get_param_value("share");
+        std::string path = req.get_param_value("path");
+        vfs::Error err;
+
+        if (share.empty()) {
+            std::vector<std::string> shares;
+            if (!vfs::listShares(host, shares, err)) { fail(err.msg, err.auth, true); return; }
+            std::sort(shares.begin(), shares.end());
+            std::string json = "{\"ok\": true, \"host\": \"" + jsonEscape(host) + "\", \"share\": \"\", \"path\": \"smb://" +
+                               jsonEscape(host) + "\", \"parent\": \"\", \"shares\": [";
+            for (size_t i = 0; i < shares.size(); ++i) {
+                json += "{\"name\": \"" + jsonEscape(shares[i]) + "\", \"path\": \"" +
+                        jsonEscape(vfs::buildUrl({host, shares[i], ""})) + "\"}";
+                if (i + 1 < shares.size()) json += ",";
+            }
+            json += "], \"directories\": []}";
+            res.set_content(json, "application/json");
+            return;
+        }
+
+        vfs::Url here{host, share, ""};
+        // Re-parse through the URL code so ".." and doubled slashes are cleaned out.
+        vfs::Url cleaned;
+        if (!vfs::parseUrl(vfs::buildUrl({host, share, path}), cleaned)) { fail("Bad folder path.", false, false); return; }
+        here = cleaned;
+        auto conn = vfs::connectShare(host, share, err);
+        if (!conn) { fail(err.msg, err.auth, false); return; }
+        std::vector<vfs::Entry> list;
+        if (!conn->list(here.path, list, err)) { fail(err.msg, err.auth, false); return; }
+        std::vector<vfs::Entry> dirs;
+        for (const auto& e : list) if (e.is_dir && !e.name.empty() && e.name[0] != '.') dirs.push_back(e);
+        std::sort(dirs.begin(), dirs.end(), [](const vfs::Entry& a, const vfs::Entry& b) { return a.name < b.name; });
+
+        std::string url = vfs::buildUrl(here);
+        std::string json = "{\"ok\": true, \"host\": \"" + jsonEscape(host) + "\", \"share\": \"" + jsonEscape(share) +
+                           "\", \"path\": \"" + jsonEscape(url) + "\", \"parent\": \"" + jsonEscape(vfs::parent(url)) +
+                           "\", \"shares\": [], \"directories\": [";
+        for (size_t i = 0; i < dirs.size(); ++i) {
+            json += "{\"name\": \"" + jsonEscape(dirs[i].name) + "\", \"path\": \"" +
+                    jsonEscape(vfs::join(url, dirs[i].name)) + "\"}";
+            if (i + 1 < dirs.size()) json += ",";
+        }
+        json += "]}";
+        res.set_content(json, "application/json");
+    });
+
     // 9. Confirmed media source folders — what the folder picker has
     //    added. Movies/TV/Unknown are all classified per-file via
     //    ffprobe regardless of which source folder they live in, so
@@ -645,6 +737,37 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     // kick off a background scan so it's reflected without a restart.
     svr.Post("/api/sources", [scanner](const httplib::Request& req, httplib::Response& res) {
         std::string path = req.get_param_value("path");
+        if (vfs::isRemote(path)) {
+            vfs::Url u;
+            if (!vfs::parseUrl(path, u) || u.share.empty() || !validNetHost(u.host)) {
+                res.status = 400;
+                res.set_content("{\"status\": \"error\", \"message\": \"Invalid network folder\"}", "application/json");
+                return;
+            }
+            if (req.has_param("user")) {
+                vfs::setCredentials(u.host, req.get_param_value("user"), req.get_param_value("pass"), false);
+            }
+            // Prove the folder can be opened before saving it, so a typo or a wrong
+            // password is reported now rather than as an empty library later.
+            vfs::Error err;
+            auto conn = vfs::connectShare(u.host, u.share, err);
+            std::vector<vfs::Entry> probe;
+            if (!conn || !conn->list(u.path, probe, err)) {
+                res.status = 400;
+                res.set_content("{\"status\": \"error\", \"auth\": " + std::string(err.auth ? "true" : "false") +
+                                ", \"message\": \"" + jsonEscape(err.msg) + "\"}", "application/json");
+                return;
+            }
+            if (!scanner->addMediaDir(vfs::buildUrl(u))) {
+                res.status = 400;
+                res.set_content("{\"status\": \"error\", \"message\": \"Invalid network folder\"}", "application/json");
+                return;
+            }
+            vfs::persistCredentials(u.host);
+            std::thread([scanner]() { scanner->scan(); }).detach();
+            res.set_content("{\"status\": \"ok\"}", "application/json");
+            return;
+        }
         if (scanner->addMediaDir(path)) {
             std::thread([scanner]() { scanner->scan(); }).detach();
             res.set_content("{\"status\": \"ok\"}", "application/json");

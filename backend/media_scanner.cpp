@@ -1,4 +1,5 @@
 #include "media_scanner.h"
+#include "vfs.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -255,6 +256,12 @@ bool isUsableShowFolder(const fs::path& dir, const std::vector<std::string>& roo
     std::string name = dir.filename().string();
     if (name.empty()) return false;
     for (const auto& r : roots) {
+        if (vfs::isRemote(r)) {
+            // fs::equivalent can't see network paths: compare the text instead.
+            auto trim = [](std::string x) { while (!x.empty() && x.back() == '/') x.pop_back(); return x; };
+            if (trim(dir.string()) == trim(r)) return false;
+            continue;
+        }
         std::error_code ec;
         if (fs::equivalent(dir, fs::path(r), ec) && !ec) return false;   // the source root itself
     }
@@ -287,8 +294,15 @@ bool MediaScanner::listSubdirectories(const std::string& dir_path, std::vector<s
 }
 
 bool MediaScanner::addMediaDir(const std::string& path) {
-    std::error_code ec;
-    if (!fs::exists(path, ec) || !fs::is_directory(path, ec)) return false;
+    if (vfs::isRemote(path)) {
+        // Reachability is checked by the API route before this; here the URL
+        // only has to be well formed and name a share (smb://host/share[/folder]).
+        vfs::Url u;
+        if (!vfs::parseUrl(path, u) || u.share.empty()) return false;
+    } else {
+        std::error_code ec;
+        if (!fs::exists(path, ec) || !fs::is_directory(path, ec)) return false;
+    }
 
     std::lock_guard<std::mutex> lock(mutex_);
     if (std::find(media_dirs_.begin(), media_dirs_.end(), path) == media_dirs_.end()) {
@@ -330,6 +344,10 @@ std::string MediaScanner::makeId(const std::string& path) {
 }
 
 void MediaScanner::probeAndClassify(MediaEntry& entry) {
+    if (vfs::isRemote(entry.path)) {      // ffprobe can't open smb:// - the filename fallback takes over
+        entry.kind = MediaKind::Unclassified;
+        return;
+    }
     std::string cmd = kFfprobeBinary + " -v quiet -print_format json -show_format " +
                        shellEscape(entry.path) + " 2>/dev/null";
     std::string json = runCommand(cmd);
@@ -480,6 +498,54 @@ void MediaScanner::scanDirectory(const std::string& dir_path, std::vector<MediaE
     }
 }
 
+bool MediaScanner::scanRemote(const std::string& root_url, std::vector<MediaEntry>& found) {
+    vfs::Url u;
+    if (!vfs::parseUrl(root_url, u) || u.share.empty()) return false;
+    vfs::Error err;
+    auto share = vfs::connectShare(u.host, u.share, err);
+    if (!share) {
+        std::cout << "[MediaScanner] Cannot reach " << root_url << ": " << err.msg << std::endl;
+        return false;
+    }
+    return scanRemoteDir(*share, u, u.path, found, 0);
+}
+
+bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const std::string& rel,
+                                 std::vector<MediaEntry>& found, int depth) {
+    if (depth > 16) return true;
+    std::vector<vfs::Entry> list;
+    vfs::Error err;
+    if (!share.list(rel, list, err)) {
+        std::cout << "[MediaScanner] Cannot read " << vfs::buildUrl({base.host, base.share, rel})
+                  << ": " << err.msg << std::endl;
+        return depth > 0;     // only a failing top folder means "unreachable"
+    }
+    for (const auto& e : list) {
+        if (e.name == ".nomedia") {
+            std::cout << "[MediaScanner] Skipping (.nomedia): " << vfs::buildUrl({base.host, base.share, rel}) << std::endl;
+            return true;
+        }
+    }
+    std::sort(list.begin(), list.end(), [](const vfs::Entry& a, const vfs::Entry& b) { return a.name < b.name; });
+    for (const auto& e : list) {
+        if (e.name.empty() || e.name[0] == '.') continue;
+        std::string child = rel.empty() ? e.name : rel + "/" + e.name;
+        if (e.is_dir) {
+            scanRemoteDir(share, base, child, found, depth + 1);
+            continue;
+        }
+        if (!isVideoFile(fs::path(e.name).extension().string())) continue;
+        MediaEntry entry;
+        entry.path = vfs::buildUrl({base.host, base.share, child});
+        entry.filename = e.name;
+        entry.id = makeId(entry.path);
+        entry.size_bytes = e.size;
+        entry.mtime = e.mtime;
+        found.push_back(std::move(entry));
+    }
+    return true;
+}
+
 void MediaScanner::scan() {
     std::lock_guard<std::mutex> scan_lock(scan_mutex_);
     std::vector<std::string> dirs_snapshot;
@@ -488,13 +554,26 @@ void MediaScanner::scan() {
         dirs_snapshot = media_dirs_;
     }
 
-    std::vector<MediaEntry> fresh;
-    for (const auto& dir : dirs_snapshot) scanDirectory(dir, fresh);
-
     std::unordered_map<std::string, MediaEntry> previous;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& e : entries_) previous[e.path] = e;
+    }
+
+    std::vector<MediaEntry> fresh;
+    for (const auto& dir : dirs_snapshot) {
+        if (!vfs::isRemote(dir)) { scanDirectory(dir, fresh); continue; }
+        if (scanRemote(dir, fresh)) continue;
+        // The network source is unreachable (NAS off, Wi-Fi down...). Keep what we
+        // already knew about it instead of emptying the library.
+        std::string prefix = dir;
+        while (!prefix.empty() && prefix.back() == '/') prefix.pop_back();
+        prefix += "/";
+        size_t kept = 0;
+        for (const auto& kv : previous) {
+            if (kv.first.compare(0, prefix.size(), prefix) == 0) { fresh.push_back(kv.second); ++kept; }
+        }
+        std::cout << "[MediaScanner] Keeping " << kept << " earlier file(s) from unreachable " << dir << std::endl;
     }
 
     for (auto& entry : fresh) {
