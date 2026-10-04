@@ -184,6 +184,7 @@ class MainApp extends HesperComponent {
             weatherText: this._readWeather(),
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
             history: this._readHistory(),    // finished items, newest first (see sync.js)
+            histAvail: null,                 // item key -> local file id, null until checked
             syncUi: { busy: false, linking: false, showKey: false, confirmDelete: false, confirmClear: false, msg: '' }
         };
     }
@@ -540,6 +541,7 @@ class MainApp extends HesperComponent {
         this.setState({ activeTab: id, showNav });
         this.loadLibrary(id);
         if (id === 'resume') this._queueResumeArt();
+        if (id === 'history') this._refreshHistoryAvailability();
     }
 
     // ---------------- Poster art for cards ----------------
@@ -668,30 +670,41 @@ class MainApp extends HesperComponent {
 
     _setSyncUi(patch) { this.setState({ syncUi: Object.assign({}, this.state.syncUi, patch) }); }
 
+    // Index of what is on THIS device: item key -> local file id (rebuilt at most every 2 min).
+    async _ensureLibIndex() {
+        const S = window.HesperSync;
+        if (this._libIndex && Date.now() - this._libIndex.t < 120000) return this._libIndex.map;
+        const map = {};
+        try {
+            const [mv, sh] = await Promise.all([
+                fetch('/api/movies').then(r => r.json()),
+                fetch('/api/shows').then(r => r.json())
+            ]);
+            (mv.movies || []).forEach(m => {
+                const k = S.histKey({ kind: 'movie', title: m.title, year: m.year || 0 });
+                if (k && !map[k]) map[k] = m.id;
+            });
+            (sh.shows || []).forEach(show => (show.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
+                const k = S.histKey({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
+                if (k && !map[k]) map[k] = e.id;
+            })));
+        } catch (err) { return null; }
+        this._libIndex = { t: Date.now(), map: map };
+        return map;
+    }
+
     // Looks up this device's own file id for an item synced from another device.
     async _resolveLocalId(meta) {
-        const S = window.HesperSync;
-        const fresh = this._libIndex && Date.now() - this._libIndex.t < 120000;
-        if (!fresh) {
-            const map = {};
-            try {
-                const [mv, sh] = await Promise.all([
-                    fetch('/api/movies').then(r => r.json()),
-                    fetch('/api/shows').then(r => r.json())
-                ]);
-                (mv.movies || []).forEach(m => {
-                    const k = S.histKey({ kind: 'movie', title: m.title, year: m.year || 0 });
-                    if (k && !map[k]) map[k] = m.id;
-                });
-                (sh.shows || []).forEach(show => (show.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
-                    const k = S.histKey({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
-                    if (k && !map[k]) map[k] = e.id;
-                })));
-            } catch (err) { return null; }
-            this._libIndex = { t: Date.now(), map: map };
-        }
-        const key = S.histKey(meta);
-        return (key && this._libIndex.map[key]) || null;
+        const map = await this._ensureLibIndex();
+        const key = window.HesperSync.histKey(meta);
+        return (map && key && map[key]) || null;
+    }
+
+    // Opening Watch History: find out which of the items are on this device.
+    async _refreshHistoryAvailability() {
+        this._libIndex = null;
+        const map = await this._ensureLibIndex();
+        if (map && this.state.activeTab === 'history') this.setState({ histAvail: map });
     }
 
     _syncMessage(err) {
@@ -791,12 +804,15 @@ class MainApp extends HesperComponent {
     _renderHistory() {
         const { createElement, ui } = this.props.engine;
         const items = (this.state.history || []).slice(0, 300);
+        const avail = this.state.histAvail;
         if (!items.length) return ui.card('No watch history yet', 'Things you finish watching will be listed here.');
         const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
         const rows = items.map(it => {
             const title = it.kind === 'movie' ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
-            const sub = [it.kind === 'movie' && it.year ? String(it.year) : '', 'Watched ' + fmt(it.watchedAt), it.count > 1 ? `${it.count} times` : ''].filter(Boolean).join(' \u00b7 ');
-            return ui.listRow(title, sub);
+            const here = avail ? !!avail[it.key] : null;     // null = still checking
+            const sub = [it.kind === 'movie' && it.year ? String(it.year) : '', 'Watched ' + fmt(it.watchedAt), it.count > 1 ? `${it.count} times` : '',
+                here === true ? 'On this device' : here === false ? 'Not on this device' : ''].filter(Boolean).join(' \u00b7 ');
+            return ui.listRow(title, sub, null, { statusDot: here === true });
         });
         return createElement('div', {},
             createElement('div', { className: 'plugin-list' }, ...rows),
