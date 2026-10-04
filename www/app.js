@@ -1504,7 +1504,9 @@ class MainApp extends HesperComponent {
         const { createElement, ui } = engine;
 
         let node = null;
-        try {
+        if (p.sandboxed) {
+            node = p.sandbox.mount(engine);      // runs in the sandboxed frame; see plugin_sandbox.js
+        } else try {
             node = typeof p.render === 'function' ? p.render(engine) : null;
         } catch (err) {
             console.error(`[Hesper] Plugin "${p.folder}" render() threw:`, err);
@@ -1822,7 +1824,7 @@ class MainApp extends HesperComponent {
             );
         } else if (activeTab === 'plugins') {
             const pluginRows = pluginsList.length > 0
-                ? pluginsList.map(p => ui.listRow(p.app_name, p.folder, () => this.openPlugin(p), { statusDot: true }))
+                ? pluginsList.map(p => ui.listRow(p.app_name, p.sandboxed ? `${p.folder} \u00b7 sandboxed` : `${p.folder} \u00b7 trusted (full access)`, () => this.openPlugin(p), { statusDot: true }))
                 : [ui.card('No Plugins Found', 'Add custom plugins to your plugins/ directory.')];
 
             mainContent = createElement('div', {},

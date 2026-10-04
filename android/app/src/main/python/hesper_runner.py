@@ -6,36 +6,17 @@ called once. Plugins keep working unchanged, including writing files next to
 themselves (e.g. weather.json), because they run from the real extracted
 plugins folder, not from inside the APK.
 """
-import importlib
 import os
 import sys
-import traceback
 
 sys.dont_write_bytecode = True  # no __pycache__ clutter inside plugins/
 
 
 def _run_module(module_name, folder):
-    # Every folder plugin is called "backend", so the module cache has to be
-    # cleared each time or the second plugin would get the first one's module.
-    sys.path.insert(0, folder)
-    sys.modules.pop(module_name, None)
-    importlib.invalidate_caches()
-    try:
-        mod = importlib.import_module(module_name)
-        fn = getattr(mod, "run", None)
-        if callable(fn):
-            fn()
-        else:
-            print("[Hesper Python Bridge] '%s' has no callable run()." % module_name)
-    except Exception:
-        print("[Hesper Python Bridge] '%s' in %s failed:" % (module_name, folder))
-        traceback.print_exc()
-    finally:
-        try:
-            sys.path.remove(folder)
-        except ValueError:
-            pass
-        sys.modules.pop(module_name, None)
+    # hesper_guard decides whether this plugin may run (bundled/trusted, or manifest +
+    # static scan + runtime backstop) and runs it. See hesper_guard.py.
+    import hesper_guard
+    hesper_guard.run_plugin(module_name, folder)
 
 
 def run_all(plugins_dir):
