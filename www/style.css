@@ -1180,3 +1180,28 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
     -webkit-user-select: text;
     user-select: text;
 }
+
+
+/* ---- Plugin sandbox: trailer player (kept above the redrawn part of the screen) ---- */
+.plugin-sandbox > .sx-video { width: 100%; max-width: 960px; margin: 0 auto 1rem; }
+.sx-video-box {
+    position: relative; width: 100%; padding-top: 56.25%;   /* 16:9 without aspect-ratio (old WebViews) */
+    border-radius: 12px; overflow: hidden; background: #000;
+}
+.sx-video-box iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+
+/* Plugins tab: Official / Third-party grouping */
+.plugin-group-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.65;
+    margin: 14px 4px 8px;
+}
+.plugin-group-label.plugin-group-sep {
+    margin-top: 28px;
+    padding-top: 16px;
+    border-top: 1px solid currentColor;
+    border-top-color: rgba(128, 128, 128, 0.35);
+}

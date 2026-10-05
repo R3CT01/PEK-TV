@@ -214,9 +214,18 @@ class MainAppLibraryMethods {
 
     // ---------------- Plugins ----------------
 
+    // Back inside a sandboxed plugin (close a detail page, previous page of results ...).
+    // True when the plugin handled it, so the plugin window itself stays open.
+    _pluginBack() {
+        const sb = this._pluginSandbox;
+        return !!(sb && sb.handleBack && sb.handleBack());
+    }
+
     openPlugin(p) {
         const { engine } = this.props;
         const { createElement, ui } = engine;
+        const app = this;
+        this._pluginSandbox = p.sandboxed ? p.sandbox : null;
 
         let node = null;
         if (p.sandboxed) {
@@ -238,7 +247,7 @@ class MainAppLibraryMethods {
             render() {
                 return createElement('div', { className: 'plugin-window' },
                     createElement('div', { className: 'plugin-window-bar' },
-                        ui.button('Back', () => engine.windows.back()),
+                        ui.button('Back', () => { if (!app._pluginBack()) engine.windows.back(); }),
                         createElement('h2', {}, p.app_name)
                     ),
                     createElement('div', { className: 'plugin-window-body' }, node)

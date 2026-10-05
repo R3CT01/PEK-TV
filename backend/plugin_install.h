@@ -62,8 +62,12 @@ constexpr size_t kMaxDepth       = 6;
 // Plugins that ship with Hesper. They can't be replaced or removed here (on Android
 // the app also re-copies them from its assets on every launch).
 inline bool isReservedId(const std::string& id) {
-    return id == "weather" || id == "sample_scraper" || id == "sample_counter";
+    return id == "weather" || id == "sample_scraper" || id == "sample_counter" || id == "tmdb-discover";
 }
+
+// Hesper's built-in TMDb access (a proxy that holds Hesper's key) is for official plugins only.
+// A plugin installed from a .zip can't list it, so it can't borrow Hesper's key.
+inline const char* reservedHost() { return "hesper-tmdb.aquariusibeats.workers.dev"; }
 
 // Python backends are accepted unless HESPER_ALLOW_PLUGIN_BACKEND=0.
 inline bool backendAllowed() {
@@ -164,6 +168,8 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             if (f.data.compare(0, 3, "\xEF\xBB\xBF") == 0) a = 3;            // UTF-8 BOM
             while (a < f.data.size() && std::isspace(static_cast<unsigned char>(f.data[a]))) ++a;
             if (a >= f.data.size() || f.data[a] != '{') return "plugin.json is not a JSON object";
+            if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
+                return std::string(reservedHost()) + " is reserved for Hesper's official plugins";
         }
         if (f.path == "ui.js") hasUi = true;
     }

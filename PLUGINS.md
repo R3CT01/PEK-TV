@@ -17,7 +17,7 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with Hesper runs *
 }
 ```
 
-- `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains.
+- `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains. Poster art and the YouTube player (`ui.video`) are only allowed from hosts listed here.
 - `storage`: a small private key/value store, plus read access to `plugins/<id>/data/`.
 - `library`: lets the plugin's **Python backend** call `hesper_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
 - No permission listed means no access.
@@ -40,8 +40,14 @@ You get one global, `hesper`:
 | `ui.grid(children, {minColWidth, scroll})` | | Responsive poster grid. `scroll: true` makes one sideways-scrolling row. `minColWidth` like `'150px'`. |
 | `ui.tabs([{id, label}], activeId, id => ...)` | | Tab strip; the callback gets the tapped id. |
 | `ui.textInput(label, value, text => ..., {placeholder, type, onSubmit})` | | Text box (`type: 'password'` hides it). The first callback runs on every keystroke and does not redraw; `onSubmit(text)` runs on Enter and redraws. Typing and scroll position survive redraws. |
+| `ui.spinner(text, big)` | | Loading wheel with an optional label. `big: true` makes it larger. |
+| `ui.toggle(label, checked, v => ...)` | | On/off switch. The callback gets `'true'` or `'false'`. |
+| `ui.video({id, autoplay, muted, title})` | `network` listing `www.youtube-nocookie.com` | A YouTube player (`id` is the 11-character video id). Hesper pins it to the top of the screen and does not restart it when the screen redraws. One per screen. |
+| `{autofocus: 'key'}` on `ui.button` / `ui.posterCard` | | Where the remote's highlight lands when the screen first shows. Use a different key for each screen; Hesper returns to the previously highlighted item when you come back. |
+| `hesper.setBack(fn)` / `hesper.setBack(null)` | | Make Back (Esc, the remote's Back, the window's Back button) call `fn` first, so a plugin can step out of its own screens. Pass `null` when there is nothing to step out of; Back then closes the plugin. |
+| `hesper.scrollTop()` | | Scroll the plugin screen back to the top (after changing page, say). |
 
-See `plugins/sample_counter/` for a small example and `plugin_packages/tmdb-discover/` for a full one (rows, search, provider chips, library badges).
+See `plugins/sample_counter/` for a small example and `plugins/tmdb-discover/` for a full one (rows, numbered pages, search, provider chips, trailer, cast, library badges).
 
 ## Backend (`backend.py`, optional)
 
@@ -53,7 +59,7 @@ Must pass an automatic scan and then runs with a limited host API:
 - `h.library_titles()` (needs `"library": true`) returns `[{"title", "year", "kind": "movie" | "tv"}]` from the library scanner's last saved list, one entry per movie and per show. The list is only as fresh as the last scan, and backends run once at startup.
 - `run()` is called once, with a 10 second limit.
 
-Plugins that ship with Hesper (`weather`) keep full access. To trust a plugin you wrote yourself while developing:
+Plugins that ship with Hesper are **official** and are listed above a separator in the Plugins tab (third-party ones are listed below it). `weather` keeps full access; `tmdb-discover` is official but still runs sandboxed, and is the only kind of plugin allowed to use Hesper's built-in TMDb access (a proxy that holds Hesper's key, so users never enter one). Installing a .zip whose `plugin.json` lists that proxy host is refused. To trust a plugin you wrote yourself while developing:
 `HESPER_TRUSTED_PLUGINS=my_plugin` (backend) and, in the browser console,
 `localStorage.setItem('hesper-trusted-plugins', '["my_plugin"]')` (UI).
 
@@ -66,7 +72,7 @@ Hesper only answers the device it runs on. To open it to other devices on your n
 
 In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, check the permissions Hesper
 shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
-with Hesper (`weather`, `sample_scraper`, `sample_counter`) can't be replaced or removed.
+with Hesper (`weather`, `sample_scraper`, `sample_counter`, `tmdb-discover`) can't be replaced or removed.
 
 The zip must contain `plugin.json` and `ui.js`, either at the top of the zip or inside one folder
 (the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:

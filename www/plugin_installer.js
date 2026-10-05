@@ -14,8 +14,9 @@
 
 const HesperPluginInstaller = (() => {
 
-    // Plugins that ship with Hesper (kept in step with plugin_install.h).
-    const BUILTIN = ['weather', 'sample_scraper', 'sample_counter'];
+    // Official plugins: the ones that ship with Hesper (kept in step with plugin_install.h).
+    // Everything else is third party.
+    const BUILTIN = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
     const isBuiltin = (folder) => BUILTIN.indexOf(folder) !== -1;
 
     function slug(text) {
@@ -146,7 +147,7 @@ const HesperPluginInstaller = (() => {
     const install = (prep) => post('/api/plugins/install', uploadForm(prep, false));
     const remove = (id) => { const fd = new FormData(); fd.append('id', id); return post('/api/plugins/uninstall', fd); };
 
-    return { pickZip, prepare, check, install, remove, isBuiltin, slug };
+    return { pickZip, prepare, check, install, remove, isBuiltin, isOfficial: isBuiltin, slug };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = HesperPluginInstaller;
