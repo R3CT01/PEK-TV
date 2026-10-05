@@ -12,11 +12,10 @@
 #hesper-splash{position:fixed;inset:0;z-index:2147483647;background:#E9E2DA;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
 #hesper-splash.out{opacity:0;pointer-events:none}
 #hesper-splash video{width:100%;height:100%;object-fit:cover}
-@media (max-aspect-ratio:1/1){#hesper-splash video{object-fit:contain}}
 </style>
 </head>
 <body>
-<div id="hesper-splash"><video src="splash.mp4" muted playsinline autoplay preload="auto"></video></div>
+<div id="hesper-splash"><video muted playsinline preload="auto"></video></div>
 <script>
 // Splash: plays once per session; tap/key skips. Skipped inside the Android app,
 // which plays the same video natively before the WebView loads.
@@ -27,6 +26,8 @@
   if (window.HesperAndroid || seen) { el.remove(); return; }
   try { sessionStorage.setItem('hesperSplash', '1'); } catch (e) {}
   var v = el.querySelector('video'), gone = false;
+  // Portrait screens (phones) get the 9:16 cut; wide screens (TVs, desktops) the 16:9 one.
+  v.src = window.matchMedia('(orientation: portrait)').matches ? 'splash_portrait.mp4' : 'splash.mp4';
   function end() {
     if (gone) return; gone = true;
     el.classList.add('out');
