@@ -1,7 +1,7 @@
 // ============================================================
 // Hesper App Shell: MainApp core (state, lifecycle, navigation, render)
 // The rest of MainApp lives in app_appearance.js, app_sources.js,
-// app_library.js, app_watch.js and app_playback.js (loaded after this file).
+// app_library.js, app_watch.js, app_playback.js and app_plugins.js (loaded after this file).
 // Constants and helpers are in app_config.js; ThemePanel is in theme_panel.js.
 // ============================================================
 
@@ -12,6 +12,8 @@ class MainApp extends HesperComponent {
             activeTab: 'dashboard',
             showThemePanel: false,
             pluginsList: [],
+            pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
+            pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
@@ -96,6 +98,8 @@ class MainApp extends HesperComponent {
         if (this._player) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) { engine.windows.back(); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
+        if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
+        if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
         if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
@@ -175,12 +179,22 @@ class MainApp extends HesperComponent {
                 )
             );
         } else if (activeTab === 'plugins') {
+            // Built-in plugins can't be removed; installed ones can (hold the row).
+            const removable = (p) => !HesperPluginInstaller.isBuiltin(p.folder);
             const pluginRows = pluginsList.length > 0
-                ? pluginsList.map(p => ui.listRow(p.app_name, p.sandboxed ? `${p.folder} \u00b7 sandboxed` : `${p.folder} \u00b7 trusted (full access)`, () => this.openPlugin(p), { statusDot: true }))
-                : [ui.card('No Plugins Found', 'Add custom plugins to your plugins/ directory.')];
+                ? pluginsList.map(p => ui.listRow(
+                    p.app_name,
+                    (p.sandboxed ? `${p.folder} \u00b7 sandboxed` : `${p.folder} \u00b7 trusted (full access)`) + (removable(p) ? ' \u00b7 hold to remove' : ''),
+                    () => this.openPlugin(p),
+                    { statusDot: true, onLongPress: removable(p) ? () => this.askRemovePlugin(p) : undefined }
+                ))
+                : [ui.card('No Plugins Found', 'Tap "Install plugin" to add one from a .zip file.')];
 
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),
+                createElement('div', { className: 'section-actions' },
+                    ui.button('Install plugin from .zip', () => this.startPluginInstall(), { variant: 'primary' })
+                ),
                 createElement('div', { className: 'plugin-list' }, ...pluginRows)
             );
         } else if (activeTab === 'history') {
@@ -261,6 +275,8 @@ class MainApp extends HesperComponent {
             this._renderClockSettings(),
             this._renderPicker(),
             this._renderNetPicker(),
+            this._renderPluginInstallModal(),
+            this._renderPluginRemoveModal(),
             this._renderBusy()
         );
     }
