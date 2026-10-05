@@ -1161,3 +1161,9 @@ html .sx-btn.sx-selected {
     padding-top: 1.5rem;
     margin-top: 0.5rem;
 }
+
+/* Layout cards only change the menu position, which phones don't have (they always
+   use the bottom tab bar), so on phones show just Poster size and the view mode. */
+@media (max-width: 720px) {
+    .layout-cards { display: none; }
+}
