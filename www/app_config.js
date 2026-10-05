@@ -159,3 +159,11 @@ function hesperMixin(target, source) {
         Object.defineProperty(target.prototype, name, Object.getOwnPropertyDescriptor(source.prototype, name));
     });
 }
+
+// Native-app feel: no long-press / right-click context menu (copy, select, share)
+// anywhere except text fields.
+document.addEventListener('contextmenu', (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest('input, textarea, [contenteditable]')) return;
+    ev.preventDefault();
+});
