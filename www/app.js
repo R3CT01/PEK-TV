@@ -153,7 +153,7 @@ class MainApp extends HesperComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Layout'),
-                    createElement('div', { className: 'plugin-list' },
+                    createElement('div', { className: 'plugin-list layout-cards' },
                         ...LAYOUTS.map(l => ui.listRow(l.name, l.description, () => this.setLayout(l.id), { statusDot: l.id === this.state.layout }))
                     ),
                     createElement('p', { className: 'sub' }, 'Poster size'),
