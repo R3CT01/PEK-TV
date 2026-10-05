@@ -1,0 +1,148 @@
+// ============================================================
+// Hesper: plugin installer (data side; the screens are in app_plugins.js).
+//
+//   pickZip()    opens the system file picker for a .zip
+//   prepare(f)   unpacks it in memory, finds plugin.json, works out the plugin id
+//   check(p)     asks the server to check it WITHOUT installing (dry run)
+//   install(p)   asks the server to install it
+//   remove(id)   asks the server to delete an installed plugin
+//
+// The server (plugin_install.h) is the one that decides what is allowed; this file
+// only prepares the upload and reads plugin.json so the user can see what the
+// plugin asks for before saying yes.
+// ============================================================
+
+const HesperPluginInstaller = (() => {
+
+    // Plugins that ship with Hesper (kept in step with plugin_install.h).
+    const BUILTIN = ['weather', 'sample_scraper', 'sample_counter'];
+    const isBuiltin = (folder) => BUILTIN.indexOf(folder) !== -1;
+
+    function slug(text) {
+        return String(text || '').toLowerCase().replace(/\.zip$/, '')
+            .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/g, '');
+    }
+
+    function pickZip() {
+        return new Promise((resolve) => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.zip,application/zip,application/x-zip-compressed';
+            input.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;';
+            let settled = false;
+            const done = (f) => {
+                if (settled) return;
+                settled = true;
+                if (input.parentNode) input.parentNode.removeChild(input);
+                resolve(f || null);
+            };
+            input.addEventListener('change', () => done(input.files && input.files[0]));
+            input.addEventListener('cancel', () => done(null));
+            document.body.appendChild(input);
+            input.click();
+        });
+    }
+
+    function readFile(file) {
+        if (file.arrayBuffer) return file.arrayBuffer();
+        return new Promise((resolve, reject) => {          // older WebViews
+            const r = new FileReader();
+            r.onload = () => resolve(r.result);
+            r.onerror = () => reject(new Error('could not read the file'));
+            r.readAsArrayBuffer(file);
+        });
+    }
+
+    const isJunk = (path) => path.split('/').some(part => part.charAt(0) === '.' || part.toLowerCase() === '__macosx');
+
+    async function prepare(file) {
+        if (!file) throw new Error('no file chosen');
+        if (file.size > 10 * 1024 * 1024) throw new Error('that file is too large to be a plugin (limit 8 MB)');
+        let entries = await HesperZip.read(await readFile(file));
+        const before = entries.length;
+        entries = entries.filter(e => !isJunk(e.path));
+        const skipped = before - entries.length;
+        if (!entries.length) throw new Error('the zip is empty');
+
+        const has = (p) => entries.some(e => e.path === p);
+        let prefix = '', folder = '';
+        if (!has('plugin.json')) {
+            const tops = new Set(entries.map(e => e.path.split('/')[0]));
+            if (tops.size === 1) {
+                const top = Array.from(tops)[0];
+                if (entries.every(e => e.path.indexOf(top + '/') === 0) && has(top + '/plugin.json')) {
+                    prefix = top + '/';
+                    folder = top;
+                }
+            }
+        }
+        if (!has(prefix + 'plugin.json')) {
+            throw new Error('plugin.json was not found. It must be at the top of the zip, or inside one folder.');
+        }
+        const files = entries.map(e => ({ path: e.path.slice(prefix.length), data: e.data }));
+
+        let raw;
+        try {
+            const text = new TextDecoder('utf-8').decode(files.find(f => f.path === 'plugin.json').data).replace(/^\uFEFF/, '');
+            raw = JSON.parse(text);
+        } catch (e) {
+            throw new Error('plugin.json is not valid JSON');
+        }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('plugin.json must be a JSON object');
+
+        // Same reading the sandbox applies at run time, so the screen shows what will really be allowed.
+        const m = (typeof HesperSandbox !== 'undefined' && HesperSandbox.normalizeManifest)
+            ? HesperSandbox.normalizeManifest(raw)
+            : { name: typeof raw.name === 'string' ? raw.name : null, version: null, permissions: { network: [], storage: false } };
+        const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+        const id = slug(folder) || slug(m.name) || slug(file.name) || 'plugin';
+
+        return {
+            id,
+            name: m.name || id,
+            version: m.version || '',
+            author: str(raw.author, 80),
+            description: str(raw.description, 200),
+            network: m.permissions.network,
+            storage: m.permissions.storage === true,
+            files,
+            skipped,
+            hasBackend: files.some(f => /\.py$/i.test(f.path))
+        };
+    }
+
+    async function post(url, form) {
+        let res;
+        try {
+            res = await fetch(url, { method: 'POST', body: form });
+        } catch (e) {
+            throw new Error("Couldn't reach Hesper's server.");
+        }
+        let data = null;
+        try { data = await res.json(); } catch (e) { /* not JSON */ }
+        if (res.status === 413) throw new Error('that plugin is too large to upload');
+        if (!data) throw new Error('the server gave an unexpected answer (' + res.status + ')');
+        if (!data.ok) throw new Error(data.error || 'the server refused the plugin');
+        return data;
+    }
+
+    function uploadForm(prep, dry) {
+        const fd = new FormData();
+        fd.append('id', prep.id);
+        if (dry) fd.append('dry', '1');
+        // Each file = a "path" text field + a "file" part, in the same order.
+        for (const f of prep.files) {
+            fd.append('path', f.path);
+            fd.append('file', new Blob([f.data]), 'f');
+        }
+        return fd;
+    }
+
+    const check = (prep) => post('/api/plugins/install', uploadForm(prep, true));
+    const install = (prep) => post('/api/plugins/install', uploadForm(prep, false));
+    const remove = (id) => { const fd = new FormData(); fd.append('id', id); return post('/api/plugins/uninstall', fd); };
+
+    return { pickZip, prepare, check, install, remove, isBuiltin, slug };
+})();
+
+if (typeof module !== 'undefined' && module.exports) module.exports = HesperPluginInstaller;

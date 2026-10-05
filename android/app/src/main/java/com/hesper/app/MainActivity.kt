@@ -3,9 +3,11 @@ package com.hesper.app
 import android.app.Activity
 import android.app.UiModeManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.util.Log
@@ -13,6 +15,8 @@ import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
 import android.webkit.JavascriptInterface
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -27,6 +31,12 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var mpv: MpvController
     private lateinit var bridge: HesperBridge
+
+    // File picker for <input type="file"> in the web UI (used by "Install plugin from .zip").
+    // WebView ignores file inputs unless the app answers onShowFileChooser. The WebView reads
+    // the chosen file itself; Hesper never needs storage permission for this.
+    private var filePathCallback: ValueCallback<Array<Uri>>? = null
+    private val fileChooserRequest = 4711
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +54,33 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
         webView.webViewClient = WebViewClient()
+        webView.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                view: WebView,
+                callback: ValueCallback<Array<Uri>>,
+                params: FileChooserParams
+            ): Boolean {
+                // A new request replaces an unfinished one; the old callback must still be answered.
+                filePathCallback?.onReceiveValue(null)
+                filePathCallback = callback
+                // Pickers often label .zip files as application/octet-stream, so accept those too.
+                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                        "application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                }
+                return try {
+                    startActivityForResult(Intent.createChooser(intent, "Choose a plugin .zip"), fileChooserRequest)
+                    true
+                } catch (e: Exception) {
+                    filePathCallback = null
+                    callback.onReceiveValue(null)
+                    false
+                }
+            }
+        }
         bridge = HesperBridge(this, mpv)
         webView.addJavascriptInterface(bridge, "HesperAndroid")
         val layout = FrameLayout(this)
@@ -100,6 +137,19 @@ class MainActivity : Activity() {
             dest.mkdirs()
             for (name in children) copyAssetDir("$assetPath/$name", File(dest, name))
         }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode == fileChooserRequest) {
+            // Always answer the callback exactly once, also when the user backed out.
+            val result = WebChromeClient.FileChooserParams.parseResult(resultCode, data)
+            filePathCallback?.onReceiveValue(result)
+            filePathCallback = null
+            return
+        }
+        @Suppress("DEPRECATION")
+        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onStop() {

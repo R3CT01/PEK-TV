@@ -3,6 +3,7 @@
 #include "discovery.h"
 #include "vfs.h"
 #include "httplib.h"
+#include "plugin_install.h"
 #include <iostream>
 #include <functional>
 #include <vector>
@@ -297,6 +298,9 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
+    // Plugin .zip uploads (POST /api/plugins/install); plugin_install.h caps a plugin at 8 MB.
+    svr.set_payload_max_length(12 * 1024 * 1024);
+
     svr.set_default_headers({
         {"X-Content-Type-Options", "nosniff"},
         {"X-Frame-Options", "DENY"},
@@ -405,6 +409,45 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
 
         json_response += "]}";
         res.set_content(json_response, "application/json");
+    });
+
+    // 3b. Install / remove a plugin. The web UI unpacks the .zip itself and sends each
+    //     file as a "path" text field + a "file" part (same order). All checking and
+    //     writing is done by hesper_plugins:: (plugin_install.h). "dry=1" only checks.
+    auto outcomeJson = [](const hesper_plugins::Outcome& o) {
+        std::string err;
+        for (unsigned char c : o.error) err += (c < 0x20 ? '?' : static_cast<char>(c));
+        return std::string("{\"ok\": ") + (o.ok ? "true" : "false") +
+               ", \"id\": \"" + jsonEscape(o.id) + "\"" +
+               ", \"files\": " + std::to_string(o.files) +
+               ", \"bytes\": " + std::to_string(o.bytes) +
+               ", \"replaced\": " + (o.replaced ? "true" : "false") +
+               ", \"error\": \"" + jsonEscape(err) + "\"}";
+    };
+
+    svr.Post("/api/plugins/install", [plugins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.form.get_field("id");
+        const bool dry = req.form.get_field("dry") == "1";
+        const auto paths = req.form.get_fields("path");
+        const auto parts = req.form.get_files("file");
+        hesper_plugins::Outcome out;
+        out.id = id;
+        if (paths.size() != parts.size()) {
+            out.error = "the upload was incomplete";
+        } else {
+            std::vector<hesper_plugins::InFile> files;
+            files.reserve(parts.size());
+            for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
+            out = hesper_plugins::install(plugins_dir, id, files, dry);
+        }
+        res.status = out.ok ? 200 : 400;
+        res.set_content(outcomeJson(out), "application/json");
+    });
+
+    svr.Post("/api/plugins/uninstall", [plugins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
+        const hesper_plugins::Outcome out = hesper_plugins::uninstall(plugins_dir, req.form.get_field("id"));
+        res.status = out.ok ? 200 : 400;
+        res.set_content(outcomeJson(out), "application/json");
     });
 
     // 4. Movies — flat list, classified from embedded container tags
