@@ -9,6 +9,13 @@
 // The only way out is postMessage to this file, which enforces plugin.json:
 //   permissions.network  list of https host names the plugin may fetch from
 //   permissions.storage  true => small private key/value store + its own data/ files
+//   permissions.library  true => the plugin's Python backend may read the titles and years
+//                        in the user's library (hesper_host.library_titles); no UI effect here
+//   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
+//                        closeOnRemove. They only change how Hesper's own screens behave.
+//
+// Images: posterCard art is loaded by Hesper's page (not by the frame), and only from https
+// hosts the plugin listed under permissions.network.
 //
 // A plugin describes its screen as plain data (card, button, ...). THIS file turns
 // that into DOM, using text nodes only, so a plugin can never inject HTML or script.
@@ -68,10 +75,23 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         text:    function (s) { return { t: 'text', text: str(s) }; },
         heading: function (s) { return { t: 'heading', text: str(s) }; },
         card:    function (title, sub, fn) { return { t: 'card', title: str(title), subtitle: str(sub), on: on(fn) }; },
-        button:  function (label, fn, opts) { return { t: 'button', label: str(label), on: on(fn), primary: !!(opts && opts.primary) }; },
+        button:  function (label, fn, opts) { return { t: 'button', label: str(label), on: on(fn), primary: !!(opts && opts.primary), selected: !!(opts && opts.selected) }; },
         listRow: function (title, sub, fn) { return { t: 'listRow', title: str(title), subtitle: str(sub), on: on(fn) }; },
         column:  function () { return { t: 'column', children: flat(arguments) }; },
-        row:     function () { return { t: 'row', children: flat(arguments) }; }
+        row:     function () { return { t: 'row', children: flat(arguments) }; },
+        posterCard: function (title, sub, posterUrl, fn, opts) {
+            return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), on: on(fn) };
+        },
+        grid:    function (children, opts) {
+            return { t: 'grid', children: flat([children]), minColWidth: str(opts && opts.minColWidth), scroll: !!(opts && opts.scroll) };
+        },
+        tabs:    function (items, activeId, fn) {
+            return { t: 'tabs', items: (Array.isArray(items) ? items : []).map(function (i) { return { id: str(i && i.id), label: str(i && i.label) }; }), active: str(activeId), on: on(fn) };
+        },
+        textInput: function (label, value, onInput, opts) {
+            return { t: 'textInput', label: str(label), value: str(value), placeholder: str(opts && opts.placeholder),
+                type: (opts && opts.type === 'password') ? 'password' : 'text', on: on(onInput), submit: on(opts && opts.onSubmit) };
+        }
     };
 
     function draw() {
@@ -121,14 +141,17 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
             if (!p) return;
             pending.delete(m.id); clearTimeout(p.timer);
             if (m.ok) p.resolve(m.value); else p.reject(new Error(String(m.error || 'denied')));
-        } else if (m.t === 'event') {
+        } else if (m.t === 'event' || m.t === 'input') {
+            // 'event' = a tap / Enter (redraws afterwards); 'input' = a keystroke in a text
+            // field (hands the plugin the new text but does not redraw, so typing is not interrupted).
             var h = handlers.get(m.id);
             if (h) {
+                var arg = typeof m.value === 'string' ? m.value.slice(0, 500) : undefined;
                 try {
-                    var r = h();
-                    if (r && typeof r.then === 'function') r.then(requestRender, requestRender);
+                    var r = h(arg);
+                    if (m.t === 'event' && r && typeof r.then === 'function') r.then(requestRender, requestRender);
                 } catch (e) { post({ t: 'log', text: 'handler threw: ' + e }); }
-                requestRender();
+                if (m.t === 'event') requestRender();
             }
         }
     });
@@ -139,7 +162,11 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
 class HesperSandbox {
     /** Validates a plugin.json object; anything unexpected simply means "no permission". */
     static normalizeManifest(raw) {
-        const out = { name: null, version: null, permissions: { network: [], storage: false } };
+        const out = {
+            name: null, version: null,
+            permissions: { network: [], storage: false, library: false },
+            ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
+        };
         if (!raw || typeof raw !== 'object') return out;
         if (typeof raw.name === 'string') out.name = raw.name.slice(0, 60);
         if (typeof raw.version === 'string') out.version = raw.version.slice(0, 20);
@@ -149,6 +176,11 @@ class HesperSandbox {
                 typeof h === 'string' && /^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(h) && !/^[\d.]+$/.test(h.replace('*.', '')));
         }
         out.permissions.storage = perms.storage === true;
+        out.permissions.library = perms.library === true;
+        const u = raw.ui && typeof raw.ui === 'object' ? raw.ui : {};
+        if (typeof u.navTab === 'string') out.ui.navTab = u.navTab.replace(/[^A-Za-z0-9 &+'.-]/g, '').trim().slice(0, 20);
+        out.ui.reloadOnInstall = u.reloadOnInstall === true;
+        out.ui.closeOnRemove = u.closeOnRemove === true;
         return out;
     }
 
@@ -321,12 +353,57 @@ class HesperSandbox {
 
     // ---------------- drawing the plugin's description ----------------
 
+    // A redraw rebuilds every element. Keep what the user is in the middle of: the text
+    // field they are typing in, how far a poster row was scrolled, and the page position.
+    _captureView() {
+        const c = this.container;
+        const keep = { height: c.offsetHeight, scroll: {}, input: null };
+        c.querySelectorAll('[data-sx-scroll]').forEach(el => { keep.scroll[el.dataset.sxScroll] = el.scrollLeft; });
+        const a = document.activeElement;
+        if (a && a.dataset && a.dataset.sxKey && c.contains(a)) {
+            keep.input = { key: a.dataset.sxKey, value: a.value, start: a.selectionStart, end: a.selectionEnd };
+        }
+        return keep;
+    }
+
+    _restoreView(keep) {
+        const c = this.container;
+        if (keep.height) {
+            c.style.minHeight = keep.height + 'px';       // no shrink-then-grow, so the page does not jump
+            requestAnimationFrame(() => { c.style.minHeight = ''; });
+        }
+        c.querySelectorAll('[data-sx-scroll]').forEach(el => {
+            const x = keep.scroll[el.dataset.sxScroll];
+            if (x) el.scrollLeft = x;
+        });
+        if (keep.input) {
+            const inp = c.querySelector('input[data-sx-key="' + keep.input.key + '"]');
+            if (inp) {
+                if (inp.value !== keep.input.value) inp.value = keep.input.value;
+                inp.focus();
+                try { inp.setSelectionRange(keep.input.start, keep.input.end); } catch (e) { /* not supported for this type */ }
+            }
+        }
+    }
+
+    // Poster art is fetched by this page, so it follows the same rule as hesper.fetch*:
+    // https only, and only hosts listed in plugin.json permissions.network.
+    _imageUrl(raw) {
+        if (typeof raw !== 'string' || !raw || raw.length > 500) return '';
+        let u;
+        try { u = new URL(raw); } catch (e) { return ''; }
+        if (u.protocol !== 'https:' || u.username || u.password) return '';
+        if (!HesperSandbox.hostAllowed(u.hostname, this.manifest.permissions.network)) return '';
+        return u.href;
+    }
+
     _renderTree() {
         if (!this.container) return;
         const { createElement, ui } = this.engine;
         let content;
+        const keep = this._captureView();
         if (this.tree) {
-            const budget = { nodes: 0 };
+            const budget = { nodes: 0, inputs: 0, scrolls: 0 };
             content = this._build(this.tree, 0, budget) || ui.card(this.manifest.name || this.folder, 'Nothing to show.');
         } else if (this.started) {
             content = ui.card(this.manifest.name || this.folder,
@@ -335,6 +412,7 @@ class HesperSandbox {
             content = ui.card(this.manifest.name || this.folder, 'Starting\u2026');
         }
         this.container.replaceChildren(content);
+        this._restoreView(keep);
         if (this.engine.refreshFocusList) this.engine.refreshFocusList();
     }
 
@@ -350,7 +428,78 @@ class HesperSandbox {
             case 'heading': return createElement('h3', {}, s(n.text));
             case 'card': return ui.card(s(n.title), s(n.subtitle), click(n.on));
             case 'listRow': return ui.listRow(s(n.title), s(n.subtitle), click(n.on));
-            case 'button': return ui.button(s(n.label), click(n.on) || (() => {}), { variant: n.primary === true ? 'primary' : 'secondary' });
+            case 'button': {
+                const b = ui.button(s(n.label), click(n.on) || (() => {}), { variant: n.primary === true ? 'primary' : 'secondary' });
+                if (n.selected === true) b.classList.add('sx-selected');
+                return b;
+            }
+            case 'posterCard': {
+                const el = ui.posterCard(s(n.title), s(n.subtitle), this._imageUrl(n.poster), click(n.on));
+                const img = el.querySelector('img');
+                if (img) {
+                    img.setAttribute('referrerpolicy', 'no-referrer');
+                    img.setAttribute('loading', 'lazy');
+                    img.setAttribute('decoding', 'async');
+                    img.setAttribute('draggable', 'false');
+                }
+                const badge = s(n.badge).slice(0, 24);
+                if (badge) {
+                    if (!img) el.style.position = 'relative';
+                    el.appendChild(createElement('div', {
+                        style: {
+                            position: 'absolute', top: '8px', left: '8px', zIndex: '1', pointerEvents: 'none',
+                            padding: '2px 8px', borderRadius: '999px', fontSize: '0.7rem', fontWeight: '700',
+                            background: 'var(--sx-accent)', color: '#fff'
+                        }
+                    }, badge));
+                }
+                return el;
+            }
+            case 'grid': {
+                const list = Array.isArray(n.children) ? n.children : [];
+                const kids = list.slice(0, 200).map(c => this._build(c, depth + 1, budget)).filter(Boolean);
+                const min = /^\d{2,3}px$/.test(n.minColWidth) ? n.minColWidth : '150px';
+                const el = ui.grid(kids, { minColWidth: min, className: 'sx-poster-grid' });
+                if (n.scroll === true) {                  // one sideways-scrolling row, like a streaming app
+                    Object.assign(el.style, {
+                        gridTemplateColumns: 'none', gridAutoFlow: 'column', gridAutoColumns: 'var(--sx-grid-min)',
+                        overflowX: 'auto', overflowY: 'hidden', padding: '0.5rem 0.25rem 0.75rem'
+                    });
+                    const first = list[0] && typeof list[0].title === 'string' ? list[0].title.slice(0, 40) : '';
+                    el.dataset.sxScroll = (budget.scrolls++) + '|' + first;
+                }
+                return el;
+            }
+            case 'tabs': {
+                const items = (Array.isArray(n.items) ? n.items : []).slice(0, 12)
+                    .filter(i => i && typeof i.id === 'string')
+                    .map(i => ({ id: i.id.slice(0, 40), label: s(i.label).slice(0, 40) }));
+                const on = n.on;
+                return ui.tabs(items, typeof n.active === 'string' ? n.active : '', (id) => {
+                    if (typeof on === 'number' && on > 0) this._send({ t: 'event', id: on, value: id });
+                });
+            }
+            case 'textInput': {
+                const key = 'k' + (budget.inputs++);
+                const onInput = (typeof n.on === 'number' && n.on > 0) ? n.on : 0;
+                const onSubmit = (typeof n.submit === 'number' && n.submit > 0) ? n.submit : 0;
+                const el = ui.textInput(s(n.label), s(n.value), (v) => {
+                    if (onInput) this._send({ t: 'input', id: onInput, value: String(v).slice(0, 500) });
+                }, { type: n.type === 'password' ? 'password' : 'text', placeholder: s(n.placeholder) });
+                const input = el.querySelector('input');
+                input.dataset.sxKey = key;
+                input.setAttribute('autocomplete', 'off');
+                input.setAttribute('autocapitalize', 'off');
+                input.setAttribute('spellcheck', 'false');
+                input.setAttribute('enterkeyhint', onSubmit ? 'search' : 'done');
+                input.addEventListener('keydown', (e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    if (onSubmit) this._send({ t: 'event', id: onSubmit, value: String(input.value).slice(0, 500) });
+                    input.blur();
+                });
+                return el;
+            }
             case 'column':
             case 'row': {
                 const kids = (Array.isArray(n.children) ? n.children : []).slice(0, 200)

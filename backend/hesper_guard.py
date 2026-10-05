@@ -14,7 +14,8 @@ Two tiers
    c. All real work goes through the host module `hesper_host`, which enforces the
       manifest: https only, allowlisted hosts only, no private/loopback addresses
       (this also stops a plugin reaching Hesper's own API), size and time limits,
-      files only inside <plugin>/data/.
+      files only inside <plugin>/data/. A plugin that declares "library": true may also call
+      hesper_host.library_titles() for the titles and years in the user's library.
    d. A runtime backstop (audit hook): blocks processes, raw sockets, ctypes and
       file access outside the plugin while its code runs, plus a time limit.
 
@@ -131,6 +132,8 @@ def load_manifest(folder):
             return None, "network permissions must be host names, not IP addresses (%r)" % h
         except ValueError:
             pass
+    if not isinstance(perms.get("library", False), bool):
+        return None, "'permissions.library' must be true or false"
     return data, None
 
 
@@ -277,6 +280,7 @@ def build_host_module(plugin_id, folder, manifest):
     perms = manifest.get("permissions", {})
     allowed_hosts = list(perms.get("network", []))
     storage_ok = bool(perms.get("storage", False))
+    library_ok = bool(perms.get("library", False))
     data_dir = os.path.join(folder, "data")
     mod = types.ModuleType("hesper_host")
 
@@ -354,10 +358,65 @@ def build_host_module(plugin_id, folder, manifest):
     def read_json(name):
         return json.loads(read_text(name))
 
+    def _library_cache_path():
+        """The library scanner's saved list (media_cache.tsv). Its place depends on the build:
+        Android keeps it next to the plugins folder, Termux one level further up."""
+        plugins_dir = os.path.dirname(os.path.normpath(folder))
+        candidates = []
+        env = os.environ.get("HESPER_LIBRARY_CACHE")
+        if env:
+            candidates.append(env)
+        candidates.append(os.path.join(plugins_dir, "..", "media_cache.tsv"))
+        candidates.append(os.path.join(plugins_dir, "..", "..", "media_cache.tsv"))
+        for c in candidates:
+            c = os.path.normpath(c)
+            if os.path.isfile(c):
+                return c
+        return None
+
+    def _as_int(text):
+        try:
+            return int(text)
+        except ValueError:
+            return 0
+
+    def library_titles():
+        """Titles and years from the user's library: [{"title", "year", "kind": "movie"|"tv"}].
+        Needs "library": true in plugin.json. Never returns file names or folders. The list is
+        the one the scanner last saved, so it can be a little behind the files on disk."""
+        if not library_ok:
+            raise PermissionError("plugin.json does not request the 'library' permission")
+        with _Privileged():
+            path = _library_cache_path()
+            if not path:
+                return []
+            out = []
+            seen = set()
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                if not f.readline().startswith("#hesper-cache-"):
+                    return []
+                for line in f:
+                    cols = line.rstrip("\n").split("\t")
+                    if len(cols) < 11:
+                        continue
+                    if cols[5] == "0":
+                        title, year, kind = cols[6].strip(), _as_int(cols[7]), "movie"
+                    elif cols[5] == "1":
+                        title, year, kind = cols[8].strip(), 0, "tv"
+                    else:
+                        continue
+                    key = (kind, title.lower(), year)
+                    if title and key not in seen:
+                        seen.add(key)
+                        out.append({"title": title, "year": year, "kind": kind})
+                    if len(out) >= 20000:
+                        break
+            return out
+
     def log(*parts):
         print("[plugin %s]" % plugin_id, *[str(p)[:500] for p in parts])
 
-    for fn in (fetch_text, fetch_json, write_text, read_text, write_json, read_json, log):
+    for fn in (fetch_text, fetch_json, write_text, read_text, write_json, read_json, library_titles, log):
         setattr(mod, fn.__name__, fn)
     return mod
 
