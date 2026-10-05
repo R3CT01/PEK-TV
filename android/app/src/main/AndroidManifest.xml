@@ -14,14 +14,24 @@
 
     <application
         android:label="Hesper"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/tv_banner"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true">
 
         <activity
             android:name=".MainActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+
+        <!-- Launcher entry: plays the splash video, then opens MainActivity -->
+        <activity
+            android:name=".SplashActivity"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
-            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+            android:theme="@style/Theme.Hesper.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
