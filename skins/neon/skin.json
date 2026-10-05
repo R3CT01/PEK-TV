@@ -15,6 +15,12 @@
     "textMuted": "#a98cc9",
     "accent": "#00f0ff",
     "accentGlow": "rgba(0, 240, 255, 0.45)",
-    "radius": "4px"
+    "radius": "4px",
+    "overlay": "rgba(5, 8, 15, 0.75)",
+    "shadow": "rgba(0, 0, 0, 0.5)",
+    "glass": "rgba(10, 14, 24, 0.45)",
+    "glassStrong": "rgba(13, 18, 30, 0.92)",
+    "glassFill": "rgba(255, 255, 255, 0.05)",
+    "glassEdge": "rgba(255, 255, 255, 0.10)"
   }
 }
