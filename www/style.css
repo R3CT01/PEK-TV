@@ -1167,3 +1167,16 @@ html .sx-btn.sx-selected {
 @media (max-width: 720px) {
     .layout-cards { display: none; }
 }
+
+/* Native-app feel: no text selection, copy callout or tap flash on buttons, cards and labels.
+   Text fields (and error output) stay selectable so typing, paste and copying errors work. */
+html, body, body * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+input, textarea, [contenteditable], [contenteditable] *, pre {
+    -webkit-user-select: text;
+    user-select: text;
+}
