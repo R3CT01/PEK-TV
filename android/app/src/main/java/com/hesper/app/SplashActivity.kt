@@ -9,10 +9,13 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.content.res.Configuration
 import android.widget.FrameLayout
 import android.widget.VideoView
 
-// Plays res/raw/hesper_splash.mp4 once, then opens MainActivity.
+// Plays the splash video once, then opens MainActivity. Portrait screens (phones) get the
+// 9:16 cut (hesper_splash_portrait) cropped to fill the whole screen; landscape screens
+// (TVs, tablets) get the 16:9 cut (hesper_splash).
 // Tap, any key or the remote's OK/Back skips it. If the video can't play for any
 // reason the app just opens - the splash must never block startup.
 class SplashActivity : Activity() {
@@ -32,11 +35,26 @@ class SplashActivity : Activity() {
         video.setOnPreparedListener { mp: MediaPlayer ->
             mp.setVolume(0f, 0f)
             mp.isLooping = false
+            fillScreen(root, mp.videoWidth, mp.videoHeight)
         }
         video.setOnCompletionListener { next() }
         video.setOnErrorListener { _, _, _ -> next(); true }
-        video.setVideoURI(Uri.parse("android.resource://$packageName/${R.raw.hesper_splash}"))
+        val portrait = resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
+        val res = if (portrait) R.raw.hesper_splash_portrait else R.raw.hesper_splash
+        video.setVideoURI(Uri.parse("android.resource://$packageName/$res"))
         video.start()
+    }
+
+    // VideoView letterboxes by default. Make it just big enough to cover the screen
+    // (centre-crop) and let the parent clip the overflow, so the video fills every edge.
+    private fun fillScreen(root: FrameLayout, vw: Int, vh: Int) {
+        if (vw <= 0 || vh <= 0) return
+        val sw = root.width
+        val sh = root.height
+        if (sw <= 0 || sh <= 0) return
+        val scale = maxOf(sw.toFloat() / vw, sh.toFloat() / vh)
+        video.layoutParams = FrameLayout.LayoutParams(
+            (vw * scale).toInt() + 1, (vh * scale).toInt() + 1, Gravity.CENTER)
     }
 
     private fun next() {
