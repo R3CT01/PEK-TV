@@ -59,22 +59,55 @@ class HesperComponent {
    restored on next launch.
    ============================================================ */
 
-const HESPER_DEFAULT_THEME = {
-    bg: '#090d16',
-    bgElevated: '#0d121e',
-    surface: '#161b22',
-    surfaceFocused: '#1f6feb22',
-    border: '#30363d',
-    borderFocus: '#58a6ff',
-    text: '#f0f6fc',
-    textMuted: '#8b949e',
-    accent: '#58a6ff',
-    accentGlow: 'rgba(88, 166, 255, 0.35)',
-    radius: '16px'
+// Surface tokens for panels that sit on top of content (hero glass, toasts, dialogs
+// backdrop). Dark skins/presets use HESPER_DARK_EXTRAS; the default cream theme has its own.
+const HESPER_DARK_EXTRAS = {
+    overlay: 'rgba(5, 8, 15, 0.75)',
+    shadow: 'rgba(0, 0, 0, 0.5)',
+    glass: 'rgba(10, 14, 24, 0.45)',
+    glassStrong: 'rgba(13, 18, 30, 0.92)',
+    glassFill: 'rgba(255, 255, 255, 0.05)',
+    glassEdge: 'rgba(255, 255, 255, 0.10)'
 };
 
+// Default look: warm cream (matches the Hesper splash screen), ink-dark text.
+const HESPER_DEFAULT_THEME = {
+    bg: '#E9E2DA',
+    bgElevated: '#F3EEE7',
+    surface: '#F8F4EE',
+    surfaceFocused: '#2b262218',
+    border: '#D5CABD',
+    borderFocus: '#2b2622',
+    text: '#2b2622',
+    textMuted: '#7a6f66',
+    accent: '#2b2622',
+    accentGlow: 'rgba(43, 38, 34, 0.22)',
+    radius: '16px',
+    overlay: 'rgba(60, 48, 38, 0.35)',
+    shadow: 'rgba(70, 52, 36, 0.22)',
+    glass: 'rgba(255, 255, 255, 0.50)',
+    glassStrong: 'rgba(250, 246, 240, 0.96)',
+    glassFill: 'rgba(255, 255, 255, 0.55)',
+    glassEdge: 'rgba(60, 48, 38, 0.14)'
+};
+
+// The previous dark default, kept as the "midnight" preset.
+const HESPER_MIDNIGHT = {
+    ...HESPER_DARK_EXTRAS,
+    bg: '#090d16', bgElevated: '#0d121e', surface: '#161b22', surfaceFocused: '#1f6feb22',
+    border: '#30363d', borderFocus: '#58a6ff', text: '#f0f6fc', textMuted: '#8b949e',
+    accent: '#58a6ff', accentGlow: 'rgba(88, 166, 255, 0.35)', radius: '16px'
+};
+
+// True if a background colour is dark (used to pick light/dark surface extras).
+function hesperIsDark(hex) {
+    const c = hesperContrast(hex, '#ffffff');
+    return c !== null && c > 4;
+}
+
 const HESPER_BUILTIN_PRESETS = {
-    midnight: { ...HESPER_DEFAULT_THEME },
+    cream: { ...HESPER_DEFAULT_THEME },
+    midnight: { ...HESPER_MIDNIGHT },
     amoled: {
         bg: '#000000', bgElevated: '#000000', surface: '#0a0a0a', surfaceFocused: '#ffffff14',
         border: '#1a1a1a', borderFocus: '#00e5ff', text: '#ffffff', textMuted: '#8a8a8a',
@@ -176,7 +209,8 @@ class HesperTheme {
             console.warn('[HesperTheme] Ignored setTokens: text would be unreadable on its background.');
             return this;
         }
-        this.tokens = { ...this.tokens, ...partialTokens };
+        const extras = (partialTokens.bg && !partialTokens.glass && hesperIsDark(partialTokens.bg)) ? HESPER_DARK_EXTRAS : {};
+        this.tokens = { ...this.tokens, ...extras, ...partialTokens };
         this._apply();
         this._save();
         this._notify();
@@ -197,7 +231,8 @@ class HesperTheme {
             console.warn(`[HesperTheme] Unknown preset "${name}"`);
             return this;
         }
-        this.tokens = { ...HESPER_DEFAULT_THEME, ...this.presets[name] };
+        const preset = this.presets[name];
+        this.tokens = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(preset.bg) ? HESPER_DARK_EXTRAS : {}), ...preset };
         this._apply();
         this._save();
         this._notify();
@@ -206,7 +241,7 @@ class HesperTheme {
 
     /** Register a reusable custom preset a developer defines once, e.g. for a branded add-on */
     registerPreset(name, tokens) {
-        this.presets[name] = { ...HESPER_DEFAULT_THEME, ...tokens };
+        this.presets[name] = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(tokens.bg) ? HESPER_DARK_EXTRAS : {}), ...tokens };
         return this;
     }
 
@@ -253,7 +288,15 @@ class HesperTheme {
         try {
             const saved = localStorage.getItem(this.storageKey);
             if (saved) {
-                const merged = { ...this.tokens, ...JSON.parse(saved) };
+                const parsed = JSON.parse(saved);
+                // Saved before the cream default existed and never customised: drop it so the
+                // new cream default shows. Other saved dark themes keep working (dark extras).
+                if (parsed.bg === '#090d16' && !parsed.glass) {
+                    localStorage.removeItem(this.storageKey);
+                    return;
+                }
+                const extras = (!parsed.glass && parsed.bg && hesperIsDark(parsed.bg)) ? HESPER_DARK_EXTRAS : {};
+                const merged = { ...this.tokens, ...extras, ...parsed };
                 if (hesperThemeUnreadable(merged)) {
                     console.warn('[HesperTheme] Saved theme was unreadable (text matches background); using defaults.');
                     localStorage.removeItem(this.storageKey);
