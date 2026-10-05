@@ -55,7 +55,7 @@ Hesper only answers the device it runs on. To open it to other devices on your n
 
 ## Installing a plugin from a .zip
 
-In the app: **Plugins tab -> Install plugin from .zip**, pick the file, check the permissions Hesper
+In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, check the permissions Hesper
 shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
 with Hesper (`weather`, `sample_scraper`, `sample_counter`) can't be replaced or removed.
 

@@ -1124,3 +1124,34 @@ html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 280px !important; }
     html[data-layout="topbar"] .sidebar-footer { margin-left: auto; padding: 0; border-top: none; }
     html[data-layout="topbar"] .nav-item { padding: 0.5rem 0.9rem; }
 }
+
+
+/* ============================================================
+   Settings polish
+   ============================================================ */
+
+/* Secondary buttons (ui.button without the primary variant) used to be bare text.
+   Give them the same grey surface and border as the primary ones. The sidebar and
+   bottom-bar tabs also use .nav-item but never .sx-btn, so they are not affected. */
+html .sx-btn.nav-item {
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    padding: 0.75rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 500;
+}
+html .sx-btn.nav-item:hover {
+    border-color: var(--sx-accent);
+    background: var(--sx-surface-focused);
+}
+/* Marks the chosen option in a row of choices (poster size, grid/list). */
+html .sx-btn.sx-selected {
+    border-color: var(--sx-accent);
+}
+
+/* A thin line between settings sections. */
+.settings-section + .settings-section {
+    border-top: 1px solid var(--sx-border);
+    padding-top: 1.5rem;
+    margin-top: 0.5rem;
+}

@@ -207,6 +207,13 @@ class MainAppAppearanceMethods {
         try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) { /* lasts until restart */ }
         this.setState({ viewMode: mode });
     }
+
+    // One option in a row of choices (poster size, grid/list). The chosen one gets an accent border.
+    _choiceButton(label, selected, onClick) {
+        const btn = this.props.engine.ui.button(label, onClick);
+        if (selected) btn.classList.add('sx-selected');
+        return btn;
+    }
 }
 
 hesperMixin(MainApp, MainAppAppearanceMethods);
