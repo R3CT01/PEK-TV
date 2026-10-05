@@ -158,12 +158,12 @@ class MainApp extends HesperComponent {
                     ),
                     createElement('p', { className: 'sub' }, 'Poster size'),
                     createElement('div', { className: 'section-actions' },
-                        ...POSTER_SIZES.map(z => ui.button(z.label, () => this.setPosterSize(z.id), { variant: this.state.posterSize === z.id ? 'primary' : 'secondary' }))
+                        ...POSTER_SIZES.map(z => this._choiceButton(z.label, this.state.posterSize === z.id, () => this.setPosterSize(z.id)))
                     ),
                     createElement('p', { className: 'sub' }, 'Movies and TV Shows view'),
                     createElement('div', { className: 'section-actions' },
-                        ui.button('Grid', () => this.setViewMode('grid'), { variant: this.state.viewMode === 'grid' ? 'primary' : 'secondary' }),
-                        ui.button('List', () => this.setViewMode('list'), { variant: this.state.viewMode === 'list' ? 'primary' : 'secondary' })
+                        this._choiceButton('Grid', this.state.viewMode === 'grid', () => this.setViewMode('grid')),
+                        this._choiceButton('List', this.state.viewMode === 'list', () => this.setViewMode('list'))
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -175,6 +175,13 @@ class MainApp extends HesperComponent {
                             () => this.applySkin(s.id),
                             { statusDot: s.id === this.state.activeSkin }
                         ))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Plugins'),
+                    createElement('p', { className: 'sub' }, 'Add a plugin from a .zip file. To remove one, hold its row in the Plugins tab.'),
+                    createElement('div', { className: 'section-actions' },
+                        ui.button('Install plugin from .zip', () => this.startPluginInstall(), { variant: 'primary' })
                     )
                 )
             );
@@ -188,13 +195,10 @@ class MainApp extends HesperComponent {
                     () => this.openPlugin(p),
                     { statusDot: true, onLongPress: removable(p) ? () => this.askRemovePlugin(p) : undefined }
                 ))
-                : [ui.card('No Plugins Found', 'Tap "Install plugin" to add one from a .zip file.')];
+                : [ui.card('No Plugins Found', 'Add one from Settings \u2192 Plugins \u2192 Install plugin from .zip.')];
 
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),
-                createElement('div', { className: 'section-actions' },
-                    ui.button('Install plugin from .zip', () => this.startPluginInstall(), { variant: 'primary' })
-                ),
                 createElement('div', { className: 'plugin-list' }, ...pluginRows)
             );
         } else if (activeTab === 'history') {
