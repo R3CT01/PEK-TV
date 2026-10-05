@@ -75,12 +75,15 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         text:    function (s) { return { t: 'text', text: str(s) }; },
         heading: function (s) { return { t: 'heading', text: str(s) }; },
         card:    function (title, sub, fn) { return { t: 'card', title: str(title), subtitle: str(sub), on: on(fn) }; },
-        button:  function (label, fn, opts) { return { t: 'button', label: str(label), on: on(fn), primary: !!(opts && opts.primary), selected: !!(opts && opts.selected) }; },
+        button:  function (label, fn, opts) { return { t: 'button', label: str(label), on: on(fn), primary: !!(opts && opts.primary), selected: !!(opts && opts.selected), autofocus: str(opts && opts.autofocus) }; },
+        spinner: function (label, big) { return { t: 'spinner', text: str(label), big: !!big }; },
+        toggle:  function (label, checked, fn) { return { t: 'toggle', label: str(label), checked: !!checked, on: on(fn) }; },
+        video:   function (o) { o = o || {}; return { t: 'video', provider: str(o.provider || 'youtube'), id: str(o.id), autoplay: !!o.autoplay, muted: !!o.muted, title: str(o.title) }; },
         listRow: function (title, sub, fn) { return { t: 'listRow', title: str(title), subtitle: str(sub), on: on(fn) }; },
         column:  function () { return { t: 'column', children: flat(arguments) }; },
         row:     function () { return { t: 'row', children: flat(arguments) }; },
         posterCard: function (title, sub, posterUrl, fn, opts) {
-            return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), on: on(fn) };
+            return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), autofocus: str(opts && opts.autofocus), on: on(fn) };
         },
         grid:    function (children, opts) {
             return { t: 'grid', children: flat([children]), minColWidth: str(opts && opts.minColWidth), scroll: !!(opts && opts.scroll) };
@@ -107,8 +110,16 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         drawQueued = true; setTimeout(draw, 0);
     }
 
+    var backFn = null, backSet = false;
     var api = {
         ui: ui,
+        // Register what the Back key / Back button should do inside the plugin (or null when
+        // there is nothing to step out of). Hesper then calls it before closing the plugin.
+        setBack: function (fn) {
+            backFn = typeof fn === 'function' ? fn : null;
+            if (backSet !== !!backFn) { backSet = !!backFn; post({ t: 'canBack', v: backSet }); }
+        },
+        scrollTop: function () { post({ t: 'scrollTop' }); },
         render: function (fn) { renderFn = fn; requestRender(); },
         requestRender: requestRender,
         fetchText: function (url) { return request('fetch', { url: str(url) }); },
@@ -136,6 +147,9 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
                 document.body.appendChild(s);
             } catch (e) { post({ t: 'log', text: 'plugin failed to start: ' + e }); }
             post({ t: 'started', hasRender: !!renderFn });
+        } else if (m.t === 'back') {
+            if (backFn) { try { backFn(); } catch (e) { post({ t: 'log', text: 'back handler threw: ' + e }); } }
+            requestRender();
         } else if (m.t === 'res') {
             var p = pending.get(m.id);
             if (!p) return;
@@ -201,13 +215,34 @@ class HesperSandbox {
         this.container = null;
         this.logs = [];
         this.started = false;
+        this.canBack = false;        // the plugin has a screen it can step back out of
+        this.body = null;            // rebuilt on every redraw
+        this.slot = null;            // the trailer player; kept across redraws so it keeps playing
+        this._videoKey = '';
+        this._afKey = null;          // which screen the plugin last asked to focus
+        this._focusMemo = {};        // screen key -> element that had focus when we left it
         this._onMessage = this._onMessage.bind(this);
+        HesperSandbox._initNav();
+    }
+
+    // Remember whether the last input was a key press (remote / keyboard) or a touch / click,
+    // so autofocus only draws a highlight ring for the D-pad.
+    static _initNav() {
+        if (HesperSandbox._navInit) return;
+        HesperSandbox._navInit = true;
+        HesperSandbox._keyNav = false;
+        window.addEventListener('keydown', (e) => { if (/^Arrow|^Enter$/.test(e.key)) HesperSandbox._keyNav = true; }, true);
+        ['pointerdown', 'mousedown', 'touchstart'].forEach(n =>
+            window.addEventListener(n, () => { HesperSandbox._keyNav = false; }, true));
     }
 
     /** Returns the DOM node that shows this plugin's screen, starting the frame on first use. */
     mount(engine) {
         this.engine = engine;
         this.container = engine.createElement('div', { className: 'plugin-sandbox' });
+        this.body = engine.createElement('div', { className: 'plugin-sandbox-body' });
+        this.container.appendChild(this.body);
+        this.slot = null; this._videoKey = ''; this._afKey = null;
         if (!this.frame) this._start();
         this._renderTree();
         return this.container;
@@ -237,13 +272,22 @@ class HesperSandbox {
         this.frame = null;
         this.stopped = reason;
         this.tree = null;
+        this.canBack = false;
         if (this.container && this.engine) {
+            this.slot = null; this._videoKey = '';
             this.container.replaceChildren(this.engine.ui.card(this.manifest.name || this.folder, 'This plugin was stopped (' + reason + ').'));
         }
     }
 
     _send(msg) {
         if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage(msg, '*');
+    }
+
+    /** Hesper's Back key / button asks here first. True = the plugin stepped back inside itself. */
+    handleBack() {
+        if (!this.canBack || !this.frame || !this.container || !this.container.isConnected) return false;
+        this._send({ t: 'back' });
+        return true;
     }
 
     _log(text) {
@@ -264,6 +308,10 @@ class HesperSandbox {
                 this._renderTree();
                 break;
             case 'view': this.tree = m.tree; this._renderTree(); break;
+            case 'canBack': this.canBack = m.v === true; break;
+            case 'scrollTop':
+                if (this.container && this.container.isConnected) this.container.scrollIntoView({ block: 'start' });
+                break;
             case 'log': this._log(m.text); break;
             case 'req': this._handleRequest(m); break;
         }
@@ -357,7 +405,9 @@ class HesperSandbox {
     // field they are typing in, how far a poster row was scrolled, and the page position.
     _captureView() {
         const c = this.container;
-        const keep = { height: c.offsetHeight, scroll: {}, input: null };
+        const keep = { height: c.offsetHeight, scroll: {}, input: null, focusKey: '' };
+        const fo = c.querySelector('.focused');
+        if (fo && fo.dataset) keep.focusKey = fo.dataset.sxFocus || '';
         c.querySelectorAll('[data-sx-scroll]').forEach(el => { keep.scroll[el.dataset.sxScroll] = el.scrollLeft; });
         const a = document.activeElement;
         if (a && a.dataset && a.dataset.sxKey && c.contains(a)) {
@@ -397,13 +447,89 @@ class HesperSandbox {
         return u.href;
     }
 
+    // Every focusable element gets a key made from its section heading and its label, so after
+    // a redraw (rows finishing loading, a page changing) the D-pad highlight stays on the same
+    // element instead of jumping to whatever now sits at the same position in the list. The
+    // heading matters: Trending and Popular often show the same titles.
+    _tagFocus() {
+        const seen = {};
+        let section = '';
+        this.body.querySelectorAll('.focusable, h3').forEach(el => {
+            if (el.tagName === 'H3') {
+                if (!el.closest('.focusable')) section = (el.textContent || '').slice(0, 40);
+                return;
+            }
+            const base = (section + '>' + el.tagName + '|' +
+                (el.getAttribute('title') || el.dataset.sxKey || el.textContent || '')).slice(0, 120);
+            seen[base] = (seen[base] || 0) + 1;
+            el.dataset.sxFocus = base + '#' + seen[base];
+        });
+    }
+
+    _placeFocus(keep, budget) {
+        const eng = this.engine;
+        if (!eng.focusableElements || !this.body.isConnected) return;
+        const find = (key) => key ? Array.from(this.body.querySelectorAll('[data-sx-focus]')).find(e => e.dataset.sxFocus === key) : null;
+        const af = budget.af;
+        const newKey = af ? af.key : null;
+        let target = null, moved = false;
+        if (newKey !== this._afKey) {
+            // A different screen: go back to where focus was last time, else the plugin's pick.
+            if (this._afKey && keep.focusKey) this._focusMemo[this._afKey] = keep.focusKey;
+            if (newKey) {
+                target = find(this._focusMemo[newKey]);
+                if (!target && HesperSandbox._keyNav) target = af.el;
+                moved = !!target;
+            }
+            this._afKey = newKey;
+        } else {
+            target = find(keep.focusKey);
+        }
+        if (!target) return;
+        const i = eng.focusableElements.indexOf(target);
+        if (i < 0) return;
+        eng.currentIndex = i;
+        eng._applyFocus(false);
+        if (moved) target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+
+    // The trailer player lives outside the part that is rebuilt on each redraw. Moving or
+    // re-creating an iframe restarts it, so it is only replaced when the trailer or the
+    // autoplay / sound setting actually changes.
+    _syncVideo(v) {
+        let key = '', src = '';
+        if (v && v.provider === 'youtube' && /^[A-Za-z0-9_-]{11}$/.test(v.id) &&
+            HesperSandbox.hostAllowed('www.youtube-nocookie.com', this.manifest.permissions.network)) {
+            src = 'https://www.youtube-nocookie.com/embed/' + v.id + '?playsinline=1&rel=0&modestbranding=1' +
+                (v.autoplay ? '&autoplay=1' : '') + (v.muted ? '&mute=1' : '');
+            key = src;
+        }
+        if (key === this._videoKey) return;
+        if (this.slot) { this.slot.remove(); this.slot = null; }
+        this._videoKey = key;
+        if (!key) return;
+        const f = document.createElement('iframe');
+        f.src = src;
+        f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+        f.setAttribute('allowfullscreen', '');
+        // Hesper sends "Referrer-Policy: no-referrer" by default and YouTube refuses to play
+        // an embed that sends no referrer, so this one frame gets its own policy.
+        f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+        f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+        f.setAttribute('title', (v.title || 'Trailer').slice(0, 100));
+        f.tabIndex = -1;
+        const box = this.engine.createElement('div', { className: 'sx-video-box' }, f);
+        this.slot = this.engine.createElement('div', { className: 'sx-video' }, box);
+        this.container.insertBefore(this.slot, this.body);
+    }
+
     _renderTree() {
-        if (!this.container) return;
-        const { createElement, ui } = this.engine;
+        if (!this.container || !this.body) return;
+        const { ui } = this.engine;
         let content;
         const keep = this._captureView();
+        const budget = { nodes: 0, inputs: 0, scrolls: 0, video: null, af: null };
         if (this.tree) {
-            const budget = { nodes: 0, inputs: 0, scrolls: 0 };
             content = this._build(this.tree, 0, budget) || ui.card(this.manifest.name || this.folder, 'Nothing to show.');
         } else if (this.started) {
             content = ui.card(this.manifest.name || this.folder,
@@ -411,9 +537,12 @@ class HesperSandbox {
         } else {
             content = ui.card(this.manifest.name || this.folder, 'Starting\u2026');
         }
-        this.container.replaceChildren(content);
+        this.body.replaceChildren(content);
+        this._syncVideo(budget.video);
         this._restoreView(keep);
+        this._tagFocus();
         if (this.engine.refreshFocusList) this.engine.refreshFocusList();
+        this._placeFocus(keep, budget);
     }
 
     _build(n, depth, budget) {
@@ -431,8 +560,26 @@ class HesperSandbox {
             case 'button': {
                 const b = ui.button(s(n.label), click(n.on) || (() => {}), { variant: n.primary === true ? 'primary' : 'secondary' });
                 if (n.selected === true) b.classList.add('sx-selected');
+                if (n.autofocus && typeof n.autofocus === 'string' && !budget.af) budget.af = { key: n.autofocus.slice(0, 60), el: b };
                 return b;
             }
+            case 'spinner':
+                return createElement('div', { className: 'hs-loading' },
+                    createElement('span', { className: 'hs-ring' + (n.big === true ? ' lg' : '') }),
+                    s(n.text) ? createElement('span', {}, s(n.text).slice(0, 120)) : null);
+            case 'toggle': {
+                const on = (typeof n.on === 'number' && n.on > 0) ? n.on : 0;
+                return ui.toggle(s(n.label).slice(0, 120), n.checked === true, (next) => {
+                    if (on) this._send({ t: 'event', id: on, value: String(next) });
+                });
+            }
+            case 'video':
+                // Only one player per screen. It is placed above everything else by _syncVideo.
+                if (!budget.video) {
+                    budget.video = { provider: s(n.provider).slice(0, 20), id: s(n.id).slice(0, 20),
+                        autoplay: n.autoplay === true, muted: n.muted === true, title: s(n.title) };
+                }
+                return null;
             case 'posterCard': {
                 const el = ui.posterCard(s(n.title), s(n.subtitle), this._imageUrl(n.poster), click(n.on));
                 const img = el.querySelector('img');
@@ -442,6 +589,7 @@ class HesperSandbox {
                     img.setAttribute('decoding', 'async');
                     img.setAttribute('draggable', 'false');
                 }
+                if (n.autofocus && typeof n.autofocus === 'string' && !budget.af) budget.af = { key: n.autofocus.slice(0, 60), el };
                 const badge = s(n.badge).slice(0, 24);
                 if (badge) {
                     if (!img) el.style.position = 'relative';

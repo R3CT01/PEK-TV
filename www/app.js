@@ -112,7 +112,11 @@ class MainApp extends HesperComponent {
         const { engine } = this.props;
         if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
         if (this._player) { this._player.onBack(); return true; }
-        if (engine.windows.activeWindow) { engine.windows.back(); return true; }
+        if (engine.windows.activeWindow) {
+            if (this._pluginBack && this._pluginBack()) return true;   // a plugin screen stepped back by itself
+            engine.windows.back();
+            return true;
+        }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
@@ -204,14 +208,30 @@ class MainApp extends HesperComponent {
         } else if (activeTab === 'plugins') {
             // Built-in plugins can't be removed; installed ones can (hold the row).
             const removable = (p) => !HesperPluginInstaller.isBuiltin(p.folder);
-            const pluginRows = pluginsList.length > 0
-                ? pluginsList.map(p => ui.listRow(
+            const row = (p) => {
+                const official = HesperPluginInstaller.isOfficial(p.folder);
+                const note = official
+                    ? (p.sandboxed ? 'official' : 'official \u00b7 full access')
+                    : 'third party \u00b7 sandboxed \u00b7 hold to remove';
+                return ui.listRow(
                     p.app_name,
-                    (p.sandboxed ? `${p.folder} \u00b7 sandboxed` : `${p.folder} \u00b7 trusted (full access)`) + (removable(p) ? ' \u00b7 hold to remove' : ''),
+                    `${p.folder} \u00b7 ${note}`,
                     () => this.openPlugin(p),
                     { statusDot: true, onLongPress: removable(p) ? () => this.askRemovePlugin(p) : undefined }
-                ))
-                : [ui.card('No Plugins Found', 'Add one from Settings \u2192 Plugins \u2192 Install plugin from .zip.')];
+                );
+            };
+            // Official plugins first, then a separator, then third-party ones.
+            const officialPlugins = pluginsList.filter(p => HesperPluginInstaller.isOfficial(p.folder));
+            const thirdParty = pluginsList.filter(p => !HesperPluginInstaller.isOfficial(p.folder));
+            const label = (text, sep) => createElement('div', { className: 'plugin-group-label' + (sep ? ' plugin-group-sep' : '') }, text);
+            const pluginRows = [];
+            if (officialPlugins.length) {
+                pluginRows.push(label('Official plugins'));
+                officialPlugins.forEach(p => pluginRows.push(row(p)));
+            }
+            pluginRows.push(label('Third-party plugins', officialPlugins.length > 0));
+            if (thirdParty.length) thirdParty.forEach(p => pluginRows.push(row(p)));
+            else pluginRows.push(ui.card('No third-party plugins', 'Add one from Settings \u2192 Plugins \u2192 Install plugin from .zip.'));
 
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),
