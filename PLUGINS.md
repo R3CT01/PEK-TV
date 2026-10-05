@@ -10,14 +10,18 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with Hesper runs *
   "version": "1.0.0",
   "permissions": {
     "network": ["api.example.com", "*.cdn.example.com"],
-    "storage": true
-  }
+    "storage": true,
+    "library": true
+  },
+  "ui": { "navTab": "Discover", "reloadOnInstall": true, "closeOnRemove": true }
 }
 ```
 
 - `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains.
 - `storage`: a small private key/value store, plus read access to `plugins/<id>/data/`.
+- `library`: lets the plugin's **Python backend** call `hesper_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
 - No permission listed means no access.
+- `ui` (optional, only changes Hesper's own screens): `navTab` adds a sidebar / More entry that opens the plugin; `reloadOnInstall` reloads the app right after installing; `closeOnRemove` makes Hesper ask the user to close and reopen it after the plugin is removed (it cannot be dismissed until the app is really closed). The install and remove screens say so.
 
 ## UI (`ui.js`)
 
@@ -31,9 +35,13 @@ You get one global, `hesper`:
 | `hesper.fetchText(url)` / `fetchJSON(url)` | `network` | HTTPS GET of an allowed host (1 MB, 8 s limit, no redirects). |
 | `hesper.storage.get/set/remove` | `storage` | Private store (256 KB total). |
 | `hesper.readData(name)` / `readJSON(name)` | `storage` | Read `data/<name>` written by the backend. |
-| `ui.card / listRow / button / text / heading / column / row` | | Building blocks. Text only, no HTML. |
+| `ui.card / listRow / button / text / heading / column / row` | | Building blocks. Text only, no HTML. `ui.button(label, fn, {primary, selected})`. |
+| `ui.posterCard(title, sub, posterUrl, fn, {badge})` | `network` for the poster's host | Poster tile like the library grid. The image loads only from an https host listed in `network`; otherwise a plain card is shown. `badge` is a short label drawn on the poster. |
+| `ui.grid(children, {minColWidth, scroll})` | | Responsive poster grid. `scroll: true` makes one sideways-scrolling row. `minColWidth` like `'150px'`. |
+| `ui.tabs([{id, label}], activeId, id => ...)` | | Tab strip; the callback gets the tapped id. |
+| `ui.textInput(label, value, text => ..., {placeholder, type, onSubmit})` | | Text box (`type: 'password'` hides it). The first callback runs on every keystroke and does not redraw; `onSubmit(text)` runs on Enter and redraws. Typing and scroll position survive redraws. |
 
-See `plugins/sample_counter/` for a working example.
+See `plugins/sample_counter/` for a small example and `plugin_packages/tmdb-discover/` for a full one (rows, search, provider chips, library badges).
 
 ## Backend (`backend.py`, optional)
 
@@ -42,6 +50,7 @@ Must pass an automatic scan and then runs with a limited host API:
 - Allowed imports: `json re math datetime time collections itertools functools string textwrap html urllib.parse base64 hashlib random statistics decimal fractions typing dataclasses enum copy operator unicodedata`, your own `.py` files in the same folder, and `hesper_host`.
 - Not allowed: `eval exec compile open getattr setattr __import__`, any attribute starting with `_`, `os sys subprocess socket ctypes ...`, native or compiled files.
 - `import hesper_host as h` gives you `h.fetch_text(url)`, `h.fetch_json(url)`, `h.write_json(name, obj)`, `h.read_json(name)` (also `*_text`). Network and storage obey `plugin.json`.
+- `h.library_titles()` (needs `"library": true`) returns `[{"title", "year", "kind": "movie" | "tv"}]` from the library scanner's last saved list, one entry per movie and per show. The list is only as fresh as the last scan, and backends run once at startup.
 - `run()` is called once, with a 10 second limit.
 
 Plugins that ship with Hesper (`weather`) keep full access. To trust a plugin you wrote yourself while developing:

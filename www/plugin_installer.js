@@ -93,7 +93,9 @@ const HesperPluginInstaller = (() => {
         // Same reading the sandbox applies at run time, so the screen shows what will really be allowed.
         const m = (typeof HesperSandbox !== 'undefined' && HesperSandbox.normalizeManifest)
             ? HesperSandbox.normalizeManifest(raw)
-            : { name: typeof raw.name === 'string' ? raw.name : null, version: null, permissions: { network: [], storage: false } };
+            : { name: typeof raw.name === 'string' ? raw.name : null, version: null,
+                permissions: { network: [], storage: false, library: false },
+                ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
         const id = slug(folder) || slug(m.name) || slug(file.name) || 'plugin';
 
@@ -105,6 +107,8 @@ const HesperPluginInstaller = (() => {
             description: str(raw.description, 200),
             network: m.permissions.network,
             storage: m.permissions.storage === true,
+            library: m.permissions.library === true,
+            ui: m.ui,
             files,
             skipped,
             hasBackend: files.some(f => /\.py$/i.test(f.path))

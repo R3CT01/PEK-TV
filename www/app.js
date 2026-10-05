@@ -14,6 +14,7 @@ class MainApp extends HesperComponent {
             pluginsList: [],
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
+            appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
@@ -74,6 +75,13 @@ class MainApp extends HesperComponent {
     }
 
     selectTab(id) {
+        // A plugin's own tab (plugin.json ui.navTab) opens that plugin's screen.
+        if (typeof id === 'string' && id.indexOf('plugin:') === 0) {
+            const p = (this.state.pluginsList || []).find(x => x.folder === id.slice(7));
+            this.setState({ moreOpen: false });
+            if (p) this.openPlugin(p);
+            return;
+        }
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
         this.setState({ activeTab: id, showNav, moreOpen: false });
@@ -87,6 +95,13 @@ class MainApp extends HesperComponent {
         let at = 1;
         if (this._resumeItems().length) { items.splice(at, 0, RESUME_NAV_ITEM); at++; }
         if ((this.state.history || []).length) items.splice(at, 0, HISTORY_NAV_ITEM);
+        const pluginTabs = (this.state.pluginsList || [])
+            .filter(p => p.manifest && p.manifest.ui && p.manifest.ui.navTab)
+            .map(p => ({ id: 'plugin:' + p.folder, label: p.manifest.ui.navTab }));
+        if (pluginTabs.length) {
+            const pluginsAt = items.findIndex(i => i.id === 'plugins');
+            items.splice(pluginsAt < 0 ? items.length : pluginsAt, 0, ...pluginTabs);
+        }
         return items;
     }
 
@@ -95,6 +110,7 @@ class MainApp extends HesperComponent {
     // browser's own Back button. Returns true if it closed or stepped out of something.
     goBack() {
         const { engine } = this.props;
+        if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
         if (this._player) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) { engine.windows.back(); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
@@ -281,7 +297,8 @@ class MainApp extends HesperComponent {
             this._renderNetPicker(),
             this._renderPluginInstallModal(),
             this._renderPluginRemoveModal(),
-            this._renderBusy()
+            this._renderBusy(),
+            this._renderAppCloseModal()
         );
     }
 }
