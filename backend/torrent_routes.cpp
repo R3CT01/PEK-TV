@@ -1,4 +1,11 @@
 #include "torrent_routes.h"
+#include <cctype>
+#include <cstdlib>
+#include <cstring>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <vector>
 #include "torrent.h"
 
 #include <algorithm>
@@ -304,6 +311,60 @@ bool httpGet(const std::string& url, std::string& body, int& code, size_t maxByt
     return true;
 }
 
+
+// ---------------------------------------------------------------- user search sites (www/search_sites.js)
+// The web side posts the list of search pages the user pasted into www/search_sites.js.
+// Only those exact https templates can be fetched, and only through /api/torrent/site.
+std::mutex g_sitesMx;
+std::vector<std::string> g_sites;
+
+// https + a real host name (no bare IPs, localhost or LAN-style names).
+bool publicHttpsUrl(const std::string& u) {
+    if (u.size() > 2000 || u.rfind("https://", 0) != 0) return false;
+    Parts p;
+    if (!splitUrl(u, p)) return false;
+    std::string h = lower(p.host);
+    if (h.empty() || h == "localhost") return false;
+    bool numeric = true;
+    for (unsigned char c : h) if (!(std::isdigit(c) || c == '.' || c == ':' || c == '[' || c == ']')) numeric = false;
+    if (numeric) return false;
+    auto endsWith = [&](const char* suf) { size_t n = std::strlen(suf); return h.size() > n && h.compare(h.size() - n, n, suf) == 0; };
+    if (endsWith(".local") || endsWith(".lan") || endsWith(".internal") || endsWith(".home")) return false;
+    return h.find('.') != std::string::npos;
+}
+
+bool siteUrlOk(const std::string& u) {
+    return u.size() <= 400 && u.find("{q}") != std::string::npos && publicHttpsUrl(u);
+}
+
+// Same as httpGet, but sends browser-like headers (many sites refuse bare clients).
+bool siteGet(const std::string& url, std::string& body, int& code, size_t maxBytes, std::string& err) {
+    Parts u;
+    if (!splitUrl(url, u)) { err = "Bad address"; return false; }
+    httplib::Headers hdrs = {
+        {"User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+        {"Accept", "text/html,application/json;q=0.9,*/*;q=0.8"},
+        {"Accept-Language", "en-US,en;q=0.9"}};
+    httplib::Result r(nullptr, httplib::Error::Unknown);
+    auto run = [&](auto& cli) {
+        cli.set_connection_timeout(8);
+        cli.set_read_timeout(15);
+        cli.set_follow_location(true);
+        r = cli.Get(u.path, hdrs);
+    };
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+    httplib::SSLClient cli(u.host, u.port);
+    run(cli);
+#else
+    err = "This build has no HTTPS support"; return false;
+#endif
+    if (!r) { err = "Could not reach the site"; return false; }
+    code = r->status;
+    if (r->body.size() > maxBytes) { err = "Response too large"; return false; }
+    body = r->body;
+    return true;
+}
+
 std::string humanSize(uint64_t b) {
     char buf[32];
     if (b >= (1ull << 30)) snprintf(buf, sizeof buf, "%.1f GB", b / double(1ull << 30));
@@ -353,6 +414,62 @@ void setTorrentDataDir(const std::string& dir) {
 }
 
 void registerTorrentRoutes(httplib::Server& svr) {
+
+
+    // Plugin support (called by plugin_sandbox.js, never by plugin code itself):
+    // a plugin that listed a release host in plugin.json may play a .torrent link from that host.
+    // The sandbox checks the manifest; this only accepts https links with a real host name.
+    svr.Post("/api/torrent/allow", [](const httplib::Request& req, httplib::Response& res) {
+        std::string url = req.get_param_value("url");
+        if (!publicHttpsUrl(url)) { jsonErr(res, 400, "Not an allowed release link"); return; }
+        { std::lock_guard<std::mutex> lk(g_linkMx);
+          if (g_knownLinks.size() > 5000) g_knownLinks.clear();
+          g_knownLinks.insert(url); }
+        res.set_content("{\"ok\": true}", "application/json");
+    });
+
+    // CORS-free GET for plugin search pages (the sandbox tries the browser first, then this).
+    svr.Get("/api/torrent/fetch", [](const httplib::Request& req, httplib::Response& res) {
+        std::string url = req.get_param_value("url");
+        if (!publicHttpsUrl(url)) { jsonErr(res, 400, "Not an allowed address"); return; }
+        std::string body, err; int code = 0;
+        if (!siteGet(url, body, code, 1000000, err)) { jsonErr(res, 502, err); return; }
+        if (code != 200) { jsonErr(res, 502, "HTTP " + std::to_string(code)); return; }
+        res.set_content(body, "text/plain; charset=utf-8");
+    });
+
+    // The sites the user pasted into www/search_sites.js (one https template per line, with {q}).
+    svr.Post("/api/torrent/sites", [](const httplib::Request& req, httplib::Response& res) {
+        std::string all = req.get_param_value("sites");
+        std::vector<std::string> keep;
+        int rejected = 0;
+        std::istringstream in(all);
+        std::string line;
+        while (std::getline(in, line)) {
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+            if (line.empty()) continue;
+            if (siteUrlOk(line) && keep.size() < 20) keep.push_back(line); else rejected++;
+        }
+        { std::lock_guard<std::mutex> lk(g_sitesMx); g_sites = keep; }
+        res.set_content("{\"count\": " + std::to_string(keep.size()) + ", \"rejected\": " + std::to_string(rejected) + "}", "application/json");
+    });
+
+    // Fetch search site number i for the words q and hand back the raw page / JSON.
+    svr.Get("/api/torrent/site", [](const httplib::Request& req, httplib::Response& res) {
+        int i = std::atoi(req.get_param_value("i").c_str());
+        std::string q = req.get_param_value("q");
+        if (q.empty() || q.size() > 200) { jsonErr(res, 400, "Missing search words"); return; }
+        std::string tmpl;
+        { std::lock_guard<std::mutex> lk(g_sitesMx);
+          if (i < 0 || i >= static_cast<int>(g_sites.size())) { jsonErr(res, 404, "Unknown search site"); return; }
+          tmpl = g_sites[i]; }
+        size_t at = tmpl.find("{q}");
+        std::string full = tmpl.substr(0, at) + urlEnc(q) + tmpl.substr(at + 3);
+        std::string body, err; int code = 0;
+        if (!siteGet(full, body, code, 3 * 1024 * 1024, err)) { jsonErr(res, 502, err); return; }
+        if (code != 200) { jsonErr(res, 502, "The site answered HTTP " + std::to_string(code)); return; }
+        res.set_content(body, "text/plain; charset=utf-8");
+    });
     svr.Get("/api/torrent/info", [](const httplib::Request&, httplib::Response& res) {
         std::lock_guard<std::mutex> lk(g_cfgMx);
         loadCfg();

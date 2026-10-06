@@ -12,6 +12,9 @@
 //   permissions.torrent  true => the plugin's UI may call hesper.torrent.search / .play: Hesper looks up
 //                        releases with the provider YOU set in Settings and streams the one picked.
 //                        The plugin never sees the provider address or key, only the results.
+//                        A plugin with this permission may also (a) play a https .torrent link from a host it
+//                        listed under network, and (b) have Hesper's server fetch its allow-listed network
+//                        hosts when the browser blocks the request (CORS).
 //   permissions.library  true => the plugin's Python backend may read the titles and years
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
@@ -392,6 +395,16 @@ class HesperSandbox {
         this._torrentGuard();
         const source = typeof a.source === 'string' ? a.source : '';
         if (!/^(magnet:\?|https?:\/\/)/i.test(source) || source.length > 4000) throw new Error('invalid release');
+        if (!/^magnet:\?/i.test(source)) {
+            // A .torrent link: only https, and only from a host this plugin declared in plugin.json.
+            // Hesper's server then agrees to download it (it refuses links nobody vouched for).
+            let ru;
+            try { ru = new URL(source); } catch (e) { throw new Error('invalid release'); }
+            if (ru.protocol !== 'https:' || !HesperSandbox.hostAllowed(ru.hostname, this.manifest.permissions.network)) {
+                throw new Error(`release host "${ru.hostname}" is not in this plugin's network permissions`);
+            }
+            await window.HesperTorrent.allowLink(source);
+        }
         const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
         await window.HesperTorrent.open({
             source, title: typeof a.title === 'string' ? a.title.slice(0, 200) : '',
@@ -415,7 +428,15 @@ class HesperSandbox {
         const timer = setTimeout(() => ctl.abort(), L.fetchTimeoutMs);
         try {
             // No cookies, no credentials, and a redirect to another host is not followed.
-            const res = await fetch(u.href, { credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal });
+            let res;
+            try {
+                res = await fetch(u.href, { credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal });
+            } catch (e) {
+                // Browser refused (most sites do not send CORS headers). Plugins with the torrent permission
+                // may ask Hesper's server to fetch the same, already allow-listed address instead.
+                if (!(e instanceof TypeError) || !this.manifest.permissions.torrent) throw e;
+                res = await fetch('/api/torrent/fetch?url=' + encodeURIComponent(u.href), { cache: 'no-store', signal: ctl.signal });
+            }
             if (!res.ok) throw new Error('HTTP ' + res.status);
             const declared = Number(res.headers.get('content-length') || 0);
             if (declared > L.maxFetchBytes) throw new Error('response too large');
