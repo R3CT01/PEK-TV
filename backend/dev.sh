@@ -63,13 +63,24 @@ if [ "$1" != "--run" ]; then
         SMB_SRC="$SMB_SRC vfs_nfs.cpp"
         echo "==> NFS: on"
     fi
+    # Torrent streaming (libtorrent-rasterbar): AUTO-DETECTED like SMB/NFS. HESPER_TORRENT=0|1 overrides.
+    # Without it the release search still works; only playing a torrent reports "not built in".
+    TORRENT_FLAGS=""
+    want_torrent="${HESPER_TORRENT:-auto}"
+    if [ "$want_torrent" = "auto" ]; then
+        if has_header libtorrent/session.hpp; then want_torrent=1; else want_torrent=0; echo "==> Torrents: libtorrent not found, building without torrent playback"; fi
+    fi
+    if [ "$want_torrent" = "1" ]; then
+        TORRENT_FLAGS="-DHESPER_TORRENT $(pkg-config --cflags --libs libtorrent-rasterbar 2>/dev/null || echo -ltorrent-rasterbar)"
+        echo "==> Torrents: on"
+    fi
     g++ -std=c++17 -O1 \
         -DCPPHTTPLIB_OPENSSL_SUPPORT \
-        core.cpp server.cpp media_scanner.cpp playback.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp $SMB_SRC \
+        core.cpp server.cpp media_scanner.cpp playback.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp torrent.cpp torrent_routes.cpp $SMB_SRC \
         -o "$ROOT/bin/hesper" \
         $(python3-config --cflags --embed) \
         $(python3-config --ldflags --embed) \
-        -lssl -lcrypto -lpthread $SMB_FLAGS
+        -lssl -lcrypto -lpthread $SMB_FLAGS $TORRENT_FLAGS
 fi
 
 # Android blocks executing files on shared storage (/storage/emulated/0,

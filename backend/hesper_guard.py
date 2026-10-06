@@ -134,6 +134,8 @@ def load_manifest(folder):
             pass
     if not isinstance(perms.get("library", False), bool):
         return None, "'permissions.library' must be true or false"
+    if not isinstance(perms.get("torrent", False), bool):
+        return None, "'permissions.torrent' must be true or false"
     return data, None
 
 

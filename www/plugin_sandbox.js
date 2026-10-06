@@ -9,6 +9,9 @@
 // The only way out is postMessage to this file, which enforces plugin.json:
 //   permissions.network  list of https host names the plugin may fetch from
 //   permissions.storage  true => small private key/value store + its own data/ files
+//   permissions.torrent  true => the plugin's UI may call hesper.torrent.search / .play: Hesper looks up
+//                        releases with the provider YOU set in Settings and streams the one picked.
+//                        The plugin never sees the provider address or key, only the results.
 //   permissions.library  true => the plugin's Python backend may read the titles and years
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
@@ -53,12 +56,12 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
 
-    function request(op, args) {
+    function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
             var id = nextReq++;
             var timer = setTimeout(function () {
                 pending.delete(id); reject(new Error('Hesper did not answer in time'));
-            }, 15000);
+            }, timeoutMs || 15000);
             pending.set(id, { resolve: resolve, reject: reject, timer: timer });
             post({ t: 'req', id: id, op: op, args: args });
         });
@@ -131,9 +134,24 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
             set: function (k, v) { return request('storageSet', { key: str(k), value: str(v) }); },
             remove: function (k) { return request('storageRemove', { key: str(k) }); }
         },
+        // Needs "torrent": true in plugin.json. search -> [{title, source, sizeText, seeders, quality, pack}];
+        // play opens Hesper's buffering box and then the player, and resolves once the player is open.
+        torrent: {
+            info: function () { return request('torrentInfo', {}, 20000).then(JSON.parse); },
+            search: function (q) {
+                q = q || {};
+                return request('torrentSearch', { kind: str(q.kind), title: str(q.title), year: Number(q.year) || 0,
+                    season: Number(q.season) || 0, episode: Number(q.episode) || 0 }, 45000).then(JSON.parse);
+            },
+            play: function (o) {
+                o = o || {};
+                return request('torrentPlay', { source: str(o.source), title: str(o.title),
+                    season: Number(o.season) || 0, episode: Number(o.episode) || 0 }, 15 * 60 * 1000);
+            }
+        },
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
-    Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api);
+    Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent); Object.freeze(api);
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });
 
     window.addEventListener('message', function (ev) {
@@ -178,7 +196,7 @@ class HesperSandbox {
     static normalizeManifest(raw) {
         const out = {
             name: null, version: null,
-            permissions: { network: [], storage: false, library: false },
+            permissions: { network: [], storage: false, library: false, torrent: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
         if (!raw || typeof raw !== 'object') return out;
@@ -191,6 +209,7 @@ class HesperSandbox {
         }
         out.permissions.storage = perms.storage === true;
         out.permissions.library = perms.library === true;
+        out.permissions.torrent = perms.torrent === true;
         const u = raw.ui && typeof raw.ui === 'object' ? raw.ui : {};
         if (typeof u.navTab === 'string') out.ui.navTab = u.navTab.replace(/[^A-Za-z0-9 &+'.-]/g, '').trim().slice(0, 20);
         out.ui.reloadOnInstall = u.reloadOnInstall === true;
@@ -330,11 +349,55 @@ class HesperSandbox {
                 case 'storageGet': reply(true, this._storageGet(a.key)); break;
                 case 'storageSet': reply(true, this._storageSet(a.key, a.value)); break;
                 case 'storageRemove': reply(true, this._storageRemove(a.key)); break;
+                case 'torrentInfo': reply(true, await this._torrentInfo()); break;
+                case 'torrentSearch': reply(true, await this._torrentSearch(a)); break;
+                case 'torrentPlay': reply(true, await this._torrentPlay(a)); break;
                 default: throw new Error('unknown request');
             }
         } catch (err) {
             reply(false, (err && err.message) || 'denied');
         }
+    }
+
+    // ---------------- torrent (permission "torrent") ----------------
+    // Hesper does the work; the plugin only gets search results and the result of play().
+
+    _torrentGuard() {
+        if (!this.manifest.permissions.torrent) throw new Error("plugin.json does not request the 'torrent' permission");
+        if (!window.HesperTorrent) throw new Error('Torrent playback is not available in this Hesper');
+    }
+
+    async _torrentInfo() {
+        this._torrentGuard();
+        return JSON.stringify(await window.HesperTorrent.info());
+    }
+
+    async _torrentSearch(a) {
+        this._torrentGuard();
+        const kind = a.kind === 'episode' ? 'episode' : 'movie';
+        const title = typeof a.title === 'string' ? a.title.trim().slice(0, 200) : '';
+        if (!title) throw new Error('missing title');
+        const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
+        const results = await window.HesperTorrent.search({
+            kind, title, year: int(a.year, 2200), season: int(a.season, 200), episode: int(a.episode, 2000)
+        });
+        // Only plain data goes back to the plugin.
+        return JSON.stringify(results.slice(0, 25).map(r => ({
+            title: String(r.title || '').slice(0, 300), source: String(r.source || '').slice(0, 4000),
+            sizeText: String(r.sizeText || ''), seeders: r.seeders | 0, quality: r.quality | 0, pack: r.pack === true
+        })));
+    }
+
+    async _torrentPlay(a) {
+        this._torrentGuard();
+        const source = typeof a.source === 'string' ? a.source : '';
+        if (!/^(magnet:\?|https?:\/\/)/i.test(source) || source.length > 4000) throw new Error('invalid release');
+        const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
+        await window.HesperTorrent.open({
+            source, title: typeof a.title === 'string' ? a.title.slice(0, 200) : '',
+            season: int(a.season, 200), episode: int(a.episode, 2000)
+        });
+        return true;
     }
 
     async _fetch(url) {

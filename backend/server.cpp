@@ -1,5 +1,6 @@
 #include "server.h"
 #include "playback.h"
+#include "torrent_routes.h"
 #include "discovery.h"
 #include "vfs.h"
 #include "httplib.h"
@@ -308,6 +309,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     });
 
     registerPlaybackRoutes(svr, scanner);   // /api/stream/<id>
+    registerTorrentRoutes(svr);             // /api/torrent/* (search, start, stream)
     // 1a. Serve plugin folders (ui.js / backend.js) at /plugins — registered
     //     before the catch-all below so it's matched directly, without
     //     needing to fail against www_dir first.
