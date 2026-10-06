@@ -282,6 +282,24 @@ bool splitUrl(const std::string& url, Parts& o) {
     return !o.host.empty() && o.port > 0;
 }
 
+// Android has no CA store OpenSSL can find on its own: use the bundle shipped inside the app
+// (SSL_CERT_FILE) and the system store (SSL_CERT_DIR) the way the TMDb proxy client does.
+// No-op where those variables are not set (desktop builds keep OpenSSL's defaults).
+#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
+void applyCaBundle(httplib::SSLClient& c) {
+    const char* f = std::getenv("SSL_CERT_FILE");
+    const char* d = std::getenv("SSL_CERT_DIR");
+    bool hasF = f && *f, hasD = d && *d;
+    if (hasF || hasD) c.set_ca_cert_path(hasF ? f : "", hasD ? d : "");
+}
+#endif
+
+// A short reason for a failed request ("SSL server verification failed", "Connection"...), so the
+// plugin can show something more useful than a bare 502.
+std::string whyFailed(const httplib::Result& r) {
+    return httplib::to_string(r.error());
+}
+
 // GET url (+ extra query) and return the body. status code written to `code`.
 bool httpGet(const std::string& url, std::string& body, int& code, size_t maxBytes, std::string& err) {
     Parts u;
@@ -296,6 +314,7 @@ bool httpGet(const std::string& url, std::string& body, int& code, size_t maxByt
     if (u.scheme == "https") {
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
         httplib::SSLClient cli(u.host, u.port);
+        applyCaBundle(cli);
         run(cli);
 #else
         err = "This build has no HTTPS support"; return false;
@@ -304,7 +323,7 @@ bool httpGet(const std::string& url, std::string& body, int& code, size_t maxByt
         httplib::Client cli(u.host, u.port);
         run(cli);
     }
-    if (!r) { err = "Could not reach the search provider"; return false; }
+    if (!r) { err = "Could not reach the search provider (" + whyFailed(r) + ")"; return false; }
     code = r->status;
     if (r->body.size() > maxBytes) { err = "Response too large"; return false; }
     body = r->body;
@@ -354,11 +373,12 @@ bool siteGet(const std::string& url, std::string& body, int& code, size_t maxByt
     };
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
     httplib::SSLClient cli(u.host, u.port);
+    applyCaBundle(cli);
     run(cli);
 #else
     err = "This build has no HTTPS support"; return false;
 #endif
-    if (!r) { err = "Could not reach the site"; return false; }
+    if (!r) { err = "Could not reach the site (" + whyFailed(r) + ")"; return false; }
     code = r->status;
     if (r->body.size() > maxBytes) { err = "Response too large"; return false; }
     body = r->body;
@@ -434,7 +454,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
         if (!publicHttpsUrl(url)) { jsonErr(res, 400, "Not an allowed address"); return; }
         std::string body, err; int code = 0;
         if (!siteGet(url, body, code, 1000000, err)) { jsonErr(res, 502, err); return; }
-        if (code != 200) { jsonErr(res, 502, "HTTP " + std::to_string(code)); return; }
+        if (code != 200) { jsonErr(res, 502, "The site answered HTTP " + std::to_string(code)); return; }
         res.set_content(body, "text/plain; charset=utf-8");
     });
 
