@@ -20,6 +20,7 @@
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
 //                        closeOnRemove. They only change how Hesper's own screens behave.
 //
+// hero: a wide backdrop billboard (picture + title + blurb + buttons). Same image rules as posterCard.
 // Images: posterCard art is loaded by Hesper's page (not by the frame), and only from https
 // hosts the plugin listed under permissions.network.
 //
@@ -90,6 +91,16 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         row:     function () { return { t: 'row', children: flat(arguments) }; },
         posterCard: function (title, sub, posterUrl, fn, opts) {
             return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), autofocus: str(opts && opts.autofocus), on: on(fn) };
+        },
+        // A wide billboard: backdrop picture, title, one line of facts, a short blurb and up to 3 buttons.
+        // image must be an https picture from a host the plugin listed under network (same rule as posterCard).
+        hero:    function (o) {
+            o = o || {};
+            return { t: 'hero', title: str(o.title), meta: str(o.meta), text: str(o.text), image: str(o.image), badge: str(o.badge),
+                actions: (Array.isArray(o.actions) ? o.actions : []).slice(0, 3).map(function (a) {
+                    a = a || {};
+                    return { label: str(a.label), on: on(a.on), primary: !!a.primary, autofocus: str(a.autofocus) };
+                }) };
         },
         grid:    function (children, opts) {
             return { t: 'grid', children: flat([children]), minColWidth: str(opts && opts.minColWidth), scroll: !!(opts && opts.scroll) };
@@ -428,16 +439,28 @@ class HesperSandbox {
         const timer = setTimeout(() => ctl.abort(), L.fetchTimeoutMs);
         try {
             // No cookies, no credentials, and a redirect to another host is not followed.
-            let res;
+            let res, viaServer = false;
             try {
                 res = await fetch(u.href, { credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal });
             } catch (e) {
                 // Browser refused (most sites do not send CORS headers). Plugins with the torrent permission
                 // may ask Hesper's server to fetch the same, already allow-listed address instead.
                 if (!(e instanceof TypeError) || !this.manifest.permissions.torrent) throw e;
+                viaServer = true;
                 res = await fetch('/api/torrent/fetch?url=' + encodeURIComponent(u.href), { cache: 'no-store', signal: ctl.signal });
             }
-            if (!res.ok) throw new Error('HTTP ' + res.status);
+            if (!res.ok) {
+                // Hesper's server explains why it could not get the page ({"error": "..."}): pass that on,
+                // so a bare "HTTP 502" becomes e.g. "HTTP 502 - Could not reach the site (SSL server verification failed)".
+                let why = '';
+                if (viaServer) {
+                    try {
+                        const j = JSON.parse((await res.text()).slice(0, 2000));
+                        if (j && typeof j.error === 'string') why = ' - ' + j.error.replace(/\s+/g, ' ').slice(0, 110);
+                    } catch (e2) { /* no explanation available */ }
+                }
+                throw new Error('HTTP ' + res.status + why);
+            }
             const declared = Number(res.headers.get('content-length') || 0);
             if (declared > L.maxFetchBytes) throw new Error('response too large');
             const text = await res.text();
@@ -685,6 +708,34 @@ class HesperSandbox {
                         }
                     }, badge));
                 }
+                return el;
+            }
+            case 'hero': {
+                const img = this._imageUrl(n.image);
+                const actions = (Array.isArray(n.actions) ? n.actions : []).slice(0, 3).map(a => {
+                    if (!a || typeof a !== 'object') return null;
+                    const b = ui.button(s(a.label).slice(0, 40), click(a.on) || (() => {}), { variant: a.primary === true ? 'primary' : 'secondary' });
+                    if (a.autofocus && typeof a.autofocus === 'string' && !budget.af) budget.af = { key: a.autofocus.slice(0, 60), el: b };
+                    return b;
+                }).filter(Boolean);
+                budget.nodes += actions.length + 4;
+                const badge = s(n.badge).slice(0, 30), meta = s(n.meta).slice(0, 160), text = s(n.text).slice(0, 600);
+                const el = createElement('div', { className: 'sx-hero' + (img ? '' : ' sx-hero-noimg') });
+                if (img) {
+                    const im = createElement('img', { className: 'sx-hero-img', src: img, alt: '' });
+                    im.setAttribute('referrerpolicy', 'no-referrer');
+                    im.setAttribute('decoding', 'async');
+                    im.setAttribute('draggable', 'false');
+                    im.addEventListener('error', () => { if (im.parentNode) im.parentNode.removeChild(im); el.classList.add('sx-hero-noimg'); });
+                    el.appendChild(im);
+                }
+                el.appendChild(createElement('div', { className: 'sx-hero-shade' }));
+                el.appendChild(createElement('div', { className: 'sx-hero-body' },
+                    badge ? createElement('span', { className: 'sx-hero-badge' }, badge) : null,
+                    createElement('h2', { className: 'sx-hero-title' }, s(n.title).slice(0, 120)),
+                    meta ? createElement('p', { className: 'sx-hero-meta' }, meta) : null,
+                    text ? createElement('p', { className: 'sx-hero-text' }, text) : null,
+                    actions.length ? createElement('div', { className: 'sx-hero-actions' }, ...actions) : null));
                 return el;
             }
             case 'grid': {
