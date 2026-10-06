@@ -356,8 +356,9 @@ std::string add(const std::string& source, int season, int episode, std::string&
 std::string addFile(const std::string& bytes, int season, int episode, std::string& err) {
     lt::error_code ec;
     lt::add_torrent_params p;
+    // libtorrent 2.x: the buffer constructor is tagged with from_span_t.
     p.ti = std::make_shared<lt::torrent_info>(
-        lt::span<char const>(bytes.data(), static_cast<std::ptrdiff_t>(bytes.size())), ec);
+        lt::span<char const>(bytes.data(), static_cast<std::ptrdiff_t>(bytes.size())), ec, lt::from_span_t());
     if (ec) { err = "Not a valid .torrent file"; return ""; }
     return addParams(std::move(p), season, episode, err);
 }

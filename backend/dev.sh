@@ -17,6 +17,10 @@
 #
 # Needs (Termux): pkg install clang python openssl, and httplib.h in the
 # source folder. For TMDb: export TMDB_API_KEY=your_key (before running).
+#
+# Search sites: this version adds /api/torrent/sites, /site, /allow and /fetch (torrent_routes.cpp).
+# They fetch pages over HTTPS, so OpenSSL is REQUIRED (checked below). Edit www/search_sites.js and restart;
+# rebuild only when .cpp files change.
 
 set -e
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -32,6 +36,9 @@ mkdir -p "$ROOT/bin"
 
 if [ "$1" != "--run" ]; then
     echo "==> Building to $ROOT/bin/hesper ..."
+    [ -f httplib.h ] || { echo "!! httplib.h is missing from $SRC_DIR"; exit 1; }
+    command -v python3-config >/dev/null 2>&1 || { echo "!! python3-config not found (pkg install python)"; exit 1; }
+    echo "#include <openssl/ssl.h>" | g++ -x c++ -fsyntax-only - >/dev/null 2>&1 || { echo "!! OpenSSL headers not found (pkg install openssl). Search sites need HTTPS."; exit 1; }
     SMB_FLAGS=""
     SMB_SRC=""
     if [ "$HESPER_SMB" = "1" ]; then
@@ -63,5 +70,6 @@ RUN_COPY="$HOME/.hesper_run"
 cp "$ROOT/bin/hesper" "$RUN_COPY"
 chmod +x "$RUN_COPY"
 
+echo "==> Search sites: edit www/search_sites.js (restart to apply)"
 echo "==> Running (Ctrl+C to stop)"
 "$RUN_COPY"

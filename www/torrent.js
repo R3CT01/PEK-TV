@@ -71,6 +71,8 @@
         info() { return call(API + '/info'); },
         getSettings() { return call(API + '/settings'); },
         saveSettings(url, key) { return post(API + '/settings', { url: url || '', key: key || '' }); },
+        // Lets the server download this .torrent link when it is started (called by plugin_sandbox.js only).
+        allowLink(url) { return post(API + '/allow', { url: String(url || '') }); },
 
         // q: { kind: 'movie'|'episode', title, year, season, episode }  ->  [{title, source, sizeText, seeders, quality, pack}]
         async search(q) {
