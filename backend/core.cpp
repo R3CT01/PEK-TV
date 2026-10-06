@@ -9,6 +9,7 @@
 #include "server.h"
 #include "media_scanner.h"
 #include "vfs.h"
+#include "torrent_routes.h"
 
 namespace fs = std::filesystem;
 
@@ -209,6 +210,7 @@ int main(int argc, char* argv[]) {
         std::error_code ec;
         fs::create_directories(dir, ec);
         vfs::init(dir + "/net_credentials.tsv");
+        setTorrentDataDir(dir);   // torrent.json + temporary torrent cache
     }
 
     MediaScanner scanner(

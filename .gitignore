@@ -31,3 +31,7 @@ Thumbs.db
 *.swp
 *~
 .nomedia
+
+# optional torrent build inputs (cloned by the workflow)
+android/libtorrent/
+android/boost/

@@ -113,6 +113,7 @@ class MainAppPluginsMethods {
             net,
             p.storage ? 'Can keep its own private data' : null,
             p.library ? 'Its Python code can read the titles and years in your library (never file names or folders).' : null,
+            p.torrent ? 'Can search for releases and start torrent streams through Hesper (it never sees your provider key). Streams download and upload from your connection.' : null,
             p.ui && p.ui.navTab ? `Adds a \u201c${p.ui.navTab}\u201d tab to Hesper.` : null,
             p.ui && p.ui.reloadOnInstall ? 'Hesper reloads right after installing. Then close and reopen Hesper once so the plugin\u2019s Python part starts.' : null,
             p.ui && p.ui.closeOnRemove ? 'Removing it later means closing Hesper once to restore the normal layout.' : null,

@@ -11,7 +11,7 @@ class MainAppPlaybackMethods {
 
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
-    _openWebPlayer(url, title, backend, track) {
+    _openWebPlayer(url, title, backend, track, onCloseCb) {
         if (this._player) {
             if (this._player.mini) this._player.close();   // starting something new replaces the mini player
             else return;
@@ -22,6 +22,7 @@ class MainAppPlaybackMethods {
             backend: backend || new window.HtmlVideoBackend(),
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
+                if (typeof onCloseCb === 'function') { try { onCloseCb(); } catch (e) { /* ignore */ } }
                 this._player = null;
                 this._playingId = null;
                 const prog = this._readProgress();
@@ -107,6 +108,23 @@ class MainAppPlaybackMethods {
             }
         } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
         if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track); return; }
+        window.open(url, '_blank');
+    }
+
+    // Plays any stream URL that is not a library file (torrent streams). There is no library id,
+    // so no resume position is kept. onClose runs when the player is closed (the caller cleans up).
+    playStream(url, title, onClose) {
+        if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
+            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), null, onClose);
+            return;
+        }
+        try {
+            if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
+                window.HesperAndroid.play(url, title || '', this._themeForNative());
+                return;
+            }
+        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, null, onClose); return; }
         window.open(url, '_blank');
     }
 

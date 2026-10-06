@@ -88,3 +88,25 @@ The zip must contain `plugin.json` and `ui.js`, either at the top of the zip or 
 On Android the plugins folder is private to the app, so this is the way to add plugins. On a computer or
 Termux you can still drop a folder into `plugins/` yourself. A build that must not install code from files
 (for example a store build) can start with `HESPER_ALLOW_PLUGIN_BACKEND=0`, which refuses `.py` files.
+
+
+## The `torrent` permission
+
+```json
+"permissions": { "network": ["api.themoviedb.org"], "torrent": true }
+```
+
+A plugin with `"torrent": true` may call, from its UI code:
+
+- `hesper.torrent.info()` -> `{available, configured}` (is the engine built in, is a provider set)
+- `hesper.torrent.search({kind: 'movie' | 'episode', title, year, season, episode})` -> array of
+  `{title, source, sizeText, seeders, quality, pack}`, best first
+- `hesper.torrent.play({source, title, season, episode})` -> resolves once the player is open.
+  Hesper shows its own buffering box (with Cancel) and opens the player when enough is downloaded.
+
+What the plugin does NOT get: the search provider's address or API key (set by the user in Settings >
+Torrents and kept in Hesper), the downloaded files, or any other Hesper API. `source` must be a
+`magnet:?` link or a `source` value returned by `search()`. The install screen lists this permission.
+
+Hesper ships with no search provider. The engine (libtorrent) is optional at build time: without it,
+`search` still works and `play` fails with "not built in".

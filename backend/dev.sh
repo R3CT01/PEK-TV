@@ -42,13 +42,18 @@ if [ "$1" != "--run" ]; then
         SMB_FLAGS="$SMB_FLAGS -DHESPER_NFS -lnfs"
         SMB_SRC="$SMB_SRC vfs_nfs.cpp"
     fi
+    # Torrent playback (needs libtorrent-rasterbar installed): HESPER_TORRENT=1 bash dev.sh
+    TORRENT_FLAGS=""
+    if [ "$HESPER_TORRENT" = "1" ]; then
+        TORRENT_FLAGS="-DHESPER_TORRENT $(pkg-config --cflags --libs libtorrent-rasterbar 2>/dev/null || echo -ltorrent-rasterbar)"
+    fi
     g++ -std=c++17 -O1 \
         -DCPPHTTPLIB_OPENSSL_SUPPORT \
-        core.cpp server.cpp media_scanner.cpp playback.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp $SMB_SRC \
+        core.cpp server.cpp media_scanner.cpp playback.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp torrent.cpp torrent_routes.cpp $SMB_SRC \
         -o "$ROOT/bin/hesper" \
         $(python3-config --cflags --embed) \
         $(python3-config --ldflags --embed) \
-        -lssl -lcrypto -lpthread $SMB_FLAGS
+        -lssl -lcrypto -lpthread $SMB_FLAGS $TORRENT_FLAGS
 fi
 
 # Android blocks executing files on shared storage (/storage/emulated/0,

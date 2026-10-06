@@ -165,6 +165,7 @@ class MainApp extends HesperComponent {
                     )
                 ),
                 this._renderSyncSettings(),
+                this._renderTorrentSettings(),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Appearance & Themes'),
                     createElement('button', {
@@ -317,6 +318,7 @@ class MainApp extends HesperComponent {
             this._renderPicker(),
             this._renderNetPicker(),
             this._renderPluginInstallModal(),
+            this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
             this._renderBusy(),
             this._renderAppCloseModal()
@@ -334,6 +336,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const engine = new HesperEngine(appRoot);
     const app = new MainApp({ engine });
+    // What sandboxed plugins (via plugin_sandbox.js) are allowed to ask the app to do.
+    window.HesperHost = { playStream: (url, title, onClose) => app.playStream(url, title, onClose) };
     engine.mount(app);
     if (typeof app.componentDidMount === 'function') {
         app.componentDidMount();

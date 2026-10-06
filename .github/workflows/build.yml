@@ -63,6 +63,17 @@ jobs:
         continue-on-error: true
         run: git clone --depth 1 https://github.com/sahlberg/libnfs.git android/libnfs
 
+      # Torrent streaming (optional). libtorrent + the Boost headers it needs. If this step or the
+      # "with torrent" build below fails, the app is rebuilt without torrent playback (the release
+      # search still works); nothing else is affected.
+      - name: Get libtorrent and Boost headers
+        continue-on-error: true
+        run: |
+          git clone --depth 1 --branch RC_2_0 --recurse-submodules https://github.com/arvidn/libtorrent.git android/libtorrent
+          curl -fsSL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz -o /tmp/boost.tgz
+          mkdir -p android/boost
+          tar -xzf /tmp/boost.tgz -C android/boost --strip-components=1 boost_1_86_0/boost
+
       - name: Copy the web frontend into the app
         run: |
           mkdir -p android/app/src/main/assets/hesper
@@ -70,7 +81,14 @@ jobs:
           find android/app/src/main/assets -name __pycache__ -type d -exec rm -rf {} +
           curl -fsSL https://curl.se/ca/cacert.pem -o android/app/src/main/assets/hesper/cacert.pem
 
-      - name: Build debug APK
+      - name: Build debug APK (with torrent streaming)
+        id: with_torrent
+        continue-on-error: true
+        working-directory: android
+        run: gradle assembleDebug -PhesperTorrent=true --no-daemon --stacktrace
+
+      - name: Build debug APK (without torrent streaming - fallback)
+        if: steps.with_torrent.outcome != 'success'
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
 
