@@ -5,18 +5,25 @@
 
 class MainAppPluginsMethods {
 
+    // "Install plugin from .zip": opens Hesper's own file picker (no system picker needed, so it
+    // also works on TV boxes that have none). Phones and desktops can still reach the system
+    // picker from the bottom of the list.
     async startPluginInstall() {
-        if (this.state.pluginInstall) return;
-        const { ui } = this.props.engine;
-        let file = null;
+        if (this.state.pluginInstall || this.state.pluginPick) return;
+        this.setState({ pluginPick: { stage: 'home', loading: true, error: null, sources: [], hosts: [], scanning: false } });
+        let sources = [];
         try {
-            file = await HesperPluginInstaller.pickZip();
-        } catch (err) {
-            ui.toast("Couldn't open the file picker on this device.");
-            return;
-        }
-        if (!file) return;
+            const res = await fetch('/api/sources');
+            const data = await res.json();
+            sources = data.sources || [];
+        } catch (e) { /* the list just starts without library folders */ }
+        const pp = this.state.pluginPick;
+        if (!pp) return;
+        this.setState({ pluginPick: Object.assign({}, pp, { loading: false, sources }) });
+    }
 
+    // Reads the chosen .zip, shows what it asks for, and checks it with the server.
+    async _checkPluginFile(file) {
         this.setState({ pluginInstall: { stage: 'checking' } });
         try {
             const prep = await HesperPluginInstaller.prepare(file);
@@ -25,6 +32,169 @@ class MainAppPluginsMethods {
         } catch (err) {
             this.setState({ pluginInstall: { stage: 'error', error: String((err && err.message) || err) } });
         }
+    }
+
+    _pluginPickCanSystem() {
+        const a = window.HesperAndroid;
+        if (!a) return true;                                           // desktop browser
+        return typeof a.canPickFiles === 'function' ? !!a.canPickFiles() : true;
+    }
+
+    async pluginPickSystem() {
+        const { ui } = this.props.engine;
+        this.closePluginPick();
+        let file = null;
+        try {
+            file = await HesperPluginInstaller.pickZip();
+        } catch (err) {
+            ui.toast("Couldn't open the system file picker on this device.");
+            return;
+        }
+        if (!file) return;
+        await this._checkPluginFile(file);
+    }
+
+    async pluginPickBrowse(path) {
+        const pp = this.state.pluginPick;
+        if (!pp || pp.loading) return;
+        this.setState({ pluginPick: Object.assign({}, pp, { loading: true, error: null }) });
+        let data;
+        try {
+            const res = await fetch('/api/plugins/browse', { method: 'POST', body: new URLSearchParams({ path }) });
+            data = await res.json();
+        } catch (e) {
+            data = { ok: false, error: "Couldn't reach Hesper's server." };
+        }
+        const cur = this.state.pluginPick;
+        if (!cur) return;
+        if (!data || !data.ok) {
+            const msg = data && data.auth
+                ? 'This device asks for a login. Add it once as a media source in Settings, then try again.'
+                : ((data && data.error) || "Couldn't open that location.");
+            this.setState({ pluginPick: Object.assign({}, cur, { loading: false, error: msg }) });
+            return;
+        }
+        this.setState({ pluginPick: Object.assign({}, cur, {
+            stage: 'browse', loading: false, error: null,
+            path: data.path, parent: data.parent || '', entries: data.entries || []
+        }) });
+    }
+
+    async pluginPickChoose(entry) {
+        const pp = this.state.pluginPick;
+        if (!pp || pp.loading) return;
+        this.setState({ pluginPick: Object.assign({}, pp, { loading: true, error: null }) });
+        let file;
+        try {
+            file = await HesperPluginInstaller.fetchZip(entry.path);
+        } catch (err) {
+            const cur = this.state.pluginPick;
+            if (cur) this.setState({ pluginPick: Object.assign({}, cur, { loading: false, error: String((err && err.message) || err) }) });
+            return;
+        }
+        if (!this.state.pluginPick) return;
+        this._multicast(false);
+        this.setState({ pluginPick: null });
+        await this._checkPluginFile(file);
+    }
+
+    async pluginPickFindNetwork() {
+        const pp = this.state.pluginPick;
+        if (!pp || pp.scanning) return;
+        this._ppSig = '';
+        this.setState({ pluginPick: Object.assign({}, pp, { scanning: true, error: null }) });
+        this._multicast(true);
+        try { await fetch('/api/discover', { method: 'POST' }); } catch (e) { /* polled below anyway */ }
+        this._pluginPickPoll(0);
+    }
+
+    async _pluginPickPoll(n) {
+        try {
+            const res = await fetch('/api/discover');
+            const data = await res.json();
+            const pp = this.state.pluginPick;
+            if (!pp) { this._multicast(false); return; }
+            const hosts = data.hosts || [];
+            const scanning = !!data.scanning;
+            // Re-render only when something visible changed (every render replays the fade-in).
+            const sig = JSON.stringify([hosts, scanning]);
+            if (sig !== this._ppSig) {
+                this._ppSig = sig;
+                this.setState({ pluginPick: Object.assign({}, pp, { hosts, scanning }) });
+            }
+            if (scanning && n < 20) { setTimeout(() => this._pluginPickPoll(n + 1), 1000); return; }
+        } catch (e) { /* stop searching */ }
+        this._multicast(false);
+        const pp = this.state.pluginPick;
+        if (pp && pp.scanning) this.setState({ pluginPick: Object.assign({}, pp, { scanning: false }) });
+    }
+
+    pluginPickHome() {
+        const pp = this.state.pluginPick;
+        if (!pp || pp.loading) return;
+        this.setState({ pluginPick: Object.assign({}, pp, { stage: 'home', error: null }) });
+    }
+
+    // Back: up one folder, then to the start list, then close.
+    pluginPickBack() {
+        const pp = this.state.pluginPick;
+        if (!pp) return;
+        if (pp.loading) return;
+        if (pp.stage === 'browse') {
+            if (pp.parent && pp.parent !== pp.path) { this.pluginPickBrowse(pp.parent); return; }
+            this.pluginPickHome();
+            return;
+        }
+        this.closePluginPick();
+    }
+
+    closePluginPick() {
+        this._multicast(false);
+        this.setState({ pluginPick: null });
+    }
+
+    _renderPluginPickModal() {
+        const pp = this.state.pluginPick;
+        if (!pp) return null;
+        const { createElement, ui } = this.props.engine;
+        const close = () => this.closePluginPick();
+        const err = pp.error ? createElement('p', { className: 'browse-error' }, pp.error) : null;
+        const sizeText = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+        const loading = pp.loading ? this._loadingBlock('Please wait\u2026') : null;
+
+        if (pp.stage === 'browse') {
+            const rows = [];
+            rows.push(ui.listRow('.. (back)', pp.parent && pp.parent !== pp.path ? pp.parent : 'Back to the start', () => this.pluginPickBack()));
+            (pp.entries || []).forEach(e => {
+                if (e.dir) rows.push(ui.listRow(e.name + '/', null, () => this.pluginPickBrowse(e.path)));
+                else rows.push(ui.listRow(e.name, sizeText(e.size || 0), () => this.pluginPickChoose(e)));
+            });
+            if (!(pp.entries || []).length) rows.push(createElement('p', { className: 'sub' }, 'No folders or .zip files here.'));
+            const body = createElement('div', {},
+                createElement('div', { className: 'browse-path' }, pp.path || ''),
+                err,
+                loading,
+                createElement('div', { className: 'browse-list plugin-list' }, ...rows)
+            );
+            return ui.modal('Choose a plugin .zip', body, close);
+        }
+
+        // Start list: library folders, this device, and the network.
+        const rows = [];
+        (pp.sources || []).forEach(src => rows.push(ui.listRow(String(src), 'Library folder', () => this.pluginPickBrowse(String(src)))));
+        rows.push(ui.listRow('This device', 'Storage on this phone or box', () => this.pluginPickBrowse('@local')));
+        rows.push(ui.listRow(pp.scanning ? 'Searching the network\u2026' : 'Search the network', 'Find shared folders on your Wi-Fi or Ethernet', () => this.pluginPickFindNetwork()));
+        (pp.hosts || []).forEach(h => rows.push(ui.listRow(h.name || h.address, h.label || h.protocol || '', () => this.pluginPickBrowse(h.url))));
+        if (this._pluginPickCanSystem()) {
+            rows.push(ui.listRow('Use the system file picker', 'Opens this device\u2019s own file chooser', () => this.pluginPickSystem()));
+        }
+        const body = createElement('div', {},
+            createElement('p', { className: 'sub' }, 'Pick the plugin\u2019s .zip file. Put it in a folder on your network or on this device first.'),
+            err,
+            loading,
+            createElement('div', { className: 'browse-list plugin-list' }, ...rows)
+        );
+        return ui.modal('Choose a plugin .zip', body, close);
     }
 
     async confirmPluginInstall() {

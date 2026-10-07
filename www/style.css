@@ -1184,6 +1184,8 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
 
 /* ---- Plugin sandbox: trailer player (kept above the redrawn part of the screen) ---- */
 .plugin-sandbox > .sx-video { width: 100%; max-width: 960px; margin: 0 auto 1rem; }
+/* never taller than the screen, so the whole trailer fits in view (TVs and landscape phones) */
+.plugin-sandbox > .sx-video { max-width: min(960px, calc((100vh - 7rem) * 16 / 9)); }
 .sx-video-box {
     position: relative; width: 100%; padding-top: 56.25%;   /* 16:9 without aspect-ratio (old WebViews) */
     border-radius: 12px; overflow: hidden; background: #000;

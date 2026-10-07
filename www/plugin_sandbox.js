@@ -276,6 +276,7 @@ class HesperSandbox {
         this.body = engine.createElement('div', { className: 'plugin-sandbox-body' });
         this.container.appendChild(this.body);
         this.slot = null; this._videoKey = ''; this._afKey = null;
+        this._bindTrailerKeys();
         if (!this.frame) this._start();
         this._renderTree();
         return this.container;
@@ -628,6 +629,41 @@ class HesperSandbox {
         const box = this.engine.createElement('div', { className: 'sx-video-box' }, f);
         this.slot = this.engine.createElement('div', { className: 'sx-video' }, box);
         this.container.insertBefore(this.slot, this.body);
+        this._showTrailer();
+    }
+
+    // A new trailer must be seen whole: scroll the page back to the top (the focus code scrolls
+    // the page to the first button, which used to leave the trailer cut off at the top while its
+    // sound kept playing). Done a little later too, because the page is attached after this runs.
+    _showTrailer() {
+        const toTop = () => {
+            if (!this.slot || !this.slot.isConnected) return;
+            const sp = this.slot.closest('.hesper-content');
+            if (sp && sp.scrollTop > 0) sp.scrollTop = 0;
+        };
+        toTop();
+        setTimeout(toTop, 60);
+        setTimeout(toTop, 300);
+    }
+
+    // Pressing Up / Left toward the first row under a half-hidden trailer brings the trailer back.
+    _bindTrailerKeys() {
+        if (this._trailerKeys) return;
+        this._trailerKeys = true;
+        window.addEventListener('keyup', (e) => {
+            if (e.key !== 'ArrowUp' && e.key !== 'ArrowLeft') return;
+            if (!this.slot || !this.slot.isConnected || !this.body) return;
+            const sp = this.slot.closest('.hesper-content');
+            const f = this.body.querySelector('.focused');
+            if (!sp || !f) return;
+            const slotRect = this.slot.getBoundingClientRect();
+            const hidden = slotRect.top < sp.getBoundingClientRect().top - 1;
+            const nearSlot = f.getBoundingClientRect().top - slotRect.bottom < 200;
+            if (hidden && nearSlot) {
+                if (sp.scrollTo) { try { sp.scrollTo({ top: 0, behavior: 'smooth' }); return; } catch (err) { /* old WebView */ } }
+                sp.scrollTop = 0;
+            }
+        });
     }
 
     _renderTree() {

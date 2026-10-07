@@ -144,11 +144,31 @@ const HesperPluginInstaller = (() => {
         return fd;
     }
 
+    // Reads a .zip chosen in Hesper's own picker (local or network) through the server and
+    // hands it back in the shape prepare() expects.
+    async function fetchZip(path) {
+        let res;
+        try {
+            res = await fetch('/api/plugins/fetch', { method: 'POST', body: new URLSearchParams({ path }) });
+        } catch (e) {
+            throw new Error("Couldn't reach Hesper's server.");
+        }
+        const type = res.headers.get('content-type') || '';
+        if (!res.ok || type.indexOf('application/json') === 0) {
+            let msg = '';
+            try { msg = (await res.json()).error; } catch (e) { /* not JSON */ }
+            throw new Error(msg || 'the file could not be read');
+        }
+        const buf = await res.arrayBuffer();
+        const name = String(path).replace(/\/+$/, '').split('/').pop() || 'plugin.zip';
+        return { name, size: buf.byteLength, arrayBuffer: () => Promise.resolve(buf) };
+    }
+
     const check = (prep) => post('/api/plugins/install', uploadForm(prep, true));
     const install = (prep) => post('/api/plugins/install', uploadForm(prep, false));
     const remove = (id) => { const fd = new FormData(); fd.append('id', id); return post('/api/plugins/uninstall', fd); };
 
-    return { pickZip, prepare, check, install, remove, isBuiltin, isOfficial: isBuiltin, slug };
+    return { pickZip, fetchZip, prepare, check, install, remove, isBuiltin, isOfficial: isBuiltin, slug };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = HesperPluginInstaller;

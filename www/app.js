@@ -12,6 +12,7 @@ class MainApp extends HesperComponent {
             activeTab: 'dashboard',
             showThemePanel: false,
             pluginsList: [],
+            pluginPick: null,     // Hesper's own .zip picker for plugin install (null = closed)
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
             appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
@@ -118,6 +119,7 @@ class MainApp extends HesperComponent {
             return true;
         }
         if (this.state.detail) { this.closeDetail(); return true; }
+        if (this.state.pluginPick) { this.pluginPickBack(); return true; }
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
@@ -316,6 +318,7 @@ class MainApp extends HesperComponent {
             this._renderClockSettings(),
             this._renderPicker(),
             this._renderNetPicker(),
+            this._renderPluginPickModal(),
             this._renderPluginInstallModal(),
             this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
