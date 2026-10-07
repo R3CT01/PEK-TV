@@ -1,3 +1,13 @@
+// Tells the rest of the app when a player starts / stops, so a plugin page can stop its trailer.
+function hesperAnnouncePlayer(active) {
+    try {
+        let ev;
+        if (typeof CustomEvent === 'function') ev = new CustomEvent('hesper-player', { detail: { active: !!active } });
+        else { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('hesper-player', false, false, { active: !!active }); }
+        document.dispatchEvent(ev);
+    } catch (e) { /* the page just keeps its trailer */ }
+}
+
 /* ============================================================
    Hesper shared player: on-screen controls + backend contract
 
@@ -272,6 +282,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         }
 
         open(url, startSec) {
+            hesperAnnouncePlayer(true);
             injectStyle();
             this._build();
             document.body.appendChild(this.root);
@@ -326,6 +337,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
             if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
+            hesperAnnouncePlayer(false);
             this.onClose();
         }
 
