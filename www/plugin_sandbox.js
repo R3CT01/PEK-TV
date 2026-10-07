@@ -17,6 +17,14 @@
 //                        hosts when the browser blocks the request (CORS).
 //   permissions.library  true => the plugin's Python backend may read the titles and years
 //                        in the user's library (hesper_host.library_titles); no UI effect here
+//   permissions.favorites true => hesper.favorites.list / add / remove: the shared Favorites list that
+//                        Hesper's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
+//   permissions.providers true => ui.providerButton: a "Watch on <service>" button. Hesper decides what it
+//                        opens (the service's app on Android, its website elsewhere); the plugin only names the
+//                        service and the title.
+//   permissions.plugins  true => hesper.plugins.streamers() lists installed plugins that can play titles
+//                        (plugin.json "provides": {"stream": true}); hesper.plugins.open(id, title) opens one of
+//                        them on that title. Only from a tap.
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
 //                        closeOnRemove. They only change how Hesper's own screens behave.
 //
@@ -59,6 +67,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
     var pending = new Map(), nextReq = 1;
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
+    var launchFn = null, pendingLaunch = null;
 
     function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
@@ -77,6 +86,12 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         var id = nextHandler++; handlers.set(id, fn); return id;
     }
     function flat(list) { return [].concat.apply([], list).filter(function (c) { return c != null; }); }
+    function flushLaunch() {
+        if (!launchFn || !pendingLaunch) return;
+        var l = pendingLaunch; pendingLaunch = null;
+        try { launchFn(l); } catch (e) { post({ t: 'log', text: 'launch handler threw: ' + e }); }
+        requestRender();
+    }
 
     var ui = {
         text:    function (s) { return { t: 'text', text: str(s) }; },
@@ -86,6 +101,13 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         spinner: function (label, big) { return { t: 'spinner', text: str(label), big: !!big }; },
         toggle:  function (label, checked, fn) { return { t: 'toggle', label: str(label), checked: !!checked, on: on(fn) }; },
         video:   function (o) { o = o || {}; return { t: 'video', provider: str(o.provider || 'youtube'), id: str(o.id), autoplay: !!o.autoplay, muted: !!o.muted, title: str(o.title) }; },
+        // A "Watch on <service>" button (needs permissions.providers). name = the service's name as TMDb gives it,
+        // logo = TMDb's logo_path for it. Hesper picks what the button opens; the plugin gets no callback.
+        providerButton: function (o) {
+            o = o || {};
+            return { t: 'providerButton', name: str(o.name), logo: str(o.logo), title: str(o.title),
+                type: o.type === 'tv' ? 'tv' : 'movie', tmdbId: Number(o.tmdbId) || 0, region: str(o.region) };
+        },
         listRow: function (title, sub, fn) { return { t: 'listRow', title: str(title), subtitle: str(sub), on: on(fn) }; },
         column:  function () { return { t: 'column', children: flat(arguments) }; },
         row:     function () { return { t: 'row', children: flat(arguments) }; },
@@ -137,6 +159,28 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
             if (backSet !== !!backFn) { backSet = !!backFn; post({ t: 'canBack', v: backSet }); }
         },
         scrollTop: function () { post({ t: 'scrollTop' }); },
+        // Called when Hesper opens this plugin on a particular title (the Favorites tab, or another plugin):
+        // fn({type: 'movie' | 'tv', id: <TMDb id>, title, year}).
+        onLaunch: function (fn) { launchFn = typeof fn === 'function' ? fn : null; flushLaunch(); },
+        // Needs permissions.favorites. list() -> ['movie:603', 'tv:1396', ...]
+        favorites: {
+            list: function () { return request('favList', {}).then(JSON.parse); },
+            add: function (it) {
+                it = it || {};
+                return request('favAdd', { type: str(it.type), id: Number(it.id) || 0, title: str(it.title),
+                    year: Number(it.year) || 0, posterPath: str(it.posterPath) });
+            },
+            remove: function (key) { return request('favRemove', { key: str(key) }); }
+        },
+        // Needs permissions.plugins. streamers() -> [{id, name}]; open(id, {type, id, title, year}) must come from a tap.
+        plugins: {
+            streamers: function () { return request('pluginStreamers', {}).then(JSON.parse); },
+            open: function (id, it) {
+                it = it || {};
+                return request('pluginOpen', { id: str(id), type: str(it.type), tmdbId: Number(it.id) || 0,
+                    title: str(it.title), year: Number(it.year) || 0 });
+            }
+        },
         render: function (fn) { renderFn = fn; requestRender(); },
         requestRender: requestRender,
         fetchText: function (url) { return request('fetch', { url: str(url) }); },
@@ -160,12 +204,14 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
             play: function (o) {
                 o = o || {};
                 return request('torrentPlay', { source: str(o.source), title: str(o.title),
-                    season: Number(o.season) || 0, episode: Number(o.episode) || 0 }, 15 * 60 * 1000);
+                    season: Number(o.season) || 0, episode: Number(o.episode) || 0,
+                    kind: str(o.kind), name: str(o.name), year: Number(o.year) || 0, image: str(o.image) }, 15 * 60 * 1000);
             }
         },
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
-    Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent); Object.freeze(api);
+    Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
+    Object.freeze(api.favorites); Object.freeze(api.plugins); Object.freeze(api);
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });
 
     window.addEventListener('message', function (ev) {
@@ -179,6 +225,8 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
                 document.body.appendChild(s);
             } catch (e) { post({ t: 'log', text: 'plugin failed to start: ' + e }); }
             post({ t: 'started', hasRender: !!renderFn });
+        } else if (m.t === 'launch') {
+            if (m.intent && typeof m.intent === 'object') { pendingLaunch = m.intent; flushLaunch(); }
         } else if (m.t === 'back') {
             if (backFn) { try { backFn(); } catch (e) { post({ t: 'log', text: 'back handler threw: ' + e }); } }
             requestRender();
@@ -210,7 +258,9 @@ class HesperSandbox {
     static normalizeManifest(raw) {
         const out = {
             name: null, version: null,
-            permissions: { network: [], storage: false, library: false, torrent: false },
+            permissions: { network: [], storage: false, library: false, torrent: false,
+                favorites: false, providers: false, plugins: false },
+            provides: { stream: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
         if (!raw || typeof raw !== 'object') return out;
@@ -224,6 +274,13 @@ class HesperSandbox {
         out.permissions.storage = perms.storage === true;
         out.permissions.library = perms.library === true;
         out.permissions.torrent = perms.torrent === true;
+        out.permissions.favorites = perms.favorites === true;
+        out.permissions.providers = perms.providers === true;
+        out.permissions.plugins = perms.plugins === true;
+        // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
+        // "plugins" permission are offered it as a "Play with ..." button.
+        const pv = raw.provides && typeof raw.provides === 'object' ? raw.provides : {};
+        out.provides.stream = pv.stream === true;
         const u = raw.ui && typeof raw.ui === 'object' ? raw.ui : {};
         if (typeof u.navTab === 'string') out.ui.navTab = u.navTab.replace(/[^A-Za-z0-9 &+'.-]/g, '').trim().slice(0, 20);
         out.ui.reloadOnInstall = u.reloadOnInstall === true;
@@ -253,6 +310,8 @@ class HesperSandbox {
         this.slot = null;            // the trailer player; kept across redraws so it keeps playing
         this._videoKey = '';
         this._afKey = null;          // which screen the plugin last asked to focus
+        this._lastTap = 0;           // when the user last tapped something in this plugin
+        this._pendingLaunch = null;  // a title to open as soon as the plugin has started
         this._focusMemo = {};        // screen key -> element that had focus when we left it
         this._onMessage = this._onMessage.bind(this);
         HesperSandbox._initNav();
@@ -315,7 +374,21 @@ class HesperSandbox {
     }
 
     _send(msg) {
+        if (msg && msg.t === 'event') this._lastTap = Date.now();     // every 'event' is a tap / Enter / toggle by the user
         if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage(msg, '*');
+    }
+
+    /** Ask the plugin to open a title ({type, id, title, year}). Held until the plugin has started. */
+    launch(intent) {
+        this._pendingLaunch = intent;
+        this._flushLaunch();
+    }
+
+    _flushLaunch() {
+        if (!this._pendingLaunch || !this.started || !this.frame) return;
+        const intent = this._pendingLaunch;
+        this._pendingLaunch = null;
+        this._send({ t: 'launch', intent });
     }
 
     /** Hesper's Back key / button asks here first. True = the plugin stepped back inside itself. */
@@ -341,6 +414,7 @@ class HesperSandbox {
                 this.started = true;
                 if (!m.hasRender) this._log('this plugin never called hesper.render(); nothing to show');
                 this._renderTree();
+                this._flushLaunch();
                 break;
             case 'view': this.tree = m.tree; this._renderTree(); break;
             case 'canBack': this.canBack = m.v === true; break;
@@ -368,11 +442,54 @@ class HesperSandbox {
                 case 'torrentInfo': reply(true, await this._torrentInfo()); break;
                 case 'torrentSearch': reply(true, await this._torrentSearch(a)); break;
                 case 'torrentPlay': reply(true, await this._torrentPlay(a)); break;
+                case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.HesperFavorites.keys())); break;
+                case 'favAdd': reply(true, this._favAdd(a)); break;
+                case 'favRemove': reply(true, this._favRemove(a)); break;
+                case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
+                case 'pluginOpen': reply(true, this._pluginOpen(a)); break;
                 default: throw new Error('unknown request');
             }
         } catch (err) {
             reply(false, (err && err.message) || 'denied');
         }
+    }
+
+    // ---------------- favorites / plugins (permissions "favorites", "plugins") ----------------
+
+    _need(perm) {
+        if (!this.manifest.permissions[perm]) throw new Error("plugin.json does not request the '" + perm + "' permission");
+        if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this Hesper');
+        if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this Hesper');
+    }
+
+    _favAdd(a) {
+        this._need('favorites');
+        // Hesper tags the entry with this plugin's folder, so the Favorites tab knows where to open it.
+        return window.HesperFavorites.add({ type: a.type, id: a.id, title: a.title, year: a.year, posterPath: a.posterPath }, this.folder);
+    }
+
+    _favRemove(a) {
+        this._need('favorites');
+        if (typeof a.key !== 'string' || !/^(movie|tv):\d{1,10}$/.test(a.key)) throw new Error('invalid key');
+        return window.HesperFavorites.remove(a.key);
+    }
+
+    _pluginStreamers() {
+        this._need('plugins');
+        return JSON.stringify(window.HesperHost.streamers(this.folder));
+    }
+
+    _pluginOpen(a) {
+        this._need('plugins');
+        // Only as the answer to a tap, so a plugin cannot open screens on its own.
+        if (Date.now() - this._lastTap > 4000) throw new Error('other plugins can only be opened from a tap');
+        const type = a.type === 'tv' ? 'tv' : (a.type === 'movie' ? 'movie' : '');
+        const id = Math.floor(Number(a.tmdbId));
+        if (!type || !(id > 0) || id > 1e9) throw new Error('missing title');
+        const year = Math.floor(Number(a.year));
+        const intent = { type, id, title: typeof a.title === 'string' ? a.title.slice(0, 200) : '', year: year > 1800 && year < 3000 ? year : 0 };
+        if (typeof a.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(a.id) || a.id === this.folder) throw new Error('unknown plugin');
+        return window.HesperHost.openPlugin(a.id, intent) === true;
     }
 
     // ---------------- torrent (permission "torrent") ----------------
@@ -419,9 +536,35 @@ class HesperSandbox {
             await window.HesperTorrent.allowLink(source);
         }
         const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
+        // Optional: what is being watched. With it, Hesper keeps the position under Resume Watching
+        // and a later "resume" starts the same release again at that position.
+        let track = null;
+        const kind = a.kind === 'movie' || a.kind === 'episode' ? a.kind : '';
+        const name = typeof a.name === 'string' ? a.name.trim().slice(0, 200) : '';
+        if (kind && name) {
+            const meta = { kind };
+            const sn = int(a.season, 200), ep = int(a.episode, 2000);
+            if (kind === 'movie') { meta.title = name; meta.year = int(a.year, 3000); }
+            else if (sn && ep) { meta.showTitle = name; meta.season = sn; meta.episode = ep; }
+            if (meta.title || meta.showTitle) {
+                if (typeof a.image === 'string' && a.image.length <= 500) {
+                    try {
+                        const iu = new URL(a.image);
+                        if (iu.protocol === 'https:' && !iu.username && !iu.password &&
+                            HesperSandbox.hostAllowed(iu.hostname, this.manifest.permissions.network)) meta.image = iu.href;
+                    } catch (e) { /* no artwork */ }
+                }
+                track = { meta };
+            }
+        }
+        // A plugin that gave no usable kind/name is still remembered, under the title it gave.
+        const plainTitle = typeof a.title === 'string' ? a.title.trim().slice(0, 200) : '';
+        if (!track && plainTitle) track = { meta: { kind: 'other', title: plainTitle, season: int(a.season, 200), episode: int(a.episode, 2000) } };
+        // Where it was started: set here by Hesper from the plugin's own folder/name, so a plugin cannot claim to be another one.
+        if (track) track.origin = { id: String(this.folder || '').slice(0, 80), name: String(this.manifest.name || this.folder || '').slice(0, 60) };
         await window.HesperTorrent.open({
             source, title: typeof a.title === 'string' ? a.title.slice(0, 200) : '',
-            season: int(a.season, 200), episode: int(a.episode, 2000)
+            season: int(a.season, 200), episode: int(a.episode, 2000), track
         });
         return true;
     }
@@ -757,6 +900,31 @@ class HesperSandbox {
                         autoplay: n.autoplay === true, muted: n.muted === true, title: s(n.title) };
                 }
                 return null;
+            case 'providerButton': {
+                // Hesper, not the plugin, decides what this opens: see providers.js.
+                if (!this.manifest.permissions.providers || !window.HesperProviders) return null;
+                const name = s(n.name).slice(0, 60);
+                if (!name) return null;
+                const spec = { name, title: s(n.title).slice(0, 200), type: n.type === 'tv' ? 'tv' : 'movie',
+                    tmdbId: Number(n.tmdbId) || 0, region: s(n.region).slice(0, 2) };
+                const known = window.HesperProviders.find(name);
+                const label = known ? known.name : name;
+                const b = ui.button(label, () => { window.HesperProviders.open(spec); }, { variant: 'secondary' });
+                b.classList.add('sx-provider');
+                b.setAttribute('aria-label', 'Watch ' + (spec.title || 'this title') + ' on ' + label);
+                // The logo is TMDb's own picture of the service, loaded only from a host the plugin may use.
+                const logo = typeof n.logo === 'string' && /^\/[A-Za-z0-9_-]{5,80}\.(jpg|jpeg|png|webp)$/.test(n.logo) ? n.logo : '';
+                const logoUrl = logo ? this._imageUrl('https://image.tmdb.org/t/p/w92' + logo) : '';
+                if (logoUrl) {
+                    const im = createElement('img', { className: 'sx-provider-logo', src: logoUrl, alt: '' });
+                    im.setAttribute('referrerpolicy', 'no-referrer');
+                    im.setAttribute('decoding', 'async');
+                    im.setAttribute('draggable', 'false');
+                    im.addEventListener('error', () => { if (im.parentNode) im.parentNode.removeChild(im); });
+                    b.insertBefore(im, b.firstChild);
+                }
+                return b;
+            }
             case 'posterCard': {
                 const el = ui.posterCard(s(n.title), s(n.subtitle), this._imageUrl(n.poster), click(n.on));
                 const img = el.querySelector('img');

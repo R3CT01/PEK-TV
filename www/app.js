@@ -12,10 +12,14 @@ class MainApp extends HesperComponent {
             activeTab: 'dashboard',
             showThemePanel: false,
             pluginsList: [],
+            resumeAsk: null,      // a Resume Watching card was tapped: ask Continue / Start over
             pluginPick: null,     // Hesper's own .zip picker for plugin install (null = closed)
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
             appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
+            favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
+            favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
+            favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
@@ -61,6 +65,14 @@ class MainApp extends HesperComponent {
         document.addEventListener('focusin', (e) => { if (isField(e.target)) document.documentElement.classList.add('hp-typing'); });
         document.addEventListener('focusout', () => document.documentElement.classList.remove('hp-typing'));
 
+        // A plugin added or removed a favorite. Only repaint when the Favorites tab is showing;
+        // otherwise just keep the list current so repainting the shell never disturbs an open plugin.
+        document.addEventListener('hesper-favorites', () => {
+            const list = window.HesperFavorites.list();
+            if (this.state.activeTab === 'favorites') this.setState({ favorites: list });
+            else this.state.favorites = list;
+        });
+
         this.loadSources();
         this.loadSkins();
         this._startClockTicker();
@@ -85,6 +97,7 @@ class MainApp extends HesperComponent {
         }
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
+        if (id === 'favorites' && window.HesperFavorites) this.state.favorites = window.HesperFavorites.list();
         this.setState({ activeTab: id, showNav, moreOpen: false });
         this.loadLibrary(id);
         if (id === 'resume') this._queueResumeArt();
@@ -119,10 +132,12 @@ class MainApp extends HesperComponent {
             engine.windows.back();
             return true;
         }
+        if (this.state.resumeAsk) { this.setState({ resumeAsk: null }); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.pluginPick) { this.pluginPickBack(); return true; }
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
+        if (this.state.favRemove) { this.cancelRemoveFavorite(); return true; }
         if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
         if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
@@ -241,6 +256,11 @@ class MainApp extends HesperComponent {
                 this._renderHeader('Plugins'),
                 createElement('div', { className: 'plugin-list' }, ...pluginRows)
             );
+        } else if (activeTab === 'favorites') {
+            mainContent = createElement('div', {},
+                this._renderHeader('Favorites'),
+                this._renderFavorites()
+            );
         } else if (activeTab === 'history') {
             mainContent = createElement('div', {},
                 this._renderHeader('Watch History'),
@@ -319,10 +339,12 @@ class MainApp extends HesperComponent {
             this._renderClockSettings(),
             this._renderPicker(),
             this._renderNetPicker(),
+            this._renderResumeAskModal(),
             this._renderPluginPickModal(),
             this._renderPluginInstallModal(),
             this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
+            this._renderFavoriteRemoveModal(),
             this._renderBusy(),
             this._renderAppCloseModal()
         );
@@ -340,7 +362,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const engine = new HesperEngine(appRoot);
     const app = new MainApp({ engine });
     // What sandboxed plugins (via plugin_sandbox.js) are allowed to ask the app to do.
-    window.HesperHost = { playStream: (url, title, onClose) => app.playStream(url, title, onClose) };
+    window.HesperHost = {
+        playStream: (url, title, onClose, track) => app.playStream(url, title, onClose, track),
+        // Plugins that can play titles, and "open this plugin on this title" (plugin_sandbox.js checks permissions and taps first).
+        streamers: (exceptFolder) => app._streamPlugins(exceptFolder),
+        openPlugin: (folder, intent) => app.openPluginOnTitle(folder, intent)
+    };
     engine.mount(app);
     if (typeof app.componentDidMount === 'function') {
         app.componentDidMount();

@@ -82,6 +82,7 @@ bool status(const std::string&, Status&) { return false; }
 int64_t read(const std::string&, uint64_t, void*, size_t, bool (*)(void*), void*) { return -1; }
 void remove(const std::string&) {}
 void removeAll() {}
+void warmUp() {}
 }  // namespace torrent
 
 #else
@@ -114,7 +115,7 @@ namespace {
 using Clock = std::chrono::steady_clock;
 
 const uint64_t kStartBuffer   = 6ull * 1024 * 1024;   // bytes that must be in place before "ready"
-const int      kLookaheadPcs  = 40;                   // pieces kept scheduled ahead of the player
+const uint64_t kLookaheadBytes = 48ull * 1024 * 1024; // how far ahead of the player pieces are scheduled (about a minute of 1080p)
 const int      kMaxTorrents   = 2;                    // older ones are removed (and their data deleted)
 const auto     kIdleLimit     = std::chrono::minutes(60);
 const auto     kMetaTimeout   = std::chrono::seconds(90);
@@ -132,7 +133,9 @@ struct Entry {
     int piece_len = 0;
     int first_piece = 0, last_piece = 0, num_pieces = 0;
     bool tail_needed = false;
+    int lookahead = 24;                 // pieces scheduled ahead of the player (kLookaheadBytes / piece size)
     uint64_t last_end = 0;
+    int aimed_piece = -1;               // where the non-urgent download currently continues from (-1 = from the start)
     Clock::time_point last_access = Clock::now();
     std::map<int, std::shared_ptr<std::vector<char>>> cache;   // downloaded pieces we have read back
     std::deque<int> cache_order;
@@ -183,6 +186,10 @@ void selectFile(Entry& e) {
     e.last_piece  = static_cast<int>((e.file_offset + (e.file_size ? e.file_size - 1 : 0)) / static_cast<uint64_t>(e.piece_len));
     e.tail_needed = needsTail(e.files[static_cast<size_t>(idx)].path);
     e.last_end = 0;
+    e.aimed_piece = -1;
+    // By bytes, not by pieces: with 16 MB pieces 40 of them would spread the bandwidth over 640 MB at once
+    // and the piece the player needs next would arrive late.
+    e.lookahead = static_cast<int>(std::max<uint64_t>(4, std::min<uint64_t>(48, kLookaheadBytes / static_cast<uint64_t>(e.piece_len))));
 
     // Start-up: the beginning first, then the end (container index), both ahead of the rest.
     e.h.clear_piece_deadlines();
@@ -262,8 +269,16 @@ void ensureSession() {   // g_mx held
     lt::settings_pack sp;
     sp.set_str(lt::settings_pack::user_agent, "Hesper/1.0");
     sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881,[::]:6881");
-    sp.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage);
-    sp.set_int(lt::settings_pack::connections_limit, 120);
+    // piece_progress: a finished piece wakes the reader at once instead of at its next poll.
+    sp.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
+                                              lt::alert_category::piece_progress);
+    sp.set_int(lt::settings_pack::connections_limit, 160);
+    // Find peers sooner and give up on dead / silent ones sooner: all of it is time spent staring at "Buffering".
+    sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+    sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
+    sp.set_int(lt::settings_pack::peer_connect_timeout, 8);
+    sp.set_int(lt::settings_pack::request_timeout, 15);
+    sp.set_int(lt::settings_pack::piece_timeout, 8);
     sp.set_bool(lt::settings_pack::enable_upnp, true);
     sp.set_bool(lt::settings_pack::enable_natpmp, true);
     g_ses.reset(new lt::session(sp));
@@ -332,19 +347,26 @@ std::shared_ptr<std::vector<char>> getPiece(Entry& e, int piece, bool (*aborted)
             if (!e.reading[piece]) { e.reading[piece] = true; e.h.read_piece(lt::piece_index_t(piece)); }
             lastProgress = Clock::now();
         } else {
-            lt::torrent_status st = e.h.status(lt::torrent_handle::query_pieces);
+            lt::torrent_status st = e.h.status();            // no piece bitfield needed: just the count
             int have = st.num_pieces;
             if (have != lastHave) { lastHave = have; lastProgress = Clock::now(); }
         }
         if (Clock::now() - lastProgress > kStallTimeout) return nullptr;
         if (aborted && aborted(ctx)) return nullptr;
-        g_cv.wait_for(lk, std::chrono::milliseconds(200));
+        g_cv.wait_for(lk, std::chrono::milliseconds(100));
     }
 }
 
 }  // namespace
 
 bool available() { return true; }
+
+// Starts the session (DHT, listening sockets) ahead of the first stream, so peers are already being
+// found while the viewer is still picking / searching.
+void warmUp() {
+    std::lock_guard<std::mutex> lk(g_mx);
+    ensureSession();
+}
 
 std::string add(const std::string& source, int season, int episode, std::string& err) {
     lt::error_code ec;
@@ -423,9 +445,20 @@ int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
         std::lock_guard<std::mutex> lk(g_mx);
         e->last_access = Clock::now();
         bool jumped = offset < e->last_end || offset > e->last_end + 4ull * 1024 * 1024;
-        if (jumped) e->h.clear_piece_deadlines();
         int p0 = static_cast<int>((e->file_offset + offset) / static_cast<uint64_t>(e->piece_len));
-        for (int k = 0; k < kLookaheadPcs && p0 + k <= e->last_piece; k++) {
+        if (jumped) {
+            e->h.clear_piece_deadlines();
+            // Seek: from here on the rest of the download continues from the new spot. Without this the
+            // sequential downloader would first fill the gap that was skipped over, then carry on.
+            if (e->num_pieces > 0 && p0 != e->aimed_piece) {
+                std::vector<lt::download_priority_t> pr(static_cast<size_t>(e->num_pieces), lt::dont_download);
+                for (int i = e->first_piece; i <= e->last_piece && i < e->num_pieces; i++)
+                    pr[static_cast<size_t>(i)] = i < p0 ? lt::low_priority : lt::default_priority;
+                e->h.prioritize_pieces(pr);
+                e->aimed_piece = p0;
+            }
+        }
+        for (int k = 0; k < e->lookahead && p0 + k <= e->last_piece; k++) {
             lt::piece_index_t pi(p0 + k);
             if (!e->h.have_piece(pi)) e->h.set_piece_deadline(pi, 50 + k * 120);
         }

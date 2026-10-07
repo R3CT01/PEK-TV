@@ -2,6 +2,7 @@ package com.hesper.app
 
 import android.app.Activity
 import android.app.UiModeManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -133,6 +134,72 @@ class MainActivity : Activity() {
 
     fun canPickFiles(): Boolean = pickerIntent() != null
 
+    // ---- "Watch on Netflix / Hulu / ..." buttons ----
+    // The web UI names a service; providers.js turns that into Android package names and an https link.
+    // Only packages in this list can be opened (it is generated from www/providers.js by tools/sync_providers.js).
+    private val streamingPackages = setOf(
+        // PKGS-START
+        "air.com.vudu.air.DownloaderTablet",
+        "com.amazon.amazonvideo.livingroom",
+        "com.amazon.avod.thirdpartyclient",
+        "com.amazon.imdb.tv.android.app",
+        "com.apple.atve.androidtv.appletv",
+        "com.bydeluxe.d3.android.program.starz",
+        "com.cbs.app",
+        "com.cbs.ott",
+        "com.criterionchannel",
+        "com.crunchyroll.crunchyroid",
+        "com.disney.disneyplus",
+        "com.google.android.videos",
+        "com.google.android.youtube",
+        "com.google.android.youtube.tv",
+        "com.hbo.hbonow",
+        "com.hoopladigital.android",
+        "com.hulu.livingroomplus",
+        "com.hulu.plus",
+        "com.kanopy",
+        "com.mubi",
+        "com.netflix.mediaclient",
+        "com.netflix.ninja",
+        "com.peacocktv.peacockandroid",
+        "com.plexapp.android",
+        "com.roku.web.trc",
+        "com.showtime.standalone",
+        "com.tubitv",
+        "com.wbd.stream",
+        "tv.pluto.android"
+        // PKGS-END
+    )
+
+    private fun tryStart(intent: Intent): Boolean = try {
+        startActivity(intent); true
+    } catch (e: ActivityNotFoundException) { false }
+    catch (e: Throwable) { Log.w("Hesper", "could not open app", e); false }
+
+    /**
+     * Opens a streaming app: first on the title's page (the app's own handler for [url]), else just the app
+     * itself, else (not installed) the website in the browser. [packagesCsv] is a comma list of candidates.
+     */
+    fun openStreamingApp(packagesCsv: String, url: String) {
+        val web = url.takeIf { it.length <= 2000 && it.startsWith("https://") }
+        val pkgs = packagesCsv.split(',').map { it.trim() }.filter { it in streamingPackages }
+        runOnUiThread {
+            for (pkg in pkgs) {
+                if (web != null && tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(web)).setPackage(pkg))) return@runOnUiThread
+                val launch = packageManager.getLeanbackLaunchIntentForPackage(pkg)
+                    ?: packageManager.getLaunchIntentForPackage(pkg)
+                if (launch != null && tryStart(launch)) return@runOnUiThread
+            }
+            if (web != null) tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(web)))
+        }
+    }
+
+    /** A plain https link in the browser (providers that have no app to open). */
+    fun openWebUrl(url: String) {
+        if (url.length > 2000 || !url.startsWith("https://")) return
+        runOnUiThread { tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
+
     // Runs plugins/<name>/backend.py (the same job core.cpp does on desktop) through
     // Chaquopy. Own thread, so a slow plugin (network) never delays the UI.
     private fun startPythonPlugins(pluginsDir: File) {
@@ -213,6 +280,10 @@ class HesperBridge(private val activity: MainActivity, private val mpv: MpvContr
 
     // False on devices with no file picker (most TV boxes); the web UI uses it to avoid the picker.
     @JavascriptInterface fun canPickFiles(): Boolean = activity.canPickFiles()
+
+    // "Watch on <service>" buttons: open the service's app (or its website). See providers.js.
+    @JavascriptInterface fun openStreamingApp(packages: String, url: String) { activity.openStreamingApp(packages, url) }
+    @JavascriptInterface fun openUrl(url: String) { activity.openWebUrl(url) }
 
     // Network folder discovery (mDNS) only works while Wi-Fi multicast is allowed.
     // The web UI turns this on while it searches and off again afterwards.

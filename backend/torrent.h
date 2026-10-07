@@ -65,6 +65,8 @@ int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
 // Stops a torrent and deletes its downloaded data.
 void remove(const std::string& hash);
 void removeAll();
+// Starts the torrent session ahead of the first stream (DHT bootstrap takes a few seconds). Safe to call often.
+void warmUp();
 
 }  // namespace torrent
 

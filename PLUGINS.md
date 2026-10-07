@@ -101,7 +101,8 @@ A plugin with `"torrent": true` may call, from its UI code:
 - `hesper.torrent.info()` -> `{available, configured}` (is the engine built in, is a provider set)
 - `hesper.torrent.search({kind: 'movie' | 'episode', title, year, season, episode})` -> array of
   `{title, source, sizeText, seeders, quality, pack}`, best first
-- `hesper.torrent.play({source, title, season, episode})` -> resolves once the player is open.
+- `hesper.torrent.play({source, title, season, episode, kind, name, year, image})` -> resolves once the player is open.
+  Optional `kind` (`'movie'` or `'episode'`) plus `name` (the movie title, or the show name for an episode; episodes also need `season` and `episode`) and `year` (movies) make Hesper keep the position under Resume Watching. Resuming starts the same release again at that spot. `image` is an optional https poster URL from a host in the plugin's `network` list. Hesper itself records which plugin started the stream (the plugin cannot set or change this) and shows it on the Resume Watching card. A plugin that gives no `kind`/`name` is still remembered, under the `title` it passed.
   Hesper shows its own buffering box (with Cancel) and opens the player when enough is downloaded.
 
 What the plugin does NOT get: the search provider's address or API key (set by the user in Settings >
@@ -110,3 +111,20 @@ Torrents and kept in Hesper), the downloaded files, or any other Hesper API. `so
 
 Hesper ships with no search provider. The engine (libtorrent) is optional at build time: without it,
 `search` still works and `play` fails with "not built in".
+
+
+## Favorites, provider buttons and plugin launching
+
+Three optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true}`):
+
+| Call | Needs | What it does |
+|---|---|---|
+| `hesper.favorites.list()` | `favorites` | Resolves to `['movie:603', 'tv:1396', ...]`: the shared Favorites list shown in Hesper's Favorites tab. |
+| `hesper.favorites.add({type, id, title, year, posterPath})` / `.remove('movie:603')` | `favorites` | `type` is `'movie'` or `'tv'`, `id` the TMDb id, `posterPath` TMDb's `poster_path` (e.g. `/abc.jpg`). Hesper builds the poster address itself and records which plugin added the title, so Favorites can open it there. |
+| `ui.providerButton({name, logo, title, type, tmdbId, region})` | `providers` | A "Watch on <service>" button. `name` and `logo` are TMDb's `provider_name` and `logo_path`. Hesper decides what it opens (the service's app on Android, its website elsewhere; unknown services open the title's TMDb "where to watch" page). The logo loads only if `image.tmdb.org` is in `network`. No callback. |
+| `hesper.plugins.streamers()` | `plugins` | `[{id, name}]` of the other installed plugins whose plugin.json has `"provides": {"stream": true}`. |
+| `hesper.plugins.open(id, {type, id, title, year})` | `plugins` | Opens that plugin on the title. Only works inside a tap handler. |
+| `hesper.onLaunch(fn)` | | `fn({type, id, title, year})` runs when Hesper (the Favorites tab or another plugin) opens this plugin on a title. It can arrive before your first screen is ready; keep it and handle it when you are. |
+
+Services and their Android packages are listed in `www/providers.js`. On Android run `node tools/sync_providers.js` after editing it
+(it regenerates the allow-list in `MainActivity.kt` and the `<queries>` in `AndroidManifest.xml`).

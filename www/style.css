@@ -1275,3 +1275,9 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
     .sx-hero { padding-top: 0; min-height: 230px; }
     .sx-hero-body { position: relative; max-width: 560px; }
 }
+
+
+/* ---- "Watch on <service>" buttons (ui.providerButton) ---- */
+.sx-btn.sx-provider { display: inline-flex; align-items: center; gap: 0.5rem; }
+.sx-provider-logo { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
+@media (max-width: 720px) { .sx-provider-logo { width: 24px; height: 24px; } }

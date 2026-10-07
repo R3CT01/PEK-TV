@@ -13,7 +13,7 @@
 (function () {
     'use strict';
     const API = '/api/torrent';
-    const POLL_MS = 1000;
+    const POLL_MS = 400;                   // status poll while buffering: short, so "ready" is noticed straight away
     const NO_METADATA_MS = 90 * 1000;      // magnet never produced a file list
     const NO_PEERS_MS = 120 * 1000;        // buffering but nobody to download from
 
@@ -67,6 +67,31 @@
         };
     }
 
+    // What to remember for Resume Watching: an id for the item plus what the Resume card needs to show
+    // and to start the same release again. null = do not track (no usable title).
+    function makeTrack(opts) {
+        const t = opts && opts.track, S = window.HesperSync;
+        if (!t || !t.meta || !S || typeof S.histKey !== 'function') return null;
+        const m = t.meta;
+        let key;
+        if (m.kind === 'other') {   // no movie/episode identity: remembered by its title only (not synced)
+            const nt = String(m.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+            key = nt ? 'o|' + nt + '|' + (m.season | 0) + '|' + (m.episode | 0) : null;
+        } else {
+            key = S.histKey(m);
+        }
+        if (!key) return null;
+        const meta = { kind: m.kind };
+        if (m.kind === 'movie') { meta.title = m.title; meta.year = m.year | 0; }
+        else if (m.kind === 'other') { meta.title = m.title; meta.season = m.season | 0; meta.episode = m.episode | 0; }
+        else { meta.showTitle = m.showTitle; meta.season = m.season | 0; meta.episode = m.episode | 0; }
+        if (m.image) meta.image = m.image;
+        const og = t.origin || m.origin;
+        if (og && og.name) meta.origin = { id: String(og.id || '').slice(0, 80), name: String(og.name).slice(0, 60) };
+        meta.torrent = { source: opts.source, title: opts.title || '', season: opts.season | 0, episode: opts.episode | 0 };
+        return { id: 'tor:' + key, meta, startSec: opts.startSec > 0 ? opts.startSec : 0 };
+    }
+
     window.HesperTorrent = {
         info() { return call(API + '/info'); },
         getSettings() { return call(API + '/settings'); },
@@ -89,7 +114,7 @@
         // Starts `source` (a magnet link or a link from a search result), shows the buffering box and
         // opens the player when it is ready. Resolves once the player is open; rejects if it failed
         // or the user cancelled.
-        //   opts: { source, title, season, episode }
+        //   opts: { source, title, season, episode, track?: { meta }, startSec? }
         async open(opts) {
             if (busy) throw new Error('Another stream is already starting');
             if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('Hesper cannot play streams here');
@@ -124,7 +149,7 @@
                 const url = window.location.origin + API + '/' + hash + '/stream';
                 window.HesperHost.playStream(url, opts.title || '', () => {
                     post(API + '/' + hash + '/stop').catch(() => {});
-                });
+                }, makeTrack(opts));
                 busy = false;
                 return { hash: hash };
             } catch (e) {

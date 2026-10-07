@@ -112,10 +112,11 @@ class MainAppPlaybackMethods {
     }
 
     // Plays any stream URL that is not a library file (torrent streams). There is no library id,
-    // so no resume position is kept. onClose runs when the player is closed (the caller cleans up).
-    playStream(url, title, onClose) {
+    // so no library resume position is kept (a torrent can pass `track` to keep its own). onClose runs when the player is closed (the caller cleans up).
+    // track (optional) = { id, meta, startSec }: keeps the position for Resume Watching and starts at startSec.
+    playStream(url, title, onClose, track) {
         if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
-            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), null, onClose);
+            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track || null, onClose);
             return;
         }
         try {
@@ -124,7 +125,7 @@ class MainAppPlaybackMethods {
                 return;
             }
         } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
-        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, null, onClose); return; }
+        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose); return; }
         window.open(url, '_blank');
     }
 

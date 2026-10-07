@@ -116,6 +116,15 @@ class MpvController(
             m.setOptionString("hwdec", "mediacodec,mediacodec-copy")
             m.setOptionString("ao", "audiotrack,opensles")
             m.setOptionString("keep-open", "no")
+            // Streaming from a torrent: keep a good stretch decoded-ahead AND behind, so scrubbing back and
+            // forth inside it needs no new download, and wait for a few seconds after a stall before resuming
+            // (resuming at once just stutters again).
+            m.setOptionString("cache", "yes")
+            m.setOptionString("cache-secs", "120")
+            m.setOptionString("demuxer-max-bytes", "64MiB")
+            m.setOptionString("demuxer-max-back-bytes", "32MiB")
+            m.setOptionString("cache-pause-initial", "no")
+            m.setOptionString("cache-pause-wait", "4")
             m.init()
             m.addObserver(this)
             m.observeProperty("time-pos", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
