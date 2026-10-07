@@ -49,7 +49,9 @@ class MainApp extends HesperComponent {
 
     componentDidMount() {
         const { engine } = this.props;
+        window.HesperActivity.begin('plugins', 'Loading plugins\u2026', true);
         engine.plugins.discover().then(plugins => {
+            window.HesperActivity.end('plugins', 'Loaded ' + plugins.length + ' plugins');
             this.setState({ pluginsList: plugins });
             this._warmWeatherPlugin(plugins);
         });
@@ -202,6 +204,15 @@ class MainApp extends HesperComponent {
                     createElement('div', { className: 'section-actions' },
                         this._choiceButton('Grid', this.state.viewMode === 'grid', () => this.setViewMode('grid')),
                         this._choiceButton('List', this.state.viewMode === 'list', () => this.setViewMode('list'))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Background activity'),
+                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what Hesper is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
+                    createElement('div', { className: 'section-actions' },
+                        ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
+                            this._choiceButton(label, window.HesperActivity.get() === id,
+                                () => { window.HesperActivity.set(id); this.setState({}); }))
                     )
                 ),
                 createElement('div', { className: 'settings-section' },

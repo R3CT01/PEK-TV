@@ -412,6 +412,7 @@ class HesperSandbox {
             case 'ready': this._send({ t: 'init', code: this.source }); break;
             case 'started':
                 this.started = true;
+                if (window.HesperActivity) window.HesperActivity.note((this.manifest.name || this.folder) + ' started', true);
                 if (!m.hasRender) this._log('this plugin never called hesper.render(); nothing to show');
                 this._renderTree();
                 this._flushLaunch();
@@ -582,6 +583,8 @@ class HesperSandbox {
         const L = HESPER_SANDBOX_LIMITS;
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), L.fetchTimeoutMs);
+        const actId = 'net:' + this.folder;
+        if (window.HesperActivity) window.HesperActivity.begin(actId, (this.manifest.name || this.folder) + ': loading from ' + u.hostname, true);
         try {
             // No cookies, no credentials, and a redirect to another host is not followed.
             let res, viaServer = false;
@@ -611,7 +614,7 @@ class HesperSandbox {
             const text = await res.text();
             if (text.length > L.maxFetchBytes) throw new Error('response too large');
             return text;
-        } finally { clearTimeout(timer); }
+        } finally { clearTimeout(timer); if (window.HesperActivity) window.HesperActivity.end(actId); }
     }
 
     async _readData(name) {

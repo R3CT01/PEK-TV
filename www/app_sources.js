@@ -273,11 +273,13 @@ class MainAppSourcesMethods {
 
     // Waits for the server's background scan to finish (checks once a second).
     async _waitForScan(maxSec) {
+        window.HesperActivity.begin('scan', 'Scanning your media folders\u2026');
         for (let i = 0; i < maxSec; i++) {
             await new Promise(r => setTimeout(r, 1000));
             const st = await fetch('/api/scan-status').then(r => r.json()).catch(() => ({ scanning: false }));
             if (!st.scanning) break;
         }
+        window.HesperActivity.end('scan', 'Scan finished');
     }
 
     _renderBusy() {
@@ -314,6 +316,7 @@ class MainAppSourcesMethods {
         if (this.state.refreshCooldown > 0 || this.state.refreshing) return;
         this._startCooldown(10);
         this.setState({ refreshing: true });
+        window.HesperActivity.begin('scan', 'Scanning your media folders\u2026');
         try {
             const res = await fetch('/api/rescan', { method: 'POST' });
             if (res.status === 429) {
@@ -330,6 +333,7 @@ class MainAppSourcesMethods {
         } catch (err) {
             console.warn('[Hesper] Rescan failed:', err);
         }
+        window.HesperActivity.end('scan', 'Scan finished');
         this.setState({ refreshing: false });
         this.refreshLibrary();
     }
