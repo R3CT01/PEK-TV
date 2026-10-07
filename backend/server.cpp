@@ -6,6 +6,7 @@
 #include "httplib.h"
 #include "plugin_install.h"
 #include <iostream>
+#include <fstream>
 #include <functional>
 #include <vector>
 #include <filesystem>
@@ -450,6 +451,149 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         const hesper_plugins::Outcome out = hesper_plugins::uninstall(plugins_dir, req.form.get_field("id"));
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
+    });
+
+    // 3c. In-app file picker for plugin .zip files. Hesper draws its own picker because TV
+    //     boxes have no system one. These two routes can only (1) list folders and .zip files
+    //     and (2) read ONE .zip of at most 8 MB, on this device or on a network share
+    //     (smb://, nfs://, ftp://, dav://). Nothing else can be read through them.
+    static constexpr uint64_t kZipPickMax = 8u * 1024 * 1024;
+    auto isZipName = [](const std::string& n) {
+        if (n.size() < 5) return false;
+        std::string t = n.substr(n.size() - 4);
+        for (auto& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return t == ".zip";
+    };
+    auto localRoot = []() -> std::string {
+        std::error_code ec;
+        if (fs::is_directory("/storage/emulated/0", ec)) return "/storage/emulated/0";
+        const char* h = std::getenv("HOME");
+        if (h && *h && fs::is_directory(h, ec)) return h;
+        return "/";
+    };
+
+    svr.Post("/api/plugins/browse", [isZipName, localRoot](const httplib::Request& req, httplib::Response& res) {
+        auto fail = [&res](const std::string& msg, bool auth) {
+            res.set_content("{\"ok\": false, \"auth\": " + std::string(auth ? "true" : "false") +
+                            ", \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
+        };
+        struct Item { std::string name, path; bool dir; uint64_t size; };
+        std::vector<Item> items;
+        std::string path = req.get_param_value("path");
+        std::string shown, parent;
+
+        if (vfs::isRemote(path)) {
+            vfs::Url u;
+            if (!vfs::parseUrl(path, u) || !validNetHost(u.host)) { fail("That is not a valid network address.", false); return; }
+            if (req.has_param("user")) {
+                vfs::setCredentials(u.scheme, u.host, req.get_param_value("user"), req.get_param_value("pass"), false);
+            }
+            vfs::Error err;
+            if (vfs::hasShares(u.scheme) && u.share.empty()) {
+                std::vector<std::string> shares;
+                if (!vfs::listShares(u, shares, err)) { fail(err.msg, err.auth); return; }
+                for (const auto& sh : shares) {
+                    vfs::Url su = u;
+                    su.share = u.scheme == "smb" ? sh : vfs::urlEncode(sh);
+                    items.push_back({sh, vfs::buildUrl(su), true, 0});
+                }
+                shown = vfs::buildUrl(u);
+            } else {
+                auto conn = vfs::connect(u, err);
+                if (!conn) { fail(err.msg, err.auth); return; }
+                std::vector<vfs::Entry> list;
+                if (!conn->list(u.path, list, err)) { fail(err.msg, err.auth); return; }
+                shown = vfs::buildUrl(u);
+                parent = vfs::parent(shown);
+                for (const auto& e : list) {
+                    if (e.name.empty() || e.name[0] == '.') continue;
+                    if (e.is_dir) items.push_back({e.name, vfs::join(shown, e.name), true, 0});
+                    else if (isZipName(e.name) && e.size <= kZipPickMax) items.push_back({e.name, vfs::join(shown, e.name), false, e.size});
+                }
+            }
+        } else {
+            if (path.empty() || path == "@local") path = localRoot();
+            if (path[0] != '/' || path.find("..") != std::string::npos) { fail("That folder isn't available.", false); return; }
+            std::error_code ec;
+            const fs::path dir(path);
+            if (!fs::is_directory(dir, ec)) { fail("That folder isn't available.", false); return; }
+            fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+            if (ec) { fail("Hesper isn't allowed to open this folder on this device. Try a network folder instead.", false); return; }
+            for (; it != fs::directory_iterator(); it.increment(ec)) {
+                if (ec) break;
+                const std::string name = it->path().filename().string();
+                if (name.empty() || name[0] == '.') continue;
+                std::error_code e2;
+                if (it->is_directory(e2)) {
+                    items.push_back({name, it->path().string(), true, 0});
+                } else if (it->is_regular_file(e2) && isZipName(name)) {
+                    const uint64_t sz = it->file_size(e2);
+                    if (!e2 && sz <= kZipPickMax) items.push_back({name, it->path().string(), false, sz});
+                }
+                if (items.size() >= 1000) break;
+            }
+            shown = dir.string();
+            parent = (dir.has_parent_path() && dir.parent_path() != dir) ? dir.parent_path().string() : "";
+        }
+
+        auto lower = [](std::string t) { for (auto& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c))); return t; };
+        std::sort(items.begin(), items.end(), [&lower](const Item& a, const Item& b) {
+            if (a.dir != b.dir) return a.dir;
+            return lower(a.name) < lower(b.name);
+        });
+        std::string json = "{\"ok\": true, \"path\": \"" + jsonEscape(shown) + "\", \"parent\": \"" + jsonEscape(parent) + "\", \"entries\": [";
+        for (size_t i = 0; i < items.size(); ++i) {
+            json += "{\"name\": \"" + jsonEscape(items[i].name) + "\", \"path\": \"" + jsonEscape(items[i].path) +
+                    "\", \"dir\": " + (items[i].dir ? "true" : "false") + ", \"size\": " + std::to_string(items[i].size) + "}";
+            if (i + 1 < items.size()) json += ",";
+        }
+        json += "]}";
+        res.set_content(json, "application/json");
+    });
+
+    svr.Post("/api/plugins/fetch", [isZipName](const httplib::Request& req, httplib::Response& res) {
+        auto fail = [&res](const std::string& msg) {
+            res.status = 400;
+            res.set_content("{\"ok\": false, \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
+        };
+        const std::string path = req.get_param_value("path");
+        if (!isZipName(path)) { fail("Only .zip files can be installed as plugins."); return; }
+        std::string data;
+
+        if (vfs::isRemote(path)) {
+            vfs::Url u;
+            vfs::Error err;
+            if (!vfs::parseUrl(path, u) || !validNetHost(u.host) || (vfs::hasShares(u.scheme) && u.share.empty())) {
+                fail("That is not a valid network address."); return;
+            }
+            auto conn = vfs::connect(u, err);
+            if (!conn) { fail(err.msg.empty() ? "Could not connect to that device." : err.msg); return; }
+            if (!conn->open(u.path, err)) { fail(err.msg.empty() ? "Could not open that file." : err.msg); return; }
+            const uint64_t size = conn->fileSize();
+            if (size == 0 || size > kZipPickMax) { fail("That file is too large to be a plugin (limit 8 MB)."); return; }
+            data.resize(static_cast<size_t>(size));
+            uint64_t off = 0;
+            while (off < size) {
+                const int64_t n = conn->read(off, &data[static_cast<size_t>(off)], static_cast<size_t>(std::min<uint64_t>(size - off, 64 * 1024)));
+                if (n <= 0) break;
+                off += static_cast<uint64_t>(n);
+            }
+            if (off != size) { fail("The file could not be read completely."); return; }
+        } else {
+            if (path[0] != '/' || path.find("..") != std::string::npos) { fail("That file isn't available."); return; }
+            std::error_code ec;
+            const fs::path p(path);
+            if (!fs::is_regular_file(p, ec)) { fail("That file isn't available."); return; }
+            const uint64_t size = fs::file_size(p, ec);
+            if (ec || size == 0 || size > kZipPickMax) { fail("That file is too large to be a plugin (limit 8 MB)."); return; }
+            std::ifstream in(p, std::ios::binary);
+            if (!in) { fail("Hesper isn't allowed to open that file."); return; }
+            data.resize(static_cast<size_t>(size));
+            in.read(&data[0], static_cast<std::streamsize>(size));
+            if (static_cast<uint64_t>(in.gcount()) != size) { fail("The file could not be read completely."); return; }
+        }
+        if (data.size() < 4 || data[0] != 'P' || data[1] != 'K') { fail("That is not a valid .zip file."); return; }
+        res.set_content(data, "application/zip");
     });
 
     // 4. Movies — flat list, classified from embedded container tags

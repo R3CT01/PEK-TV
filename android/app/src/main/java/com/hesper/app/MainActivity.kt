@@ -62,22 +62,22 @@ class MainActivity : Activity() {
             ): Boolean {
                 // A new request replaces an unfinished one; the old callback must still be answered.
                 filePathCallback?.onReceiveValue(null)
-                filePathCallback = callback
-                // Pickers often label .zip files as application/octet-stream, so accept those too.
-                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
-                        "application/zip", "application/x-zip-compressed", "application/octet-stream"))
-                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                filePathCallback = null
+                // Google TV / Android TV boxes usually ship no file picker at all. Launching a
+                // chooser with nothing behind it hangs or crashes there, so check first and
+                // simply cancel when no app can pick a file.
+                val intent = pickerIntent() ?: run {
+                    callback.onReceiveValue(null)
+                    return true
                 }
+                filePathCallback = callback
                 return try {
-                    startActivityForResult(Intent.createChooser(intent, "Choose a plugin .zip"), fileChooserRequest)
+                    startActivityForResult(intent, fileChooserRequest)
                     true
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
                     filePathCallback = null
                     callback.onReceiveValue(null)
-                    false
+                    true
                 }
             }
         }
@@ -111,6 +111,27 @@ class MainActivity : Activity() {
             }
         }.start()
     }
+
+
+    // The picker intent, or null when this device has no app that can answer it (typical on TV).
+    // No createChooser(): on TV firmware the chooser itself can freeze or crash.
+    private fun pickerIntent(): Intent? {
+        val candidates = listOf(Intent.ACTION_OPEN_DOCUMENT, Intent.ACTION_GET_CONTENT)
+        for (action in candidates) {
+            val intent = Intent(action).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                // Pickers often label .zip files as application/octet-stream, so accept those too.
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(
+                    "application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            }
+            if (intent.resolveActivity(packageManager) != null) return intent
+        }
+        return null
+    }
+
+    fun canPickFiles(): Boolean = pickerIntent() != null
 
     // Runs plugins/<name>/backend.py (the same job core.cpp does on desktop) through
     // Chaquopy. Own thread, so a slow plugin (network) never delays the UI.
@@ -169,7 +190,7 @@ class MainActivity : Activity() {
 }
 
 /** Exposed to the web UI as window.HesperAndroid. */
-class HesperBridge(private val activity: Activity, private val mpv: MpvController) {
+class HesperBridge(private val activity: MainActivity, private val mpv: MpvController) {
 
     // libmpv backend for the web player (player.js MpvBackend). JS calls arrive on a
     // background thread, so each one hops to the UI thread.
@@ -189,6 +210,9 @@ class HesperBridge(private val activity: Activity, private val mpv: MpvControlle
     }
 
     @JavascriptInterface fun isPhone(): Boolean = phone
+
+    // False on devices with no file picker (most TV boxes); the web UI uses it to avoid the picker.
+    @JavascriptInterface fun canPickFiles(): Boolean = activity.canPickFiles()
 
     // Network folder discovery (mDNS) only works while Wi-Fi multicast is allowed.
     // The web UI turns this on while it searches and off again afterwards.
