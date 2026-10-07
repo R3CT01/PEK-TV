@@ -1074,6 +1074,7 @@ class HesperEngine {
                 // First press just shows the highlight; after that, move spatially.
                 const hasFocus = this.focusableElements.some(el => el.classList.contains('focused'));
                 let stepped = false;
+                const beforeIdx = this.currentIndex;
                 if (hasFocus) {
                     const current = this.focusableElements[this.currentIndex];
                     const target = current ? hesperSpatialTarget(current, this.focusableElements, dirs[e.key]) : null;
@@ -1083,6 +1084,8 @@ class HesperEngine {
                     else if (target) this.currentIndex = this.focusableElements.indexOf(target);
                 }
                 if (!stepped) this._applyFocus();
+                // A soft tick when the highlight actually moved (or first appears).
+                if (!stepped && window.HesperNavSound && (!hasFocus || this.currentIndex !== beforeIdx)) window.HesperNavSound.tick();
                 e.preventDefault();
             } else if (e.key === 'Enter') {
                 const active = this.focusableElements[this.currentIndex];
