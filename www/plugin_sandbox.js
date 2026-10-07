@@ -632,13 +632,25 @@ class HesperSandbox {
         this._showTrailer();
     }
 
+    // The element that actually scrolls this plugin's page: the plugin window's body, or the
+    // main content area when the plugin is shown as a tab.
+    _scroller() {
+        let el = this.slot ? this.slot.parentElement : null;
+        while (el && el !== document.body && el !== document.documentElement) {
+            const oy = window.getComputedStyle(el).overflowY;
+            if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+            el = el.parentElement;
+        }
+        return null;
+    }
+
     // A new trailer must be seen whole: scroll the page back to the top (the focus code scrolls
     // the page to the first button, which used to leave the trailer cut off at the top while its
     // sound kept playing). Done a little later too, because the page is attached after this runs.
     _showTrailer() {
         const toTop = () => {
             if (!this.slot || !this.slot.isConnected) return;
-            const sp = this.slot.closest('.hesper-content');
+            const sp = this._scroller();
             if (sp && sp.scrollTop > 0) sp.scrollTop = 0;
         };
         toTop();
@@ -653,7 +665,7 @@ class HesperSandbox {
         window.addEventListener('keyup', (e) => {
             if (e.key !== 'ArrowUp' && e.key !== 'ArrowLeft') return;
             if (!this.slot || !this.slot.isConnected || !this.body) return;
-            const sp = this.slot.closest('.hesper-content');
+            const sp = this._scroller();
             const f = this.body.querySelector('.focused');
             if (!sp || !f) return;
             const slotRect = this.slot.getBoundingClientRect();
