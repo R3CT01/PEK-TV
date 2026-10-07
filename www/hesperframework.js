@@ -773,6 +773,44 @@ class HesperNav {
    vertically, whatever order the elements sit in the DOM.
    Elements lined up with the current one win over diagonal ones.
    ============================================================ */
+// The element that scrolls the page `el` is on (a plugin window's body, the main content area...).
+function hesperScrollParent(el) {
+    let p = el && el.parentElement;
+    while (p && p !== document.body && p !== document.documentElement) {
+        const oy = window.getComputedStyle(p).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p;
+        p = p.parentElement;
+    }
+    return null;
+}
+
+// Plugin pages only. When the next focus target is not fully on screen and there is more than a
+// small gap (non-focusable text, such as a movie description) before it, scroll toward it by at
+// most 60% of the screen and report true, so the caller leaves focus where it is. The next press
+// then moves focus once the target is in view. Anything else (posters in a grid...) is unchanged.
+function hesperStepScroll(current, target, dir) {
+    if (dir !== 'down' && dir !== 'up') return false;
+    if (!current.closest || !current.closest('.plugin-sandbox')) return false;
+    const sp = hesperScrollParent(current);
+    if (!sp || !sp.contains(target)) return false;
+    const c = sp.getBoundingClientRect(), f = current.getBoundingClientRect(), r = target.getBoundingClientRect();
+    const margin = 24, minGap = 100, cap = Math.max(120, Math.round(sp.clientHeight * 0.6));
+    let need;
+    if (dir === 'down') {
+        if (r.bottom <= c.bottom - margin || r.top - f.bottom <= minGap) return false;
+        if (sp.scrollTop + sp.clientHeight >= sp.scrollHeight - 1) return false;
+        need = Math.min(r.bottom - c.bottom + margin, r.top - c.top - margin);
+    } else {
+        if (r.top >= c.top + margin || f.top - r.bottom <= minGap) return false;
+        if (sp.scrollTop <= 0) return false;
+        need = c.top + margin - r.top;
+    }
+    if (need <= 0) return false;
+    const dy = Math.min(need, cap) * (dir === 'down' ? 1 : -1);
+    try { sp.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { sp.scrollTop += dy; }
+    return true;
+}
+
 function hesperSpatialTarget(from, elements, dir) {
     const EPS = 4;                                   // tolerate slight overlap between neighbours
     const f = from.getBoundingClientRect();
@@ -1035,12 +1073,16 @@ class HesperEngine {
                 if (typing && t.blur) t.blur();
                 // First press just shows the highlight; after that, move spatially.
                 const hasFocus = this.focusableElements.some(el => el.classList.contains('focused'));
+                let stepped = false;
                 if (hasFocus) {
                     const current = this.focusableElements[this.currentIndex];
                     const target = current ? hesperSpatialTarget(current, this.focusableElements, dirs[e.key]) : null;
-                    if (target) this.currentIndex = this.focusableElements.indexOf(target);
+                    // Text sits between the two (a description, say): scroll to reveal it first and keep focus
+                    // where it is, instead of jumping straight past it.
+                    if (target && hesperStepScroll(current, target, dirs[e.key])) stepped = true;
+                    else if (target) this.currentIndex = this.focusableElements.indexOf(target);
                 }
-                this._applyFocus();
+                if (!stepped) this._applyFocus();
                 e.preventDefault();
             } else if (e.key === 'Enter') {
                 const active = this.focusableElements[this.currentIndex];

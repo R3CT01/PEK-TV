@@ -277,6 +277,7 @@ class HesperSandbox {
         this.container.appendChild(this.body);
         this.slot = null; this._videoKey = ''; this._afKey = null;
         this._bindTrailerKeys();
+        this._bindPlayerEvents();
         if (!this.frame) this._start();
         this._renderTree();
         return this.container;
@@ -606,6 +607,7 @@ class HesperSandbox {
     // autoplay / sound setting actually changes.
     _syncVideo(v) {
         let key = '', src = '';
+        if (this._playerActive) v = null;          // a movie is playing: no trailer (and no iframe kept in memory)
         if (v && v.provider === 'youtube' && /^[A-Za-z0-9_-]{11}$/.test(v.id) &&
             HesperSandbox.hostAllowed('www.youtube-nocookie.com', this.manifest.permissions.network)) {
             src = 'https://www.youtube-nocookie.com/embed/' + v.id + '?playsinline=1&rel=0&modestbranding=1' +
@@ -629,7 +631,7 @@ class HesperSandbox {
         const box = this.engine.createElement('div', { className: 'sx-video-box' }, f);
         this.slot = this.engine.createElement('div', { className: 'sx-video' }, box);
         this.container.insertBefore(this.slot, this.body);
-        this._showTrailer();
+        if (this._keepScroll) this._keepScroll = false; else this._showTrailer();
     }
 
     // The element that actually scrolls this plugin's page: the plugin window's body, or the
@@ -656,6 +658,26 @@ class HesperSandbox {
         toTop();
         setTimeout(toTop, 60);
         setTimeout(toTop, 300);
+    }
+
+    // While a player is open (full screen or the mini bar) the trailer is removed, which stops its
+    // sound and frees the YouTube frame. When the player closes the page is drawn again.
+    _bindPlayerEvents() {
+        if (this._playerEvents) return;
+        this._playerEvents = true;
+        document.addEventListener('hesper-player', (e) => {
+            const active = !!(e && e.detail && e.detail.active);
+            if (active === !!this._playerActive) return;
+            this._playerActive = active;
+            if (!this.container || !this.container.isConnected) return;
+            if (active) {
+                this._syncVideo(null);
+            } else {
+                this._keepScroll = true;              // coming back from a movie: do not jump the page to the top
+                this._renderTree();
+                this._keepScroll = false;
+            }
+        });
     }
 
     // Pressing Up / Left toward the first row under a half-hidden trailer brings the trailer back.
