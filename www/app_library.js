@@ -11,6 +11,7 @@ class MainAppLibraryMethods {
         const endpoint = LIBRARY_ENDPOINTS[tab];
         if (!endpoint) return;
         if (!force && this.state.library[tab]) return;
+        window.HesperActivity.begin('lib:' + tab, 'Loading your library\u2026');
         try {
             const res = await fetch(endpoint);
             const data = await res.json();
@@ -19,6 +20,7 @@ class MainAppLibraryMethods {
         } catch (err) {
             this.setState({ library: { ...this.state.library, [tab]: { error: true } } });
         }
+        window.HesperActivity.end('lib:' + tab);
     }
 
     refreshLibrary() {
@@ -60,6 +62,10 @@ class MainAppLibraryMethods {
     }
 
     _pumpPosters() {
+        const act = window.HesperActivity;
+        const left = this._posterQueue.length + this._posterActive;
+        if (left) act.update('posters', 'Fetching poster art (' + left + ' left)');
+        else act.end('posters', 'Poster art up to date');
         while (this._posterActive < 3 && this._posterQueue.length) {
             const it = this._posterQueue.shift();
             this._posterActive++;

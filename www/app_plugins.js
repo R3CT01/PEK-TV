@@ -57,6 +57,7 @@ class MainAppPluginsMethods {
     async pluginPickBrowse(path) {
         const pp = this.state.pluginPick;
         if (!pp || pp.loading) return;
+        if (String(path).indexOf('/') === 0 || path === '@local') { if (!(await this._ensureStorage())) return; }
         this.setState({ pluginPick: Object.assign({}, pp, { loading: true, error: null }) });
         let data;
         try {
@@ -202,8 +203,10 @@ class MainAppPluginsMethods {
         if (!pi || pi.stage !== 'confirm') return;
         const { ui } = this.props.engine;
         this.setState({ pluginInstall: Object.assign({}, pi, { stage: 'installing' }) });
+        window.HesperActivity.begin('install', 'Installing ' + pi.prep.name + '\u2026');
         try {
             await HesperPluginInstaller.install(pi.prep);
+            window.HesperActivity.end('install', 'Installed ' + pi.prep.name);
             await this._reloadPlugins();
             this.setState({ pluginInstall: null });
             if (pi.prep.ui && pi.prep.ui.reloadOnInstall) {
@@ -215,6 +218,7 @@ class MainAppPluginsMethods {
             ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}` +
                 (pi.prep.hasBackend ? '. Restart Hesper to start its Python backend.' : ''), pi.prep.hasBackend ? 7000 : 3500);
         } catch (err) {
+            window.HesperActivity.end('install', 'Plugin install failed');
             this.setState({ pluginInstall: { stage: 'error', error: String((err && err.message) || err) } });
         }
     }

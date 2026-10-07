@@ -1,5 +1,6 @@
 package com.hesper.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.UiModeManager
 import android.content.ActivityNotFoundException
@@ -11,6 +12,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
 import android.view.SurfaceView
 import android.view.View
@@ -90,6 +92,11 @@ class MainActivity : Activity() {
         setContentView(layout)
         webView.requestFocus()
 
+        // First start: ask for storage access straight away. (If it is refused, the folder browsers ask again when opened.)
+        if (!hasStoragePermission() && !getSharedPreferences("hesper", MODE_PRIVATE).getBoolean("asked_storage", false)) {
+            requestStoragePermission(true)
+        }
+
         Thread {
             val root = File(filesDir, "hesper")
             copyAssetDir("hesper", root)
@@ -133,6 +140,49 @@ class MainActivity : Activity() {
     }
 
     fun canPickFiles(): Boolean = pickerIntent() != null
+
+    // ---- storage permission ----
+    private val storageRequest = 4712
+    private val storagePerm = Manifest.permission.READ_EXTERNAL_STORAGE
+
+    fun hasStoragePermission(): Boolean =
+        checkSelfPermission(storagePerm) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Shows the system prompt. Once Android stops showing it (refused with "don't ask again"), a deliberate
+     * request from the web UI ([auto] = false) opens Hesper's page in Android Settings instead.
+     */
+    fun requestStoragePermission(auto: Boolean) {
+        runOnUiThread {
+            if (hasStoragePermission()) { notifyStorage(true, false); return@runOnUiThread }
+            val prefs = getSharedPreferences("hesper", MODE_PRIVATE)
+            val asked = prefs.getBoolean("asked_storage", false)
+            if (asked && !shouldShowRequestPermissionRationale(storagePerm)) {
+                if (!auto) {
+                    try {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+                        notifyStorage(false, true)
+                    } catch (e: Throwable) { notifyStorage(false, false) }
+                }
+                return@runOnUiThread
+            }
+            prefs.edit().putBoolean("asked_storage", true).apply()
+            requestPermissions(arrayOf(storagePerm), storageRequest)
+        }
+    }
+
+    private fun notifyStorage(granted: Boolean, openedSettings: Boolean) {
+        webView.evaluateJavascript(
+            "window.__hesperStorage&&window.__hesperStorage($granted,$openedSettings);" +
+            "window.__hesperStorageAny&&window.__hesperStorageAny($granted);", null)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == storageRequest) {
+            notifyStorage(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED, false)
+        }
+    }
 
     // ---- "Watch on Netflix / Hulu / ..." buttons ----
     // The web UI names a service; providers.js turns that into Android package names and an https link.
@@ -280,6 +330,10 @@ class HesperBridge(private val activity: MainActivity, private val mpv: MpvContr
 
     // False on devices with no file picker (most TV boxes); the web UI uses it to avoid the picker.
     @JavascriptInterface fun canPickFiles(): Boolean = activity.canPickFiles()
+
+    // Storage access (see app_storage.js): ask first start, and again when a file browser is opened.
+    @JavascriptInterface fun hasStoragePermission(): Boolean = activity.hasStoragePermission()
+    @JavascriptInterface fun requestStoragePermission(auto: Boolean) { activity.requestStoragePermission(auto) }
 
     // "Watch on <service>" buttons: open the service's app (or its website). See providers.js.
     @JavascriptInterface fun openStreamingApp(packages: String, url: String) { activity.openStreamingApp(packages, url) }
