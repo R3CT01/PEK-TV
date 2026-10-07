@@ -205,6 +205,15 @@ class MainApp extends HesperComponent {
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Navigation sound'),
+                    createElement('p', { className: 'sub' }, 'A soft tick when you move around with the D-pad, remote or arrow keys.'),
+                    createElement('div', { className: 'section-actions' },
+                        ...[['off', 'Off'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']].map(([id, label]) =>
+                            this._choiceButton(label, window.HesperNavSound && window.HesperNavSound.get() === id,
+                                () => { window.HesperNavSound.set(id); this.setState({}); }))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
                     createElement('div', { className: 'plugin-list' },
                         ...this.state.skins.map(s => ui.listRow(
