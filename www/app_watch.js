@@ -248,6 +248,7 @@ class MainAppWatchMethods {
         const items = this._resumeItems();
         const jobs = [];
         items.forEach(it => {
+            if (it.torrent) return;            // plugin streams bring their own artwork
             if (it.kind === 'movie') {
                 jobs.push({ key: 'm:' + it.id, url: '/api/movie-details?id=' + encodeURIComponent(it.id) });
             } else {
@@ -271,9 +272,11 @@ class MainAppWatchMethods {
         return ui.grid(
             items.map(it => {
                 const isMovie = it.kind === 'movie';
-                const title = isMovie ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
-                const sub = [isMovie && it.year ? String(it.year) : '', this._fmtLeft(it)].filter(Boolean).join(' \u00b7 ');
-                const img = isMovie
+                const title = this._resumeTitle(it);
+                const sub = [isMovie && it.year ? String(it.year) : '', this._fmtLeft(it), this._originLabel(it)].filter(Boolean).join(' \u00b7 ');
+                const img = it.torrent
+                    ? (it.image || '')
+                    : isMovie
                     ? this.state.posters['m:' + it.id]
                     : (this.state.posters['e:' + it.id] || this.state.posters['s:' + it.showTitle]);
                 return ui.posterCard(title, sub, img, () => this.resumeItem(it), { onLongPress: () => ui.toast(title + (sub ? ' \u00b7 ' + sub : '')) });
@@ -282,10 +285,61 @@ class MainAppWatchMethods {
         );
     }
 
+    _resumeTitle(it) {
+        if (it.kind === 'movie') return it.title;
+        if (it.kind === 'episode') return `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
+        return it.title + (it.season && it.episode ? ` \u00b7 S${it.season}E${it.episode}` : '');
+    }
+
+    // Where this was started: the plugin's name, or the library when nothing says otherwise.
+    _originLabel(it) {
+        if (it.origin && it.origin.name) return it.origin.name;
+        return it.torrent ? 'A plugin' : 'Your library';
+    }
+
+    // Tapping a card asks first: continue where it stopped, or start over.
+    _renderResumeAskModal() {
+        const it = this.state.resumeAsk;
+        if (!it) return null;
+        const { createElement, ui } = this.props.engine;
+        const close = () => this.setState({ resumeAsk: null });
+        const at = window.HesperPlayerUtil ? window.HesperPlayerUtil.fmtTime(it.position) : Math.round(it.position) + 's';
+        const from = it.origin && it.origin.name ? 'Started in ' + it.origin.name : (it.torrent ? 'Started in a plugin' : 'From your library');
+        const left = this._fmtLeft(it);
+        const body = createElement('div', {},
+            createElement('p', { className: 'sub' }, [from, left].filter(Boolean).join(' \u00b7 ')),
+            createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
+                ui.button('\u25b6  Continue from ' + at, () => this._doResume(it, it.position), { variant: 'primary' }),
+                ui.button('Start over', () => this._doResume(it, 0)),
+                ui.button('Cancel', close)));
+        return ui.modal(this._resumeTitle(it), body, close);
+    }
+
+    _doResume(it, startSec) {
+        this.setState({ resumeAsk: null });
+        if (it.torrent && it.torrent.source && window.HesperTorrent) { this._resumeTorrent(it, startSec); return; }
+        this.playMedia(it.id, this._resumeTitle(it), it, startSec);
+    }
+
+    // Something started from a plugin (a torrent stream): start the same release again at the saved spot.
+    async _resumeTorrent(it, startSec) {
+        const { ui } = this.props.engine;
+        const t = it.torrent;
+        try {
+            if (/^https:/i.test(t.source)) await window.HesperTorrent.allowLink(t.source);
+            await window.HesperTorrent.open({
+                source: t.source, title: t.title || it.title || it.showTitle || '',
+                season: t.season || 0, episode: t.episode || 0, startSec: startSec > 0 ? startSec : 0,
+                track: { meta: { kind: it.kind, title: it.title, year: it.year, showTitle: it.showTitle, season: it.season, episode: it.episode, image: it.image, origin: it.origin } }
+            });
+        } catch (e) {
+            const m = String((e && e.message) || e || '');
+            if (m !== 'Cancelled') ui.toast("Couldn't start this stream again. " + m.slice(0, 120));
+        }
+    }
+
     resumeItem(it) {
-        const isMovie = it.kind === 'movie';
-        const title = isMovie ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
-        this.playMedia(it.id, title, it, it.position);
+        this.setState({ resumeAsk: it });
     }
 }
 

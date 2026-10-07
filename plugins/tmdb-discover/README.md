@@ -55,3 +55,15 @@ one-year difference. After installing, close and reopen Hesper once so this runs
 
 Data provided by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.
 Streaming availability data provided by JustWatch.
+
+## Favorites (1.3.0)
+
+Open a title and press **♡ Add to favorites** (next to Back). It is added to Hesper's **Favorites** tab, which is shared
+with Snake Skin; press a favorite there to open it again, press and hold to remove it.
+
+## Watch on... (1.3.0)
+
+Under the description, every service the title streams on in your region (and, separately, where to rent or buy it) shows as a
+button with the service's logo. Press one to open that service: on Android its app (or its website if the app is not installed),
+elsewhere its website. A title that is on no service lists nothing. If the title is out and another installed plugin can play
+movies and shows (for example Snake Skin), a **Play with ...** button opens that plugin on the title.

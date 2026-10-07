@@ -14,6 +14,7 @@ const NAV_ITEMS = [
     { id: 'movies', label: 'Movies' },
     { id: 'shows', label: 'TV Shows' },
     { id: 'music', label: 'Music' },
+    { id: 'favorites', label: 'Favorites' },
     { id: 'duplicates', label: 'Duplicates' },
     { id: 'unknown', label: 'Unknown' },
     { id: 'plugins', label: 'Plugins' },

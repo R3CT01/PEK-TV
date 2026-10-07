@@ -38,7 +38,11 @@
         hist: [],                // earlier screens, so Back returns to them
         query: '',
         lib: { movies: {}, shows: {}, nMovies: 0, nShows: 0, loaded: false },
-        authError: false
+        authError: false,
+        favs: {},                // 'movie:603' -> true  (the shared Favorites list in Hesper)
+        favMsg: '',
+        streamers: [],           // other plugins that can play titles: [{ id, name }]
+        pendingLaunch: null      // a title Hesper asked us to open before we were ready
     };
 
     // ---------------------------------------------------------------- helpers
@@ -86,6 +90,7 @@
             alt: String((t === 'tv' ? r.original_name : r.original_title) || ''),
             year: yearOf(date),
             poster: r.poster_path ? IMG + r.poster_path : '',
+            posterPath: r.poster_path || '',
             overview: String(r.overview || ''),
             rating: typeof r.vote_average === 'number' ? r.vote_average : 0,
             votes: r.vote_count || 0
@@ -135,6 +140,106 @@
         // Personal key: straight to TMDb. No key: Hesper's built-in access (the proxy adds the key).
         return hesper.fetchJSON((S.key ? API : PROXY) + path + '?' + q.join('&'));
     }
+
+    function today() {
+        var d = new Date(), p = function (n) { return n < 10 ? '0' + n : String(n); };
+        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+
+    // ---------------------------------------------------------------- favorites, providers, other plugins
+    function favKey(it) { return it.type + ':' + it.id; }
+
+    function loadFavs() {
+        if (!hesper.favorites) return Promise.resolve();
+        return hesper.favorites.list().then(function (keys) {
+            var m = {};
+            (keys || []).forEach(function (k) { m[k] = true; });
+            S.favs = m;
+        }, noop).then(redraw);
+    }
+
+    function toggleFav(it) {
+        if (!hesper.favorites) return;
+        var k = favKey(it), on = !S.favs[k];
+        if (on) S.favs[k] = true; else delete S.favs[k];
+        S.favMsg = '';
+        redraw();
+        var job = on
+            ? hesper.favorites.add({ type: it.type, id: it.id, title: it.title, year: it.year, posterPath: it.posterPath || '' })
+            : hesper.favorites.remove(k);
+        job.then(noop, function () {
+            if (on) delete S.favs[k]; else S.favs[k] = true;       // undo: it did not save
+            S.favMsg = 'Could not update your favorites.';
+        }).then(redraw);
+    }
+
+    function loadStreamers() {
+        if (!hesper.plugins) return;
+        hesper.plugins.streamers().then(function (l) { S.streamers = l || []; }, noop).then(redraw);
+    }
+
+    // Is this title released? (If it is not, there is nothing to watch yet.)
+    function isOut(it, info) {
+        info = info || {};
+        var date = (it.type === 'tv' ? info.first_air_date : info.release_date) || '';
+        var status = String(info.status || '');
+        if (/^(Rumored|Planned)$/i.test(status)) return false;
+        if (it.type === 'movie' && /^(In Production|Post Production)$/i.test(status)) return false;
+        if (date) return date <= today();
+        return /^(Released|Ended|Returning Series|Canceled)$/i.test(status);
+    }
+
+    // Where this title can be watched in the chosen region, as logo buttons. Nothing is listed
+    // when it is not on any service. The buttons open the service's app (Android) or website.
+    var SHOW_RENT_BUY = true;
+    function providerButtons(ui, it, info) {
+        if (!ui.providerButton) return [];
+        var wp = info && info['watch/providers'] && info['watch/providers'].results && info['watch/providers'].results[S.region];
+        if (!wp) return [];
+        var seen = {};
+        function uniq(list) {
+            return (list || []).filter(function (p) {
+                if (!p || !p.provider_id || !p.provider_name || seen[p.provider_id]) return false;
+                seen[p.provider_id] = 1;
+                return true;
+            }).slice(0, 12);
+        }
+        function btns(list) {
+            return ui.row.apply(ui, list.map(function (p) {
+                return ui.providerButton({ name: p.provider_name, logo: p.logo_path, title: it.title, type: it.type, tmdbId: it.id, region: S.region });
+            }));
+        }
+        var stream = uniq((wp.flatrate || []).concat(wp.free || [], wp.ads || []));
+        var buy = SHOW_RENT_BUY ? uniq((wp.rent || []).concat(wp.buy || [])) : [];
+        var out = [];
+        if (stream.length) { out.push(ui.heading('Watch on')); out.push(btns(stream)); }
+        if (buy.length) { out.push(ui.heading('Rent or buy')); out.push(btns(buy)); }
+        return out;
+    }
+
+    // "Play with <plugin>" for every other installed plugin that can play movies and shows.
+    function streamerButtons(ui, it, info) {
+        if (!hesper.plugins || !S.streamers.length || !isOut(it, info)) return [];
+        return [ui.heading('Play with a plugin'), ui.row.apply(ui, S.streamers.map(function (p) {
+            return ui.button('\u25b6  ' + p.name, function () {
+                return hesper.plugins.open(p.id, { type: it.type, id: it.id, title: it.title, year: it.year })
+                    .then(noop, function () { S.favMsg = 'Could not open ' + p.name + '.'; });
+            }, { primary: true });
+        }))];
+    }
+
+    // Hesper opened this plugin on a title (Favorites tab, or another plugin's button).
+    function launch(intent) {
+        if (!intent || !intent.id || !intent.type) return;
+        if (!S.ready) { S.pendingLaunch = intent; return; }
+        S.tab = intent.type === 'tv' ? 'tv' : 'movie';
+        S.provider = 0; S.query = '';
+        resetViews();
+        ensureLoaded();
+        openDetail({ id: intent.id, type: S.tab, title: intent.title || 'Loading\u2026', alt: '', year: intent.year || 0,
+            poster: '', posterPath: '', overview: '', rating: 0, votes: 0 });
+    }
+    if (hesper.onLaunch) hesper.onLaunch(launch);
 
     function redraw() { hesper.requestRender(); }
     function top() { if (hesper.scrollTop) hesper.scrollTop(); }
@@ -354,6 +459,7 @@
     function openDetail(item) {
         pushView();
         var d = { item: item, loading: true };
+        var it0 = item;
         S.detail = d;
         top();
         api('/' + item.type + '/' + item.id, {
@@ -361,10 +467,17 @@
             include_video_language: videoLangs()
         }).then(function (j) {
             d.info = j;
+            // A title opened from Favorites only knew its id: fill in the rest from TMDb's answer.
+            if (j.title || j.name) it0.title = String((item.type === 'tv' ? j.name : j.title) || it0.title);
+            if (!it0.posterPath && j.poster_path) { it0.posterPath = j.poster_path; it0.poster = IMG + j.poster_path; }
+            if (!it0.rating) { it0.rating = j.vote_average || 0; it0.votes = j.vote_count || 0; }
+            if (!it0.year) it0.year = yearOf(j.release_date || j.first_air_date);
+            if (!it0.overview) it0.overview = String(j.overview || '');
         }, function (e) {
             if (isAuth(e)) S.authError = true;
             d.error = errText(e);
         }).then(function () { d.loading = false; redraw(); });
+        loadFavs();
     }
 
     function saveKey() {
@@ -481,18 +594,6 @@
         return vids[0];
     }
 
-    function providerLine(info) {
-        var wp = info && info['watch/providers'] && info['watch/providers'].results && info['watch/providers'].results[S.region];
-        function names(list) { return (list || []).map(function (p) { return p.provider_name; }).filter(Boolean).slice(0, 8).join(', '); }
-        if (!wp) return ['Not listed for streaming in ' + S.region + '.'];
-        var lines = [];
-        var stream = names((wp.flatrate || []).concat(wp.free || [], wp.ads || []));
-        if (stream) lines.push('Stream: ' + stream);
-        var buy = names((wp.rent || []).concat(wp.buy || []));
-        if (buy) lines.push('Rent or buy: ' + buy);
-        return lines.length ? lines : ['Not listed for streaming in ' + S.region + '.'];
-    }
-
     function castRow(ui, info) {
         var cast = ((info.credits && info.credits.cast) || []).filter(function (c) { return c && c.id && c.name; }).slice(0, 20);
         if (!cast.length) return null;
@@ -529,7 +630,13 @@
         if (it.rating) meta.push('\u2605 ' + it.rating.toFixed(1) + ' (' + it.votes + ' votes)');
         if (info.runtime) meta.push(info.runtime + ' min');
         if (info.number_of_seasons) meta.push(info.number_of_seasons + (info.number_of_seasons === 1 ? ' season' : ' seasons'));
-        kids.push(ui.button('\u2190 Back', back, { autofocus: 'detail:' + it.type + it.id }));
+        var backBtn = ui.button('\u2190 Back', back, { autofocus: 'detail:' + it.type + it.id });
+        if (hesper.favorites && !d.loading) {
+            var isFav = !!S.favs[favKey(it)];
+            kids.push(ui.row(backBtn, ui.button(isFav ? '\u2665  In your favorites' : '\u2661  Add to favorites',
+                function () { toggleFav(it); }, { selected: isFav })));
+            if (S.favMsg) kids.push(ui.text(S.favMsg));
+        } else kids.push(backBtn);
         kids.push(ui.heading(it.title));
         kids.push(ui.text(meta.filter(Boolean).join(' \u00b7 ')));
         if (owned(it)) kids.push(ui.text('\u2713 In your library'));
@@ -539,7 +646,9 @@
         if (info.genres && info.genres.length) kids.push(ui.text('Genres: ' + info.genres.map(function (g) { return g.name; }).join(', ')));
         if (d.error) kids.push(ui.text(d.error));
         if (!d.loading && !d.error) {
-            providerLine(info).forEach(function (l) { kids.push(ui.text(l)); });
+            if (!isOut(it, info)) kids.push(ui.text('Not out yet' + (((it.type === 'tv' ? info.first_air_date : info.release_date) || '') > today() ? ' \u2014 ' + (it.type === 'tv' ? info.first_air_date : info.release_date) : '') + '.'));
+            providerButtons(ui, it, info).forEach(function (k) { kids.push(k); });
+            streamerButtons(ui, it, info).forEach(function (k) { kids.push(k); });
             var c = castRow(ui, info);
             if (c) kids.push(c);
             var r = relatedRow(ui, it, info);
@@ -673,6 +782,9 @@
         S.tab = 'movie';
         S.ready = true;
         ensureLoaded();
+        loadFavs();
+        loadStreamers();
+        if (S.pendingLaunch) { var l = S.pendingLaunch; S.pendingLaunch = null; launch(l); }
         redraw();
     });
 })();

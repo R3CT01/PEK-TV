@@ -217,7 +217,9 @@ class MainAppLibraryMethods {
     // Back inside a sandboxed plugin (close a detail page, previous page of results ...).
     // True when the plugin handled it, so the plugin window itself stays open.
     _pluginBack() {
-        const sb = this._pluginSandbox;
+        // The plugin window that is on top (a plugin can open another one, e.g. "Play with Snake Skin").
+        const win = this.props.engine.windows.activeWindow;
+        const sb = win && win._sandbox;
         return !!(sb && sb.handleBack && sb.handleBack());
     }
 
@@ -225,7 +227,6 @@ class MainAppLibraryMethods {
         const { engine } = this.props;
         const { createElement, ui } = engine;
         const app = this;
-        this._pluginSandbox = p.sandboxed ? p.sandbox : null;
 
         let node = null;
         if (p.sandboxed) {
@@ -243,7 +244,7 @@ class MainAppLibraryMethods {
             );
         }
 
-        engine.windows.create(class extends HesperWindow {
+        const win = engine.windows.create(class extends HesperWindow {
             render() {
                 return createElement('div', { className: 'plugin-window' },
                     createElement('div', { className: 'plugin-window-bar' },
@@ -254,6 +255,7 @@ class MainAppLibraryMethods {
                 );
             }
         });
+        win._sandbox = p.sandboxed ? p.sandbox : null;   // what Back asks first while this window is on top
     }
 
     // ---------------- Rendering ----------------

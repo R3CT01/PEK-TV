@@ -1,4 +1,6 @@
 #include "torrent_routes.h"
+
+#include <thread>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -452,6 +454,10 @@ void registerTorrentRoutes(httplib::Server& svr) {
     svr.Get("/api/torrent/fetch", [](const httplib::Request& req, httplib::Response& res) {
         std::string url = req.get_param_value("url");
         if (!publicHttpsUrl(url)) { jsonErr(res, 400, "Not an allowed address"); return; }
+        // A site is being searched, so a stream is probably next: start the torrent session now (DHT needs a
+        // few seconds to find peers) instead of when the stream starts. Once per run, off this request's thread.
+        static std::once_flag warmOnce;
+        std::call_once(warmOnce, []() { std::thread([]() { torrent::warmUp(); }).detach(); });
         std::string body, err; int code = 0;
         if (!siteGet(url, body, code, 1000000, err)) { jsonErr(res, 502, err); return; }
         if (code != 200) { jsonErr(res, 502, "The site answered HTTP " + std::to_string(code)); return; }
