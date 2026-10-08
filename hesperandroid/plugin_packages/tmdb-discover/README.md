@@ -1,4 +1,4 @@
-# TMDb Discover
+# PEK Discover
 
 Trending, top rated, popular and now playing rows for movies and TV, streaming-service chips
 (Netflix, Hulu, Disney+ ...), search, descriptions, and an "In library" badge on titles you own.

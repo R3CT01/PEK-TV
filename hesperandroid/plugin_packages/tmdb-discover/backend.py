@@ -1,4 +1,4 @@
-"""TMDb Discover backend.
+"""PEK Discover backend.
 
 Runs once when Hesper starts. It asks Hesper for the titles in your library
 (titles and years only, never file names or folders) and saves a small list to

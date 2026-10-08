@@ -16,7 +16,7 @@ const HesperPluginInstaller = (() => {
 
     // Official plugins: the ones that ship with Hesper (kept in step with plugin_install.h).
     // Everything else is third party.
-    const BUILTIN = ['weather', 'sample_counter', 'tmdb-discover'];
+    const BUILTIN = ['weather', 'tmdb-discover'];
     const isBuiltin = (folder) => BUILTIN.indexOf(folder) !== -1;
 
     function slug(text) {

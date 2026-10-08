@@ -49,6 +49,7 @@ class MainActivity : Activity() {
         surfaceView.visibility = View.GONE
         webView = WebView(this)
         webView.setBackgroundColor(Color.TRANSPARENT)
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         mpv = MpvController(this, surfaceView, webView)
         webView.settings.apply {
             javaScriptEnabled = true
@@ -99,6 +100,7 @@ class MainActivity : Activity() {
 
         Thread {
             val root = File(filesDir, "hesper")
+            File(root, "plugins/sample_counter").deleteRecursively()   // retired built-in; older installs still have a copy
             copyAssetDir("hesper", root)
             NativeBridge.startServer(root.absolutePath)
             startPythonPlugins(File(root, "plugins"))

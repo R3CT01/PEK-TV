@@ -47,7 +47,7 @@ You get one global, `hesper`:
 | `hesper.setBack(fn)` / `hesper.setBack(null)` | | Make Back (Esc, the remote's Back, the window's Back button) call `fn` first, so a plugin can step out of its own screens. Pass `null` when there is nothing to step out of; Back then closes the plugin. |
 | `hesper.scrollTop()` | | Scroll the plugin screen back to the top (after changing page, say). |
 
-See `plugins/sample_counter/` for a small example and `plugins/tmdb-discover/` for a full one (rows, numbered pages, search, provider chips, trailer, cast, library badges).
+See `plugins/weather/` for a small example and `plugins/tmdb-discover/` for a full one (rows, numbered pages, search, provider chips, trailer, cast, library badges).
 
 ## Backend (`backend.py`, optional)
 
@@ -72,7 +72,7 @@ Hesper only answers the device it runs on. To open it to other devices on your n
 
 In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, check the permissions Hesper
 shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
-with Hesper (`weather`, `sample_counter`, `tmdb-discover`) can't be replaced or removed.
+with Hesper (`weather`, `tmdb-discover`) can't be replaced or removed.
 
 The zip must contain `plugin.json` and `ui.js`, either at the top of the zip or inside one folder
 (the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:

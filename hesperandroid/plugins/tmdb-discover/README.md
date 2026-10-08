@@ -1,4 +1,4 @@
-# TMDb Discover
+# PEK Discover
 
 Trending, top rated, popular and now playing rows for movies and TV, streaming-service chips
 (Netflix, Hulu, Disney+ ...), search, and an "In library" badge on titles you own. Open a title to get a
@@ -6,7 +6,7 @@ trailer that plays by itself at the top of the page, the description, the cast a
 
 ## No key needed
 
-TMDb Discover is an official Hesper plugin. It comes with the app and uses Hesper's built-in TMDb access,
+PEK Discover is an official Hesper plugin. It comes with the app and uses Hesper's built-in TMDb access,
 so you can open the **Discover** tab and start browsing straight away.
 
 Optional: under **Settings > TMDb access** you can paste your own free v3 API key (themoviedb.org > Settings > API).

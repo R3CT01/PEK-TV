@@ -382,6 +382,7 @@ class HesperUIKit {
             onClick: onClick || (() => {})
         });
         const img = this.engine.createElement('img', { className: 'sx-poster-img', src: posterUrl, alt: title });
+        img.decoding = 'async';
         img.addEventListener('error', () => {
             const plain = this.card(title, subtitle, onClick, opts);
             if (wrap.parentNode) {
@@ -404,6 +405,7 @@ class HesperUIKit {
             HesperUIKit._lpInstalled = true;
             // After a long press fires, swallow the click that follows the release.
             document.addEventListener('click', (ev) => {
+                if (Date.now() < (HesperUIKit._lpGuard || 0)) { ev.stopPropagation(); ev.preventDefault(); return; }
                 const t = ev.target && ev.target.closest ? ev.target.closest('.sx-longpress') : null;
                 if (t && t._lpSuppress) { t._lpSuppress = false; ev.stopPropagation(); ev.preventDefault(); }
             }, true);
@@ -415,6 +417,7 @@ class HesperUIKit {
             fired = true;
             cancel();
             el._lpSuppress = true;                                   // the click that follows the release is ignored
+            HesperUIKit._lpGuard = Date.now() + 600;                  // ...and so is any click that lands on what the hold opened
             setTimeout(() => { el._lpSuppress = false; }, 700);
             handler();
         };
@@ -746,7 +749,7 @@ class HesperNav {
         if (best) {
             current.classList.remove('focused');
             best.classList.add('focused');
-            best.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+            hesperScrollIntoView(best, false);
         }
         return best;
     }
@@ -799,6 +802,64 @@ function hesperScrollParent(el) {
     return null;
 }
 
+// Fast, interruptible scroll-into-view. The browser's own smooth scroll is slow (a few hundred ms)
+// and restarts on every key press, which feels laggy on a TV. This one eases over ~110ms
+// (~65ms while a key is held), retargets instantly and is driven by requestAnimationFrame.
+const _hsAnims = new Map();
+let _hsRaf = 0;
+function _hsTick(now) {
+    _hsRaf = 0;
+    _hsAnims.forEach((a, sp) => {
+        const p = Math.min(1, (now - a.t0) / a.dur), e = 1 - Math.pow(1 - p, 3);
+        if (a.ty !== null) sp.scrollTop = a.fy + (a.ty - a.fy) * e;
+        if (a.tx !== null) sp.scrollLeft = a.fx + (a.tx - a.fx) * e;
+        if (p >= 1) _hsAnims.delete(sp);
+    });
+    if (_hsAnims.size) _hsRaf = requestAnimationFrame(_hsTick);
+}
+function hesperAnimateScroll(sp, top, left, dur) {
+    const root = document.scrollingElement || document.documentElement;
+    if (sp === document.body || sp === document.documentElement) sp = root;
+    if (top === null && left === null) return;
+    _hsAnims.set(sp, { t0: performance.now(), dur: dur,
+        fy: sp.scrollTop, ty: top, fx: sp.scrollLeft, tx: left });
+    if (!_hsRaf) _hsRaf = requestAnimationFrame(_hsTick);
+}
+function hesperScrollIntoView(el, fast) {
+    if (!el || !el.isConnected) return;
+    const dur = fast ? 65 : 110;
+    const root = document.scrollingElement || document.documentElement;
+    const r = el.getBoundingClientRect();
+    const pick = (lo, hi, rl, rh) => (rh - rl > hi - lo ? rl - lo : rl < lo ? rl - lo : rh > hi ? rh - hi : 0);
+    let p = el.parentElement, depth = 0;
+    while (p && depth++ < 12) {
+        const isRoot = p === document.body || p === document.documentElement;
+        const cs = isRoot ? null : getComputedStyle(p);
+        const scrollY = isRoot ? false : /(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1;
+        const scrollX = isRoot ? false : /(auto|scroll)/.test(cs.overflowX) && p.scrollWidth > p.clientWidth + 1;
+        if (scrollY || scrollX) {
+            const c = p.getBoundingClientRect();
+            const dy = scrollY ? pick(c.top, c.bottom, r.top, r.bottom) : 0;
+            const dx = scrollX ? pick(c.left, c.right, r.left, r.right) : 0;
+            if (dy || dx) {
+                const ty = dy ? Math.max(0, Math.min(p.scrollHeight - p.clientHeight, p.scrollTop + dy)) : null;
+                const tx = dx ? Math.max(0, Math.min(p.scrollWidth - p.clientWidth, p.scrollLeft + dx)) : null;
+                hesperAnimateScroll(p, ty, tx, dur);
+                // What is left of the distance is handled by the outer scroller.
+                if (dy) r.y -= dy; if (dx) r.x -= dx;
+            }
+        }
+        p = p.parentElement;
+    }
+    // The page itself
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const dy = root.scrollHeight > vh + 1 ? pick(0, vh, r.top, r.bottom) : 0;
+    const dx = root.scrollWidth > vw + 1 ? pick(0, vw, r.left, r.right) : 0;
+    if (dy || dx) hesperAnimateScroll(root,
+        dy ? Math.max(0, Math.min(root.scrollHeight - vh, root.scrollTop + dy)) : null,
+        dx ? Math.max(0, Math.min(root.scrollWidth - vw, root.scrollLeft + dx)) : null, dur);
+}
+
 // Plugin pages only. When the next focus target is not fully on screen and there is more than a
 // small gap (non-focusable text, such as a movie description) before it, scroll toward it by at
 // most 60% of the screen and report true, so the caller leaves focus where it is. The next press
@@ -822,7 +883,7 @@ function hesperStepScroll(current, target, dir) {
     }
     if (need <= 0) return false;
     const dy = Math.min(need, cap) * (dir === 'down' ? 1 : -1);
-    try { sp.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { sp.scrollTop += dy; }
+    hesperAnimateScroll(sp, Math.max(0, Math.min(sp.scrollHeight - sp.clientHeight, sp.scrollTop + dy)), null, 110);
     return true;
 }
 
@@ -1098,15 +1159,23 @@ class HesperEngine {
                     if (target && hesperStepScroll(current, target, dirs[e.key])) stepped = true;
                     else if (target) this.currentIndex = this.focusableElements.indexOf(target);
                 }
+                this._fastScroll = !!e.repeat;
                 if (!stepped) this._applyFocus();
                 // A soft tick when the highlight actually moved (or first appears).
                 if (!stepped && window.HesperNavSound && (!hasFocus || this.currentIndex !== beforeIdx)) window.HesperNavSound.tick();
                 e.preventDefault();
             } else if (e.key === 'Enter') {
+                // Holding OK makes the remote repeat the key. A repeat must never click anything: once a long
+                // press opens a dialog, the repeats would otherwise press its buttons (closing or confirming it).
+                if (e.repeat) {
+                    if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) this._fireKeyLongPress();
+                    e.preventDefault();
+                    return;
+                }
                 const active = this.focusableElements[this.currentIndex];
                 if (active) {
                     // A text field needs real DOM focus (not a click) to open the keyboard.
-                    if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) active.focus();
+                    if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) { if (window.HesperNavSound) window.HesperNavSound.select(); active.focus(); }
                     else if (active._hesperLongPress) {
                         // Hold OK for the long-press action; a short press clicks on release.
                         if (!e.repeat) {
@@ -1119,7 +1188,7 @@ class HesperEngine {
                         } else if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) {
                             this._fireKeyLongPress();
                         }
-                    } else active.click();
+                    } else { if (!e.repeat && window.HesperNavSound) window.HesperNavSound.select(); active.click(); }
                 }
                 e.preventDefault();
             }
@@ -1139,7 +1208,7 @@ class HesperEngine {
                 clearTimeout(this._lpTimer);
                 this._lpTimer = null;
                 const t = this._lpTarget; this._lpTarget = null;
-                if (t && t.isConnected) t.click();
+                if (t && t.isConnected) { if (window.HesperNavSound) window.HesperNavSound.select(); t.click(); }
             }
         });
     }
@@ -1151,6 +1220,7 @@ class HesperEngine {
         this._lpTarget = null;
         if (!t || !t.isConnected || !t._hesperLongPress) return;
         this._lpFiredByKey = true;
+        HesperUIKit._lpGuard = Date.now() + 400;
         t._hesperLongPress();
     }
 
@@ -1158,7 +1228,7 @@ class HesperEngine {
         this.focusableElements.forEach((el, idx) => {
             if (idx === this.currentIndex) {
                 el.classList.add('focused');
-                if (scroll) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                if (scroll) hesperScrollIntoView(el, this._fastScroll);
             } else {
                 el.classList.remove('focused');
             }
