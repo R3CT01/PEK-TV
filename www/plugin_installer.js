@@ -66,6 +66,19 @@ const HesperPluginInstaller = (() => {
         if (!entries.length) throw new Error('the zip is empty');
 
         const has = (p) => entries.some(e => e.path === p);
+        // A zip is a plugin or a skin, never both. Say so clearly instead of "plugin.json was not found".
+        const hasAt = (name) => {
+            if (has(name)) return true;
+            const tops = new Set(entries.map(e => e.path.split('/')[0]));
+            if (tops.size !== 1) return false;
+            const top = Array.from(tops)[0];
+            return entries.every(e => e.path.indexOf(top + '/') === 0) && has(top + '/' + name);
+        };
+        if (hasAt('skin.json')) {
+            throw new Error(hasAt('plugin.json')
+                ? 'This zip has both plugin.json and skin.json, so Hesper can\u2019t tell whether it is a plugin or a skin.'
+                : 'This is a skin, not a plugin. Install it from Settings \u2192 Skins.');
+        }
         let prefix = '', folder = '';
         if (!has('plugin.json')) {
             const tops = new Set(entries.map(e => e.path.split('/')[0]));

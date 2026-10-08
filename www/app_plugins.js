@@ -8,9 +8,12 @@ class MainAppPluginsMethods {
     // "Install plugin from .zip": opens Hesper's own file picker (no system picker needed, so it
     // also works on TV boxes that have none). Phones and desktops can still reach the system
     // picker from the bottom of the list.
-    async startPluginInstall() {
-        if (this.state.pluginInstall || this.state.pluginPick) return;
-        this.setState({ pluginPick: { stage: 'home', loading: true, error: null, sources: [], hosts: [], scanning: false } });
+    // kind is 'plugin' (the default) or 'skin': the same picker serves both, and the zip is then
+    // checked as that kind (a skin zip chosen for a plugin, or the other way round, is refused).
+    async startPluginInstall(kind) {
+        if (this.state.pluginInstall || this.state.skinInstall || this.state.pluginPick) return;
+        kind = kind === 'skin' ? 'skin' : 'plugin';
+        this.setState({ pluginPick: { kind, stage: 'home', loading: true, error: null, sources: [], hosts: [], scanning: false } });
         let sources = [];
         try {
             const res = await fetch('/api/sources');
@@ -23,7 +26,8 @@ class MainAppPluginsMethods {
     }
 
     // Reads the chosen .zip, shows what it asks for, and checks it with the server.
-    async _checkPluginFile(file) {
+    async _checkPluginFile(file, kind) {
+        if (kind === 'skin') { await this._checkSkinFile(file); return; }
         this.setState({ pluginInstall: { stage: 'checking' } });
         try {
             const prep = await HesperPluginInstaller.prepare(file);
@@ -42,6 +46,7 @@ class MainAppPluginsMethods {
 
     async pluginPickSystem() {
         const { ui } = this.props.engine;
+        const kind = this.state.pluginPick && this.state.pluginPick.kind;
         this.closePluginPick();
         let file = null;
         try {
@@ -51,7 +56,7 @@ class MainAppPluginsMethods {
             return;
         }
         if (!file) return;
-        await this._checkPluginFile(file);
+        await this._checkPluginFile(file, kind);
     }
 
     async pluginPickBrowse(path) {
@@ -94,9 +99,10 @@ class MainAppPluginsMethods {
             return;
         }
         if (!this.state.pluginPick) return;
+        const kind = this.state.pluginPick.kind;
         this._multicast(false);
         this.setState({ pluginPick: null });
-        await this._checkPluginFile(file);
+        await this._checkPluginFile(file, kind);
     }
 
     async pluginPickFindNetwork() {
@@ -162,6 +168,7 @@ class MainAppPluginsMethods {
         const err = pp.error ? createElement('p', { className: 'browse-error' }, pp.error) : null;
         const sizeText = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
         const loading = pp.loading ? this._loadingBlock('Please wait\u2026') : null;
+        const what = pp.kind === 'skin' ? 'skin' : 'plugin';
 
         if (pp.stage === 'browse') {
             const rows = [];
@@ -177,7 +184,7 @@ class MainAppPluginsMethods {
                 loading,
                 createElement('div', { className: 'browse-list plugin-list' }, ...rows)
             );
-            return ui.modal('Choose a plugin .zip', body, close);
+            return ui.modal('Choose a ' + what + ' .zip', body, close);
         }
 
         // Start list: library folders, this device, and the network.
@@ -190,12 +197,12 @@ class MainAppPluginsMethods {
             rows.push(ui.listRow('Use the system file picker', 'Opens this device\u2019s own file chooser', () => this.pluginPickSystem()));
         }
         const body = createElement('div', {},
-            createElement('p', { className: 'sub' }, 'Pick the plugin\u2019s .zip file. Put it in a folder on your network or on this device first.'),
+            createElement('p', { className: 'sub' }, 'Pick the ' + what + '\u2019s .zip file. Put it in a folder on your network or on this device first.'),
             err,
             loading,
             createElement('div', { className: 'browse-list plugin-list' }, ...rows)
         );
-        return ui.modal('Choose a plugin .zip', body, close);
+        return ui.modal('Choose a ' + what + ' .zip', body, close);
     }
 
     async confirmPluginInstall() {

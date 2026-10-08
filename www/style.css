@@ -2,23 +2,24 @@
    Hesper Theme Tokens
    ============================================================ */
 :root {
-    --sx-bg: #E9E2DA;
-    --sx-bg-elevated: #F3EEE7;
-    --sx-surface: #F8F4EE;
-    --sx-surface-focused: #2b262218;
-    --sx-border: #D5CABD;
-    --sx-border-focus: #2b2622;
-    --sx-text: #2b2622;
-    --sx-text-muted: #7a6f66;
-    --sx-accent: #2b2622;
-    --sx-accent-glow: rgba(43, 38, 34, 0.22);
+    --sx-bg: #150a05;
+    --sx-bg-elevated: #1e0f07;
+    --sx-surface: #2b160b;
+    --sx-surface-focused: #ff8a3d2e;
+    --sx-border: #4d2813;
+    --sx-border-focus: #ffa24d;
+    --sx-text: #fff0e2;
+    --sx-text-muted: #cfa68a;
+    --sx-accent: #ffa24d;
+    --sx-accent-glow: rgba(255, 150, 60, 0.5);
     --sx-radius: 16px;
-    --sx-overlay: rgba(60, 48, 38, 0.35);
-    --sx-shadow: rgba(70, 52, 36, 0.22);
-    --sx-glass: rgba(255, 255, 255, 0.50);
-    --sx-glass-strong: rgba(250, 246, 240, 0.96);
-    --sx-glass-fill: rgba(255, 255, 255, 0.55);
-    --sx-glass-edge: rgba(60, 48, 38, 0.14);
+    --sx-overlay: rgba(16, 7, 3, 0.72);
+    --sx-shadow: rgba(0, 0, 0, 0.55);
+    --sx-glass: rgba(43, 22, 11, 0.55);
+    --sx-glass-strong: rgba(30, 15, 7, 0.95);
+    --sx-glass-fill: rgba(255, 170, 90, 0.07);
+    --sx-glass-edge: rgba(255, 170, 90, 0.18);
+    --sx-bg-image: radial-gradient(1300px 820px at 86% -10%, rgba(255, 146, 54, 0.46) 0%, rgba(255, 146, 54, 0) 64%), radial-gradient(1000px 680px at -8% 112%, rgba(224, 84, 24, 0.36) 0%, rgba(224, 84, 24, 0) 66%), radial-gradient(700px 500px at 55% 60%, rgba(180, 70, 20, 0.12) 0%, rgba(180, 70, 20, 0) 70%), linear-gradient(160deg, #2a140a 0%, #180b05 52%, #0f0603 100%);
     --sx-font: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -29,6 +30,10 @@
 body {
     margin: 0;
     background-color: var(--sx-bg);
+    background-image: var(--sx-bg-image, none);
+    background-repeat: no-repeat;
+    background-size: 100% 100%;
+    background-attachment: fixed;
     color: var(--sx-text);
     font-family: var(--sx-font);
     overflow: hidden;
@@ -116,7 +121,7 @@ body {
     padding: 2.5rem;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    background: var(--sx-bg);
+    background: transparent;      /* the page background (colour or gradient) shows through */
 }
 
 .content-title {
@@ -607,7 +612,9 @@ body {
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    background: var(--sx-bg);
+    background-color: var(--sx-bg);
+    background-image: var(--sx-bg-image, none);
+    background-size: 100% 100%;
     color: var(--sx-text);
 }
 
