@@ -1,0 +1,136 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [android]
+  workflow_dispatch:   # adds a manual "Run workflow" button in the Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Chaquopy compiles the app's Python to bytecode with a build Python
+      # whose major.minor matches the app's (3.11, see app/build.gradle).
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      # OpenSSL takes a few minutes to compile, so it is cached and
+      # only rebuilt if the script changes.
+      - name: Cache OpenSSL
+        id: openssl-cache
+        uses: actions/cache@v4
+        with:
+          path: android/openssl
+          key: openssl-${{ hashFiles('android/scripts/build-openssl.sh') }}
+
+      - name: Build OpenSSL for Android
+        if: steps.openssl-cache.outputs.cache-hit != 'true'
+        run: bash android/scripts/build-openssl.sh
+
+      # SMB support for network shares. If this step fails the app still builds
+      # (CMake just reports "SMB support OFF").
+      - name: Get libsmb2
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libsmb2.git android/libsmb2
+
+      # Diagnostic: shows which libsmb2 commit was cloned and which headers exist.
+      - name: Inspect libsmb2 headers
+        continue-on-error: true
+        run: |
+          git -C android/libsmb2 log -1 --oneline
+          ls android/libsmb2/include/smb2
+          grep -rln "srvsvc" android/libsmb2/include || true
+
+      # NFS support (optional, off by default). To try it, remove the leading "#"
+      # from the next three lines. If the build then fails, put the "#" back.
+      - name: Get libnfs
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libnfs.git android/libnfs
+
+      # Torrent streaming (optional). libtorrent + the Boost headers it needs. If this step or the
+      # "with torrent" build below fails, the app is rebuilt without torrent playback (the release
+      # search still works); nothing else is affected.
+      - name: Get libtorrent and Boost headers
+        continue-on-error: true
+        run: |
+          git clone --depth 1 --branch RC_2_0 --recurse-submodules https://github.com/arvidn/libtorrent.git android/libtorrent
+          curl -fsSL https://archives.boost.io/release/1.86.0/source/boost_1_86_0.tar.gz -o /tmp/boost.tgz
+          mkdir -p android/boost
+          tar -xzf /tmp/boost.tgz -C android/boost --strip-components=1 boost_1_86_0/boost
+
+      - name: Copy the web frontend into the app
+        run: |
+          mkdir -p android/app/src/main/assets/hesper
+          cp -r www skins plugins android/app/src/main/assets/hesper/
+          find android/app/src/main/assets -name __pycache__ -type d -exec rm -rf {} +
+          curl -fsSL https://curl.se/ca/cacert.pem -o android/app/src/main/assets/hesper/cacert.pem
+
+      - name: Build debug APK (with torrent streaming)
+        id: with_torrent
+        continue-on-error: true
+        working-directory: android
+        run: gradle assembleDebug -PhesperTorrent=true --no-daemon --stacktrace
+
+      - name: Build debug APK (without torrent streaming - fallback)
+        if: steps.with_torrent.outcome != 'success'
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: hesper-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      # TEMPORARY: record libmpv's real Java API from the downloaded library,
+      # so the player code can be written against it exactly.
+      - name: Inspect libmpv API
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          OUT="$GITHUB_WORKSPACE/mpv-api.txt"
+          echo "inspection started" > "$OUT"
+          AAR=$(find "$HOME/.gradle" /home/runner -name 'libmpv-*.aar' 2>/dev/null | head -1)
+          echo "AAR: $AAR" >> "$OUT"
+          if [ -z "$AAR" ]; then
+            echo "AAR not found. Folders under HOME:" >> "$OUT"
+            find "$HOME" -maxdepth 3 -type d 2>/dev/null | head -60 >> "$OUT"
+            exit 0
+          fi
+          rm -rf /tmp/mpvaar && mkdir -p /tmp/mpvaar && cd /tmp/mpvaar && unzip -q -o "$AAR"
+          echo "--- aar contents (bytes, path)" >> "$OUT"
+          find . -type f | sort | while read f; do echo "$(stat -c %s "$f") $f" >> "$OUT"; done
+          echo "--- classes" >> "$OUT"
+          unzip -Z1 classes.jar >> "$OUT" 2>&1
+          echo "--- public API" >> "$OUT"
+          for c in $(unzip -Z1 classes.jar | grep '\.class$' | sed 's/\.class$//' | tr '/' '.'); do
+            javap -public -cp classes.jar "$c" >> "$OUT" 2>&1
+          done
+          echo "--- manifest" >> "$OUT"
+          cat AndroidManifest.xml >> "$OUT" 2>&1
+          exit 0
+
+      - name: Upload libmpv API listing
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mpv-api
+          path: mpv-api.txt
+          if-no-files-found: ignore
