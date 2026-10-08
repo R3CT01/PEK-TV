@@ -1,5 +1,5 @@
 /* ============================================================
-   Hesper connectivity indicator (is_online)
+   PEK connectivity indicator (is_online)
 
    Shows a small dot in the top-right corner: green = online, red = offline.
    "Online" means the internet is really reachable, not just that the device is

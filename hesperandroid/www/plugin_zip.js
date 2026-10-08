@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper: tiny .zip reader (used by the plugin installer).
+// PEK: tiny .zip reader (used by the plugin installer).
 // Reads stored and deflated files, checks each file's CRC and enforces size limits
 // while unpacking (so a "zip bomb" can't use up memory). Uses the browser's built-in
 // DecompressionStream when it exists, otherwise a small inflate written here, so it

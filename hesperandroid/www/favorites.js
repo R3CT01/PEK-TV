@@ -1,11 +1,11 @@
-/* Hesper favorites  (window.HesperFavorites)
+/* PEK favorites  (window.HesperFavorites)
  *
  * One list for the whole app: PEK Discover, Snake Skin (any plugin with the "favorites"
  * permission) add titles here, and the Favorites tab shows them.
  *
  * Plugins never touch this storage directly. plugin_sandbox.js passes their requests through
  * add() / remove() / keys(), and every entry is cleaned here: only a TMDb type + id, a title,
- * a year and a poster *path* are kept. The poster address is built by Hesper (image.tmdb.org),
+ * a year and a poster *path* are kept. The poster address is built by PEK (image.tmdb.org),
  * so a plugin cannot make the Favorites tab load a picture from anywhere else.
  */
 (function () {
@@ -78,7 +78,7 @@
         has: function (key) { return read().some(function (f) { return f.key === key; }); },
         posterUrl: function (f) { return f && f.posterPath ? POSTER_BASE + f.posterPath : ''; },
 
-        /** `source` is the plugin folder that asked (set by Hesper, not by the plugin). */
+        /** `source` is the plugin folder that asked (set by PEK, not by the plugin). */
         add: function (raw, source) {
             var e = clean(raw);
             if (!e) throw new Error('not a usable title');

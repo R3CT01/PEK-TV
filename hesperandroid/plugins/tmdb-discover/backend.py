@@ -1,6 +1,6 @@
 """PEK Discover backend.
 
-Runs once when Hesper starts. It asks Hesper for the titles in your library
+Runs once when PEK starts. It asks PEK for the titles in your library
 (titles and years only, never file names or folders) and saves a small list to
 data/library.json, which ui.js reads to mark the titles you already own.
 """

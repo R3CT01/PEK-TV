@@ -1,4 +1,4 @@
-/* Hesper navigation sound  (window.HesperNavSound)
+/* PEK navigation sound  (window.HesperNavSound)
  * tick():   a soft, short "tick" when the D-pad / arrow keys move the highlight.
  * select(): a different, slightly longer two-note "pop" when OK is pressed.
  * Synthesised with Web Audio (no sound file). Off / Low / Medium / High is saved in Settings.

@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper App Shell: MainApp core (state, lifecycle, navigation, render)
+// PEK App Shell: MainApp core (state, lifecycle, navigation, render)
 // The rest of MainApp lives in app_appearance.js, app_sources.js,
 // app_library.js, app_watch.js, app_playback.js and app_plugins.js (loaded after this file).
 // Constants and helpers are in app_config.js; ThemePanel is in theme_panel.js.
@@ -13,10 +13,10 @@ class MainApp extends HesperComponent {
             showThemePanel: false,
             pluginsList: [],
             resumeAsk: null,      // a Resume Watching card was tapped: ask Continue / Start over
-            pluginPick: null,     // Hesper's own .zip picker for plugin install (null = closed)
+            pluginPick: null,     // PEK's own .zip picker for plugin install (null = closed)
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
-            appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
+            appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until PEK is closed
             favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
             favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
@@ -129,7 +129,7 @@ class MainApp extends HesperComponent {
     // browser's own Back button. Returns true if it closed or stepped out of something.
     goBack() {
         const { engine } = this.props;
-        if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
+        if (this.state.appClose) return true;   // the "close PEK" screen cannot be dismissed
         // while minimized the player is just a bar; Back belongs to the app
         if (this._player && !this._player.mini) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
@@ -166,7 +166,7 @@ class MainApp extends HesperComponent {
             }, item.label);
         });
 
-        const currentLabel = navItems.find(i => i.id === activeTab)?.label || 'Hesper';
+        const currentLabel = navItems.find(i => i.id === activeTab)?.label || 'PEK';
 
         // Tab View Content
         let mainContent;
@@ -212,7 +212,7 @@ class MainApp extends HesperComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Background activity'),
-                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what Hesper is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
+                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what PEK is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
                     createElement('div', { className: 'section-actions' },
                         ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
                             this._choiceButton(label, window.HesperActivity.get() === id,
@@ -315,7 +315,7 @@ class MainApp extends HesperComponent {
 
         const isPhone = window.matchMedia(PHONE_MQ).matches;
         const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
-                createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
+                createElement('div', { className: 'sidebar-brand' }, 'PEK'),
                 createElement('div', { className: 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
                     createElement('span', { className: 'status-badge' }, 'System Online')
@@ -378,7 +378,7 @@ class MainApp extends HesperComponent {
 document.addEventListener('DOMContentLoaded', () => {
     const appRoot = document.getElementById('app');
     if (!appRoot) {
-        console.error('[Hesper] Missing #app element in index.html');
+        console.error('[PEK] Missing #app element in index.html');
         return;
     }
 
@@ -431,6 +431,6 @@ document.addEventListener('DOMContentLoaded', () => {
             else history.back();
         });
     } catch (err) {
-        console.warn('[Hesper] History guard unavailable:', err);
+        console.warn('[PEK] History guard unavailable:', err);
     }
 });

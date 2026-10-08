@@ -1,13 +1,13 @@
-/* Hesper background activity  (window.HesperActivity)
+/* PEK background activity  (window.HesperActivity)
  *
- * A small, quiet status line in the corner that says what Hesper is doing behind the scenes
+ * A small, quiet status line in the corner that says what PEK is doing behind the scenes
  * ("Scanning your media folders...", "Fetching poster art (12 left)", "Syncing watch history...").
  *
  * It never gets in the way: it is not focusable (the D-pad skips it), ignores taps and clicks, stays
  * small and half see-through, sits above the phone's tab bar, and is hidden while a video is playing.
  * Settings -> Background activity: Off / Basic / Detailed (Detailed adds plugin network requests etc.).
  *
- * API (used by Hesper's own code):
+ * API (used by PEK's own code):
  *   begin(id, text, detail)   something started (counted: every begin needs an end)
  *   update(id, text)          change the text of a running item
  *   end(id, doneText)         finished; doneText (optional) stays a moment as "done"

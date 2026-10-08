@@ -1,14 +1,14 @@
-/* Hesper plugin backup  (window.HesperPluginBackup)
+/* PEK plugin backup  (window.HesperPluginBackup)
  *
- * Backs up the plugins you installed from a .zip to your Hesper Cloud account, and lets you
- * bring them back on another device (or after reinstalling Hesper).
+ * Backs up the plugins you installed from a .zip to your PEK Cloud account, and lets you
+ * bring them back on another device (or after reinstalling PEK).
  *
- *  - Only third-party plugins are backed up. Built-in ones ship with Hesper.
+ *  - Only third-party plugins are backed up. Built-in ones ship with PEK.
  *  - Only the plugin's own files are saved (never its data/ folder, which is private to a device).
  *  - Backing up is automatic once you are signed in (switch it off in Settings > Cloud Sync).
  *  - Getting plugins BACK is never automatic: a cloud copy is only offered, and installing it goes
  *    through the same permission screen and server checks as installing a .zip.
- *  - Removing a plugin in Hesper marks it removed in the cloud so your other devices stop offering it.
+ *  - Removing a plugin in PEK marks it removed in the cloud so your other devices stop offering it.
  *    They keep their own copy; nothing is ever deleted on a device because of the cloud.
  */
 (function () {
@@ -284,7 +284,7 @@
         }).catch(function (e) { return { ok: false, error: (e && e.error) || 'server' }; });
     }
 
-    // The user removed this plugin in Hesper: tell the cloud so other devices stop offering it.
+    // The user removed this plugin in PEK: tell the cloud so other devices stop offering it.
     function forget(id) {
         if (!enabled() || !S() || !S().isLinked() || !validId(id)) return;
         S().cloud('POST', '/v1/plugins/delete', { id: id, updated: Date.now() }).then(function (r) {

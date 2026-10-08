@@ -1,4 +1,4 @@
-// FTP client for Hesper's network folders. Plain POSIX sockets, no libraries.
+// FTP client for PEK's network folders. Plain POSIX sockets, no libraries.
 // Lists with MLSD (falls back to LIST), reads with REST + RETR, passive mode only.
 #include "vfs.h"
 #include "vfs_backends.h"

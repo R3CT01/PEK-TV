@@ -240,7 +240,7 @@ class MainAppLibraryMethods {
         } else try {
             node = typeof p.render === 'function' ? p.render(engine) : null;
         } catch (err) {
-            console.error(`[Hesper] Plugin "${p.folder}" render() threw:`, err);
+            console.error(`[PEK] Plugin "${p.folder}" render() threw:`, err);
             node = ui.card('Plugin error', String((err && err.message) || err));
         }
         if (!node) {
@@ -306,7 +306,7 @@ class MainAppLibraryMethods {
     _renderEmptyLibrary(what) {
         const { createElement, ui } = this.props.engine;
         return createElement('div', {},
-            ui.card(`No ${what} yet`, 'Add a media folder and Hesper will scan it and sort your videos here.'),
+            ui.card(`No ${what} yet`, 'Add a media folder and PEK will scan it and sort your videos here.'),
             createElement('div', { className: 'section-actions' },
                 ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' }),
                 ui.button('Add Network Folder', () => this.openNetPicker())
@@ -326,7 +326,7 @@ class MainAppLibraryMethods {
         return createElement('div', {},
             ui.card(
                 `${plural(groups.length, 'duplicate group')} found`,
-                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. Hesper only lists duplicates; delete files from your file manager.`
+                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. PEK only lists duplicates; delete files from your file manager.`
             ),
             ...groups.map(g => createElement('div', { className: 'settings-section' },
                 createElement('h2', {}, g.kind === 'size' ? `${g.label}: ${hesperFormatBytes(g.files[0].size)}` : g.label),

@@ -1,4 +1,4 @@
-# Deploying Hesper Cloud (accounts + sync). A phone browser is enough.
+# Deploying PEK Cloud (accounts + sync). A phone browser is enough.
 
 Accounts are an email and a password. New accounts confirm their email with a 6-digit code, and
 "Forgot password" works the same way. Both codes are sent through Brevo.
@@ -24,7 +24,7 @@ Accounts are an email and a password. New accounts confirm their email with a 6-
 3. Worker -> **Settings** -> **Variables and Secrets** -> Add:
    - Type **Secret**, name `BREVO_API_KEY`, value = the key from step A2
    - Type **Text**, name `BREVO_SENDER_EMAIL`, value = the sender address verified in step A1
-   - Type **Text**, name `BREVO_SENDER_NAME`, value = `Hesper` (optional)
+   - Type **Text**, name `BREVO_SENDER_NAME`, value = `PEK` (optional)
    Then **Deploy** so they take effect.
 4. Visit the worker URL in a browser. It should say: `hesper-sync ok`
    (tables are created automatically on the first request).

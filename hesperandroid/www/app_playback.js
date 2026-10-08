@@ -106,7 +106,7 @@ class MainAppPlaybackMethods {
                 window.HesperAndroid.play(url, title || '', this._themeForNative());
                 return;
             }
-        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        } catch (e) { console.warn('[PEK] native play failed, falling back', e); }
         if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track); return; }
         window.open(url, '_blank');
     }
@@ -124,7 +124,7 @@ class MainAppPlaybackMethods {
                 window.HesperAndroid.play(url, title || '', this._themeForNative());
                 return;
             }
-        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        } catch (e) { console.warn('[PEK] native play failed, falling back', e); }
         if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose); return; }
         window.open(url, '_blank');
     }

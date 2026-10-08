@@ -135,14 +135,14 @@ class MainAppAppearanceMethods {
         const p = this._findWeatherPlugin(plugins);
         if (!p || typeof p.render !== 'function') return;
         try { p.render(this.props.engine); } catch (err) {
-            console.warn('[Hesper] Weather plugin failed to warm up:', err);
+            console.warn('[PEK] Weather plugin failed to warm up:', err);
         }
     }
 
     // ---------------- Skins ----------------
 
     async loadSkins() {
-        const builtIn = { id: 'default', name: 'Hesper Cream', author: 'Hesper', description: 'The standard look: warm cream and ink.' };
+        const builtIn = { id: 'default', name: 'PEK Cream', author: 'PEK', description: 'The standard look: warm cream and ink.' };
         let skins = [];
         try {
             const res = await fetch('/api/skins');
@@ -153,13 +153,13 @@ class MainAppAppearanceMethods {
                     const m = await fetch(`/skins/${id}/skin.json`).then(r => r.json());
                     return { ...m, id, name: m.name || id };
                 } catch (err) {
-                    console.warn(`[Hesper] Skipping skin "${id}": bad skin.json`, err);
+                    console.warn(`[PEK] Skipping skin "${id}": bad skin.json`, err);
                     return null;
                 }
             }));
             skins = manifests.filter(Boolean);
         } catch (err) {
-            console.warn('[Hesper] Could not load skins:', err);
+            console.warn('[PEK] Could not load skins:', err);
         }
         if (!skins.some(s => s.id === 'default')) skins.unshift(builtIn);
         this.setState({ skins });
@@ -177,7 +177,7 @@ class MainAppAppearanceMethods {
             hesperSetSkinCss(id, true);
             localStorage.setItem(SKIN_KEY, id);
         } catch (err) {
-            console.warn('[Hesper] Could not apply skin, reverting to default:', err);
+            console.warn('[PEK] Could not apply skin, reverting to default:', err);
             theme.reset();
             hesperSetSkinCss('default');
             id = 'default';

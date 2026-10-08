@@ -6,7 +6,7 @@ trailer that plays by itself at the top of the page, the description, the cast a
 
 ## No key needed
 
-PEK Discover is an official Hesper plugin. It comes with the app and uses Hesper's built-in TMDb access,
+PEK Discover is an official PEK plugin. It comes with the app and uses PEK's built-in TMDb access,
 so you can open the **Discover** tab and start browsing straight away.
 
 Optional: under **Settings > TMDb access** you can paste your own free v3 API key (themoviedb.org > Settings > API).
@@ -29,7 +29,7 @@ Open a title and its trailer sits at the very top of the page and starts by itse
   switch this off and the trailer will start muted.
 
 Trailers are YouTube videos played through youtube-nocookie.com. That address is listed under this plugin's
-network permissions. Hesper sends nothing about you to it except what any embedded video player sends.
+network permissions. PEK sends nothing about you to it except what any embedded video player sends.
 
 ## Cast and more titles like it
 
@@ -49,16 +49,16 @@ Both follow the device (for example en-GB gives region GB). Change the region un
 
 ## "In library" badges
 
-`backend.py` runs when Hesper starts and saves the titles and years of your library to `data/library.json`.
+`backend.py` runs when PEK starts and saves the titles and years of your library to `data/library.json`.
 Titles are compared after normalizing (case, accents, punctuation, "&"/"and", leading "The"), movies allow a
-one-year difference. After installing, close and reopen Hesper once so this runs.
+one-year difference. After installing, close and reopen PEK once so this runs.
 
 Data provided by TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.
 Streaming availability data provided by JustWatch.
 
 ## Favorites (1.3.0)
 
-Open a title and press **♡ Add to favorites** (next to Back). It is added to Hesper's **Favorites** tab, which is shared
+Open a title and press **♡ Add to favorites** (next to Back). It is added to PEK's **Favorites** tab, which is shared
 with Snake Skin; press a favorite there to open it again, press and hold to remove it.
 
 ## Watch on... (1.3.0)

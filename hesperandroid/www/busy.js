@@ -1,4 +1,4 @@
-// Shows a loading ring when a request to the Hesper server is slow (>0.5 s):
+// Shows a loading ring when a request to the PEK server is slow (>0.5 s):
 // removing a folder, browsing folders, loading a big library, and so on.
 // Background chatter (progress polling, poster/detail lookups) is ignored.
 (function () {

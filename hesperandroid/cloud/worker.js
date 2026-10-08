@@ -1,4 +1,4 @@
-// Hesper Cloud: accounts + sync service for watch history and resume positions.
+// PEK Cloud: accounts + sync service for watch history and resume positions.
 // Runs as a Cloudflare Worker with ONE D1 database bound as "DB".
 //
 // Accounts are an email address and a password.
@@ -11,7 +11,7 @@
 // Settings (Worker -> Settings -> Variables and Secrets):
 //   BREVO_API_KEY       (Secret)  your Brevo API key
 //   BREVO_SENDER_EMAIL  (Text)    a sender address you verified in Brevo
-//   BREVO_SENDER_NAME   (Text, optional)  shown as the sender name, default "Hesper"
+//   BREVO_SENDER_NAME   (Text, optional)  shown as the sender name, default "PEK"
 //
 // Routes:
 //   POST   /v1/auth/signup   { email, password }                -> { ok, needsVerify, email }   (code emailed)
@@ -211,24 +211,24 @@ async function sessionFor(request, db, now) {
 // ---------------------------------------------------------------- email (Brevo)
 const MAILS = {
     reset: {
-        subject: 'Your Hesper password reset code',
-        title: 'Reset your Hesper password',
+        subject: 'Your PEK password reset code',
+        title: 'Reset your PEK password',
         lead: 'Enter this code in the app:',
         foot: 'It works for 15 minutes. If you did not ask to reset your password, ignore this email; your password has not changed.',
-        text: 'Your Hesper password reset code is {code}\n\nIt works for 15 minutes. If you did not ask to reset your password, you can ignore this email; your password has not changed.'
+        text: 'Your PEK password reset code is {code}\n\nIt works for 15 minutes. If you did not ask to reset your password, you can ignore this email; your password has not changed.'
     },
     verify: {
-        subject: 'Verify your email for Hesper',
+        subject: 'Verify your email for PEK',
         title: 'Verify your email',
-        lead: 'Enter this code in the app to finish creating your Hesper account:',
-        foot: 'It works for 30 minutes. If you did not create a Hesper account, ignore this email and nothing will happen.',
-        text: 'Your Hesper verification code is {code}\n\nIt works for 30 minutes. If you did not create a Hesper account, you can ignore this email.'
+        lead: 'Enter this code in the app to finish creating your PEK account:',
+        foot: 'It works for 30 minutes. If you did not create a PEK account, ignore this email and nothing will happen.',
+        text: 'Your PEK verification code is {code}\n\nIt works for 30 minutes. If you did not create a PEK account, you can ignore this email.'
     }
 };
 
 async function sendCodeEmail(env, to, code, kind) {
     const m = MAILS[kind];
-    const sender = { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'Hesper' };
+    const sender = { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'PEK' };
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: { 'api-key': env.BREVO_API_KEY, 'accept': 'application/json', 'content-type': 'application/json' },

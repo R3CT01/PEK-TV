@@ -1,8 +1,8 @@
-/* Hesper watch history + cloud sync  (window.HesperSync)
+/* PEK watch history + cloud sync  (window.HesperSync)
  *
  * Local part: a permanent "watched" record (kept after resume points are gone).
  * Cloud part: optional sync of watch history, resume positions AND favorites between devices,
- * through the Hesper Cloud worker (cloud/worker.js). An account is an email address and
+ * through the PEK Cloud worker (cloud/worker.js). An account is an email address and
  * a password; nothing is sent until the user signs in.
  *
  * Items are matched across devices by title (not file id), so a movie or episode
@@ -415,7 +415,7 @@
         return inflight;
     }
 
-    // Lets other parts of Hesper (the plugin backup) talk to the cloud with this session.
+    // Lets other parts of PEK (the plugin backup) talk to the cloud with this session.
     // Resolves { ok, body } or { ok: false, error }, and signs the device out if the session is gone.
     function cloud(method, path, body) {
         if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });

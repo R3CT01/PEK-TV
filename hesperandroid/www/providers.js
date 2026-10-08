@@ -1,9 +1,9 @@
-/* Hesper streaming providers  (window.HesperProviders)
+/* PEK streaming providers  (window.HesperProviders)
  *
  * Turns a "Watch on Netflix / Hulu / ..." button into an action:
  *   - Android app: opens the provider's app (on its page for the title when the app supports the link),
  *     or the provider's website when the app is not installed.
- *   - Everything else (the main Hesper in a browser): opens the provider's website in a new tab.
+ *   - Everything else (the main PEK in a browser): opens the provider's website in a new tab.
  *
  * A plugin only says WHICH provider (TMDb's name) and WHICH title. It never supplies an address or an
  * app name: those come from the table below, so a plugin cannot use a button to open something else.
@@ -90,7 +90,7 @@
             var url = p.search && title ? p.search.replace('{q}', encodeURIComponent(title)) : p.home;
             return { name: p.name, pkgs: p.pkgs.slice(), url: url, known: true };
         }
-        // A service Hesper has no row for: TMDb's own "where to watch" page for the title.
+        // A service PEK has no row for: TMDb's own "where to watch" page for the title.
         var tmdb = id ? 'https://www.themoviedb.org/' + type + '/' + id + '/watch?locale=' + region
                       : 'https://www.themoviedb.org/';
         return { name: String(spec.name || 'this service').slice(0, 60), pkgs: [], url: tmdb, known: false };
@@ -110,7 +110,7 @@
             }
             if (A && typeof A.openUrl === 'function') { A.openUrl(p.url); return p; }
             var w = window.open(p.url, '_blank', 'noopener,noreferrer');
-            if (!w) toast('Your browser blocked the new tab. Allow pop-ups for Hesper and try again.');
+            if (!w) toast('Your browser blocked the new tab. Allow pop-ups for PEK and try again.');
         } catch (e) {
             toast("Couldn't open " + p.name + '.');
         }

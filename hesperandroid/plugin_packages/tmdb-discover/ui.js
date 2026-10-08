@@ -1,7 +1,7 @@
 // PEK Discover: trending / top rated / popular / now playing rows for movies and TV,
 // streaming-service chips, search, descriptions, and a badge on titles you already own.
 //
-// Runs in Hesper's plugin sandbox. It talks to TMDb with your own v3 API key
+// Runs in PEK's plugin sandbox. It talks to TMDb with your own v3 API key
 // (entered in this screen's Settings tab, stored only in this plugin's private storage).
 // Data: TMDb. Streaming availability: JustWatch (via TMDb).
 (function () {
@@ -109,7 +109,7 @@
         if (/HTTP 429/.test(m)) return 'TMDb is busy right now (429). Try again in a moment.';
         if (/HTTP 5\d\d/.test(m)) return 'TMDb had a problem (' + m.replace('HTTP ', '') + '). Try again later.';
         if (/abort/i.test(m)) return 'TMDb took too long to answer.';
-        if (/too large/i.test(m)) return 'TMDb sent more data than Hesper allows.';
+        if (/too large/i.test(m)) return 'TMDb sent more data than PEK allows.';
         return "Couldn't reach TMDb. Check your connection.";
     }
 
@@ -391,8 +391,8 @@
         if (S.keyMsg) kids.push(ui.text(S.keyMsg));
         kids.push(ui.heading('Your library'));
         kids.push(ui.text(S.lib.loaded
-            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time Hesper starts.'
-            : 'Library list not available yet. It is created when Hesper starts, so close and reopen Hesper once after installing.'));
+            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time PEK starts.'
+            : 'Library list not available yet. It is created when PEK starts, so close and reopen PEK once after installing.'));
         kids.push(attribution(ui));
         return ui.column.apply(ui, kids);
     }

@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-# Dev helper: builds Hesper into your project root's bin/ folder, then
+# Dev helper: builds PEK into your project root's bin/ folder, then
 # runs it. Nothing is installed system-wide.
 #   bash dev.sh         build, then run  (use "bash" — files on shared
 #                       storage can't be made executable)

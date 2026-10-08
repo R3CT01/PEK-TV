@@ -3,7 +3,7 @@
 //
 //  What it does when a plugin (or the Torrents test button) searches for a movie or episode:
 //    1. builds the search words ("dune 2021" or "show name S01E02"),
-//    2. asks Hesper's server to fetch each site you listed (the server does the web request),
+//    2. asks PEK's server to fetch each site you listed (the server does the web request),
 //    3. reads the answer: JSON lists, or web pages that show magnet links,
 //    4. throws away wrong titles / wrong episodes, scores the rest (episode, year, quality, seeders),
 //    5. returns the list best-first. The first one is what a plugin plays.
@@ -173,7 +173,7 @@
         return w;
     }
 
-    // ------------------------------------------------------------ talking to Hesper's server
+    // ------------------------------------------------------------ talking to PEK's server
     const sites = (Array.isArray(window.HESPER_SEARCH_SITES) ? window.HESPER_SEARCH_SITES : [])
         .map(s => String(s || '').trim()).filter(Boolean);
     let registered = null;

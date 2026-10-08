@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper Plugin — "Weather Widget" (Loop-Broken & Stable)
+// PEK Plugin — "Weather Widget" (Loop-Broken & Stable)
 // ============================================================
 
 window.app_name = 'Weather Widget';

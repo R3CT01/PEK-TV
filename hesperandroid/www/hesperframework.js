@@ -70,7 +70,7 @@ const HESPER_DARK_EXTRAS = {
     glassEdge: 'rgba(255, 255, 255, 0.10)'
 };
 
-// Default look: warm cream (matches the Hesper splash screen), ink-dark text.
+// Default look: warm cream (matches the PEK splash screen), ink-dark text.
 const HESPER_DEFAULT_THEME = {
     bg: '#E9E2DA',
     bgElevated: '#F3EEE7',
@@ -992,7 +992,7 @@ class HesperPluginLoader {
     }
 
     // Plugins allowed to run their ui.js directly in this page (full access, the old
-    // way). Only what ships with Hesper. Every other plugin runs in the sandbox
+    // way). Only what ships with PEK. Every other plugin runs in the sandbox
     // (plugin_sandbox.js). To trust one you wrote yourself while developing, run in the
     // browser console:  localStorage.setItem('hesper-trusted-plugins', '["my_plugin"]')
     static isTrusted(folder) {
