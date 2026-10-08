@@ -2,24 +2,23 @@
    Hesper Theme Tokens
    ============================================================ */
 :root {
-    --sx-bg: #150a05;
-    --sx-bg-elevated: #1e0f07;
-    --sx-surface: #2b160b;
-    --sx-surface-focused: #ff8a3d2e;
-    --sx-border: #4d2813;
-    --sx-border-focus: #ffa24d;
-    --sx-text: #fff0e2;
-    --sx-text-muted: #cfa68a;
-    --sx-accent: #ffa24d;
-    --sx-accent-glow: rgba(255, 150, 60, 0.5);
+    --sx-bg: #E9E2DA;
+    --sx-bg-elevated: #F3EEE7;
+    --sx-surface: #F8F4EE;
+    --sx-surface-focused: #2b262218;
+    --sx-border: #D5CABD;
+    --sx-border-focus: #2b2622;
+    --sx-text: #2b2622;
+    --sx-text-muted: #7a6f66;
+    --sx-accent: #2b2622;
+    --sx-accent-glow: rgba(43, 38, 34, 0.22);
     --sx-radius: 16px;
-    --sx-overlay: rgba(16, 7, 3, 0.72);
-    --sx-shadow: rgba(0, 0, 0, 0.55);
-    --sx-glass: rgba(43, 22, 11, 0.55);
-    --sx-glass-strong: rgba(30, 15, 7, 0.95);
-    --sx-glass-fill: rgba(255, 170, 90, 0.07);
-    --sx-glass-edge: rgba(255, 170, 90, 0.18);
-    --sx-bg-image: radial-gradient(1300px 820px at 86% -10%, rgba(255, 146, 54, 0.46) 0%, rgba(255, 146, 54, 0) 64%), radial-gradient(1000px 680px at -8% 112%, rgba(224, 84, 24, 0.36) 0%, rgba(224, 84, 24, 0) 66%), radial-gradient(700px 500px at 55% 60%, rgba(180, 70, 20, 0.12) 0%, rgba(180, 70, 20, 0) 70%), linear-gradient(160deg, #2a140a 0%, #180b05 52%, #0f0603 100%);
+    --sx-overlay: rgba(60, 48, 38, 0.35);
+    --sx-shadow: rgba(70, 52, 36, 0.22);
+    --sx-glass: rgba(255, 255, 255, 0.50);
+    --sx-glass-strong: rgba(250, 246, 240, 0.96);
+    --sx-glass-fill: rgba(255, 255, 255, 0.55);
+    --sx-glass-edge: rgba(60, 48, 38, 0.14);
     --sx-font: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
@@ -30,10 +29,6 @@
 body {
     margin: 0;
     background-color: var(--sx-bg);
-    background-image: var(--sx-bg-image, none);
-    background-repeat: no-repeat;
-    background-size: 100% 100%;
-    background-attachment: fixed;
     color: var(--sx-text);
     font-family: var(--sx-font);
     overflow: hidden;
@@ -89,7 +84,7 @@ body {
     cursor: pointer;
     font-size: 1rem;
     text-align: left;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
 .nav-item.active {
@@ -121,7 +116,7 @@ body {
     padding: 2.5rem;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
-    background: transparent;      /* the page background (colour or gradient) shows through */
+    background: var(--sx-bg);
 }
 
 .content-title {
@@ -153,7 +148,7 @@ body {
     cursor: pointer;
     font-size: 1rem;
     font-weight: 500;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
 .theme-launch-btn:hover {
@@ -176,7 +171,7 @@ body {
     padding: 1rem 1.25rem;
     border-radius: var(--sx-radius);
     cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.1s, background 0.1s;
 }
 
 .plugin-row h3 {
@@ -300,7 +295,7 @@ body {
     width: 130px;
     flex-shrink: 0;
     cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+    transition: transform 0.15s ease-out, border-color 0.1s;
     position: relative;
     margin-right: -20px;
     box-shadow: 0 10px 25px var(--sx-shadow);
@@ -612,9 +607,7 @@ body {
     z-index: 1000;
     display: flex;
     flex-direction: column;
-    background-color: var(--sx-bg);
-    background-image: var(--sx-bg-image, none);
-    background-size: 100% 100%;
+    background: var(--sx-bg);
     color: var(--sx-text);
 }
 
@@ -919,8 +912,8 @@ body {
     overflow: hidden;
     background: #161b22;
     background: var(--sx-surface, #161b22);
-    -webkit-transition: -webkit-transform 0.18s ease, box-shadow 0.18s ease;
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    -webkit-transition: -webkit-transform 0.12s ease-out;
+    transition: transform 0.12s ease-out;
 }
 
 .sx-poster-img {
@@ -1296,3 +1289,33 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
 .sx-btn.sx-provider { display: inline-flex; align-items: center; gap: 0.5rem; }
 .sx-provider-logo { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
 @media (max-width: 720px) { .sx-provider-logo { width: 24px; height: 24px; } }
+
+/* ============================================================
+   Performance pass (60 fps TV): no live blur over scrolling content,
+   promoted layers for the things that move, shorter focus transitions.
+   ============================================================ */
+.glass-panel, .hero-glass, .sx-toast, .sx-toast * {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.hero-backdrop { will-change: transform; -webkit-transform: translateZ(0); transform: translateZ(0); }
+.sx-poster-card { will-change: transform; contain: paint; }
+.preset-card { will-change: transform; }
+
+
+/* ============================================================
+   TV boxes / Fire Stick (html.hesper-tv, set in index.html)
+   Cheap GPUs drop frames on live blur, wide soft shadows and on
+   hundreds of always-promoted layers. Same look, lighter paint.
+   ============================================================ */
+/* A layer per poster is hundreds of GPU textures on a 1-2 GB box: promote only the focused one. */
+.sx-poster-card, .preset-card { will-change: auto; }
+.sx-poster-card.focused, .preset-card:hover { will-change: transform; }
+html.hesper-tv * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.hesper-tv .theme-panel-overlay, html.hesper-tv .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.82); }
+html.hesper-tv .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32;
+    -webkit-transform: scale(1.12) translateZ(0); transform: scale(1.12) translateZ(0); }
+html.hesper-tv .focusable { -webkit-transition: border-color 0.08s, background-color 0.08s; transition: border-color 0.08s, background-color 0.08s; }
+html.hesper-tv .focusable.focused { box-shadow: 0 0 0 2px var(--sx-border-focus); }
+html.hesper-tv .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
+html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { animation: none; }

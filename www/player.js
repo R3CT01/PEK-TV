@@ -9,7 +9,7 @@ function hesperAnnouncePlayer(active) {
 }
 
 /* ============================================================
-   Hesper shared player: on-screen controls + backend contract
+   PEK shared player: on-screen controls + backend contract
 
    One set of controls (this file) is used on every platform. Each platform
    only supplies a *backend* that decodes and draws the video:
@@ -243,7 +243,49 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     .hp-stream { padding: 12px 16px 11px; }
     .hp-stream-title { font-size: 1.3rem; }
 }
+/* TV / set-top box ("lite") mode. Blur filters, big soft shadows and animated shadows are what make a
+   TV GPU drop frames, and over the native video surface the blur has nothing to blur anyway. So the
+   same glass look is kept with a denser translucent fill, and only opacity / transform are animated
+   (both run on the compositor, no repaint). Phones and desktop keep the full glass. */
+.hp-lite .hp-btn, .hp-lite .hp-chip, .hp-lite .hp-seek-tip, .hp-lite .hp-stream, .hp-lite .hp-menu,
+.hp-lite .hp-confirm-card, .hp-lite .hp-min {
+    -webkit-backdrop-filter: none; backdrop-filter: none;
+    background-color: rgba(28, 24, 21, 0.8);
+    background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.8);
+    box-shadow: none; }
+.hp-lite .hp-stream, .hp-lite .hp-menu, .hp-lite .hp-confirm-card {
+    background-color: rgba(28, 24, 21, 0.94); background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.94); }
+.hp-lite .hp-confirm { -webkit-backdrop-filter: none; backdrop-filter: none;
+    background: rgba(5, 8, 15, 0.78); background: rgba(var(--hp-shade-rgb, 14, 12, 10), 0.78); }
+.hp-lite .hp-btn { -webkit-transition: -webkit-transform 0.12s; transition: transform 0.12s; }
+.hp-lite .hp-btn.hp-main { box-shadow: none; }
+.hp-keys.hp-lite .hp-btn.hp-focused {
+    -webkit-transform: scale(1.08); transform: scale(1.08);
+    box-shadow: 0 0 0 3px rgba(243, 238, 231, 0.45); box-shadow: 0 0 0 3px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.45); }
+.hp-keys.hp-lite .hp-btn.hp-main.hp-focused { box-shadow: 0 0 0 4px rgba(243, 238, 231, 0.5);
+    box-shadow: 0 0 0 4px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.5); }
+.hp-lite .hp-seek-track, .hp-lite .hp-seek-knob { -webkit-transition: none; transition: none; }
+.hp-lite .hp-seek-knob { box-shadow: none; }
+.hp-lite .hp-times, .hp-lite .hp-top-title, .hp-lite .hp-error { text-shadow: none; }
+.hp-lite .hp-top, .hp-lite .hp-bottom { will-change: opacity, transform;
+    -webkit-transition: opacity 0.2s ease, -webkit-transform 0.2s ease, visibility 0s linear 0.2s;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s; visibility: hidden; }
+.hp-lite.hp-show .hp-top, .hp-lite.hp-show .hp-bottom { visibility: visible;
+    -webkit-transition-delay: 0s; transition-delay: 0s; }
+.hp-lite .hp-stream.hp-on { -webkit-animation: none; animation: none; }
+.hp-lite .hp-stream-fill { -webkit-transition: none; transition: none; }
+.hp-lite .hp-menu-item, .hp-lite .hp-confirm-btn { -webkit-transition: none; transition: none; }
 `;
+
+    // TV / box = running inside the Android app but not on a phone. Used to switch to the lighter look.
+    function isLiteDevice() {
+        try {
+            const a = window.HesperAndroid;
+            if (!a) return false;
+            if (typeof a.isPhone === 'function') return !a.isPhone();
+            return typeof a.mpvLoad === 'function';
+        } catch (e) { return false; }
+    }
 
     function injectStyle() {
         if (document.getElementById(STYLE_ID)) return;
@@ -306,7 +348,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     // ---- theme: derive the player's colours from the active skin's --sx-* tokens ----
     // The player sits on top of a picture, so it always uses dark glass with light text. The skin
     // decides the tint of the glass, the highlight colour (play button, seek bar, focus) and the
-    // roundness. "Hesper Cream" gets a warm cream highlight; Green / Neon get their accent colour.
+    // roundness. "PEK Cream" gets a warm cream highlight; Green / Neon get their accent colour.
     function parseColor(str) {
         str = String(str || '').trim();
         let m = /^#([0-9a-f]{3,8})$/i.exec(str);
@@ -596,7 +638,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 
         // ---- building the screen ----
         _build() {
-            const root = el('div', 'hp-root' + (this.backend.drawsBehindPage ? ' hp-transparent' : ''));
+            const root = el('div', 'hp-root' + (this.backend.drawsBehindPage ? ' hp-transparent' : '') + (isLiteDevice() ? ' hp-lite' : ''));
             this.root = root;
             this.videoLayer = el('div', 'hp-video-layer');
             this.spinner = el('div', 'hp-spinner hp-on');

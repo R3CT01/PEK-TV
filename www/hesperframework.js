@@ -70,8 +70,8 @@ const HESPER_DARK_EXTRAS = {
     glassEdge: 'rgba(255, 255, 255, 0.10)'
 };
 
-// The old default look: warm cream, ink-dark text. Still available as the "cream" preset.
-const HESPER_CREAM = {
+// Default look: warm cream (matches the PEK splash screen), ink-dark text.
+const HESPER_DEFAULT_THEME = {
     bg: '#E9E2DA',
     bgElevated: '#F3EEE7',
     surface: '#F8F4EE',
@@ -91,52 +91,6 @@ const HESPER_CREAM = {
     glassEdge: 'rgba(60, 48, 38, 0.14)'
 };
 
-
-// Default look: "Ember", a dim, radiant orange. bgImage is the gradient behind the app
-// (a theme/skin that sets its own bg colour without a bgImage gets no gradient).
-const HESPER_DEFAULT_THEME = {
-    bg: '#150a05',
-    bgElevated: '#1e0f07',
-    surface: '#2b160b',
-    surfaceFocused: '#ff8a3d2e',
-    border: '#4d2813',
-    borderFocus: '#ffa24d',
-    text: '#fff0e2',
-    textMuted: '#cfa68a',
-    accent: '#ffa24d',
-    accentGlow: 'rgba(255, 150, 60, 0.5)',
-    radius: '16px',
-    overlay: 'rgba(16, 7, 3, 0.72)',
-    shadow: 'rgba(0, 0, 0, 0.55)',
-    glass: 'rgba(43, 22, 11, 0.55)',
-    glassStrong: 'rgba(30, 15, 7, 0.95)',
-    glassFill: 'rgba(255, 170, 90, 0.07)',
-    glassEdge: 'rgba(255, 170, 90, 0.18)',
-    // A soft orange glow top-right, a deeper ember glow bottom-left, over a dim brown base.
-    bgImage: 'radial-gradient(1300px 820px at 86% -10%, rgba(255, 146, 54, 0.46) 0%, rgba(255, 146, 54, 0) 64%), radial-gradient(1000px 680px at -8% 112%, rgba(224, 84, 24, 0.36) 0%, rgba(224, 84, 24, 0) 66%), radial-gradient(700px 500px at 55% 60%, rgba(180, 70, 20, 0.12) 0%, rgba(180, 70, 20, 0) 70%), linear-gradient(160deg, #2a140a 0%, #180b05 52%, #0f0603 100%)'
-};
-
-// Presets and skins that choose their own background colour are flat unless they ask for an image.
-function hesperMergePreset(preset) {
-    return {
-        ...HESPER_DEFAULT_THEME,
-        ...(hesperIsDark(preset.bg) ? HESPER_DARK_EXTRAS : {}),
-        ...(preset.bg && preset.bgImage === undefined ? { bgImage: 'none' } : {}),
-        ...preset
-    };
-}
-
-// Only plain gradients (or none) are accepted as the background image: no url(), so a skin can't
-// make the app load anything from the network through a token.
-function hesperSafeBgImage(v) {
-    if (typeof v !== 'string') return 'none';
-    const t = v.trim();
-    if (t === 'none') return 'none';
-    const low = t.toLowerCase();
-    if (t.length > 800 || /url\(|image\(|image-set\(|element\(|cross-fade\(|[;{}@\\<]/.test(low)) return 'none';
-    return /^(?:(?:repeating-)?(?:linear|radial|conic)-gradient\([^]*\)\s*,?\s*)+$/.test(low) ? t : 'none';
-}
-
 // The previous dark default, kept as the "midnight" preset.
 const HESPER_MIDNIGHT = {
     ...HESPER_DARK_EXTRAS,
@@ -152,8 +106,7 @@ function hesperIsDark(hex) {
 }
 
 const HESPER_BUILTIN_PRESETS = {
-    ember: { ...HESPER_DEFAULT_THEME },
-    cream: { ...HESPER_CREAM, bgImage: 'none' },
+    cream: { ...HESPER_DEFAULT_THEME },
     midnight: { ...HESPER_MIDNIGHT },
     amoled: {
         bg: '#000000', bgElevated: '#000000', surface: '#0a0a0a', surfaceFocused: '#ffffff14',
@@ -244,7 +197,6 @@ class HesperTheme {
             return this;
         }
         this.tokens[key] = value;
-        if (key === 'bg') this.tokens.bgImage = 'none';     // a custom background colour replaces the gradient
         this._apply();
         this._save();
         this._notify();
@@ -258,8 +210,7 @@ class HesperTheme {
             return this;
         }
         const extras = (partialTokens.bg && !partialTokens.glass && hesperIsDark(partialTokens.bg)) ? HESPER_DARK_EXTRAS : {};
-        const flat = (partialTokens.bg && partialTokens.bgImage === undefined) ? { bgImage: 'none' } : {};
-        this.tokens = { ...this.tokens, ...extras, ...flat, ...partialTokens };
+        this.tokens = { ...this.tokens, ...extras, ...partialTokens };
         this._apply();
         this._save();
         this._notify();
@@ -281,7 +232,7 @@ class HesperTheme {
             return this;
         }
         const preset = this.presets[name];
-        this.tokens = hesperMergePreset(preset);
+        this.tokens = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(preset.bg) ? HESPER_DARK_EXTRAS : {}), ...preset };
         this._apply();
         this._save();
         this._notify();
@@ -290,7 +241,7 @@ class HesperTheme {
 
     /** Register a reusable custom preset a developer defines once, e.g. for a branded add-on */
     registerPreset(name, tokens) {
-        this.presets[name] = hesperMergePreset(tokens);
+        this.presets[name] = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(tokens.bg) ? HESPER_DARK_EXTRAS : {}), ...tokens };
         return this;
     }
 
@@ -301,7 +252,7 @@ class HesperTheme {
     reset() {
         this.tokens = { ...HESPER_DEFAULT_THEME };
         this._apply();
-        try { localStorage.removeItem(this.storageKey); } catch (err) { /* ignore */ }
+        this._save();
         this._notify();
         return this;
     }
@@ -317,7 +268,7 @@ class HesperTheme {
     _apply() {
         const root = document.documentElement;
         for (const [key, value] of Object.entries(this.tokens)) {
-            root.style.setProperty(`--sx-${this._kebab(key)}`, key === 'bgImage' ? hesperSafeBgImage(value) : value);
+            root.style.setProperty(`--sx-${this._kebab(key)}`, value);
         }
     }
 
@@ -328,7 +279,6 @@ class HesperTheme {
     _save() {
         try {
             localStorage.setItem(this.storageKey, JSON.stringify(this.tokens));
-            localStorage.setItem(this.storageKey + '-v', '2');
         } catch (err) {
             console.warn('[HesperTheme] Could not persist theme:', err);
         }
@@ -345,16 +295,8 @@ class HesperTheme {
                     localStorage.removeItem(this.storageKey);
                     return;
                 }
-                // Saved before the Ember default existed and never customised (an untouched copy of the old
-                // cream default): drop it so the new default shows. Once a theme was saved by this version
-                // the marker is set, so choosing the cream preset on purpose is kept.
-                if (localStorage.getItem(this.storageKey + '-v') !== '2' && Object.keys(HESPER_CREAM).every(k => parsed[k] === HESPER_CREAM[k])) {
-                    localStorage.removeItem(this.storageKey);
-                    return;
-                }
                 const extras = (!parsed.glass && parsed.bg && hesperIsDark(parsed.bg)) ? HESPER_DARK_EXTRAS : {};
-                const flat = (parsed.bg && parsed.bgImage === undefined) ? { bgImage: 'none' } : {};
-                const merged = { ...this.tokens, ...extras, ...flat, ...parsed };
+                const merged = { ...this.tokens, ...extras, ...parsed };
                 if (hesperThemeUnreadable(merged)) {
                     console.warn('[HesperTheme] Saved theme was unreadable (text matches background); using defaults.');
                     localStorage.removeItem(this.storageKey);
@@ -440,6 +382,7 @@ class HesperUIKit {
             onClick: onClick || (() => {})
         });
         const img = this.engine.createElement('img', { className: 'sx-poster-img', src: posterUrl, alt: title });
+        img.decoding = 'async';
         img.addEventListener('error', () => {
             const plain = this.card(title, subtitle, onClick, opts);
             if (wrap.parentNode) {
@@ -462,6 +405,7 @@ class HesperUIKit {
             HesperUIKit._lpInstalled = true;
             // After a long press fires, swallow the click that follows the release.
             document.addEventListener('click', (ev) => {
+                if (Date.now() < (HesperUIKit._lpGuard || 0)) { ev.stopPropagation(); ev.preventDefault(); return; }
                 const t = ev.target && ev.target.closest ? ev.target.closest('.sx-longpress') : null;
                 if (t && t._lpSuppress) { t._lpSuppress = false; ev.stopPropagation(); ev.preventDefault(); }
             }, true);
@@ -473,6 +417,7 @@ class HesperUIKit {
             fired = true;
             cancel();
             el._lpSuppress = true;                                   // the click that follows the release is ignored
+            HesperUIKit._lpGuard = Date.now() + 600;                  // ...and so is any click that lands on what the hold opened
             setTimeout(() => { el._lpSuppress = false; }, 700);
             handler();
         };
@@ -804,7 +749,7 @@ class HesperNav {
         if (best) {
             current.classList.remove('focused');
             best.classList.add('focused');
-            best.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+            hesperScrollIntoView(best, false);
         }
         return best;
     }
@@ -857,6 +802,64 @@ function hesperScrollParent(el) {
     return null;
 }
 
+// Fast, interruptible scroll-into-view. The browser's own smooth scroll is slow (a few hundred ms)
+// and restarts on every key press, which feels laggy on a TV. This one eases over ~110ms
+// (~65ms while a key is held), retargets instantly and is driven by requestAnimationFrame.
+const _hsAnims = new Map();
+let _hsRaf = 0;
+function _hsTick(now) {
+    _hsRaf = 0;
+    _hsAnims.forEach((a, sp) => {
+        const p = Math.min(1, (now - a.t0) / a.dur), e = 1 - Math.pow(1 - p, 3);
+        if (a.ty !== null) sp.scrollTop = a.fy + (a.ty - a.fy) * e;
+        if (a.tx !== null) sp.scrollLeft = a.fx + (a.tx - a.fx) * e;
+        if (p >= 1) _hsAnims.delete(sp);
+    });
+    if (_hsAnims.size) _hsRaf = requestAnimationFrame(_hsTick);
+}
+function hesperAnimateScroll(sp, top, left, dur) {
+    const root = document.scrollingElement || document.documentElement;
+    if (sp === document.body || sp === document.documentElement) sp = root;
+    if (top === null && left === null) return;
+    _hsAnims.set(sp, { t0: performance.now(), dur: dur,
+        fy: sp.scrollTop, ty: top, fx: sp.scrollLeft, tx: left });
+    if (!_hsRaf) _hsRaf = requestAnimationFrame(_hsTick);
+}
+function hesperScrollIntoView(el, fast) {
+    if (!el || !el.isConnected) return;
+    const dur = fast ? 65 : 110;
+    const root = document.scrollingElement || document.documentElement;
+    const r = el.getBoundingClientRect();
+    const pick = (lo, hi, rl, rh) => (rh - rl > hi - lo ? rl - lo : rl < lo ? rl - lo : rh > hi ? rh - hi : 0);
+    let p = el.parentElement, depth = 0;
+    while (p && depth++ < 12) {
+        const isRoot = p === document.body || p === document.documentElement;
+        const cs = isRoot ? null : getComputedStyle(p);
+        const scrollY = isRoot ? false : /(auto|scroll)/.test(cs.overflowY) && p.scrollHeight > p.clientHeight + 1;
+        const scrollX = isRoot ? false : /(auto|scroll)/.test(cs.overflowX) && p.scrollWidth > p.clientWidth + 1;
+        if (scrollY || scrollX) {
+            const c = p.getBoundingClientRect();
+            const dy = scrollY ? pick(c.top, c.bottom, r.top, r.bottom) : 0;
+            const dx = scrollX ? pick(c.left, c.right, r.left, r.right) : 0;
+            if (dy || dx) {
+                const ty = dy ? Math.max(0, Math.min(p.scrollHeight - p.clientHeight, p.scrollTop + dy)) : null;
+                const tx = dx ? Math.max(0, Math.min(p.scrollWidth - p.clientWidth, p.scrollLeft + dx)) : null;
+                hesperAnimateScroll(p, ty, tx, dur);
+                // What is left of the distance is handled by the outer scroller.
+                if (dy) r.y -= dy; if (dx) r.x -= dx;
+            }
+        }
+        p = p.parentElement;
+    }
+    // The page itself
+    const vh = window.innerHeight, vw = window.innerWidth;
+    const dy = root.scrollHeight > vh + 1 ? pick(0, vh, r.top, r.bottom) : 0;
+    const dx = root.scrollWidth > vw + 1 ? pick(0, vw, r.left, r.right) : 0;
+    if (dy || dx) hesperAnimateScroll(root,
+        dy ? Math.max(0, Math.min(root.scrollHeight - vh, root.scrollTop + dy)) : null,
+        dx ? Math.max(0, Math.min(root.scrollWidth - vw, root.scrollLeft + dx)) : null, dur);
+}
+
 // Plugin pages only. When the next focus target is not fully on screen and there is more than a
 // small gap (non-focusable text, such as a movie description) before it, scroll toward it by at
 // most 60% of the screen and report true, so the caller leaves focus where it is. The next press
@@ -878,21 +881,26 @@ function hesperStepScroll(current, target, dir) {
         if (sp.scrollTop <= 0) return false;
         need = c.top + margin - r.top;
     }
-    // Sub-pixel / tiny remainders: scrolling that little does nothing visible, so moving focus is right.
-    // (Without this, Down could be swallowed forever when the target sat a fraction of a pixel off screen.)
-    if (need < 8) return false;
-    const dy = Math.min(Math.ceil(need), cap) * (dir === 'down' ? 1 : -1);
-    try { sp.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { sp.scrollTop += dy; }
+    if (need <= 0) return false;
+    const dy = Math.min(need, cap) * (dir === 'down' ? 1 : -1);
+    hesperAnimateScroll(sp, Math.max(0, Math.min(sp.scrollHeight - sp.clientHeight, sp.scrollTop + dy)), null, 110);
     return true;
 }
 
+const hesperRegionCache = new WeakMap();
 function hesperSpatialTarget(from, elements, dir) {
     const EPS = 4;                                   // tolerate slight overlap between neighbours
     const f = from.getBoundingClientRect();
     const horizontal = dir === 'left' || dir === 'right';
     // Up/Down stay inside the same area (sidebar or content) so you can't
     // jump from a card to a far-away menu item; Left/Right cross between areas.
-    const regionOf = (el) => (el.closest && el.closest('.hesper-sidebar, .hesper-content')) || null;
+    // closest() for every focusable on every key press is slow on a TV CPU; an element's region
+    // does not change while it exists, so it is looked up once.
+    const regionOf = (el) => {
+        let r = hesperRegionCache.get(el);
+        if (r === undefined) { r = (el.closest && el.closest('.hesper-sidebar, .hesper-content')) || null; hesperRegionCache.set(el, r); }
+        return r;
+    };
     const fromRegion = regionOf(from);
     let best = null;
     let bestScore = Infinity;
@@ -991,7 +999,7 @@ class HesperPluginLoader {
     }
 
     // Plugins allowed to run their ui.js directly in this page (full access, the old
-    // way). Only what ships with Hesper. Every other plugin runs in the sandbox
+    // way). Only what ships with PEK. Every other plugin runs in the sandbox
     // (plugin_sandbox.js). To trust one you wrote yourself while developing, run in the
     // browser console:  localStorage.setItem('hesper-trusted-plugins', '["my_plugin"]')
     static isTrusted(folder) {
@@ -1147,7 +1155,9 @@ class HesperEngine {
                 // Leaving a text field with Up/Down hides the keyboard.
                 if (typing && t.blur) t.blur();
                 // First press just shows the highlight; after that, move spatially.
-                const hasFocus = this.focusableElements.some(el => el.classList.contains('focused'));
+                const lastEl = this._focusedEl;
+                const hasFocus = (lastEl && lastEl.isConnected && lastEl.classList.contains('focused')) ||
+                    this.focusableElements.some(el => el.classList.contains('focused'));
                 let stepped = false;
                 const beforeIdx = this.currentIndex;
                 if (hasFocus) {
@@ -1158,15 +1168,24 @@ class HesperEngine {
                     if (target && hesperStepScroll(current, target, dirs[e.key])) stepped = true;
                     else if (target) this.currentIndex = this.focusableElements.indexOf(target);
                 }
-                if (!stepped) this._applyFocus();
-                // A soft tick when the highlight actually moved (or first appears).
+                this._fastScroll = !!e.repeat;
+                // A soft tick when the highlight actually moved (or first appears). It goes out BEFORE the
+                // focus update below, so the sound is never queued behind the layout work.
                 if (!stepped && window.HesperNavSound && (!hasFocus || this.currentIndex !== beforeIdx)) window.HesperNavSound.tick();
+                if (!stepped) this._applyFocus();
                 e.preventDefault();
             } else if (e.key === 'Enter') {
+                // Holding OK makes the remote repeat the key. A repeat must never click anything: once a long
+                // press opens a dialog, the repeats would otherwise press its buttons (closing or confirming it).
+                if (e.repeat) {
+                    if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) this._fireKeyLongPress();
+                    e.preventDefault();
+                    return;
+                }
                 const active = this.focusableElements[this.currentIndex];
                 if (active) {
                     // A text field needs real DOM focus (not a click) to open the keyboard.
-                    if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) active.focus();
+                    if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) { if (window.HesperNavSound) window.HesperNavSound.select(); active.focus(); }
                     else if (active._hesperLongPress) {
                         // Hold OK for the long-press action; a short press clicks on release.
                         if (!e.repeat) {
@@ -1179,7 +1198,7 @@ class HesperEngine {
                         } else if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) {
                             this._fireKeyLongPress();
                         }
-                    } else active.click();
+                    } else { if (!e.repeat && window.HesperNavSound) window.HesperNavSound.select(); active.click(); }
                 }
                 e.preventDefault();
             }
@@ -1199,7 +1218,7 @@ class HesperEngine {
                 clearTimeout(this._lpTimer);
                 this._lpTimer = null;
                 const t = this._lpTarget; this._lpTarget = null;
-                if (t && t.isConnected) t.click();
+                if (t && t.isConnected) { if (window.HesperNavSound) window.HesperNavSound.select(); t.click(); }
             }
         });
     }
@@ -1211,18 +1230,26 @@ class HesperEngine {
         this._lpTarget = null;
         if (!t || !t.isConnected || !t._hesperLongPress) return;
         this._lpFiredByKey = true;
+        HesperUIKit._lpGuard = Date.now() + 400;
         t._hesperLongPress();
     }
 
     _applyFocus(scroll = true) {
-        this.focusableElements.forEach((el, idx) => {
-            if (idx === this.currentIndex) {
-                el.classList.add('focused');
-                if (scroll) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } else {
-                el.classList.remove('focused');
-            }
-        });
+        const list = this.focusableElements;
+        const cur = list[this.currentIndex];
+        // Fast path (a key press inside the same list): only the old and the new element change.
+        // Walking every card on every press is what made big grids feel slow on TV boxes.
+        if (this._focusList === list && this._focusedEl && this._focusedEl !== cur) {
+            this._focusedEl.classList.remove('focused');
+        } else if (this._focusList !== list) {
+            list.forEach((el) => { if (el !== cur) el.classList.remove('focused'); });
+        }
+        this._focusList = list;
+        this._focusedEl = cur || null;
+        if (cur) {
+            cur.classList.add('focused');
+            if (scroll) hesperScrollIntoView(cur, this._fastScroll);
+        }
     }
 }
 
