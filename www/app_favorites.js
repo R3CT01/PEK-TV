@@ -101,7 +101,7 @@ class MainAppFavoritesMethods {
             list.length
                 ? ui.grid(cards, { minColWidth: '200px', className: 'sx-poster-grid' })
                 : ui.card('Nothing here', filter === 'movie' ? 'No movies in your favorites yet.' : 'No TV shows in your favorites yet.'),
-            createElement('p', { className: 'sub' }, 'Press a title to open it. Press and hold to remove it.')
+            createElement('p', { className: 'sub' }, 'Press a title to open it. Press and hold it (or press Menu) to remove it.')
         );
     }
 }

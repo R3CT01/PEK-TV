@@ -139,7 +139,7 @@
                         break;
                     } else {
                         if (s.peers > 0 || s.downKBps > 0) lastGood = Date.now();
-                        overlay.set('Buffering ' + (s.file || '') + '\n' + s.peers + ' peers \u00b7 ' + fmtSpeed(s.downKBps) +
+                        overlay.set('Loading ' + Math.round((s.bufferProgress || 0) * 100) + '%  ' + (s.file || '') + '\n' + s.peers + ' peers \u00b7 ' + fmtSpeed(s.downKBps) +
                             (s.fileSize ? ' \u00b7 ' + fmtSize(s.fileSize) : ''), 0.1 + 0.9 * (s.bufferProgress || 0));
                         if (Date.now() - lastGood > NO_PEERS_MS) throw new Error('No one is sending data for this release. Try another one.');
                     }

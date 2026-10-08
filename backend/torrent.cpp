@@ -78,7 +78,7 @@ namespace torrent {
 bool available() { return false; }
 std::string add(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this Hesper"; return ""; }
 std::string addFile(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this Hesper"; return ""; }
-bool status(const std::string&, Status&) { return false; }
+bool status(const std::string&, Status&, bool) { return false; }
 int64_t read(const std::string&, uint64_t, void*, size_t, bool (*)(void*), void*) { return -1; }
 void remove(const std::string&) {}
 void removeAll() {}
@@ -385,10 +385,10 @@ std::string addFile(const std::string& bytes, int season, int episode, std::stri
     return addParams(std::move(p), season, episode, err);
 }
 
-bool status(const std::string& hash, Status& out) {
+bool status(const std::string& hash, Status& out, bool withMap) {
     std::shared_ptr<Entry> e = find(hash);
     if (!e) return false;
-    lt::torrent_status st = e->h.status();
+    lt::torrent_status st = withMap ? e->h.status(lt::torrent_handle::query_pieces) : e->h.status();
 
     std::lock_guard<std::mutex> lk(g_mx);
     e->last_access = Clock::now();
@@ -420,6 +420,22 @@ bool status(const std::string& hash, Status& out) {
     out.buffer_progress = static_cast<double>(have) / needPcs;
     out.ready = (have >= needPcs) && tailOk;
     out.state = out.ready ? "ready" : "buffering";
+
+    if (withMap && st.pieces.size() > 0) {
+        const int cnt = e->last_piece - e->first_piece + 1;
+        if (cnt > 0) {
+            const int slices = std::min(100, cnt);
+            out.have_map.assign(static_cast<size_t>(slices), 0);
+            for (int b = 0; b < slices; b++) {
+                const int p0 = e->first_piece + static_cast<int>(static_cast<int64_t>(b) * cnt / slices);
+                const int p1 = e->first_piece + static_cast<int>(static_cast<int64_t>(b + 1) * cnt / slices);
+                int got = 0;
+                for (int p = p0; p < p1; p++)
+                    if (p < static_cast<int>(st.pieces.size()) && st.pieces.get_bit(lt::piece_index_t(p))) got++;
+                out.have_map[static_cast<size_t>(b)] = static_cast<unsigned char>(p1 > p0 ? 100 * got / (p1 - p0) : 0);
+            }
+        }
+    }
     return true;
 }
 
