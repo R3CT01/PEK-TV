@@ -100,14 +100,21 @@ class MainAppWatchMethods {
     _syncMessage(err) {
         return ({
             offline: 'Could not reach Hesper Cloud. Check your connection.',
-            no_account: 'No account found for that key.',
-            bad_key: 'That key is not valid.',
+            bad_email: 'That email address does not look right.',
+            weak_password: 'Passwords need at least 8 characters.',
+            bad_credentials: 'Wrong email or password.',
+            email_taken: 'There is already an account with that email. Try signing in.',
+            bad_code: 'That code is wrong or has expired. Request a new one.',
+            email_not_verified: 'Your email is not verified yet.',
+            rate_limited: 'Too many attempts. Wait a few minutes and try again.',
+            email_not_configured: 'Password reset email is not set up on the server yet.',
+            session_expired: 'You were signed out. Please sign in again.',
             too_large: 'Too much data to sync at once.',
-            not_linked: 'Not linked yet.'
+            not_linked: 'Not signed in yet.'
         })[err] || 'Hesper Cloud is having trouble. Try again later.';
     }
 
-    // opts: { create, manual }. Updates the screen when something changed.
+    // opts: { manual }. Updates the screen when something changed.
     async _runSync(opts) {
         const S = window.HesperSync;
         if (!S || !S.isLinked() || this._syncing) return { ok: false, error: 'busy' };
@@ -116,13 +123,14 @@ class MainAppWatchMethods {
         if (opts.manual) this._setSyncUi({ busy: true, msg: '' });
         let res;
         try {
-            res = await S.sync({ create: !!opts.create, resolve: (m) => this._resolveLocalId(m) });
+            res = await S.sync({ resolve: (m) => this._resolveLocalId(m) });
         } catch (e) { res = { ok: false, error: 'offline' }; }
         this._syncing = false;
         const refresh = res.ok && res.changed && !this._player;
         const patch = {};
         if (opts.manual) { patch.busy = false; patch.msg = res.ok ? '' : this._syncMessage(res.error); }
-        if (refresh || opts.manual) {
+        else if (!res.ok && res.error === 'session_expired') { patch.msg = this._syncMessage(res.error); }
+        if (refresh || opts.manual || patch.msg) {
             this.setState({
                 progress: refresh ? this._readProgress() : this.state.progress,
                 history: this._readHistory(),
@@ -139,7 +147,7 @@ class MainAppWatchMethods {
         if (!S || !S.isLinked()) return;
         clearTimeout(this._autoSyncTimer);
         this._autoSyncTimer = setTimeout(() => {
-            if (this.state.syncUi.linking || this._player) return;   // don't rebuild the screen under a text box or a video
+            if (this.state.syncUi.mode || this._player) return;   // don't rebuild the screen under a text box or a video
             this._runSync({});
         }, delayMs || 0);
     }
@@ -149,39 +157,108 @@ class MainAppWatchMethods {
         if (!this._syncTimer) this._syncTimer = setInterval(() => this._autoSync(0), 10 * 60 * 1000);
     }
 
-    async createSyncAccount() {
-        const S = window.HesperSync;
-        if (!S) return;
-        S.setKey(S.newKey());
-        this._setSyncUi({ busy: true, showKey: true, linking: false, msg: 'Save this key somewhere safe: it is the only way to sign in on another device.' });
-        const res = await this._runSync({ create: true, manual: true });
-        if (!res.ok && res.error !== 'busy') { S.unlink(); this._setSyncUi({ busy: false, showKey: false, msg: this._syncMessage(res.error) }); }
-        else this._setSyncUi({ msg: 'Save this key somewhere safe: it is the only way to sign in on another device.' });
+    // What is typed in the sign-in boxes lives here (not in state), so typing never redraws the screen.
+    _authForm() {
+        if (!this._auth) this._auth = { email: '', password: '', confirm: '', code: '' };
+        return this._auth;
     }
 
-    async linkSyncAccount() {
-        const S = window.HesperSync;
-        const typed = this._syncKeyInput || '';
-        if (!S) return;
-        if (!S.validKey(typed)) { this._setSyncUi({ msg: 'That key looks too short. It has 25 letters and numbers.' }); return; }
-        S.setKey(typed);
-        this._syncKeyInput = '';
-        this._setSyncUi({ linking: false, busy: true, msg: '' });
+    _openAuth(mode) {
+        const f = this._authForm();
+        if (!mode) { f.password = ''; f.confirm = ''; f.code = ''; }
+        this._setSyncUi({ mode: mode, msg: '', busy: false, confirmDelete: false });
+    }
+
+    // Called after any successful sign up / sign in / reset.
+    async _afterSignIn(toast) {
+        const f = this._authForm();
+        f.password = ''; f.confirm = ''; f.code = '';
+        this._setSyncUi({ mode: '', busy: true, msg: '' });
+        this.props.engine.ui.toast(toast);
         const res = await this._runSync({ manual: true });
-        if (!res.ok && res.error !== 'busy') { S.unlink(); this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); }
-        else this.props.engine.ui.toast('Linked. Your history is syncing.');
+        if (!res.ok && res.error !== 'busy') this._setSyncUi({ busy: false });
     }
 
-    unlinkSyncDevice() {
-        window.HesperSync.unlink();
-        this._setSyncUi({ showKey: false, confirmDelete: false, msg: 'This device is no longer synced. Your local history is kept.' });
+    async signUpAccount() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        if (!S.validEmail(f.email)) { this._setSyncUi({ msg: this._syncMessage('bad_email') }); return; }
+        if (!S.validPassword(f.password)) { this._setSyncUi({ msg: this._syncMessage('weak_password') }); return; }
+        if (f.password !== f.confirm) { this._setSyncUi({ msg: 'The two passwords do not match.' }); return; }
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.signUp(f.email, f.password);
+        if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
+        f.code = '';
+        this._setSyncUi({ busy: false, mode: 'verify', msg: 'We emailed a 6-digit code to ' + f.email.trim() + '. Enter it to finish. It can take a minute. Check spam too.' });
+    }
+
+    async verifyAccountEmail() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        if (String(f.code).replace(/\D/g, '').length !== 6) { this._setSyncUi({ msg: 'Enter the 6-digit code from the email.' }); return; }
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.verifyEmail(f.email, f.code);
+        if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
+        await this._afterSignIn('Email verified. Your history is syncing.');
+    }
+
+    async resendVerifyCode() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.resendCode(f.email);
+        this._setSyncUi({ busy: false, msg: res.ok ? 'A new code is on its way. Only the newest code works.' : this._syncMessage(res.error) });
+    }
+
+    async signInAccount() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        if (!S.validEmail(f.email) || !f.password) { this._setSyncUi({ msg: 'Enter your email and password.' }); return; }
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.signIn(f.email, f.password);
+        if (!res.ok && res.error === 'email_not_verified') {
+            f.code = ''; f.password = '';
+            this._setSyncUi({ busy: false, mode: 'verify', msg: 'Your email is not verified yet. We sent a new code to ' + f.email.trim() + '. Enter it to finish.' });
+            return;
+        }
+        if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
+        await this._afterSignIn('Signed in. Your history is syncing.');
+    }
+
+    async sendResetCode() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        if (!S.validEmail(f.email)) { this._setSyncUi({ msg: this._syncMessage('bad_email') }); return; }
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.forgotPassword(f.email);
+        if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
+        f.code = ''; f.password = ''; f.confirm = '';
+        this._setSyncUi({ busy: false, mode: 'reset', msg: 'If that email has an account, a 6-digit code is on its way. It can take a minute. Check spam too.' });
+    }
+
+    async resetPasswordAccount() {
+        const S = window.HesperSync, f = this._authForm();
+        if (!S) return;
+        if (String(f.code).replace(/\D/g, '').length !== 6) { this._setSyncUi({ msg: 'Enter the 6-digit code from the email.' }); return; }
+        if (!S.validPassword(f.password)) { this._setSyncUi({ msg: this._syncMessage('weak_password') }); return; }
+        if (f.password !== f.confirm) { this._setSyncUi({ msg: 'The two passwords do not match.' }); return; }
+        this._setSyncUi({ busy: true, msg: '' });
+        const res = await S.resetPassword(f.email, f.code, f.password);
+        if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
+        await this._afterSignIn('Password changed. You are signed in.');
+    }
+
+    async signOutDevice() {
+        this._setSyncUi({ busy: true });
+        await window.HesperSync.signOut();
+        this._setSyncUi({ busy: false, confirmDelete: false, msg: 'Signed out. Your local history is kept on this device.' });
     }
 
     async deleteCloudData() {
         if (!this.state.syncUi.confirmDelete) { this._setSyncUi({ confirmDelete: true }); return; }
         this._setSyncUi({ busy: true });
         const res = await window.HesperSync.deleteAccount();
-        this._setSyncUi({ busy: false, confirmDelete: false, showKey: false, msg: res.ok ? 'Your cloud account and its data were deleted.' : this._syncMessage(res.error) });
+        this._setSyncUi({ busy: false, confirmDelete: false, msg: res.ok ? 'Your cloud account and its data were deleted.' : this._syncMessage(res.error) });
     }
 
     clearWatchHistory() {
@@ -215,29 +292,49 @@ class MainAppWatchMethods {
         const { createElement, ui } = this.props.engine;
         const S = window.HesperSync;
         const u = this.state.syncUi;
+        const f = this._authForm();
         const parts = [createElement('h2', {}, 'Cloud Sync')];
+        const row = (...btns) => createElement('div', { className: 'section-actions' }, ...btns);
+        const email = () => ui.textInput('Email', f.email, (v) => { f.email = v; }, { type: 'email', placeholder: 'you@example.com' });
+        const pass = (label, key) => ui.textInput(label, f[key], (v) => { f[key] = v; }, { type: 'password', placeholder: 'At least 8 characters' });
+        const go = (label, fn, primary) => ui.button(u.busy ? 'Working\u2026' : label, () => { if (!u.busy) fn(); }, primary ? { variant: 'primary' } : undefined);
+
         if (!S) {
             parts.push(createElement('p', { className: 'sub' }, 'Sync is not available in this build.'));
         } else if (!S.isLinked()) {
-            parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices. Nothing is uploaded until you turn it on.'));
-            parts.push(createElement('div', { className: 'section-actions' },
-                ui.button(u.busy ? 'Working\u2026' : 'Create Sync Account', () => { if (!u.busy) this.createSyncAccount(); }, { variant: 'primary' }),
-                ui.button(u.linking ? 'Cancel' : 'Link Existing Account', () => this._setSyncUi({ linking: !u.linking, msg: '' }))));
-            if (u.linking) {
-                parts.push(ui.textInput('Sync key', this._syncKeyInput || '', (v) => { this._syncKeyInput = v; }, { placeholder: 'XXXXX-XXXXX-XXXXX-XXXXX-XXXXX' }));
-                parts.push(createElement('div', { className: 'section-actions' }, ui.button('Link This Device', () => this.linkSyncAccount(), { variant: 'primary' })));
+            if (u.mode === 'signin') {
+                parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points.'));
+                parts.push(email(), pass('Password', 'password'));
+                parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
+            } else if (u.mode === 'signup') {
+                parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices.'));
+                parts.push(email(), pass('Password', 'password'), pass('Confirm password', 'confirm'));
+                parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
+            } else if (u.mode === 'verify') {
+                parts.push(createElement('p', { className: 'sub' }, 'Verify your email to finish creating your account.'));
+                parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }));
+                parts.push(row(go('Verify Email', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
+            } else if (u.mode === 'forgot') {
+                parts.push(createElement('p', { className: 'sub' }, 'We will email you a 6-digit code to set a new password.'));
+                parts.push(email());
+                parts.push(row(go('Send Reset Code', () => this.sendResetCode(), true), ui.button('I Have a Code', () => this._openAuth('reset')), ui.button('Back', () => this._openAuth('signin'))));
+            } else if (u.mode === 'reset') {
+                parts.push(createElement('p', { className: 'sub' }, 'Enter the code from the email and choose a new password.'));
+                parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
+                parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
+            } else {
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices. Nothing is uploaded until you sign in.'));
+                parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
             const last = S.lastSync();
+            parts.push(ui.listRow('Signed in', S.getEmail(), null));
             parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
                 last ? 'Last synced ' + new Date(last).toLocaleString() : 'Not synced yet', null, { statusDot: !u.busy && !!last }));
-            if (u.showKey) parts.push(ui.listRow('Your sync key', S.getKey(), null));
-            parts.push(createElement('div', { className: 'section-actions' },
+            parts.push(row(
                 ui.button(u.busy ? 'Syncing\u2026' : 'Sync Now', () => { if (!u.busy) this._runSync({ manual: true }); }, { variant: 'primary' }),
-                ui.button(u.showKey ? 'Hide Sync Key' : 'Show Sync Key', () => this._setSyncUi({ showKey: !u.showKey }))));
-            parts.push(createElement('div', { className: 'section-actions' },
-                ui.button('Unlink This Device', () => this.unlinkSyncDevice()),
-                ui.button(u.confirmDelete ? 'Tap again to delete cloud data' : 'Delete Cloud Data', () => this.deleteCloudData())));
+                ui.button('Sign Out', () => { if (!u.busy) this.signOutDevice(); })));
+            parts.push(row(ui.button(u.confirmDelete ? 'Tap again to delete your account and cloud data' : 'Delete Account & Cloud Data', () => this.deleteCloudData())));
         }
         if (u.msg) parts.push(createElement('p', { className: 'sub' }, u.msg));
         return createElement('div', { className: 'settings-section' }, ...parts);
