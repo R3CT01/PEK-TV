@@ -81,6 +81,12 @@ const HesperPluginInstaller = (() => {
             throw new Error('plugin.json was not found. It must be at the top of the zip, or inside one folder.');
         }
         const files = entries.map(e => ({ path: e.path.slice(prefix.length), data: e.data }));
+        return buildPrep(files, folder, file.name, skipped);
+    }
+
+    // Turns a list of files ({path, data: Uint8Array}) into what the install screen needs.
+    // Used for a .zip (prepare) and for a plugin restored from the cloud (prepareFiles).
+    function buildPrep(files, folder, fileName, skipped) {
 
         let raw;
         try {
@@ -99,7 +105,7 @@ const HesperPluginInstaller = (() => {
                 provides: { stream: false },
                 ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
-        const id = slug(folder) || slug(m.name) || slug(file.name) || 'plugin';
+        const id = slug(folder) || slug(m.name) || slug(fileName) || 'plugin';
 
         return {
             id,
@@ -120,6 +126,14 @@ const HesperPluginInstaller = (() => {
             skipped,
             hasBackend: files.some(f => /\.py$/i.test(f.path))
         };
+    }
+
+    function prepareFiles(id, files) {
+        if (!Array.isArray(files) || !files.length) throw new Error('the backup has no files');
+        if (!files.some(f => f.path === 'plugin.json')) throw new Error('the backup has no plugin.json');
+        const prep = buildPrep(files, id, id, 0);
+        prep.id = id;      // keep the exact id it was backed up under (slug() would turn _ into -)
+        return prep;
     }
 
     async function post(url, form) {
@@ -170,10 +184,25 @@ const HesperPluginInstaller = (() => {
     }
 
     const check = (prep) => post('/api/plugins/install', uploadForm(prep, true));
-    const install = (prep) => post('/api/plugins/install', uploadForm(prep, false));
-    const remove = (id) => { const fd = new FormData(); fd.append('id', id); return post('/api/plugins/uninstall', fd); };
+    const installedListeners = [];
+    const onInstalled = (fn) => { if (typeof fn === 'function') installedListeners.push(fn); };
+    const install = async (prep) => {
+        const data = await post('/api/plugins/install', uploadForm(prep, false));
+        installedListeners.forEach(fn => { try { fn(prep.id); } catch (e) { /* a listener must never break an install */ } });
+        return data;
+    };
+    // Other parts of Hesper (the cloud plugin backup) can ask to hear about a removal the user confirmed.
+    const removedListeners = [];
+    const onRemoved = (fn) => { if (typeof fn === 'function') removedListeners.push(fn); };
+    const remove = async (id) => {
+        const fd = new FormData(); fd.append('id', id);
+        const data = await post('/api/plugins/uninstall', fd);
+        removedListeners.forEach(fn => { try { fn(id); } catch (e) { /* a listener must never break a removal */ } });
+        return data;
+    };
 
-    return { pickZip, fetchZip, prepare, check, install, remove, isBuiltin, isOfficial: isBuiltin, slug };
+    return { pickZip, fetchZip, prepare, prepareFiles, check, install, remove, onInstalled, onRemoved, isBuiltin, isOfficial: isBuiltin, slug };
 })();
 
+if (typeof window !== 'undefined') window.HesperPluginInstaller = HesperPluginInstaller;   // so other scripts can reach it as window.*
 if (typeof module !== 'undefined' && module.exports) module.exports = HesperPluginInstaller;

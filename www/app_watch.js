@@ -110,14 +110,19 @@ class MainAppWatchMethods {
             email_not_configured: 'Password reset email is not set up on the server yet.',
             session_expired: 'You were signed out. Please sign in again.',
             too_large: 'Too much data to sync at once.',
-            not_linked: 'Not signed in yet.'
+            not_linked: 'Not signed in yet.',
+            local: 'Could not read the plugins on this device.',
+            plugin_quota: 'Your plugin backup is full (30 plugins or 60 MB). Remove one you no longer use.',
+            damaged: 'The plugin from the cloud arrived damaged. Try again.',
+            gone: 'That plugin is no longer in your cloud backup.'
         })[err] || 'Hesper Cloud is having trouble. Try again later.';
     }
 
     // opts: { manual }. Updates the screen when something changed.
     async _runSync(opts) {
         const S = window.HesperSync;
-        if (!S || !S.isLinked() || this._syncing) return { ok: false, error: 'busy' };
+        if (!S || !S.isLinked()) return { ok: false, error: 'busy' };
+        if (this._syncing) { this._syncAgain = true; return { ok: false, error: 'busy' }; }   // something changed mid-sync: go again right after
         opts = opts || {};
         this._syncing = true;
         if (opts.manual) this._setSyncUi({ busy: true, msg: '' });
@@ -125,12 +130,29 @@ class MainAppWatchMethods {
         try {
             res = await S.sync({ resolve: (m) => this._resolveLocalId(m) });
         } catch (e) { res = { ok: false, error: 'offline' }; }
+        // Plugin backup rides along with the sync: back up what changed, and note what the cloud has that this device lacks.
+        let pb = null;
+        const PB = window.HesperPluginBackup;
+        if (res.ok && PB) {
+            try { pb = await PB.run({ force: !!opts.manual }); } catch (e) { pb = null; }
+        }
         this._syncing = false;
+        if (this._syncAgain) { this._syncAgain = false; this._autoSync(1000); }
+        const pbCount = pb && pb.pending ? pb.pending.length : 0;
+        const pbChanged = pbCount !== (this._pbPrev || 0);
+        this._pbPrev = pbCount;
         const refresh = res.ok && res.changed && !this._player;
         const patch = {};
-        if (opts.manual) { patch.busy = false; patch.msg = res.ok ? '' : this._syncMessage(res.error); }
+        if (opts.manual) {
+            patch.busy = false;
+            patch.msg = res.ok ? '' : this._syncMessage(res.error);
+            if (res.ok && pb && !pb.off) {
+                if (!pb.ok) patch.msg = 'History synced. Plugin backup did not finish: ' + this._syncMessage(pb.error);
+                else if (pb.uploaded) patch.msg = 'Backed up ' + pb.uploaded + (pb.uploaded === 1 ? ' plugin.' : ' plugins.');
+            }
+        }
         else if (!res.ok && res.error === 'session_expired') { patch.msg = this._syncMessage(res.error); }
-        if (refresh || opts.manual || patch.msg) {
+        if (refresh || opts.manual || patch.msg || (pbChanged && !this._player)) {
             this.setState({
                 progress: refresh ? this._readProgress() : this.state.progress,
                 history: this._readHistory(),
@@ -141,18 +163,36 @@ class MainAppWatchMethods {
         return res;
     }
 
-    // Quiet background sync: on start, after playback, when back online, every 10 minutes.
+    // Quiet background sync (history, resume points, favorites and the plugin backup): on start, every 10 minutes,
+    // and soon after a favorite changes, something is watched, a plugin is installed, playback ends, the device
+    // comes back online or the app is reopened.
     _autoSync(delayMs) {
         const S = window.HesperSync;
         if (!S || !S.isLinked()) return;
         clearTimeout(this._autoSyncTimer);
         this._autoSyncTimer = setTimeout(() => {
-            if (this.state.syncUi.mode || this._player) return;   // don't rebuild the screen under a text box or a video
+            // Don't rebuild the screen under a text box or a video: try again shortly instead of dropping the sync.
+            if (this.state.syncUi.mode || this._player) { this._autoSync(20000); return; }
             this._runSync({});
         }, delayMs || 0);
     }
 
     _startAutoSync() {
+        if (!this._pbHooked && window.HesperPluginInstaller) {
+            this._pbHooked = true;     // back a plugin up shortly after it is installed
+            window.HesperPluginInstaller.onInstalled(() => this._autoSync(1500));
+        }
+        if (!this._autoHooked) {
+            // Sync soon after anything worth keeping changes, not only on the timer.
+            this._autoHooked = true;
+            const S = window.HesperSync;
+            document.addEventListener('hesper-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000); });   // added or removed a favorite
+            document.addEventListener('hesper-history', () => this._autoSync(2000));                                                   // finished watching something
+            window.addEventListener('online', () => this._autoSync(1500));                                                             // back online
+            document.addEventListener('visibilitychange', () => {                                                                     // came back to the app
+                if (document.visibilityState === 'visible' && S && Date.now() - (S.lastSync() || 0) > 60000) this._autoSync(1000);
+            });
+        }
         this._autoSync(2500);
         if (!this._syncTimer) this._syncTimer = setInterval(() => this._autoSync(0), 10 * 60 * 1000);
     }
@@ -288,6 +328,79 @@ class MainAppWatchMethods {
         );
     }
 
+    // ---------------- Plugin backup (see plugin_backup.js) ----------------
+
+    togglePluginBackup() {
+        const PB = window.HesperPluginBackup;
+        if (!PB) return;
+        PB.setEnabled(!PB.enabled());
+        this._setSyncUi({ msg: PB.enabled() ? 'Plugin backup is on.' : 'Plugin backup is off. Nothing is uploaded or offered. What is already in your cloud stays there.' });
+        if (PB.enabled()) this._autoSync(300);
+    }
+
+    // Downloads a plugin from the cloud backup and shows the normal install screen for it
+    // (permissions, safety checks, confirm). Nothing is installed until the user confirms there.
+    async restoreCloudPlugin(id) {
+        const PB = window.HesperPluginBackup, I = window.HesperPluginInstaller;
+        if (!PB || !I || this.state.pluginInstall || this.state.syncUi.busy) return;
+        this._setSyncUi({ busy: true, msg: '' });
+        try {
+            const files = await PB.fetchForRestore(id);
+            const prep = I.prepareFiles(id, files);
+            const verdict = await I.check(prep);
+            this._setSyncUi({ busy: false });
+            this.setState({ pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
+        } catch (e) {
+            const m = (e && e.error) ? this._syncMessage(e.error) : ('Could not restore this plugin: ' + String((e && e.message) || e).slice(0, 160));
+            this._setSyncUi({ busy: false, msg: m });
+        }
+    }
+
+    dismissCloudPlugin(id) {
+        const PB = window.HesperPluginBackup;
+        if (!PB) return;
+        PB.dismiss(id);
+        this._setSyncUi({});
+    }
+
+    async keepLocalPlugin(id) {
+        const PB = window.HesperPluginBackup;
+        if (!PB || this.state.syncUi.busy) return;
+        this._setSyncUi({ busy: true, msg: '' });
+        const r = await PB.keepLocal(id);
+        this._setSyncUi({ busy: false, msg: r.ok ? 'Your version is now the one in the cloud.' : this._syncMessage(r.error) });
+    }
+
+    _renderPluginBackup(go, row) {
+        const { createElement, ui } = this.props.engine;
+        const PB = window.HesperPluginBackup;
+        if (!PB) return [];
+        const on = PB.enabled();
+        const out = [ui.listRow('Back up my plugins',
+            on ? 'On: plugins you installed from a .zip are saved to your account. Tap to turn off.' : 'Off. Tap to turn on.',
+            () => this.togglePluginBackup(), { statusDot: on })];
+        if (!on) return out;
+        const here = {};
+        (this.state.pluginsList || []).forEach(p => { here[p.folder] = true; });
+        const items = PB.pending().filter(p => !(p.kind === 'new' && here[p.id]));
+        if (items.length) {
+            out.push(createElement('p', { className: 'sub' }, 'In your cloud backup. Nothing is installed until you confirm.'));
+            items.forEach(p => {
+                const label = p.name + (p.version ? ' ' + p.version : '');
+                const sub = p.kind === 'new' ? 'Not installed on this device'
+                    : p.kind === 'update' ? 'A newer version is in your backup'
+                    : 'Different from the version on this device';
+                out.push(ui.listRow(label, sub, null));
+                out.push(row(
+                    go(p.kind === 'new' ? 'Restore' : (p.kind === 'update' ? 'Update' : 'Use cloud version'), () => this.restoreCloudPlugin(p.id), true),
+                    p.kind === 'conflict'
+                        ? go('Keep mine', () => this.keepLocalPlugin(p.id))
+                        : ui.button('Not now', () => this.dismissCloudPlugin(p.id))));
+            });
+        }
+        return out;
+    }
+
     _renderSyncSettings() {
         const { createElement, ui } = this.props.engine;
         const S = window.HesperSync;
@@ -303,7 +416,7 @@ class MainAppWatchMethods {
             parts.push(createElement('p', { className: 'sub' }, 'Sync is not available in this build.'));
         } else if (!S.isLinked()) {
             if (u.mode === 'signin') {
-                parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points, and to get your plugins back.'));
                 parts.push(email(), pass('Password', 'password'));
                 parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
             } else if (u.mode === 'signup') {
@@ -323,7 +436,7 @@ class MainAppWatchMethods {
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
                 parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
             } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices. Nothing is uploaded until you sign in.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices, and backs up the plugins you install. Nothing is uploaded until you sign in.'));
                 parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
@@ -334,6 +447,7 @@ class MainAppWatchMethods {
             parts.push(row(
                 ui.button(u.busy ? 'Syncing\u2026' : 'Sync Now', () => { if (!u.busy) this._runSync({ manual: true }); }, { variant: 'primary' }),
                 ui.button('Sign Out', () => { if (!u.busy) this.signOutDevice(); })));
+            parts.push(...this._renderPluginBackup(go, row));
             parts.push(row(ui.button(u.confirmDelete ? 'Tap again to delete your account and cloud data' : 'Delete Account & Cloud Data', () => this.deleteCloudData())));
         }
         if (u.msg) parts.push(createElement('p', { className: 'sub' }, u.msg));

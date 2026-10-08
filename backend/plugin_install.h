@@ -23,9 +23,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <utility>
 #include <mutex>
 #include <set>
 #include <stdexcept>
@@ -272,6 +275,61 @@ inline Outcome uninstall(const std::string& pluginsDir, const std::string& id) {
     if (ec) { out.error = "could not remove the plugin folder"; return out; }
     out.ok = true;
     return out;
+}
+
+// Lists the files of an installed plugin that a backup may carry: only plain, allowed file types,
+// never hidden files, never __pycache__, never the plugin's own data/ folder (that is the plugin's
+// private, device-specific data). Returns false when the plugin is not installed.
+struct ListedFile {
+    std::string path;
+    size_t size = 0;
+    long long mtime = 0;    // seconds on the file system's own clock: only ever compared with itself
+    bool operator<(const ListedFile& o) const { return path < o.path; }
+};
+
+inline bool listFiles(const std::string& pluginsDir, const std::string& id,
+                      std::vector<ListedFile>& out) {
+    out.clear();
+    if (!validId(id) || isReservedId(id)) return false;
+    std::error_code ec;
+    const fs::path base = fs::path(pluginsDir) / id;
+    if (!fs::is_directory(base, ec)) return false;
+    for (fs::recursive_directory_iterator it(base, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_regular_file(ec)) continue;
+        std::string rel = fs::relative(it->path(), base, ec).generic_string();
+        if (ec || rel.empty()) { ec.clear(); continue; }
+        if (rel.compare(0, 5, "data/") == 0) continue;
+        if (rel.find("__pycache__") != std::string::npos) continue;
+        if (!checkRelativePath(rel).empty()) continue;
+        if (!allowedExtension(extensionOf(rel))) continue;
+        const uintmax_t sz = it->file_size(ec);
+        if (ec) { ec.clear(); continue; }
+        ListedFile lf;
+        lf.path = rel;
+        lf.size = static_cast<size_t>(sz);
+        const auto wt = fs::last_write_time(it->path(), ec);
+        if (!ec) lf.mtime = static_cast<long long>(std::chrono::duration_cast<std::chrono::seconds>(wt.time_since_epoch()).count());
+        ec.clear();
+        out.push_back(lf);
+        if (out.size() > kMaxFiles) break;
+    }
+    std::sort(out.begin(), out.end());
+    return true;
+}
+
+// Reads one backed-up file. Same path rules as an install, so nothing outside the plugin folder
+// (and nothing under data/) can be read through it.
+inline bool readFile(const std::string& pluginsDir, const std::string& id, const std::string& rel, std::string& data) {
+    if (!validId(id) || isReservedId(id)) return false;
+    if (!checkRelativePath(rel).empty() || rel.compare(0, 5, "data/") == 0) return false;
+    if (!allowedExtension(extensionOf(rel))) return false;
+    std::error_code ec;
+    const fs::path f = fs::path(pluginsDir) / id / rel;
+    if (!fs::is_regular_file(f, ec) || fs::file_size(f, ec) > kMaxFileBytes) return false;
+    std::ifstream in(f, std::ios::binary);
+    if (!in) return false;
+    data.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    return true;
 }
 
 }  // namespace hesper_plugins

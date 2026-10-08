@@ -90,6 +90,15 @@ Termux you can still drop a folder into `plugins/` yourself. A build that must n
 (for example a store build) can start with `HESPER_ALLOW_PLUGIN_BACKEND=0`, which refuses `.py` files.
 
 
+## Backing plugins up to Hesper Cloud
+
+When you are signed in (Settings -> Cloud Sync), plugins you installed from a .zip are backed up to your account
+automatically; switch it off with **Back up my plugins**. Built-in plugins are not backed up, and neither is a
+plugin's `data/` folder. On another device (or after reinstalling Hesper) the same screen lists your backed-up
+plugins. **Restore** opens the usual install screen with the plugin's permissions, runs the same server checks and
+safety scan as a .zip, and installs only after you confirm. A plugin is never installed or replaced by itself, and
+removing a plugin on one device only stops it being offered on the others.
+
 ## The `torrent` permission
 
 ```json

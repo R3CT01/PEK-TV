@@ -447,6 +447,37 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(outcomeJson(out), "application/json");
     });
 
+    // 3b-2. Plugin backup: list an installed plugin's files, and read one of them. Used by the app to
+    //       back plugins up to Hesper Cloud. plugin_install.h only lets through plain allowed files
+    //       (never data/, hidden files or built-in plugins).
+    svr.Get("/api/plugins/files", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
+        std::vector<hesper_plugins::ListedFile> files;
+        const std::string id = req.get_param_value("id");
+        if (!hesper_plugins::listFiles(plugins_dir, id, files)) {
+            res.status = 404;
+            res.set_content("{\"ok\": false, \"error\": \"not installed\"}", "application/json");
+            return;
+        }
+        std::string j = "{\"ok\": true, \"files\": [";
+        for (size_t i = 0; i < files.size(); ++i) {
+            if (i) j += ",";
+            j += "{\"path\": \"" + jsonEscape(files[i].path) + "\", \"size\": " + std::to_string(files[i].size) +
+                 ", \"mtime\": " + std::to_string(files[i].mtime) + "}";
+        }
+        j += "]}";
+        res.set_content(j, "application/json");
+    });
+
+    svr.Get("/api/plugins/file", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
+        std::string data;
+        if (!hesper_plugins::readFile(plugins_dir, req.get_param_value("id"), req.get_param_value("path"), data)) {
+            res.status = 404;
+            res.set_content("{\"ok\": false, \"error\": \"not found\"}", "application/json");
+            return;
+        }
+        res.set_content(data, "application/octet-stream");
+    });
+
     svr.Post("/api/plugins/uninstall", [plugins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
         const hesper_plugins::Outcome out = hesper_plugins::uninstall(plugins_dir, req.form.get_field("id"));
         res.status = out.ok ? 200 : 400;
