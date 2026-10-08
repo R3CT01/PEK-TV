@@ -35,3 +35,6 @@ Thumbs.db
 # optional torrent build inputs (cloned by the workflow)
 android/libtorrent/
 android/boost/
+
+# Plugin runtime data
+plugins/*/data/
