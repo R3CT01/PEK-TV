@@ -71,17 +71,46 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 .hp-seek.hp-focused .hp-seek-track { top: 9px; height: 10px; border-radius: 5px; }
 .hp-seek.hp-focused .hp-seek-knob { top: 4px; width: 20px; height: 20px; margin-left: -10px; }
 
-.hp-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.hp-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
 .hp-spacer { -webkit-box-flex: 1; flex: 1; }
-.hp-time { font-size: 0.95rem; min-width: 3.2rem; color: #8b949e; color: var(--sx-text-muted, #8b949e); }
-.hp-btn { padding: 8px 16px; border-radius: 12px; font: inherit; font-size: 1rem; cursor: pointer;
-    color: #f0f6fc; color: var(--sx-text, #f0f6fc);
-    background: rgba(22, 27, 34, 0.88);
-    border: 1px solid #30363d; border: 1px solid var(--sx-border, #30363d); }
+.hp-time { font-size: 1.05rem; font-weight: 600; min-width: 3.4rem; color: #e6edf3; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+/* Glass buttons: big, frosted, with a bright rim so they stay readable on any picture. */
+.hp-btn { min-width: 64px; min-height: 52px; padding: 12px 22px; border-radius: 16px; font: inherit;
+    font-size: 1.15rem; font-weight: 600; letter-spacing: 0.01em; cursor: pointer;
+    color: #ffffff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+    background-color: rgba(26, 34, 52, 0.72);
+    background-image: -webkit-linear-gradient(top, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
+    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
+    -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4);
+    border: 1.5px solid rgba(255, 255, 255, 0.60);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.45); }
+.hp-btn.hp-main { min-width: 140px; font-size: 1.3rem; }
 .hp-btn.hp-focused, .hp-btn:hover, .hp-menu-item.hp-focused, .hp-confirm-btn.hp-focused {
     border-color: #58a6ff; border-color: var(--sx-accent, #58a6ff);
-    background: rgba(88, 166, 255, 0.35); background: var(--sx-accent-glow, rgba(88, 166, 255, 0.35));
-    box-shadow: 0 0 14px rgba(88, 166, 255, 0.45); }
+    background-color: rgba(60, 120, 200, 0.62);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.9), 0 0 22px rgba(88, 166, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.5); }
+.hp-btn.hp-focused { -webkit-transform: scale(1.06); transform: scale(1.06); }
+
+/* torrent streams: downloaded parts on the seek bar, scrub label, and the loading box */
+.hp-seek-have { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
+.hp-seek-have i { position: absolute; top: 0; bottom: 0; background: rgba(255, 255, 255, 0.55); }
+.hp-seek-have i.hp-part { background: rgba(255, 255, 255, 0.28); }
+.hp-seek-tip { position: absolute; bottom: 34px; left: 0; padding: 5px 12px; border-radius: 12px; display: none;
+    font-size: 0.95rem; font-weight: 600; white-space: nowrap; pointer-events: none; color: #fff;
+    -webkit-transform: translateX(-50%); transform: translateX(-50%);
+    background: rgba(16, 22, 34, 0.86); border: 1px solid rgba(255, 255, 255, 0.55); }
+.hp-seek-tip.hp-on { display: block; }
+.hp-stream { position: absolute; left: 50%; top: 50%; margin-top: 44px; width: 360px; max-width: 86%; padding: 14px 18px;
+    -webkit-transform: translateX(-50%); transform: translateX(-50%); border-radius: 18px; text-align: center; display: none;
+    background: rgba(14, 19, 30, 0.78); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1.5px solid rgba(255, 255, 255, 0.5); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); }
+.hp-stream.hp-on { display: block; }
+.hp-stream-title { font-size: 1.1rem; font-weight: 700; }
+.hp-stream-sub { margin-top: 3px; font-size: 0.95rem; color: #dbe4ee; }
+.hp-stream-bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.22); overflow: hidden; margin: 10px 0 8px; }
+.hp-stream-fill { height: 100%; width: 3%; border-radius: 4px; background: #58a6ff; background: var(--sx-accent, #58a6ff);
+    -webkit-transition: width 0.4s; transition: width 0.4s; }
+.hp-stream-foot { font-size: 0.85rem; color: #b8c4d2; }
 
 .hp-spinner { position: absolute; top: 50%; left: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
     border-radius: 50%; border: 4px solid rgba(255, 255, 255, 0.2); border-top-color: #58a6ff;
@@ -121,12 +150,14 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 /* minimize button (top-left of the full-screen player; phones only) */
 .hp-top { display: flex; align-items: center; gap: 12px; }
 .hp-top-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hp-min { flex: none; width: 40px; height: 40px; padding: 0; border-radius: 50%; cursor: pointer;
+.hp-min { flex: none; width: 52px; height: 52px; padding: 0; border-radius: 50%; cursor: pointer;
     display: flex; align-items: center; justify-content: center; pointer-events: none;
-    color: #f0f6fc; color: var(--sx-text, #f0f6fc); background: rgba(22, 27, 34, 0.7);
-    border: 1px solid #30363d; border: 1px solid var(--sx-border, #30363d); }
+    color: #ffffff; background-color: rgba(26, 34, 52, 0.72);
+    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1.5px solid rgba(255, 255, 255, 0.60); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); }
 .hp-show .hp-min { pointer-events: auto; }
-.hp-min svg { width: 22px; height: 22px; }
+.hp-min svg { width: 28px; height: 28px; }
 
 /* mini player: a bar docked at the bottom. The thumbnail cell is deliberately
    see-through: the native video surface is moved right under it. Nothing else
@@ -159,7 +190,9 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
 @media (max-width: 700px) {
     .hp-top { padding: 14px 16px 36px; font-size: 1rem; }
     .hp-bottom { padding: 36px 14px 14px; }
-    .hp-btn { padding: 7px 11px; font-size: 0.9rem; }
+    .hp-btn { min-width: 56px; min-height: 48px; padding: 10px 16px; font-size: 1.05rem; }
+    .hp-btn.hp-main { min-width: 116px; font-size: 1.15rem; }
+    .hp-row { gap: 10px; }
     .hp-menu { right: 12px; bottom: 110px; }
 }
 `;
@@ -344,6 +377,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             injectStyle();
             this._build();
             document.body.appendChild(this.root);
+            this._startStreamWatch(url);
             if (this.backend.attach) this.backend.attach(this.videoLayer);
 
             this._onKey = (e) => this._handleKey(e);
@@ -390,6 +424,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (this._closed) return;
             this._closed = true;
             clearTimeout(this._hideTimer);
+            clearTimeout(this._streamTimer);
             this._reportProgress(true);
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
@@ -553,9 +588,13 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             const track = el('div', 'hp-seek-track');
             this.seekFill = el('div', 'hp-seek-fill');
             this.seekKnob = el('div', 'hp-seek-knob');
+            this.seekHave = el('div', 'hp-seek-have');
+            track.appendChild(this.seekHave);
             track.appendChild(this.seekFill);
             this.seek.appendChild(track);
             this.seek.appendChild(this.seekKnob);
+            this.seekTip = el('div', 'hp-seek-tip');
+            this.seek.appendChild(this.seekTip);
             this._wireSeek();
 
             // buttons
@@ -572,6 +611,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             row.appendChild(this.timeLeft);
             row.appendChild(mk('rew', '\u221210s', () => this._seekBy(-10)));
             row.appendChild(mk('play', '\u25b6  Play', () => this._toggle()));
+            this.btns.play.classList.add('hp-main');
             row.appendChild(mk('fwd', '+10s', () => this._seekBy(10)));
             row.appendChild(this.timeRight);
             row.appendChild(el('span', 'hp-spacer'));
@@ -586,6 +626,18 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
 
             root.appendChild(this.videoLayer);
             root.appendChild(this.spinner);
+            this.streamBox = el('div', 'hp-stream');
+            this.streamTitle = el('div', 'hp-stream-title', 'Loading from the torrent');
+            this.streamSub = el('div', 'hp-stream-sub');
+            const sbar = el('div', 'hp-stream-bar');
+            this.streamFill = el('div', 'hp-stream-fill');
+            sbar.appendChild(this.streamFill);
+            this.streamFoot = el('div', 'hp-stream-foot');
+            this.streamBox.appendChild(this.streamTitle);
+            this.streamBox.appendChild(this.streamSub);
+            this.streamBox.appendChild(sbar);
+            this.streamBox.appendChild(this.streamFoot);
+            root.appendChild(this.streamBox);
             root.appendChild(this.errorBox);
             root.appendChild(top);
             root.appendChild(bottom);
@@ -643,10 +695,11 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
                 if (!this._dragging) return;
                 at(ev, true);
                 this._dragging = false;
+                this._updateSeekTip();
                 this._scheduleHide();
             };
             this.seek.addEventListener('pointerup', end);
-            this.seek.addEventListener('pointercancel', () => { this._dragging = false; });
+            this.seek.addEventListener('pointercancel', () => { this._dragging = false; this._updateSeekTip(); });
         }
 
         // ---- showing and hiding ----
@@ -681,7 +734,100 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this.seekKnob.style.left = pct + '%';
             this.timeLeft.textContent = fmtTime(p);
             this.timeRight.textContent = d > 0 ? fmtTime(d) : '--:--';
+            this._updateSeekTip();
             this._updateMini();
+        }
+
+        // ---- torrent streams: what is downloaded, and how far a scrub target is ----
+        // The stream URL is /api/torrent/<hash>/stream; its status (with the downloaded map) is next to it.
+        _startStreamWatch(url) {
+            const m = /^(.*\/api\/torrent\/[0-9a-fA-F]+)\/stream(?:[?#].*)?$/.exec(String(url || ''));
+            if (!m) return;
+            this._streamUrl = m[1] + '/status?map=1';
+            this.stream = null;
+            const tick = () => {
+                if (this._closed || !this._streamUrl) return;
+                const waiting = !!(this.state && this.state.buffering);
+                fetch(this._streamUrl).then(r => r.json()).then(s => {
+                    if (this._closed || !s || s.error) return;
+                    this.stream = { peers: s.peers | 0, kbps: s.downKBps | 0, done: s.fileProgress || 0, have: s.have || null };
+                    this._renderStream();
+                }).catch(() => { /* try again next time */ }).then(() => {
+                    if (!this._closed) this._streamTimer = setTimeout(tick, (this.state && this.state.buffering) || waiting ? 500 : 2000);
+                });
+            };
+            tick();
+        }
+
+        // Percent (0..100) of the part of the file at `ratio` (0..1) that is downloaded: the slice there
+        // and the two after it, which is what playback needs next.
+        _haveAt(ratio) {
+            const have = this.stream && this.stream.have;
+            if (!have || !have.length) return null;
+            const b = Math.min(have.length - 1, Math.max(0, Math.floor(ratio * have.length)));
+            let sum = 0, n = 0;
+            for (let i = b; i < Math.min(have.length, b + 3); i++) { sum += have[i]; n++; }
+            return Math.round(sum / n);
+        }
+
+        _renderStream() {
+            const s = this.stream;
+            const waiting = !!this.state.buffering && this.errorBox.style.display === 'none';
+            if (!s) {                                  // first status not here yet
+                if (this._streamUrl) {
+                    this.streamBox.classList.toggle('hp-on', waiting);
+                    this.streamSub.textContent = 'Connecting to the torrent\u2026';
+                    this.streamFoot.textContent = '';
+                }
+                return;
+            }
+            const have = s.have;
+            const sig = have ? have.join(',') : '';
+            if (sig !== this._haveSig) {
+                this._haveSig = sig;
+                this.seekHave.innerHTML = '';
+                if (have) {
+                    const cls = v => (v >= 90 ? 2 : (v > 0 ? 1 : 0));
+                    let start = 0;
+                    for (let i = 1; i <= have.length; i++) {
+                        if (i === have.length || cls(have[i]) !== cls(have[start])) {
+                            const c = cls(have[start]);
+                            if (c > 0) {
+                                const bar = document.createElement('i');
+                                if (c === 1) bar.className = 'hp-part';
+                                bar.style.left = (start / have.length * 100) + '%';
+                                bar.style.width = ((i - start) / have.length * 100) + '%';
+                                this.seekHave.appendChild(bar);
+                            }
+                            start = i;
+                        }
+                    }
+                }
+            }
+            this.streamBox.classList.toggle('hp-on', waiting);
+            if (!waiting) return;
+            const d = this.state.duration, p = this.state.position;
+            const pct = this._haveAt(d > 0 ? p / d : 0);
+            const speed = s.kbps >= 1024 ? (s.kbps / 1024).toFixed(1) + ' MB/s' : s.kbps + ' KB/s';
+            this.streamSub.textContent = (p > 0 ? 'At ' + fmtTime(p) + ' \u00b7 ' : '') +
+                (pct === null ? 'getting started\u2026' : pct + '% of this part is ready');
+            this.streamFill.style.width = Math.max(3, pct === null ? 3 : pct) + '%';
+            this.streamFoot.textContent = s.peers + ' peers \u00b7 ' + speed + ' \u00b7 ' +
+                Math.round(s.done * 100) + '% of the file downloaded';
+        }
+
+        // While dragging the bar: the time under the finger, and whether that part is downloaded yet.
+        _updateSeekTip() {
+            if (!this.seekTip) return;
+            if (!this._dragging) { this.seekTip.classList.remove('hp-on'); return; }
+            const d = this.state.duration, p = this.state.position;
+            const pct = d > 0 ? Math.min(100, Math.max(0, p / d * 100)) : 0;
+            let text = fmtTime(p);
+            const h = this._haveAt(d > 0 ? p / d : 0);
+            if (h !== null) text += h >= 90 ? ' \u00b7 ready' : (h > 0 ? ' \u00b7 ' + h + '% loaded' : ' \u00b7 not downloaded yet');
+            this.seekTip.textContent = text;
+            this.seekTip.style.left = Math.min(88, Math.max(12, pct)) + '%';
+            this.seekTip.classList.add('hp-on');
         }
 
         _focusOrder() {
@@ -698,6 +844,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this.btns.subs.style.display = this.state.subtitles.length > 0 ? '' : 'none';
             const waiting = this.state.buffering && this.errorBox.style.display === 'none';
             this.spinner.classList.toggle('hp-on', waiting);
+            if (this._streamUrl) this._renderStream();
             if (this._focusOrder().indexOf(this.focus) < 0) this.focus = 'play';
             this._updateFocus();
             this._updateMini();

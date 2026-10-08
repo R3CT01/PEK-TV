@@ -408,17 +408,32 @@ class HesperUIKit {
                 if (t && t._lpSuppress) { t._lpSuppress = false; ev.stopPropagation(); ev.preventDefault(); }
             }, true);
         }
-        let timer = null;
+        let timer = null, startX = 0, startY = 0, startT = 0, moved = false, fired = false;
         const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-        el.addEventListener('pointerdown', () => {
+        const fire = () => {
+            if (fired) return;
+            fired = true;
             cancel();
-            timer = setTimeout(() => { timer = null; el._lpSuppress = true; handler(); }, 550);
+            el._lpSuppress = true;                                   // the click that follows the release is ignored
+            setTimeout(() => { el._lpSuppress = false; }, 700);
+            handler();
+        };
+        el.addEventListener('pointerdown', (ev) => {
+            cancel();
+            fired = false; moved = false; startX = ev.clientX; startY = ev.clientY; startT = Date.now();
+            timer = setTimeout(() => { timer = null; fire(); }, 450);
         });
-        ['pointerup', 'pointercancel', 'pointerleave'].forEach(n => el.addEventListener(n, () => {
-            cancel();
-            if (el._lpSuppress) setTimeout(() => { el._lpSuppress = false; }, 350);
-        }));
-        el.addEventListener('contextmenu', (ev) => ev.preventDefault());
+        el.addEventListener('pointermove', (ev) => {
+            if (timer && (Math.abs(ev.clientX - startX) > 14 || Math.abs(ev.clientY - startY) > 14)) { moved = true; cancel(); }
+        });
+        ['pointerup', 'pointerleave'].forEach(n => el.addEventListener(n, cancel));
+        // A phone takes over a long touch (drag / context menu) and cancels the pointer. A finger that
+        // stayed put for that long is still a hold, not a scroll.
+        el.addEventListener('pointercancel', () => {
+            if (!fired && !moved && startT && Date.now() - startT >= 300) fire(); else cancel();
+        });
+        // Long touch on a phone / right-click with a mouse arrive as 'contextmenu': that is a hold too.
+        el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); if (!moved) fire(); });
         return el;
     }
 
@@ -1094,18 +1109,27 @@ class HesperEngine {
                     if (active.matches('textarea, input:not([type=color]):not([type=checkbox]):not([type=button])')) active.focus();
                     else if (active._hesperLongPress) {
                         // Hold OK for the long-press action; a short press clicks on release.
-                        if (!e.repeat && !this._lpTimer && !this._lpFiredByKey) {
+                        if (!e.repeat) {
+                            // A fresh press: forget any earlier press whose key-up never arrived.
+                            clearTimeout(this._lpTimer);
+                            this._lpFiredByKey = false;
                             this._lpTarget = active;
-                            this._lpTimer = setTimeout(() => {
-                                this._lpTimer = null; this._lpTarget = null;
-                                this._lpFiredByKey = true;
-                                active._hesperLongPress();
-                            }, 550);
+                            this._lpStart = Date.now();
+                            this._lpTimer = setTimeout(() => this._fireKeyLongPress(), 500);
+                        } else if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) {
+                            this._fireKeyLongPress();
                         }
                     } else active.click();
                 }
                 e.preventDefault();
             }
+        });
+
+        // The Menu button (or the context-menu key) does the same as holding OK on the highlighted item.
+        window.addEventListener('keydown', (e) => {
+            if (e.key !== 'ContextMenu' && e.keyCode !== 82 && e.keyCode !== 93) return;
+            const active = this.focusableElements[this.currentIndex];
+            if (active && active._hesperLongPress && active.isConnected) { e.preventDefault(); active._hesperLongPress(); }
         });
 
         window.addEventListener('keyup', (e) => {
@@ -1118,6 +1142,16 @@ class HesperEngine {
                 if (t && t.isConnected) t.click();
             }
         });
+    }
+
+    _fireKeyLongPress() {
+        clearTimeout(this._lpTimer);
+        this._lpTimer = null;
+        const t = this._lpTarget;
+        this._lpTarget = null;
+        if (!t || !t.isConnected || !t._hesperLongPress) return;
+        this._lpFiredByKey = true;
+        t._hesperLongPress();
     }
 
     _applyFocus(scroll = true) {

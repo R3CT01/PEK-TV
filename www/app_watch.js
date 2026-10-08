@@ -310,8 +310,7 @@ class MainAppWatchMethods {
             createElement('p', { className: 'sub' }, [from, left].filter(Boolean).join(' \u00b7 ')),
             createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
                 ui.button('\u25b6  Continue from ' + at, () => this._doResume(it, it.position), { variant: 'primary' }),
-                ui.button('Start over', () => this._doResume(it, 0)),
-                ui.button('Cancel', close)));
+                ui.button('Start over', () => this._doResume(it, 0))));
         return ui.modal(this._resumeTitle(it), body, close);
     }
 

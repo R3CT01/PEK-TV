@@ -39,6 +39,9 @@ struct Status {
     uint64_t file_size = 0;
     std::string file_name;
     std::vector<FileInfo> files;
+    // Only filled when asked for (withMap): for ~100 equal slices of the file, how many percent of
+    // each slice is downloaded. The player draws this on the seek bar.
+    std::vector<unsigned char> have_map;
 };
 
 // True when this build contains the torrent engine.
@@ -55,7 +58,7 @@ std::string add(const std::string& source, int season, int episode, std::string&
 // Same, from the bytes of a .torrent file (fetched by the caller).
 std::string addFile(const std::string& torrentBytes, int season, int episode, std::string& err);
 
-bool status(const std::string& hash, Status& out);
+bool status(const std::string& hash, Status& out, bool withMap = false);
 
 // Blocking read of the selected file. Returns bytes read, 0 at end of file, -1 on error or
 // timeout. `abort` (optional) is polled while waiting so a closed connection stops the wait.

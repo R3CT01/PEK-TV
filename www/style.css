@@ -968,6 +968,14 @@ body {
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
+    -ms-touch-action: manipulation;
+    touch-action: manipulation;
+}
+/* A hold on a poster must reach the tile itself, not start the phone's "drag / save image" gesture. */
+.sx-longpress img {
+    pointer-events: none;
+    -webkit-user-drag: none;
+    user-drag: none;
 }
 
 .sx-toast {

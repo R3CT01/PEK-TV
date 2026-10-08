@@ -422,7 +422,13 @@ std::string statusJson(const std::string& hash, const torrent::Status& s) {
       << ", \"error\": \"" << jesc(s.error) << "\", \"peers\": " << s.peers << ", \"seeds\": " << s.seeds
       << ", \"downKBps\": " << s.down_kbps << ", \"upKBps\": " << s.up_kbps
       << ", \"fileProgress\": " << s.file_progress << ", \"bufferProgress\": " << s.buffer_progress
-      << ", \"fileSize\": " << s.file_size << "}";
+      << ", \"fileSize\": " << s.file_size;
+    if (!s.have_map.empty()) {
+        o << ", \"have\": [";
+        for (size_t i = 0; i < s.have_map.size(); ++i) o << (i ? "," : "") << static_cast<int>(s.have_map[i]);
+        o << "]";
+    }
+    o << "}";
     return o.str();
 }
 
@@ -633,7 +639,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
     svr.Get(R"(/api/torrent/([0-9A-Fa-f]+)/status)", [](const httplib::Request& req, httplib::Response& res) {
         std::string hash = lower(req.matches[1].str());
         torrent::Status s;
-        if (!validHash(hash) || !torrent::status(hash, s)) { jsonErr(res, 404, "Unknown torrent"); return; }
+        if (!validHash(hash) || !torrent::status(hash, s, req.has_param("map"))) { jsonErr(res, 404, "Unknown torrent"); return; }
         res.set_content(statusJson(hash, s), "application/json");
     });
 
