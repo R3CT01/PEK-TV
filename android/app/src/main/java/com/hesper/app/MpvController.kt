@@ -44,6 +44,13 @@ class MpvController(
     private var loaded = false
     private var paused = false
     private var buffering = true
+    // What makes up "buffering": the file is still opening, a jump is under way, or mpv paused to refill its cache.
+    // A jump into a part of a torrent that is not downloaded yet is the slow case: mpv sits in the read until the
+    // pieces arrive, and the page has to know, so it can show how far the download is.
+    private var seeking = false
+    private var seekPending = false
+    private var seekAt = 0L
+    private var pausedForCache = false
     private var position = 0.0
     private var duration = 0.0
     private var lastTimeEmit = 0L
@@ -60,6 +67,9 @@ class MpvController(
         this.startSec = startSec
         loaded = false
         paused = false
+        seeking = false
+        seekPending = false
+        pausedForCache = false
         buffering = true
         position = 0.0
         duration = 0.0
@@ -71,7 +81,23 @@ class MpvController(
 
     fun play() { mpv?.setPropertyBoolean("pause", false) }
     fun pause() { mpv?.setPropertyBoolean("pause", true) }
-    fun seek(sec: Double) { mpv?.command(arrayOf("seek", sec.toString(), "absolute")) }
+    fun seek(sec: Double) {
+        val m = mpv ?: return
+        // Say "buffering" right away (mpv's own flag can lag a moment behind); PLAYBACK_RESTART clears it.
+        seekPending = true
+        seekAt = SystemClock.uptimeMillis()
+        updateBuffering()
+        emitState()
+        m.command(arrayOf("seek", sec.toString(), "absolute"))
+        // If mpv never answers (a seek it refused), don't leave the page waiting for ever.
+        ui.postDelayed({
+            if (seekPending && SystemClock.uptimeMillis() - seekAt >= 60_000L) {
+                seekPending = false
+                updateBuffering()
+                emitState()
+            }
+        }, 60_000L)
+    }
     fun setAudio(id: Int) { mpv?.setPropertyString("aid", id.toString()) }
     fun setSubtitle(id: Int) { mpv?.setPropertyString("sid", if (id < 0) "no" else id.toString()) }
 
@@ -131,6 +157,7 @@ class MpvController(
             m.observeProperty("duration", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
             m.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             m.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+            m.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             m.attachSurface(surfaceView.holder.surface)
             mpv = m
             m.command(arrayOf("loadfile", u))
@@ -198,7 +225,8 @@ class MpvController(
         ui.post {
             when (property) {
                 "pause" -> { paused = value; emitState() }
-                "paused-for-cache" -> { buffering = value; emitState() }
+                "paused-for-cache" -> { pausedForCache = value; updateBuffering(); emitState() }
+                "seeking" -> { seeking = value; updateBuffering(); emitState() }
             }
         }
     }
@@ -207,7 +235,12 @@ class MpvController(
         ui.post {
             when (eventId) {
                 MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> onFileLoaded()
-                MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> { buffering = false; emitState() }
+                MPVLib.MpvEvent.MPV_EVENT_PLAYBACK_RESTART -> {
+                    seeking = false
+                    seekPending = false
+                    updateBuffering()
+                    emitState()
+                }
                 MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                     if (mpv == null) return@post                       // we stopped it ourselves
                     if (loaded) emit("ended", JSONObject())
@@ -219,10 +252,14 @@ class MpvController(
 
     private fun onFileLoaded() {
         loaded = true
-        buffering = false
+        updateBuffering()
         if (startSec > 1.0) seek(startSec)
         emit("tracks", readTracks())
         emitState()
+    }
+
+    private fun updateBuffering() {
+        buffering = !loaded || seeking || seekPending || pausedForCache
     }
 
     // ---------------- reporting to the page ----------------

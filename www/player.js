@@ -43,7 +43,9 @@ function hesperAnnouncePlayer(active) {
     const STYLE_ID = 'hesper-player-style';
     const CSS = `
 .hp-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20000; overflow: hidden;
-    background: #000; color: #f0f6fc; color: var(--sx-text, #f0f6fc); font-family: inherit; }
+    background: #000; color: #f6f2ec; color: var(--hp-fg, #f6f2ec);
+    font-family: inherit; font-family: var(--sx-font, inherit);
+    -webkit-user-select: none; user-select: none; }
 .hp-root.hp-transparent { background: transparent; }
 html.hp-mpv, html.hp-mpv body { background: transparent !important; }
 html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
@@ -51,113 +53,195 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 .hp-video-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
 .hp-video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; }
 
+/* Shared dark glass: every floating piece of the player (buttons, tip, chip, menus). */
+.hp-btn, .hp-chip, .hp-seek-tip, .hp-stream, .hp-menu, .hp-confirm-card, .hp-min {
+    background-color: rgba(28, 24, 21, 0.62);
+    background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.58);
+    -webkit-backdrop-filter: blur(18px) saturate(1.5); backdrop-filter: blur(18px) saturate(1.5);
+    border: 1px solid rgba(246, 242, 236, 0.16);
+    border: 1px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.16);
+    color: #f6f2ec; color: var(--hp-fg, #f6f2ec); }
+
+/* top bar + bottom bar */
 .hp-top, .hp-bottom { position: absolute; left: 0; right: 0; opacity: 0; pointer-events: none;
-    -webkit-transition: opacity 0.25s; transition: opacity 0.25s; }
-.hp-show .hp-top, .hp-show .hp-bottom { opacity: 1; }
+    -webkit-transition: opacity 0.28s ease, -webkit-transform 0.28s ease; transition: opacity 0.28s ease, transform 0.28s ease; }
+.hp-show .hp-top, .hp-show .hp-bottom { opacity: 1; -webkit-transform: none; transform: none; }
 .hp-show .hp-bottom { pointer-events: auto; }
-.hp-top { top: 0; padding: 20px 24px 44px; font-size: 1.15rem; font-weight: 600;
-    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0)); }
-.hp-bottom { bottom: 0; padding: 46px 24px 20px;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.88), rgba(0, 0, 0, 0)); }
+.hp-top { top: 0; padding: 18px 22px 54px; display: flex; align-items: center; gap: 12px;
+    -webkit-transform: translateY(-6px); transform: translateY(-6px);
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0));
+    background: linear-gradient(to bottom, rgba(var(--hp-shade-rgb, 14, 12, 10), 0.82), rgba(var(--hp-shade-rgb, 14, 12, 10), 0)); }
+.hp-bottom { bottom: 0; padding: 58px 22px 16px;
+    -webkit-transform: translateY(6px); transform: translateY(6px);
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.82), rgba(0, 0, 0, 0));
+    background: linear-gradient(to top, rgba(var(--hp-shade-rgb, 14, 12, 10), 0.9), rgba(var(--hp-shade-rgb, 14, 12, 10), 0)); }
+.hp-top-title { -webkit-box-flex: 1; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 1.08rem; font-weight: 600; letter-spacing: 0.01em; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65); }
 
-.hp-seek { position: relative; height: 28px; cursor: pointer; -ms-touch-action: none; touch-action: none; }
-.hp-seek-track { position: absolute; left: 0; right: 0; top: 11px; height: 6px; border-radius: 3px;
-    background: rgba(255, 255, 255, 0.25); }
-.hp-seek-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 3px;
-    background: #58a6ff; background: var(--sx-accent, #58a6ff); }
-.hp-seek-knob { position: absolute; top: 6px; left: 0; width: 16px; height: 16px; margin-left: -8px;
-    border-radius: 50%; background: #58a6ff; background: var(--sx-accent, #58a6ff);
-    box-shadow: 0 0 10px rgba(88, 166, 255, 0.7); }
-.hp-seek.hp-focused .hp-seek-track { top: 9px; height: 10px; border-radius: 5px; }
-.hp-seek.hp-focused .hp-seek-knob { top: 4px; width: 20px; height: 20px; margin-left: -10px; }
+/* live torrent chip (top right, only for torrent streams) */
+.hp-chip { flex: none; display: none; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px;
+    font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hp-chip.hp-on { display: flex; }
+.hp-chip i { width: 7px; height: 7px; border-radius: 50%; background: #f3eee7; background: var(--hp-hi, #f3eee7);
+    box-shadow: 0 0 8px rgba(243, 238, 231, 0.8); box-shadow: 0 0 8px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.8); }
 
-.hp-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-.hp-spacer { -webkit-box-flex: 1; flex: 1; }
-.hp-time { font-size: 1.05rem; font-weight: 600; min-width: 3.4rem; color: #e6edf3; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
-/* Glass buttons: big, frosted, with a bright rim so they stay readable on any picture. */
-.hp-btn { min-width: 64px; min-height: 52px; padding: 12px 22px; border-radius: 16px; font: inherit;
-    font-size: 1.15rem; font-weight: 600; letter-spacing: 0.01em; cursor: pointer;
-    color: #ffffff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
-    background-color: rgba(26, 34, 52, 0.72);
-    background-image: -webkit-linear-gradient(top, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
-    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
-    -webkit-backdrop-filter: blur(14px) saturate(1.4); backdrop-filter: blur(14px) saturate(1.4);
-    border: 1.5px solid rgba(255, 255, 255, 0.60);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.45); }
-.hp-btn.hp-main { min-width: 140px; font-size: 1.3rem; }
-.hp-btn.hp-focused, .hp-btn:hover, .hp-menu-item.hp-focused, .hp-confirm-btn.hp-focused {
-    border-color: #58a6ff; border-color: var(--sx-accent, #58a6ff);
-    background-color: rgba(60, 120, 200, 0.62);
-    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.9), 0 0 22px rgba(88, 166, 255, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.5); }
-.hp-btn.hp-focused { -webkit-transform: scale(1.06); transform: scale(1.06); }
+/* seek bar */
+.hp-seek { position: relative; height: 30px; cursor: pointer; -ms-touch-action: none; touch-action: none; }
+.hp-seek-track { position: absolute; left: 0; right: 0; top: 13px; height: 4px; border-radius: 2px; overflow: hidden;
+    background: rgba(255, 255, 255, 0.16); background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.16);
+    -webkit-transition: top 0.15s, height 0.15s; transition: top 0.15s, height 0.15s; }
+.hp-seek-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 2px;
+    background: #f3eee7; background: var(--hp-hi, #f3eee7); }
+.hp-seek-knob { position: absolute; top: 9px; left: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+    background: #f3eee7; background: var(--hp-hi, #f3eee7);
+    box-shadow: 0 0 0 4px rgba(243, 238, 231, 0.22), 0 2px 8px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 4px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.22), 0 2px 8px rgba(0, 0, 0, 0.5);
+    -webkit-transition: -webkit-transform 0.15s; transition: transform 0.15s; }
+.hp-keys .hp-seek.hp-focused .hp-seek-track { top: 11px; height: 8px; border-radius: 4px; }
+.hp-keys .hp-seek.hp-focused .hp-seek-knob { -webkit-transform: scale(1.5); transform: scale(1.5); }
 
-/* torrent streams: downloaded parts on the seek bar, scrub label, and the loading box */
+/* torrent streams: the downloaded parts shown on the seek bar */
 .hp-seek-have { position: absolute; left: 0; right: 0; top: 0; bottom: 0; pointer-events: none; }
-.hp-seek-have i { position: absolute; top: 0; bottom: 0; background: rgba(255, 255, 255, 0.55); }
-.hp-seek-have i.hp-part { background: rgba(255, 255, 255, 0.28); }
-.hp-seek-tip { position: absolute; bottom: 34px; left: 0; padding: 5px 12px; border-radius: 12px; display: none;
-    font-size: 0.95rem; font-weight: 600; white-space: nowrap; pointer-events: none; color: #fff;
-    -webkit-transform: translateX(-50%); transform: translateX(-50%);
-    background: rgba(16, 22, 34, 0.86); border: 1px solid rgba(255, 255, 255, 0.55); }
-.hp-seek-tip.hp-on { display: block; }
-.hp-stream { position: absolute; left: 50%; top: 50%; margin-top: 44px; width: 360px; max-width: 86%; padding: 14px 18px;
-    -webkit-transform: translateX(-50%); transform: translateX(-50%); border-radius: 18px; text-align: center; display: none;
-    background: rgba(14, 19, 30, 0.78); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-    border: 1.5px solid rgba(255, 255, 255, 0.5); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); }
-.hp-stream.hp-on { display: block; }
-.hp-stream-title { font-size: 1.1rem; font-weight: 700; }
-.hp-stream-sub { margin-top: 3px; font-size: 0.95rem; color: #dbe4ee; }
-.hp-stream-bar { height: 8px; border-radius: 4px; background: rgba(255, 255, 255, 0.22); overflow: hidden; margin: 10px 0 8px; }
-.hp-stream-fill { height: 100%; width: 3%; border-radius: 4px; background: #58a6ff; background: var(--sx-accent, #58a6ff);
-    -webkit-transition: width 0.4s; transition: width 0.4s; }
-.hp-stream-foot { font-size: 0.85rem; color: #b8c4d2; }
+.hp-seek-have i { position: absolute; top: 0; bottom: 0; background: rgba(255, 255, 255, 0.46);
+    background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.46); }
+.hp-seek-have i.hp-part { background: rgba(255, 255, 255, 0.24); background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.24); }
 
-.hp-spinner { position: absolute; top: 50%; left: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
-    border-radius: 50%; border: 4px solid rgba(255, 255, 255, 0.2); border-top-color: #58a6ff;
-    border-top-color: var(--sx-accent, #58a6ff); display: none;
+/* the label that follows your finger while you drag the bar */
+.hp-seek-tip { position: absolute; bottom: 38px; left: 0; padding: 7px 14px 8px; border-radius: 14px;
+    border-radius: var(--hp-pr, 14px); display: none; text-align: center; white-space: nowrap; pointer-events: none;
+    -webkit-transform: translateX(-50%); transform: translateX(-50%); }
+.hp-seek-tip.hp-on { display: block; }
+.hp-tip-time { display: block; font-size: 1.02rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.hp-tip-state { display: block; margin-top: 1px; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.03em;
+    color: rgba(246, 242, 236, 0.72); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.72); }
+.hp-tip-state.hp-ok { color: #f3eee7; color: var(--hp-hi, #f3eee7); }
+.hp-tip-state.hp-no { color: #f2b84b; }
+
+/* control row: time on the left, transport in the middle, tracks + exit on the right */
+.hp-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+.hp-grp { display: flex; align-items: center; gap: 10px; -webkit-box-flex: 1; flex: 1 1 0; min-width: 0; }
+.hp-grp-mid { -webkit-box-flex: 0; flex: 0 0 auto; gap: 16px; -webkit-box-pack: center; justify-content: center; }
+.hp-grp-end { -webkit-box-pack: end; justify-content: flex-end; }
+.hp-times { white-space: nowrap; font-size: 0.95rem; font-weight: 600; font-variant-numeric: tabular-nums;
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); }
+.hp-time { display: inline; }
+.hp-sep { margin: 0 0.4em; opacity: 0.45; }
+.hp-times .hp-time + .hp-sep + .hp-time { opacity: 0.7; }
+
+/* buttons: round glass, one clean icon each. The play button is solid in the theme's highlight colour. */
+.hp-btn { position: relative; width: 48px; height: 48px; padding: 0; display: -webkit-box; display: flex;
+    -webkit-box-align: center; align-items: center; -webkit-box-pack: center; justify-content: center;
+    border-radius: 999px; border-radius: var(--hp-r, 999px); cursor: pointer; font: inherit;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    -webkit-transition: -webkit-transform 0.15s, background-color 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s;
+    transition: transform 0.15s, background-color 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s; }
+.hp-btn svg { width: 26px; height: 26px; display: block; pointer-events: none; }
+.hp-btn.hp-sm { width: 42px; height: 42px; }
+.hp-btn.hp-sm svg { width: 22px; height: 22px; }
+.hp-btn.hp-main { width: 62px; height: 62px; border-color: transparent;
+    background-color: #f3eee7; background-color: var(--hp-hi, #f3eee7);
+    color: #2b2622; color: var(--hp-ink, #2b2622); box-shadow: 0 8px 26px rgba(0, 0, 0, 0.45); }
+.hp-btn.hp-main svg { width: 32px; height: 32px; }
+.hp-btn:active { -webkit-transform: scale(0.94); transform: scale(0.94); }
+.hp-keys .hp-btn.hp-focused { -webkit-transform: scale(1.1); transform: scale(1.1); border-color: transparent;
+    background-color: #f3eee7; background-color: var(--hp-hi, #f3eee7);
+    color: #2b2622; color: var(--hp-ink, #2b2622);
+    box-shadow: 0 0 0 3px rgba(243, 238, 231, 0.38), 0 10px 28px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 0 0 3px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.38), 0 10px 28px rgba(0, 0, 0, 0.5); }
+.hp-keys .hp-btn.hp-main.hp-focused { box-shadow: 0 0 0 4px rgba(243, 238, 231, 0.42), 0 0 30px rgba(243, 238, 231, 0.5);
+    box-shadow: 0 0 0 4px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.42), 0 0 30px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.5); }
+@media (hover: hover) {
+    .hp-btn:hover:not(.hp-main) { background-color: rgba(255, 255, 255, 0.18);
+        background-color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.18); }
+    .hp-btn.hp-main:hover { -webkit-transform: scale(1.06); transform: scale(1.06); }
+}
+
+/* thin progress line that stays at the bottom edge while the controls are hidden */
+.hp-line { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; pointer-events: none;
+    background: rgba(255, 255, 255, 0.12); background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.12);
+    -webkit-transition: opacity 0.25s; transition: opacity 0.25s; }
+.hp-line-fill { height: 100%; width: 0; background: #f3eee7; background: var(--hp-hi, #f3eee7); }
+.hp-show .hp-line { opacity: 0; }
+
+/* torrent loading card: shown while the picture is waiting for the download */
+.hp-stream { position: absolute; left: 50%; top: 50%; width: 320px; max-width: 86%;
+    padding: 16px 18px 14px; border-radius: 16px; border-radius: var(--hp-pr, 16px); display: none;
+    -webkit-transform: translate(-50%, -50%); transform: translate(-50%, -50%);
+    background-color: rgba(28, 24, 21, 0.82); background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.8);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); }
+.hp-stream.hp-on { display: block; -webkit-animation: hp-pop 0.22s ease-out; animation: hp-pop 0.22s ease-out; }
+.hp-stream-eyebrow { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(246, 242, 236, 0.62); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.62); }
+.hp-stream-title { margin-top: 2px; font-size: 1.55rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.hp-stream-bar { height: 6px; border-radius: 3px; overflow: hidden; margin: 13px 0 9px;
+    background: rgba(255, 255, 255, 0.16); background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.16); }
+.hp-stream-fill { height: 100%; width: 3%; border-radius: 3px; background: #f3eee7; background: var(--hp-hi, #f3eee7);
+    -webkit-transition: width 0.45s ease; transition: width 0.45s ease; }
+.hp-stream-line { display: flex; -webkit-box-pack: justify; justify-content: space-between; gap: 12px;
+    font-size: 0.86rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.hp-stream-eta { color: rgba(246, 242, 236, 0.7); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.7); text-align: right; }
+.hp-stream-foot { margin-top: 10px; padding-top: 9px; font-size: 0.78rem; letter-spacing: 0.02em;
+    border-top: 1px solid rgba(255, 255, 255, 0.12); border-top: 1px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.12);
+    color: rgba(246, 242, 236, 0.62); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.62); }
+@-webkit-keyframes hp-pop { from { opacity: 0; -webkit-transform: translate(-50%, -46%); } to { opacity: 1; -webkit-transform: translate(-50%, -50%); } }
+@keyframes hp-pop { from { opacity: 0; transform: translate(-50%, -46%); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.hp-stream-ring { position: absolute; top: 16px; right: 18px; width: 16px; height: 16px; border-radius: 50%;
+    border: 2.5px solid rgba(255, 255, 255, 0.18); border-top-color: #f3eee7;
+    border: 2.5px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.18); border-top-color: var(--hp-hi, #f3eee7);
     -webkit-animation: hp-spin 0.9s linear infinite; animation: hp-spin 0.9s linear infinite; }
+
+.hp-spinner { position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; margin: -22px 0 0 -22px;
+    border-radius: 50%; border: 3px solid rgba(255, 255, 255, 0.18); border-top-color: #f3eee7;
+    border: 3px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.18); border-top-color: var(--hp-hi, #f3eee7);
+    display: none; -webkit-animation: hp-spin 0.9s linear infinite; animation: hp-spin 0.9s linear infinite; }
 .hp-spinner.hp-on { display: block; }
 @-webkit-keyframes hp-spin { to { -webkit-transform: rotate(360deg); } }
 @keyframes hp-spin { to { transform: rotate(360deg); } }
 
 .hp-error { position: absolute; top: 50%; left: 10%; right: 10%; margin-top: -1.5em; text-align: center;
-    font-size: 1.2rem; display: none; }
+    font-size: 1.15rem; display: none; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); }
 
-.hp-menu { position: absolute; right: 24px; bottom: 120px; min-width: 220px; max-width: 80%; max-height: 50%;
-    overflow-y: auto; padding: 10px; border-radius: 14px; display: none;
-    background: #0d121e; background: var(--sx-bg-elevated, #0d121e);
-    border: 1px solid #58a6ff; border: 1px solid var(--sx-accent, #58a6ff);
-    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6); }
+/* audio / subtitle menu */
+.hp-menu { position: absolute; right: 22px; bottom: 118px; min-width: 230px; max-width: 80%; max-height: 50%;
+    overflow-y: auto; padding: 8px; border-radius: 16px; border-radius: var(--hp-pr, 16px); display: none;
+    background-color: rgba(28, 24, 21, 0.92); background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.9);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6); }
 .hp-menu.hp-open { display: block; }
-.hp-menu-title { font-weight: 700; margin: 2px 8px 8px; }
-.hp-menu-item { padding: 9px 12px; border-radius: 10px; cursor: pointer; border: 1px solid transparent; white-space: pre; }
+.hp-menu-title { margin: 6px 10px 6px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(246, 242, 236, 0.6); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.6); }
+.hp-menu-item { padding: 10px 12px; border-radius: 10px; border-radius: var(--hp-ir, 10px); cursor: pointer;
+    border: 1px solid transparent; white-space: pre; font-weight: 500; }
+.hp-menu-item.hp-focused { background: #f3eee7; background: var(--hp-hi, #f3eee7); color: #2b2622; color: var(--hp-ink, #2b2622); }
 
+/* "Stop watching?" */
 .hp-confirm { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: none;
     -webkit-box-align: center; align-items: center; -webkit-box-pack: center; justify-content: center;
-    background: rgba(5, 8, 15, 0.7); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+    background: rgba(5, 8, 15, 0.66); background: rgba(var(--hp-shade-rgb, 14, 12, 10), 0.66);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .hp-confirm.hp-open { display: -webkit-box; display: flex; }
-.hp-confirm-card { width: 420px; max-width: 90%; padding: 22px 24px 18px; border-radius: 16px;
-    background: #0d121e; background: var(--sx-bg-elevated, #0d121e);
-    border: 1px solid #58a6ff; border: 1px solid var(--sx-accent, #58a6ff);
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(88, 166, 255, 0.35); }
-.hp-confirm-title { font-size: 1.4rem; font-weight: 700; }
-.hp-confirm-msg { margin-top: 6px; color: #8b949e; color: var(--sx-text-muted, #8b949e); }
-.hp-confirm-row { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
-.hp-confirm-btn { padding: 10px 20px; border-radius: 12px; font: inherit; font-size: 1rem; cursor: pointer;
-    color: #f0f6fc; color: var(--sx-text, #f0f6fc); background: #161b22; background: var(--sx-surface, #161b22);
-    border: 1px solid #30363d; border: 1px solid var(--sx-border, #30363d); }
+.hp-confirm-card { width: 400px; max-width: 90%; padding: 22px 24px 18px; border-radius: 16px; border-radius: var(--hp-pr, 16px);
+    background-color: rgba(28, 24, 21, 0.94); background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.92);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6); }
+.hp-confirm-title { font-size: 1.3rem; font-weight: 700; }
+.hp-confirm-msg { margin-top: 6px; color: rgba(246, 242, 236, 0.68); color: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.68); }
+.hp-confirm-row { display: flex; -webkit-box-pack: end; justify-content: flex-end; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
+.hp-confirm-btn { padding: 11px 22px; border-radius: 12px; border-radius: var(--hp-ir, 12px); font: inherit; font-size: 1rem; font-weight: 600; cursor: pointer;
+    color: #f6f2ec; color: var(--hp-fg, #f6f2ec);
+    background: rgba(255, 255, 255, 0.1); background: rgba(var(--hp-fg-rgb, 246, 242, 236), 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.16); border: 1px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.16);
+    -webkit-transition: background-color 0.15s, color 0.15s; transition: background-color 0.15s, color 0.15s; }
+.hp-confirm-btn.hp-focused { background: #f3eee7; background: var(--hp-hi, #f3eee7); color: #2b2622; color: var(--hp-ink, #2b2622);
+    border-color: transparent;
+    box-shadow: 0 0 0 3px rgba(243, 238, 231, 0.32); box-shadow: 0 0 0 3px rgba(var(--hp-hi-rgb, 243, 238, 231), 0.32); }
 
 /* minimize button (top-left of the full-screen player; phones only) */
-.hp-top { display: flex; align-items: center; gap: 12px; }
-.hp-top-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hp-min { flex: none; width: 52px; height: 52px; padding: 0; border-radius: 50%; cursor: pointer;
+.hp-min { flex: none; width: 44px; height: 44px; padding: 0; border-radius: 50%; cursor: pointer;
     display: flex; align-items: center; justify-content: center; pointer-events: none;
-    color: #ffffff; background-color: rgba(26, 34, 52, 0.72);
-    background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.30), rgba(255, 255, 255, 0.10));
-    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
-    border: 1.5px solid rgba(255, 255, 255, 0.60); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5); }
+    -webkit-tap-highlight-color: transparent; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); }
 .hp-show .hp-min { pointer-events: auto; }
-.hp-min svg { width: 28px; height: 28px; }
+.hp-min:active { -webkit-transform: scale(0.94); transform: scale(0.94); }
+.hp-min svg { width: 26px; height: 26px; }
 
 /* mini player: a bar docked at the bottom. The thumbnail cell is deliberately
    see-through: the native video surface is moved right under it. Nothing else
@@ -179,7 +263,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     color: #8b949e; color: var(--sx-text-muted, #8b949e); }
 .hp-mini-btn { flex: none; width: 48px; height: 48px; padding: 0; border: 0; background: transparent; cursor: pointer;
     font: inherit; font-size: 1.15rem; color: inherit; border-radius: 50%; }
-.hp-mini-btn:active { background: rgba(88, 166, 255, 0.25); }
+.hp-mini-btn:active { background: rgba(127, 127, 127, 0.25); background: var(--sx-surface-focused, rgba(127, 127, 127, 0.25)); }
 html.hp-mini-on, html.hp-mini-on body { background: transparent !important; }
 html.hp-mini-on body { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
 html.hp-mini-on .hesper-shell { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
@@ -187,13 +271,18 @@ html.hp-mini-on::before { content: ''; position: fixed; left: 0; right: 0; top: 
     background: #090d16; background: var(--sx-bg, #090d16); z-index: -1; }
 html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: var(--hp-mini-h); }
 
-@media (max-width: 700px) {
-    .hp-top { padding: 14px 16px 36px; font-size: 1rem; }
-    .hp-bottom { padding: 36px 14px 14px; }
-    .hp-btn { min-width: 56px; min-height: 48px; padding: 10px 16px; font-size: 1.05rem; }
-    .hp-btn.hp-main { min-width: 116px; font-size: 1.15rem; }
-    .hp-row { gap: 10px; }
-    .hp-menu { right: 12px; bottom: 110px; }
+@media (max-width: 640px) {
+    .hp-top { padding: 14px 14px 46px; }
+    .hp-bottom { padding: 46px 14px 12px; }
+    .hp-row { flex-wrap: wrap; row-gap: 10px; }
+    .hp-grp-mid { -webkit-box-ordinal-group: 0; order: -1; -webkit-box-flex: 1; flex: 1 1 100%; }
+    .hp-menu { right: 12px; bottom: 130px; }
+    .hp-chip { padding: 6px 10px; font-size: 0.72rem; }
+}
+@media (max-height: 420px) {
+    .hp-bottom { padding-top: 36px; }
+    .hp-stream { padding: 12px 16px 11px; }
+    .hp-stream-title { font-size: 1.3rem; }
 }
 `;
 
@@ -218,6 +307,97 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
         const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
         const pad = n => (n < 10 ? '0' : '') + n;
         return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+    }
+
+
+    function fmtSpeed(kbps) {
+        kbps = kbps > 0 ? kbps : 0;
+        return kbps >= 1024 ? (kbps / 1024).toFixed(1) + ' MB/s' : kbps + ' KB/s';
+    }
+
+    function fmtWait(sec) {
+        if (!isFinite(sec) || sec < 0) return '';
+        sec = Math.max(1, Math.round(sec));
+        if (sec < 60) return sec + 's';
+        if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+        return 'over an hour';
+    }
+
+    // ---- icons: one clean glyph per button (drawn with currentColor, so the theme colours them) ----
+    const ICONS = {
+        play: '<path fill="currentColor" d="M8.2 5.3v13.4c0 .8.9 1.3 1.6.9l10.4-6.7c.6-.4.6-1.3 0-1.7L9.8 4.4c-.7-.4-1.6.1-1.6.9z"/>',
+        pause: '<rect x="6.2" y="5" width="4" height="14" rx="1.3" fill="currentColor"/><rect x="13.8" y="5" width="4" height="14" rx="1.3" fill="currentColor"/>',
+        rew: '<path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>' +
+             '<text x="12" y="16.4" text-anchor="middle" font-size="7.4" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">10</text>',
+        fwd: '<path fill="currentColor" d="M12 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/>' +
+             '<text x="12" y="16.4" text-anchor="middle" font-size="7.4" font-weight="700" fill="currentColor" font-family="system-ui,sans-serif">10</text>',
+        audio: '<path fill="currentColor" d="M4 9.6v4.8h3.4l4.6 3.9V5.7L7.4 9.6H4z"/>' +
+               '<path d="M15.4 9.2a4.2 4.2 0 0 1 0 5.6M17.9 6.7a7.6 7.6 0 0 1 0 10.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+        subs: '<rect x="3" y="5.2" width="18" height="13.6" rx="3.2" fill="none" stroke="currentColor" stroke-width="1.9"/>' +
+              '<path d="M7 10.8h3.2M12.6 10.8H17M7 14.6h5.2M14.6 14.6H17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
+        close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+    };
+
+    function setIcon(btn, name) {
+        if (btn._icon === name) return;
+        btn._icon = name;
+        btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+    }
+
+    // ---- theme: derive the player's colours from the active skin's --sx-* tokens ----
+    // The player sits on top of a picture, so it always uses dark glass with light text. The skin
+    // decides the tint of the glass, the highlight colour (play button, seek bar, focus) and the
+    // roundness. "Hesper Cream" gets a warm cream highlight; Green / Neon get their accent colour.
+    function parseColor(str) {
+        str = String(str || '').trim();
+        let m = /^#([0-9a-f]{3,8})$/i.exec(str);
+        if (m) {
+            let h = m[1];
+            if (h.length === 3 || h.length === 4) h = h.split('').map(c => c + c).join('');
+            if (h.length < 6) return null;
+            return { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16) };
+        }
+        m = /^rgba?\(([^)]+)\)/i.exec(str);
+        if (m) {
+            const a = m[1].split(/[\s,\/]+/).filter(Boolean).map(parseFloat);
+            if (a.length >= 3 && isFinite(a[0]) && isFinite(a[1]) && isFinite(a[2])) return { r: a[0], g: a[1], b: a[2] };
+        }
+        return null;
+    }
+    function lum(c) {
+        const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+        return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    }
+    const rgbText = (c, k) => Math.round(c.r * (k || 1)) + ', ' + Math.round(c.g * (k || 1)) + ', ' + Math.round(c.b * (k || 1));
+    const hexText = c => 'rgb(' + rgbText(c) + ')';
+
+    function applyPlayerTheme(root) {
+        try {
+            const cs = getComputedStyle(document.documentElement);
+            const tok = n => parseColor(cs.getPropertyValue('--sx-' + n));
+            const pick = (names, darkest) => {
+                const list = names.map(tok).filter(Boolean).sort((a, b) => lum(a) - lum(b));
+                return list.length ? (darkest ? list[0] : list[list.length - 1]) : null;
+            };
+            const dark = pick(['bg', 'bg-elevated', 'text', 'accent'], true);
+            const text = tok('text'), accent = tok('accent');
+            const lightest = pick(['bg-elevated', 'surface', 'text', 'bg'], false);
+            if (!dark || !lightest) return;               // no tokens: the CSS fallbacks (warm cream) apply
+            const fg = text && lum(text) > 0.6 ? text : lightest;
+            const hi = accent && lum(accent) >= 0.22 ? accent : lightest;
+            const set = (k, v) => root.style.setProperty(k, v);
+            set('--hp-fg', hexText(fg));           set('--hp-fg-rgb', rgbText(fg));
+            set('--hp-hi', hexText(hi));           set('--hp-hi-rgb', rgbText(hi));
+            set('--hp-ink', hexText(dark));
+            set('--hp-base-rgb', rgbText(dark, 0.7));
+            set('--hp-shade-rgb', rgbText(dark, 0.45));
+            const r = parseInt(cs.getPropertyValue('--sx-radius'), 10);
+            const rad = isFinite(r) ? r : 16;
+            set('--hp-r', rad >= 20 ? '999px' : Math.max(rad, 2) + 'px');
+            const pr = Math.min(Math.max(rad, 4), 20);
+            set('--hp-pr', pr + 'px');
+            set('--hp-ir', Math.max(3, Math.round(pr * 0.65)) + 'px');
+        } catch (e) { /* keep the fallbacks */ }
     }
 
     // Maps the many key names TV remotes and browsers send to a small set.
@@ -273,6 +453,10 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             v.addEventListener('playing', () => this.emit('state', { playing: true, buffering: false }));
             v.addEventListener('pause', () => this.emit('state', { playing: false, buffering: false }));
             v.addEventListener('waiting', () => this.emit('state', { playing: !v.paused, buffering: true }));
+            // jumping ahead in a stream that is still downloading: say so, so the player can show the loading card
+            v.addEventListener('seeking', () => this.emit('state', { playing: !v.paused, buffering: true }));
+            v.addEventListener('seeked', () => this.emit('state', { playing: !v.paused, buffering: v.readyState < 3 }));
+            v.addEventListener('canplay', () => this.emit('state', { playing: !v.paused, buffering: false }));
             v.addEventListener('ended', () => this.emit('ended'));
             v.addEventListener('loadedmetadata', () => this.emit('tracks', { audio: [], subtitles: [] }));
             v.addEventListener('error', () => {
@@ -368,6 +552,14 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this._hideTimer = null;
             this._dragging = false;
             this._closed = false;
+            this._seekTo = null;           // where the user last jumped to, until playback has caught up
+            this._seekAt = 0;
+            this._seekSawWait = false;
+            this._pendingSeek = false;     // a jump on a torrent is held back for a moment (see _seekBy)
+            this._waitSince = 0;
+            this._waitTimer = null;
+            this._streamTick = null;
+            this._streamFlight = false;
             this.mini = false;             // true while shrunk into the docked mini player
             this.miniSupported = opts.allowMini !== false && !!this.backend.supportsMini;
         }
@@ -376,6 +568,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             hesperAnnouncePlayer(true);
             injectStyle();
             this._build();
+            applyPlayerTheme(this.root);
             document.body.appendChild(this.root);
             this._startStreamWatch(url);
             if (this.backend.attach) this.backend.attach(this.videoLayer);
@@ -390,13 +583,16 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             const b = this.backend;
             b.on('time', (d) => {
                 this.state.duration = d.duration > 0 && isFinite(d.duration) ? d.duration : 0;
-                if (!this._dragging) this.state.position = d.position || 0;
+                if (!this._dragging && !this._pendingSeek) this.state.position = d.position || 0;
+                this._settleSeek();
                 this._updateTime();
                 this._reportProgress(false);
             });
             b.on('state', (d) => {
                 this.state.playing = !!d.playing;
                 this.state.buffering = !!d.buffering;
+                if (this.state.buffering) this._seekSawWait = true;
+                this._settleSeek();
                 this._updateButtons();
                 if (this.state.playing) this._scheduleHide();
             });
@@ -425,6 +621,8 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this._closed = true;
             clearTimeout(this._hideTimer);
             clearTimeout(this._streamTimer);
+            clearTimeout(this._waitTimer);
+            clearTimeout(this._seekDebounce);
             this._reportProgress(true);
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
@@ -581,6 +779,11 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
                 top.appendChild(mb);
             }
             top.appendChild(el('div', 'hp-top-title', this.title));
+            this.chip = el('div', 'hp-chip');
+            this.chip.appendChild(el('i'));
+            this.chipText = el('span');
+            this.chip.appendChild(this.chipText);
+            top.appendChild(this.chip);
             const bottom = el('div', 'hp-bottom');
 
             // seek bar
@@ -594,30 +797,45 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this.seek.appendChild(track);
             this.seek.appendChild(this.seekKnob);
             this.seekTip = el('div', 'hp-seek-tip');
+            this.tipTime = el('span', 'hp-tip-time');
+            this.tipState = el('span', 'hp-tip-state');
+            this.seekTip.appendChild(this.tipTime);
+            this.seekTip.appendChild(this.tipState);
             this.seek.appendChild(this.seekTip);
             this._wireSeek();
 
-            // buttons
+            // buttons: round glass with one icon each; Play is the solid one
             this.btns = {};
-            const mk = (id, label, fn) => {
-                const b = el('button', 'hp-btn', label);
+            const mk = (id, label, icon, fn, cls) => {
+                const b = el('button', 'hp-btn' + (cls ? ' ' + cls : ''));
+                b.setAttribute('type', 'button');
+                b.setAttribute('aria-label', label);
+                b.title = label;
+                setIcon(b, icon);
                 b.addEventListener('click', (ev) => { ev.stopPropagation(); this.focus = id; this._scheduleHide(); fn(); this._updateFocus(); });
                 this.btns[id] = b;
                 return b;
             };
             this.timeLeft = el('span', 'hp-time', '0:00');
             this.timeRight = el('span', 'hp-time', '0:00');
+            const times = el('div', 'hp-times');
+            times.appendChild(this.timeLeft);
+            times.appendChild(el('span', 'hp-sep', '/'));
+            times.appendChild(this.timeRight);
+            const left = el('div', 'hp-grp');
+            left.appendChild(times);
+            const mid = el('div', 'hp-grp hp-grp-mid');
+            mid.appendChild(mk('rew', 'Back 10 seconds', 'rew', () => this._seekBy(-10)));
+            mid.appendChild(mk('play', 'Play', 'play', () => this._toggle(), 'hp-main'));
+            mid.appendChild(mk('fwd', 'Forward 10 seconds', 'fwd', () => this._seekBy(10)));
+            const end = el('div', 'hp-grp hp-grp-end');
+            end.appendChild(mk('audio', 'Audio', 'audio', () => this._openMenu('audio'), 'hp-sm'));
+            end.appendChild(mk('subs', 'Subtitles', 'subs', () => this._openMenu('subs'), 'hp-sm'));
+            end.appendChild(mk('exit', 'Exit', 'close', () => this._askExit(), 'hp-sm'));
             const row = el('div', 'hp-row');
-            row.appendChild(this.timeLeft);
-            row.appendChild(mk('rew', '\u221210s', () => this._seekBy(-10)));
-            row.appendChild(mk('play', '\u25b6  Play', () => this._toggle()));
-            this.btns.play.classList.add('hp-main');
-            row.appendChild(mk('fwd', '+10s', () => this._seekBy(10)));
-            row.appendChild(this.timeRight);
-            row.appendChild(el('span', 'hp-spacer'));
-            row.appendChild(mk('audio', 'Audio', () => this._openMenu('audio')));
-            row.appendChild(mk('subs', 'Subtitles', () => this._openMenu('subs')));
-            row.appendChild(mk('exit', 'Exit', () => this._askExit()));
+            row.appendChild(left);
+            row.appendChild(mid);
+            row.appendChild(end);
             bottom.appendChild(this.seek);
             bottom.appendChild(row);
 
@@ -627,17 +845,28 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             root.appendChild(this.videoLayer);
             root.appendChild(this.spinner);
             this.streamBox = el('div', 'hp-stream');
-            this.streamTitle = el('div', 'hp-stream-title', 'Loading from the torrent');
-            this.streamSub = el('div', 'hp-stream-sub');
+            this.streamBox.appendChild(el('div', 'hp-stream-ring'));
+            this.streamEyebrow = el('div', 'hp-stream-eyebrow', 'Starting the stream');
+            this.streamTitle = el('div', 'hp-stream-title', 'Just a moment');
             const sbar = el('div', 'hp-stream-bar');
             this.streamFill = el('div', 'hp-stream-fill');
             sbar.appendChild(this.streamFill);
+            const sline = el('div', 'hp-stream-line');
+            this.streamSub = el('span', 'hp-stream-sub');
+            this.streamEta = el('span', 'hp-stream-eta');
+            sline.appendChild(this.streamSub);
+            sline.appendChild(this.streamEta);
             this.streamFoot = el('div', 'hp-stream-foot');
+            this.streamBox.appendChild(this.streamEyebrow);
             this.streamBox.appendChild(this.streamTitle);
-            this.streamBox.appendChild(this.streamSub);
             this.streamBox.appendChild(sbar);
+            this.streamBox.appendChild(sline);
             this.streamBox.appendChild(this.streamFoot);
+            this.line = el('div', 'hp-line');
+            this.lineFill = el('div', 'hp-line-fill');
+            this.line.appendChild(this.lineFill);
             root.appendChild(this.streamBox);
+            root.appendChild(this.line);
             root.appendChild(this.errorBox);
             root.appendChild(top);
             root.appendChild(bottom);
@@ -646,6 +875,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
 
             // tap the picture to show / hide the controls
             root.addEventListener('pointerdown', (ev) => {
+                root.classList.remove('hp-keys');
                 if (this.mode === 'confirm' || this.mode === 'menu') return;
                 if (ev.target === root || ev.target === this.videoLayer || ev.target === this.backend.video) {
                     if (this.mode === 'hidden') this._show(); else this._hide();
@@ -680,7 +910,12 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
                 this.state.position = ratio * this.state.duration;
                 this._updateTime();
                 const now = Date.now();
-                if (send || now - lastSent > 250) { lastSent = now; this.backend.seek(this.state.position); }
+                // A torrent stream is only asked to jump once, when the finger lifts: every jump re-aims the download.
+                if (send || (!this._streamUrl && now - lastSent > 250)) {
+                    lastSent = now;
+                    this.backend.seek(this.state.position);
+                    if (send) this._noteSeek(this.state.position);
+                }
             };
             this.seek.addEventListener('pointerdown', (ev) => {
                 ev.stopPropagation();
@@ -732,6 +967,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             const pct = d > 0 ? Math.min(100, Math.max(0, (p / d) * 100)) : 0;
             this.seekFill.style.width = pct + '%';
             this.seekKnob.style.left = pct + '%';
+            if (this.lineFill) this.lineFill.style.width = pct + '%';
             this.timeLeft.textContent = fmtTime(p);
             this.timeRight.textContent = d > 0 ? fmtTime(d) : '--:--';
             this._updateSeekTip();
@@ -745,18 +981,42 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (!m) return;
             this._streamUrl = m[1] + '/status?map=1';
             this.stream = null;
-            const tick = () => {
-                if (this._closed || !this._streamUrl) return;
-                const waiting = !!(this.state && this.state.buffering);
-                fetch(this._streamUrl).then(r => r.json()).then(s => {
+            this._streamTick = () => {
+                clearTimeout(this._streamTimer);
+                if (this._closed || !this._streamUrl || this._streamFlight) return;
+                this._streamFlight = true;
+                fetch(this._streamUrl, { cache: 'no-store' }).then(r => r.json()).then(s => {
                     if (this._closed || !s || s.error) return;
-                    this.stream = { peers: s.peers | 0, kbps: s.downKBps | 0, done: s.fileProgress || 0, have: s.have || null };
+                    this.stream = { peers: s.peers | 0, kbps: s.downKBps | 0, done: s.fileProgress || 0, have: s.have || null, size: s.fileSize || 0 };
                     this._renderStream();
                 }).catch(() => { /* try again next time */ }).then(() => {
-                    if (!this._closed) this._streamTimer = setTimeout(tick, (this.state && this.state.buffering) || waiting ? 500 : 2000);
+                    this._streamFlight = false;
+                    if (this._closed) return;
+                    const busy = (this.state && this.state.buffering) || this._dragging || this._seekTo !== null;
+                    this._streamTimer = setTimeout(this._streamTick, busy ? 500 : 2500);
                 });
             };
-            tick();
+            this._streamTick();
+        }
+
+        // Ask for fresh numbers right now (after a jump), instead of waiting for the next poll.
+        _pollStreamNow() { if (this._streamTick && !this._closed) this._streamTick(); }
+
+        // The user jumped to `t` seconds. For a torrent the part there may not be downloaded yet, so
+        // remember the target: the loading card shows it, with how much of that part has arrived.
+        _noteSeek(t) {
+            this._pendingSeek = false;
+            this._seekTo = t;
+            this._seekAt = Date.now();
+            this._seekSawWait = !!this.state.buffering;
+            if (this._streamUrl) { this._pollStreamNow(); this._renderStream(); }
+        }
+
+        // Forget the jump target once playback has caught up with it.
+        _settleSeek() {
+            if (this._seekTo === null) return;
+            const age = Date.now() - this._seekAt;
+            if (!this.state.buffering && (this._seekSawWait || age > 2500)) this._seekTo = null;
         }
 
         // Percent (0..100) of the part of the file at `ratio` (0..1) that is downloaded: the slice there
@@ -770,50 +1030,83 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             return Math.round(sum / n);
         }
 
-        _renderStream() {
-            const s = this.stream;
-            const waiting = !!this.state.buffering && this.errorBox.style.display === 'none';
-            if (!s) {                                  // first status not here yet
-                if (this._streamUrl) {
-                    this.streamBox.classList.toggle('hp-on', waiting);
-                    this.streamSub.textContent = 'Connecting to the torrent\u2026';
-                    this.streamFoot.textContent = '';
+        // Draws the downloaded parts on the seek bar (only when they changed).
+        _drawHave(have) {
+            const sig = have ? have.join(',') : '';
+            if (sig === this._haveSig) return;
+            this._haveSig = sig;
+            this.seekHave.innerHTML = '';
+            if (!have) return;
+            const cls = v => (v >= 90 ? 2 : (v > 0 ? 1 : 0));
+            let start = 0;
+            for (let i = 1; i <= have.length; i++) {
+                if (i === have.length || cls(have[i]) !== cls(have[start])) {
+                    const c = cls(have[start]);
+                    if (c > 0) {
+                        const bar = document.createElement('i');
+                        if (c === 1) bar.className = 'hp-part';
+                        bar.style.left = (start / have.length * 100) + '%';
+                        bar.style.width = ((i - start) / have.length * 100) + '%';
+                        this.seekHave.appendChild(bar);
+                    }
+                    start = i;
                 }
+            }
+        }
+
+        _renderStream() {
+            if (this._closed || !this._streamUrl) return;
+            const s = this.stream;
+            const now = Date.now();
+            const waiting = !!this.state.buffering && this.errorBox.style.display !== 'block';
+
+            if (s) {                                   // live numbers in the corner + the map on the seek bar
+                this.chipText.textContent = s.peers + ' peers \u00b7 ' + fmtSpeed(s.kbps);
+                this.chip.classList.add('hp-on');
+                this._drawHave(s.have);
+            }
+
+            // Only show the card when the wait is a real one (a jump inside what is already loaded takes no time).
+            if (waiting) {
+                if (!this._waitSince) {
+                    this._waitSince = now;
+                    clearTimeout(this._waitTimer);
+                    this._waitTimer = setTimeout(() => this._renderStream(), 340);
+                }
+            } else {
+                this._waitSince = 0;
+            }
+            const show = waiting && now - this._waitSince >= 300;
+            this.streamBox.classList.toggle('hp-on', show);
+            this.spinner.classList.toggle('hp-on', waiting && !show);
+            if (!show) return;
+
+            const d = this.state.duration;
+            const p = this._seekTo !== null ? this._seekTo : this.state.position;
+            if (this._seekTo !== null) { this.streamEyebrow.textContent = 'Skipping to'; this.streamTitle.textContent = fmtTime(p); }
+            else if (p > 0) { this.streamEyebrow.textContent = 'Buffering at'; this.streamTitle.textContent = fmtTime(p); }
+            else { this.streamEyebrow.textContent = 'Starting the stream'; this.streamTitle.textContent = 'Just a moment'; }
+
+            if (!s) {                                  // first status not here yet
+                this.streamFill.style.width = '3%';
+                this.streamSub.textContent = 'Connecting to the torrent\u2026';
+                this.streamEta.textContent = '';
+                this.streamFoot.textContent = '';
                 return;
             }
-            const have = s.have;
-            const sig = have ? have.join(',') : '';
-            if (sig !== this._haveSig) {
-                this._haveSig = sig;
-                this.seekHave.innerHTML = '';
-                if (have) {
-                    const cls = v => (v >= 90 ? 2 : (v > 0 ? 1 : 0));
-                    let start = 0;
-                    for (let i = 1; i <= have.length; i++) {
-                        if (i === have.length || cls(have[i]) !== cls(have[start])) {
-                            const c = cls(have[start]);
-                            if (c > 0) {
-                                const bar = document.createElement('i');
-                                if (c === 1) bar.className = 'hp-part';
-                                bar.style.left = (start / have.length * 100) + '%';
-                                bar.style.width = ((i - start) / have.length * 100) + '%';
-                                this.seekHave.appendChild(bar);
-                            }
-                            start = i;
-                        }
-                    }
-                }
-            }
-            this.streamBox.classList.toggle('hp-on', waiting);
-            if (!waiting) return;
-            const d = this.state.duration, p = this.state.position;
             const pct = this._haveAt(d > 0 ? p / d : 0);
-            const speed = s.kbps >= 1024 ? (s.kbps / 1024).toFixed(1) + ' MB/s' : s.kbps + ' KB/s';
-            this.streamSub.textContent = (p > 0 ? 'At ' + fmtTime(p) + ' \u00b7 ' : '') +
-                (pct === null ? 'getting started\u2026' : pct + '% of this part is ready');
             this.streamFill.style.width = Math.max(3, pct === null ? 3 : pct) + '%';
-            this.streamFoot.textContent = s.peers + ' peers \u00b7 ' + speed + ' \u00b7 ' +
-                Math.round(s.done * 100) + '% of the file downloaded';
+            this.streamSub.textContent = pct === null ? 'Checking the download\u2026'
+                : (pct >= 90 ? 'Almost ready' : pct + '% ready');
+            // Time left: what is still missing of the part playback needs next, at the current speed.
+            let eta = '';
+            if (pct !== null && pct < 90 && s.have && s.size) {
+                const missing = (s.size / s.have.length) * 3 * (100 - pct) / 100;
+                eta = s.kbps > 0 ? '~' + fmtWait(missing / (s.kbps * 1024)) + ' left' : 'waiting for peers';
+            }
+            this.streamEta.textContent = eta;
+            this.streamFoot.textContent = s.peers + ' peers \u00b7 ' + fmtSpeed(s.kbps) + ' \u00b7 ' +
+                Math.round(s.done * 100) + '% of file';
         }
 
         // While dragging the bar: the time under the finger, and whether that part is downloaded yet.
@@ -822,10 +1115,17 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (!this._dragging) { this.seekTip.classList.remove('hp-on'); return; }
             const d = this.state.duration, p = this.state.position;
             const pct = d > 0 ? Math.min(100, Math.max(0, p / d * 100)) : 0;
-            let text = fmtTime(p);
+            this.tipTime.textContent = fmtTime(p);
             const h = this._haveAt(d > 0 ? p / d : 0);
-            if (h !== null) text += h >= 90 ? ' \u00b7 ready' : (h > 0 ? ' \u00b7 ' + h + '% loaded' : ' \u00b7 not downloaded yet');
-            this.seekTip.textContent = text;
+            let t = '', c = 'hp-tip-state';
+            if (h !== null) {
+                if (h >= 90) { t = 'Ready to play'; c += ' hp-ok'; }
+                else if (h > 0) t = h + '% loaded';
+                else { t = 'Not downloaded yet'; c += ' hp-no'; }
+            }
+            this.tipState.textContent = t;
+            this.tipState.className = c;
+            this.tipState.style.display = t ? '' : 'none';
             this.seekTip.style.left = Math.min(88, Math.max(12, pct)) + '%';
             this.seekTip.classList.add('hp-on');
         }
@@ -839,10 +1139,12 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
         }
 
         _updateButtons() {
-            this.btns.play.textContent = this.state.playing ? '\u275a\u275a  Pause' : '\u25b6  Play';
+            setIcon(this.btns.play, this.state.playing ? 'pause' : 'play');
+            this.btns.play.setAttribute('aria-label', this.state.playing ? 'Pause' : 'Play');
+            this.btns.play.title = this.state.playing ? 'Pause' : 'Play';
             this.btns.audio.style.display = this.state.audio.length > 1 ? '' : 'none';
             this.btns.subs.style.display = this.state.subtitles.length > 0 ? '' : 'none';
-            const waiting = this.state.buffering && this.errorBox.style.display === 'none';
+            const waiting = this.state.buffering && this.errorBox.style.display !== 'block';
             this.spinner.classList.toggle('hp-on', waiting);
             if (this._streamUrl) this._renderStream();
             if (this._focusOrder().indexOf(this.focus) < 0) this.focus = 'play';
@@ -869,6 +1171,17 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             t = Math.max(0, d > 0 ? Math.min(t, d) : t);
             this.state.position = t;
             this._updateTime();
+            if (this._streamUrl) {
+                // torrent: a run of taps becomes one jump, so the download is re-aimed once, not on every tap
+                this._pendingSeek = true;
+                clearTimeout(this._seekDebounce);
+                this._seekDebounce = setTimeout(() => {
+                    if (this._closed) return;
+                    this.backend.seek(this.state.position);
+                    this._noteSeek(this.state.position);
+                }, 350);
+                return;
+            }
             this.backend.seek(t);
         }
 
@@ -942,6 +1255,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
         _handleKey(e) {
             const key = normKey(e);
             if (!key) return;                       // leave other keys (F5, F12...) alone
+            this.root.classList.add('hp-keys');
             e.preventDefault();
             e.stopImmediatePropagation();
 
