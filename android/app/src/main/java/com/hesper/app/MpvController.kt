@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -76,6 +77,7 @@ class MpvController(
         pendingUrl = url
         setFullscreen()                     // a new video always starts full screen
         surfaceView.visibility = View.VISIBLE
+        keepScreenOn(true)                    // no sleep / screensaver while a video is open, playing or paused
         if (surfaceReady) startPending()      // otherwise surfaceCreated() starts it
     }
 
@@ -124,6 +126,13 @@ class MpvController(
     fun destroy() {
         stopEngine()
         surfaceView.visibility = View.GONE
+        keepScreenOn(false)
+    }
+
+    private fun keepScreenOn(on: Boolean) {
+        val w = activity.window
+        if (on) w.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else w.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     /** Called from the activity's onStop: don't keep playing in the background. */
@@ -182,6 +191,7 @@ class MpvController(
     private fun fail() {
         stopEngine()
         surfaceView.visibility = View.GONE
+        keepScreenOn(false)
         Toast.makeText(activity, "Player has crashed - please restart", Toast.LENGTH_LONG).show()
         emit("ended", JSONObject())          // closes the web player layer
     }
@@ -190,7 +200,17 @@ class MpvController(
 
     override fun surfaceCreated(holder: SurfaceHolder) {
         surfaceReady = true
-        if (pendingUrl != null) startPending() else mpv?.attachSurface(holder.surface)
+        if (pendingUrl != null) {
+            startPending()
+        } else {
+            // Coming back after the TV slept / the app was stopped: hand mpv the new surface
+            // AND restart its video output, which surfaceDestroyed() switched off.
+            mpv?.let {
+                it.attachSurface(holder.surface)
+                it.setPropertyString("force-window", "yes")
+                it.setPropertyString("vo", "gpu")
+            }
+        }
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, w: Int, h: Int) {
@@ -199,7 +219,13 @@ class MpvController(
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
         surfaceReady = false
-        mpv?.detachSurface()
+        // Stop drawing BEFORE the surface goes away; otherwise the video output stays bound to a
+        // dead surface and never recovers (black screen, audio only).
+        mpv?.let {
+            it.setPropertyString("vo", "null")
+            it.setPropertyString("force-window", "no")
+            it.detachSurface()
+        }
     }
 
     // ---------------- mpv events (mpv's thread) -> UI thread ----------------
