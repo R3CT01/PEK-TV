@@ -1,4 +1,4 @@
-// TMDb Discover: trending / top rated / popular / now playing rows for movies and TV,
+// PEK Discover: trending / top rated / popular / now playing rows for movies and TV,
 // streaming-service chips, search, descriptions, and a badge on titles you already own.
 //
 // Runs in Hesper's plugin sandbox. It talks to TMDb with your own v3 API key

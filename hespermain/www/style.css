@@ -84,7 +84,7 @@ body {
     cursor: pointer;
     font-size: 1rem;
     text-align: left;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
 .nav-item.active {
@@ -148,7 +148,7 @@ body {
     cursor: pointer;
     font-size: 1rem;
     font-weight: 500;
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.1s, border-color 0.1s;
 }
 
 .theme-launch-btn:hover {
@@ -171,7 +171,7 @@ body {
     padding: 1rem 1.25rem;
     border-radius: var(--sx-radius);
     cursor: pointer;
-    transition: border-color 0.2s, background 0.2s;
+    transition: border-color 0.1s, background 0.1s;
 }
 
 .plugin-row h3 {
@@ -295,7 +295,7 @@ body {
     width: 130px;
     flex-shrink: 0;
     cursor: pointer;
-    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+    transition: transform 0.15s ease-out, border-color 0.1s;
     position: relative;
     margin-right: -20px;
     box-shadow: 0 10px 25px var(--sx-shadow);
@@ -912,8 +912,8 @@ body {
     overflow: hidden;
     background: #161b22;
     background: var(--sx-surface, #161b22);
-    -webkit-transition: -webkit-transform 0.18s ease, box-shadow 0.18s ease;
-    transition: transform 0.18s ease, box-shadow 0.18s ease;
+    -webkit-transition: -webkit-transform 0.12s ease-out;
+    transition: transform 0.12s ease-out;
 }
 
 .sx-poster-img {
@@ -1289,3 +1289,15 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
 .sx-btn.sx-provider { display: inline-flex; align-items: center; gap: 0.5rem; }
 .sx-provider-logo { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
 @media (max-width: 720px) { .sx-provider-logo { width: 24px; height: 24px; } }
+
+/* ============================================================
+   Performance pass (60 fps TV): no live blur over scrolling content,
+   promoted layers for the things that move, shorter focus transitions.
+   ============================================================ */
+.glass-panel, .hero-glass, .sx-toast, .sx-toast * {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.hero-backdrop { will-change: transform; -webkit-transform: translateZ(0); transform: translateZ(0); }
+.sx-poster-card { will-change: transform; contain: paint; }
+.preset-card { will-change: transform; }

@@ -65,7 +65,7 @@ constexpr size_t kMaxDepth       = 6;
 // Plugins that ship with Hesper. They can't be replaced or removed here (on Android
 // the app also re-copies them from its assets on every launch).
 inline bool isReservedId(const std::string& id) {
-    return id == "weather" || id == "sample_counter" || id == "tmdb-discover";
+    return id == "weather" || id == "tmdb-discover";
 }
 
 // Hesper's built-in TMDb access (a proxy that holds Hesper's key) is for official plugins only.

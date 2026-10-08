@@ -1,4 +1,4 @@
-// TMDb Discover: trending / top rated / popular / now playing rows for movies and TV,
+// PEK Discover: trending / top rated / popular / now playing rows for movies and TV,
 // streaming-service chips, search, a detail page with an auto-playing trailer, cast and
 // related titles, numbered pages for every list, and a badge on titles you already own.
 //

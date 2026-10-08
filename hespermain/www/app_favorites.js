@@ -35,7 +35,7 @@ class MainAppFavoritesMethods {
         for (let i = 0; i < order.length; i++) {
             if (this.openPluginOnTitle(order[i], intent)) return;
         }
-        ui.toast('Install TMDb Discover or Snake Skin (Settings \u2192 Plugins) to open this title.');
+        ui.toast('Install PEK Discover or Snake Skin (Settings \u2192 Plugins) to open this title.');
     }
 
     // ---------------- removing ----------------
@@ -57,7 +57,7 @@ class MainAppFavoritesMethods {
         const { createElement, ui } = this.props.engine;
         const body = createElement('div', {},
             createElement('div', { className: 'glass-panel' },
-                createElement('p', {}, 'It stays in TMDb Discover and Snake Skin. You can add it back any time.')
+                createElement('p', {}, 'It stays in PEK Discover and Snake Skin. You can add it back any time.')
             ),
             ui.button('Remove', () => this.confirmRemoveFavorite(), { variant: 'primary' })
         );
@@ -72,7 +72,7 @@ class MainAppFavoritesMethods {
         if (!all.length) {
             return createElement('div', {},
                 ui.card('No favorites yet',
-                    'Open a movie or show in TMDb Discover or Snake Skin and press \u2661 Add to favorites. It will show up here.'),
+                    'Open a movie or show in PEK Discover or Snake Skin and press \u2661 Add to favorites. It will show up here.'),
                 createElement('div', { className: 'section-actions' },
                     ui.button('Open Plugins', () => this.selectTab('plugins'))
                 )
