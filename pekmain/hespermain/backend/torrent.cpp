@@ -1,0 +1,527 @@
+#include "torrent.h"
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <filesystem>
+#include <regex>
+#include <system_error>
+
+namespace fs = std::filesystem;
+
+namespace torrent {
+namespace {
+
+std::string g_dir = ".";
+
+std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+}
+
+std::string baseName(const std::string& p) {
+    size_t i = p.find_last_of("/\\");
+    return i == std::string::npos ? p : p.substr(i + 1);
+}
+
+bool isVideoName(const std::string& name) {
+    std::string ext = lower(fs::path(name).extension().string());
+    return ext == ".mkv" || ext == ".mp4" || ext == ".m4v" || ext == ".avi" || ext == ".mov" ||
+           ext == ".webm" || ext == ".ts" || ext == ".wmv" || ext == ".mpg" || ext == ".mpeg";
+}
+
+// MP4-style containers keep their index at the end, so the tail has to be there before play.
+bool needsTail(const std::string& name) {
+    std::string ext = lower(fs::path(name).extension().string());
+    return ext == ".mp4" || ext == ".m4v" || ext == ".mov";
+}
+
+// Picks the file to play: the episode that matches S/E when given (season packs), else the
+// biggest video file.
+int pickFile(const std::vector<FileInfo>& files, int season, int episode) {
+    int best = -1;
+    auto better = [&](int i) { return best < 0 || files[i].size > files[best].size; };
+
+    if (season > 0 && episode > 0) {
+        std::string S = std::to_string(season), E = std::to_string(episode);
+        std::regex a("(^|[^0-9])s0*" + S + "[ ._-]?e0*" + E + "([^0-9]|$)");
+        std::regex b("(^|[^0-9])0*" + S + "x0*" + E + "([^0-9]|$)");
+        for (const auto& f : files) {
+            if (!f.video) continue;
+            std::string n = lower(baseName(f.path));
+            if ((std::regex_search(n, a) || std::regex_search(n, b)) && better(f.index)) best = f.index;
+        }
+        if (best >= 0) return best;
+    }
+    for (const auto& f : files) {
+        if (!f.video) continue;
+        std::string n = lower(baseName(f.path));
+        if (n.find("sample") != std::string::npos && f.size < 300ull * 1024 * 1024) continue;
+        if (better(f.index)) best = f.index;
+    }
+    if (best >= 0) return best;
+    for (const auto& f : files) if (better(f.index)) best = f.index;   // no video at all: biggest file
+    return best;
+}
+
+}  // namespace
+
+void setDataDir(const std::string& dir) { g_dir = dir.empty() ? "." : dir; }
+
+}  // namespace torrent
+
+#ifndef HESPER_TORRENT
+// ------------------------------------------------------------------------------------------
+// Built without libtorrent: everything reports "not available".
+// ------------------------------------------------------------------------------------------
+namespace torrent {
+bool available() { return false; }
+std::string add(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this PEK"; return ""; }
+std::string addFile(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this PEK"; return ""; }
+bool status(const std::string&, Status&, bool) { return false; }
+int64_t read(const std::string&, uint64_t, void*, size_t, bool (*)(void*), void*) { return -1; }
+void remove(const std::string&) {}
+void removeAll() {}
+void warmUp() {}
+}  // namespace torrent
+
+#else
+// ------------------------------------------------------------------------------------------
+// libtorrent-rasterbar (2.x) implementation
+// ------------------------------------------------------------------------------------------
+#include <condition_variable>
+#include <cstring>
+#include <deque>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <thread>
+
+#include <libtorrent/add_torrent_params.hpp>
+#include <libtorrent/alert_types.hpp>
+#include <libtorrent/magnet_uri.hpp>
+#include <libtorrent/session.hpp>
+#include <libtorrent/settings_pack.hpp>
+#include <libtorrent/torrent_handle.hpp>
+#include <libtorrent/torrent_info.hpp>
+#include <libtorrent/torrent_status.hpp>
+
+namespace lt = libtorrent;
+
+namespace torrent {
+namespace {
+
+using Clock = std::chrono::steady_clock;
+
+const uint64_t kStartBuffer   = 6ull * 1024 * 1024;   // bytes that must be in place before "ready"
+const uint64_t kLookaheadBytes = 48ull * 1024 * 1024; // how far ahead of the player pieces are scheduled (about a minute of 1080p)
+const int      kMaxTorrents   = 2;                    // older ones are removed (and their data deleted)
+const auto     kIdleLimit     = std::chrono::minutes(60);
+const auto     kMetaTimeout   = std::chrono::seconds(90);
+const auto     kStallTimeout  = std::chrono::seconds(60);
+
+struct Entry {
+    lt::torrent_handle h;
+    std::string hash;
+    int season = 0, episode = 0;
+    bool have_meta = false;
+    std::string name, err;
+    std::vector<FileInfo> files;
+    int file_index = -1;
+    uint64_t file_size = 0, file_offset = 0;
+    int piece_len = 0;
+    int first_piece = 0, last_piece = 0, num_pieces = 0;
+    bool tail_needed = false;
+    int lookahead = 24;                 // pieces scheduled ahead of the player (kLookaheadBytes / piece size)
+    uint64_t last_end = 0;
+    int aimed_piece = -1;               // where the non-urgent download currently continues from (-1 = from the start)
+    Clock::time_point last_access = Clock::now();
+    std::map<int, std::shared_ptr<std::vector<char>>> cache;   // downloaded pieces we have read back
+    std::deque<int> cache_order;
+    std::map<int, bool> reading;                                // read_piece() issued, answer pending
+};
+
+std::mutex g_mx;
+std::condition_variable g_cv;
+std::map<std::string, std::shared_ptr<Entry>> g_entries;
+std::unique_ptr<lt::session> g_ses;
+std::thread g_alerts;
+bool g_stop = false;
+
+std::string toHex(const lt::sha1_hash& h) {
+    std::ostringstream ss;
+    ss << h;
+    return lower(ss.str());
+}
+
+// Called with g_mx held, once metadata is known.
+void selectFile(Entry& e) {
+    std::shared_ptr<const lt::torrent_info> ti = e.h.torrent_file();
+    if (!ti) return;
+    const lt::file_storage& fst = ti->files();
+    e.files.clear();
+    for (int i = 0; i < fst.num_files(); i++) {
+        FileInfo f;
+        f.index = i;
+        f.path = fst.file_path(lt::file_index_t(i));
+        f.size = static_cast<uint64_t>(fst.file_size(lt::file_index_t(i)));
+        f.video = isVideoName(f.path);
+        e.files.push_back(f);
+    }
+    e.name = ti->name();
+    int idx = pickFile(e.files, e.season, e.episode);
+    if (idx < 0) { e.err = "This torrent has no files"; return; }
+
+    std::vector<lt::download_priority_t> prios(static_cast<size_t>(fst.num_files()), lt::dont_download);
+    prios[static_cast<size_t>(idx)] = lt::default_priority;
+    e.h.prioritize_files(prios);
+
+    e.file_index  = idx;
+    e.file_size   = e.files[static_cast<size_t>(idx)].size;
+    e.file_offset = static_cast<uint64_t>(fst.file_offset(lt::file_index_t(idx)));
+    e.piece_len   = ti->piece_length();
+    e.num_pieces  = ti->num_pieces();
+    e.first_piece = static_cast<int>(e.file_offset / static_cast<uint64_t>(e.piece_len));
+    e.last_piece  = static_cast<int>((e.file_offset + (e.file_size ? e.file_size - 1 : 0)) / static_cast<uint64_t>(e.piece_len));
+    e.tail_needed = needsTail(e.files[static_cast<size_t>(idx)].path);
+    e.last_end = 0;
+    e.aimed_piece = -1;
+    // By bytes, not by pieces: with 16 MB pieces 40 of them would spread the bandwidth over 640 MB at once
+    // and the piece the player needs next would arrive late.
+    e.lookahead = static_cast<int>(std::max<uint64_t>(4, std::min<uint64_t>(48, kLookaheadBytes / static_cast<uint64_t>(e.piece_len))));
+
+    // Start-up: the beginning first, then the end (container index), both ahead of the rest.
+    e.h.clear_piece_deadlines();
+    int headPcs = static_cast<int>(std::min<uint64_t>(kStartBuffer / static_cast<uint64_t>(e.piece_len) + 2, 24));
+    for (int k = 0; k < headPcs && e.first_piece + k <= e.last_piece; k++)
+        e.h.set_piece_deadline(lt::piece_index_t(e.first_piece + k), 100 + k * 150);
+    for (int k = 0; k < 2 && e.last_piece - k > e.first_piece + headPcs; k++)
+        e.h.set_piece_deadline(lt::piece_index_t(e.last_piece - k), 1500 + k * 300);
+    e.have_meta = true;
+}
+
+void trimCache(Entry& e) {
+    while (e.cache_order.size() > 8) {
+        e.cache.erase(e.cache_order.front());
+        e.cache_order.pop_front();
+    }
+}
+
+void dropLocked(const std::string& hash) {
+    auto it = g_entries.find(hash);
+    if (it == g_entries.end()) return;
+    if (g_ses && it->second->h.is_valid()) g_ses->remove_torrent(it->second->h, lt::session::delete_files);
+    g_entries.erase(it);
+}
+
+void alertLoop() {
+    std::vector<lt::alert*> alerts;
+    auto lastSweep = Clock::now();
+    for (;;) {
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (g_stop) return;
+        }
+        if (!g_ses) return;
+        g_ses->wait_for_alert(std::chrono::milliseconds(500));
+        alerts.clear();
+        g_ses->pop_alerts(&alerts);
+
+        std::lock_guard<std::mutex> lk(g_mx);
+        for (lt::alert* a : alerts) {
+            if (auto* m = lt::alert_cast<lt::metadata_received_alert>(a)) {
+                for (auto& kv : g_entries) if (kv.second->h == m->handle) selectFile(*kv.second);
+            } else if (auto* r = lt::alert_cast<lt::read_piece_alert>(a)) {
+                for (auto& kv : g_entries) {
+                    Entry& e = *kv.second;
+                    if (!(e.h == r->handle)) continue;
+                    int p = static_cast<int>(r->piece);
+                    e.reading.erase(p);
+                    if (!r->error && r->size > 0) {
+                        e.cache[p] = std::make_shared<std::vector<char>>(r->buffer.get(), r->buffer.get() + r->size);
+                        e.cache_order.push_back(p);
+                        trimCache(e);
+                    }
+                }
+            } else if (auto* t = lt::alert_cast<lt::torrent_error_alert>(a)) {
+                for (auto& kv : g_entries) if (kv.second->h == t->handle) kv.second->err = t->error.message();
+            }
+        }
+        // Drop torrents nobody has touched for a long time.
+        auto now = Clock::now();
+        if (now - lastSweep > std::chrono::seconds(30)) {
+            lastSweep = now;
+            std::vector<std::string> old;
+            for (auto& kv : g_entries) if (now - kv.second->last_access > kIdleLimit) old.push_back(kv.first);
+            for (auto& h : old) dropLocked(h);
+        }
+        g_cv.notify_all();
+    }
+}
+
+void ensureSession() {   // g_mx held
+    if (g_ses) return;
+    std::error_code ec;
+    fs::remove_all(fs::path(g_dir) / "torrent_cache", ec);   // leftovers from a previous run
+    fs::create_directories(fs::path(g_dir) / "torrent_cache", ec);
+
+    lt::settings_pack sp;
+    sp.set_str(lt::settings_pack::user_agent, "Hesper/1.0");
+    sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881,[::]:6881");
+    // piece_progress: a finished piece wakes the reader at once instead of at its next poll.
+    sp.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
+                                              lt::alert_category::piece_progress);
+    sp.set_int(lt::settings_pack::connections_limit, 160);
+    // Find peers sooner and give up on dead / silent ones sooner: all of it is time spent staring at "Buffering".
+    sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+    sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
+    sp.set_int(lt::settings_pack::peer_connect_timeout, 8);
+    sp.set_int(lt::settings_pack::request_timeout, 15);
+    sp.set_int(lt::settings_pack::piece_timeout, 8);
+    sp.set_bool(lt::settings_pack::enable_upnp, true);
+    sp.set_bool(lt::settings_pack::enable_natpmp, true);
+    g_ses.reset(new lt::session(sp));
+    g_stop = false;
+    g_alerts = std::thread(alertLoop);
+    std::atexit([]() { removeAll(); });
+}
+
+// Adds (or finds) the torrent for p. g_mx must NOT be held.
+std::string addParams(lt::add_torrent_params p, int season, int episode, std::string& err) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    ensureSession();
+
+    std::string hash = toHex(p.info_hashes.get_best());
+    auto it = g_entries.find(hash);
+    if (it != g_entries.end()) {                       // already running: just re-aim it
+        Entry& e = *it->second;
+        e.last_access = Clock::now();
+        if (e.season != season || e.episode != episode) {
+            e.season = season; e.episode = episode;
+            e.cache.clear(); e.cache_order.clear();
+            if (e.have_meta) selectFile(e);
+        }
+        return hash;
+    }
+
+    // Keep the cache small: only the newest few torrents stay.
+    while (static_cast<int>(g_entries.size()) >= kMaxTorrents) {
+        auto oldest = g_entries.begin();
+        for (auto i = g_entries.begin(); i != g_entries.end(); ++i)
+            if (i->second->last_access < oldest->second->last_access) oldest = i;
+        dropLocked(oldest->first);
+    }
+
+    p.save_path = (fs::path(g_dir) / "torrent_cache" / hash).string();
+    p.flags |= lt::torrent_flags::sequential_download;
+    p.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+
+    lt::error_code ec;
+    lt::torrent_handle h = g_ses->add_torrent(std::move(p), ec);
+    if (ec || !h.is_valid()) { err = ec ? ec.message() : "Could not start the torrent"; return ""; }
+
+    auto e = std::make_shared<Entry>();
+    e->h = h; e->hash = hash; e->season = season; e->episode = episode;
+    g_entries[hash] = e;
+    if (h.torrent_file()) selectFile(*e);               // .torrent files already carry the file list
+    return hash;
+}
+
+std::shared_ptr<Entry> find(const std::string& hash) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    auto it = g_entries.find(hash);
+    return it == g_entries.end() ? nullptr : it->second;
+}
+
+// Waits for one piece and returns its bytes (nullptr on timeout / error / abort).
+std::shared_ptr<std::vector<char>> getPiece(Entry& e, int piece, bool (*aborted)(void*), void* ctx) {
+    auto lastProgress = Clock::now();
+    int lastHave = -1;
+    std::unique_lock<std::mutex> lk(g_mx);
+    for (;;) {
+        auto c = e.cache.find(piece);
+        if (c != e.cache.end()) return c->second;
+        if (!e.err.empty()) return nullptr;
+        if (e.h.have_piece(lt::piece_index_t(piece))) {
+            if (!e.reading[piece]) { e.reading[piece] = true; e.h.read_piece(lt::piece_index_t(piece)); }
+            lastProgress = Clock::now();
+        } else {
+            lt::torrent_status st = e.h.status();            // no piece bitfield needed: just the count
+            int have = st.num_pieces;
+            if (have != lastHave) { lastHave = have; lastProgress = Clock::now(); }
+        }
+        if (Clock::now() - lastProgress > kStallTimeout) return nullptr;
+        if (aborted && aborted(ctx)) return nullptr;
+        g_cv.wait_for(lk, std::chrono::milliseconds(100));
+    }
+}
+
+}  // namespace
+
+bool available() { return true; }
+
+// Starts the session (DHT, listening sockets) ahead of the first stream, so peers are already being
+// found while the viewer is still picking / searching.
+void warmUp() {
+    std::lock_guard<std::mutex> lk(g_mx);
+    ensureSession();
+}
+
+std::string add(const std::string& source, int season, int episode, std::string& err) {
+    lt::error_code ec;
+    lt::add_torrent_params p = lt::parse_magnet_uri(source, ec);
+    if (ec) { err = "Not a valid magnet link"; return ""; }
+    return addParams(std::move(p), season, episode, err);
+}
+
+std::string addFile(const std::string& bytes, int season, int episode, std::string& err) {
+    lt::error_code ec;
+    lt::add_torrent_params p;
+    // libtorrent 2.x: the buffer constructor is tagged with from_span_t.
+    p.ti = std::make_shared<lt::torrent_info>(
+        lt::span<char const>(bytes.data(), static_cast<std::ptrdiff_t>(bytes.size())), ec, lt::from_span_t());
+    if (ec) { err = "Not a valid .torrent file"; return ""; }
+    return addParams(std::move(p), season, episode, err);
+}
+
+bool status(const std::string& hash, Status& out, bool withMap) {
+    std::shared_ptr<Entry> e = find(hash);
+    if (!e) return false;
+    lt::torrent_status st = withMap ? e->h.status(lt::torrent_handle::query_pieces) : e->h.status();
+
+    std::lock_guard<std::mutex> lk(g_mx);
+    e->last_access = Clock::now();
+    out = Status();
+    out.name = e->name;
+    out.peers = st.num_peers;
+    out.seeds = st.num_seeds;
+    out.down_kbps = st.download_payload_rate / 1024;
+    out.up_kbps = st.upload_payload_rate / 1024;
+    out.files = e->files;
+    if (!e->err.empty()) { out.state = "error"; out.error = e->err; return true; }
+    if (!e->have_meta) { out.state = "metadata"; return true; }
+
+    out.file_index = e->file_index;
+    out.file_size = e->file_size;
+    out.file_name = baseName(e->files[static_cast<size_t>(e->file_index)].path);
+
+    std::vector<int64_t> fp = e->h.file_progress(lt::torrent_handle::piece_granularity);
+    if (e->file_size && static_cast<size_t>(e->file_index) < fp.size())
+        out.file_progress = std::min(1.0, static_cast<double>(fp[static_cast<size_t>(e->file_index)]) / static_cast<double>(e->file_size));
+
+    // Start-up buffer: contiguous pieces from the beginning (and the end for MP4-style files).
+    uint64_t need = std::min<uint64_t>(kStartBuffer, e->file_size);
+    int needPcs = static_cast<int>((need + static_cast<uint64_t>(e->piece_len) - 1) / static_cast<uint64_t>(e->piece_len));
+    needPcs = std::max(1, std::min(needPcs, e->last_piece - e->first_piece + 1));
+    int have = 0;
+    while (have < needPcs && e->h.have_piece(lt::piece_index_t(e->first_piece + have))) have++;
+    bool tailOk = !e->tail_needed || e->h.have_piece(lt::piece_index_t(e->last_piece));
+    out.buffer_progress = static_cast<double>(have) / needPcs;
+    out.ready = (have >= needPcs) && tailOk;
+    out.state = out.ready ? "ready" : "buffering";
+
+    if (withMap && st.pieces.size() > 0) {
+        const int cnt = e->last_piece - e->first_piece + 1;
+        if (cnt > 0) {
+            const int slices = std::min(100, cnt);
+            out.have_map.assign(static_cast<size_t>(slices), 0);
+            for (int b = 0; b < slices; b++) {
+                const int p0 = e->first_piece + static_cast<int>(static_cast<int64_t>(b) * cnt / slices);
+                const int p1 = e->first_piece + static_cast<int>(static_cast<int64_t>(b + 1) * cnt / slices);
+                int got = 0;
+                for (int p = p0; p < p1; p++)
+                    if (p < static_cast<int>(st.pieces.size()) && st.pieces.get_bit(lt::piece_index_t(p))) got++;
+                out.have_map[static_cast<size_t>(b)] = static_cast<unsigned char>(p1 > p0 ? 100 * got / (p1 - p0) : 0);
+            }
+        }
+    }
+    return true;
+}
+
+int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
+             bool (*aborted)(void*), void* ctx) {
+    std::shared_ptr<Entry> e = find(hash);
+    if (!e) return -1;
+
+    // Wait for the file list (magnet links need to fetch it from peers first).
+    auto t0 = Clock::now();
+    for (;;) {
+        std::unique_lock<std::mutex> lk(g_mx);
+        if (!e->err.empty()) return -1;
+        if (e->have_meta) break;
+        if (Clock::now() - t0 > kMetaTimeout || (aborted && aborted(ctx))) return -1;
+        g_cv.wait_for(lk, std::chrono::milliseconds(200));
+    }
+
+    if (offset >= e->file_size) return 0;
+    len = static_cast<size_t>(std::min<uint64_t>(len, e->file_size - offset));
+
+    {   // Aim the downloader at where the player is reading.
+        std::lock_guard<std::mutex> lk(g_mx);
+        e->last_access = Clock::now();
+        bool jumped = offset < e->last_end || offset > e->last_end + 4ull * 1024 * 1024;
+        int p0 = static_cast<int>((e->file_offset + offset) / static_cast<uint64_t>(e->piece_len));
+        if (jumped) {
+            e->h.clear_piece_deadlines();
+            // Seek: from here on the rest of the download continues from the new spot. Without this the
+            // sequential downloader would first fill the gap that was skipped over, then carry on.
+            if (e->num_pieces > 0 && p0 != e->aimed_piece) {
+                std::vector<lt::download_priority_t> pr(static_cast<size_t>(e->num_pieces), lt::dont_download);
+                for (int i = e->first_piece; i <= e->last_piece && i < e->num_pieces; i++)
+                    pr[static_cast<size_t>(i)] = i < p0 ? lt::low_priority : lt::default_priority;
+                e->h.prioritize_pieces(pr);
+                e->aimed_piece = p0;
+            }
+        }
+        for (int k = 0; k < e->lookahead && p0 + k <= e->last_piece; k++) {
+            lt::piece_index_t pi(p0 + k);
+            if (!e->h.have_piece(pi)) e->h.set_piece_deadline(pi, 50 + k * 120);
+        }
+    }
+
+    size_t done = 0;
+    char* out = static_cast<char*>(buf);
+    while (done < len) {
+        uint64_t abs = e->file_offset + offset + done;
+        int piece = static_cast<int>(abs / static_cast<uint64_t>(e->piece_len));
+        size_t within = static_cast<size_t>(abs % static_cast<uint64_t>(e->piece_len));
+        std::shared_ptr<std::vector<char>> data = getPiece(*e, piece, aborted, ctx);
+        if (!data || within >= data->size()) break;
+        size_t n = std::min(len - done, data->size() - within);
+        std::memcpy(out + done, data->data() + within, n);
+        done += n;
+    }
+    if (done == 0) return -1;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        e->last_end = offset + done;
+    }
+    return static_cast<int64_t>(done);
+}
+
+void remove(const std::string& hash) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    dropLocked(hash);
+    g_cv.notify_all();
+}
+
+void removeAll() {
+    std::thread t;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        g_stop = true;
+        std::vector<std::string> all;
+        for (auto& kv : g_entries) all.push_back(kv.first);
+        for (auto& h : all) dropLocked(h);
+        t = std::move(g_alerts);
+    }
+    if (t.joinable()) t.join();
+    std::lock_guard<std::mutex> lk(g_mx);
+    g_ses.reset();
+    std::error_code ec;
+    fs::remove_all(fs::path(g_dir) / "torrent_cache", ec);
+}
+
+}  // namespace torrent
+#endif

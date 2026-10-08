@@ -1,0 +1,1321 @@
+/* ============================================================
+   Hesper Theme Tokens
+   ============================================================ */
+:root {
+    --sx-bg: #E9E2DA;
+    --sx-bg-elevated: #F3EEE7;
+    --sx-surface: #F8F4EE;
+    --sx-surface-focused: #2b262218;
+    --sx-border: #D5CABD;
+    --sx-border-focus: #2b2622;
+    --sx-text: #2b2622;
+    --sx-text-muted: #7a6f66;
+    --sx-accent: #2b2622;
+    --sx-accent-glow: rgba(43, 38, 34, 0.22);
+    --sx-radius: 16px;
+    --sx-overlay: rgba(60, 48, 38, 0.35);
+    --sx-shadow: rgba(70, 52, 36, 0.22);
+    --sx-glass: rgba(255, 255, 255, 0.50);
+    --sx-glass-strong: rgba(250, 246, 240, 0.96);
+    --sx-glass-fill: rgba(255, 255, 255, 0.55);
+    --sx-glass-edge: rgba(60, 48, 38, 0.14);
+    --sx-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background-color: var(--sx-bg);
+    color: var(--sx-text);
+    font-family: var(--sx-font);
+    overflow: hidden;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+}
+
+/* ============================================================
+   App Shell Layout
+   ============================================================ */
+.hesper-shell {
+    display: flex;
+    height: 100vh;
+    height: 100dvh;
+    width: 100vw;
+}
+
+.hesper-sidebar {
+    width: 260px;
+    background: var(--sx-bg-elevated);
+    border-right: 1px solid var(--sx-border);
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem 1rem;
+    flex-shrink: 0;
+}
+
+.sidebar-brand {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--sx-accent);
+    margin-bottom: 2rem;
+    padding-left: 0.5rem;
+}
+
+.sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    flex: 1;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--sx-text);
+    padding: 0.75rem 1rem;
+    border-radius: var(--sx-radius);
+    cursor: pointer;
+    font-size: 1rem;
+    text-align: left;
+    transition: background 0.1s, border-color 0.1s;
+}
+
+.nav-item.active {
+    background: var(--sx-surface);
+    border-color: var(--sx-border);
+}
+
+.nav-icon {
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar-footer {
+    padding-top: 1rem;
+    border-top: 1px solid var(--sx-border);
+}
+
+.status-badge {
+    font-size: 0.85rem;
+    color: var(--sx-text-muted);
+}
+
+.hesper-content {
+    flex: 1;
+    min-height: 0;
+    padding: 2.5rem;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    background: var(--sx-bg);
+}
+
+.content-title {
+    font-size: 2rem;
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+}
+
+/* Settings Sections & Plugin List Layout */
+.settings-section {
+    margin-bottom: 2rem;
+}
+
+.settings-section h2 {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+    color: var(--sx-text);
+}
+
+.theme-launch-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--sx-surface);
+    color: var(--sx-text);
+    border: 1px solid var(--sx-border);
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--sx-radius);
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: background 0.1s, border-color 0.1s;
+}
+
+.theme-launch-btn:hover {
+    border-color: var(--sx-accent);
+    background: var(--sx-surface-focused);
+}
+
+.plugin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.plugin-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    padding: 1rem 1.25rem;
+    border-radius: var(--sx-radius);
+    cursor: pointer;
+    transition: border-color 0.1s, background 0.1s;
+}
+
+.plugin-row h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+}
+
+.plugin-row p {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--sx-text-muted);
+}
+
+.plugin-status-dot {
+    width: 10px;
+    height: 10px;
+    background-color: #238636;
+    border-radius: 50%;
+    box-shadow: 0 0 8px rgba(35, 134, 54, 0.5);
+}
+
+/* Focus and Interactive States */
+.focusable.focused {
+    border-color: var(--sx-border-focus);
+    outline: none;
+    box-shadow: 0 0 10px var(--sx-accent-glow);
+    background: var(--sx-surface-focused);
+}
+
+/* Empty States */
+.empty-state {
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: var(--sx-radius);
+    padding: 3rem;
+    text-align: center;
+}
+
+.empty-heading {
+    margin-top: 0;
+    font-size: 1.25rem;
+}
+
+.empty-state p {
+    color: var(--sx-text-muted);
+    margin-bottom: 0;
+}
+
+/* ============================================================
+   Slick Theme Panel & Overlapping Cards
+   ============================================================ */
+.theme-panel-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--sx-overlay);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.theme-panel {
+    background: var(--sx-bg-elevated);
+    border: 1px solid var(--sx-border-focus);
+    border-radius: var(--sx-radius);
+    width: 680px;
+    max-width: 90vw;
+    max-height: 85vh;
+    padding: 2.5rem;
+    box-shadow: 0 25px 60px var(--sx-shadow), 0 0 30px var(--sx-accent-glow);
+    overflow-y: auto;
+    position: relative;
+}
+
+.theme-panel h2 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.75rem;
+    letter-spacing: -0.02em;
+}
+
+.theme-panel .sub {
+    color: var(--sx-text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+}
+
+/* Scrollable Overlapping Preset Container */
+.preset-container {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 2.5rem;
+    position: relative;
+    padding: 5px 10px 15px 10px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--sx-accent) var(--sx-surface);
+}
+
+.preset-container::-webkit-scrollbar {
+    height: 6px;
+}
+.preset-container::-webkit-scrollbar-track {
+    background: var(--sx-surface);
+    border-radius: 3px;
+}
+.preset-container::-webkit-scrollbar-thumb {
+    background: var(--sx-accent);
+    border-radius: 3px;
+}
+
+.preset-card {
+    background: var(--sx-surface);
+    border: 2px solid var(--sx-border);
+    border-radius: 14px;
+    padding: 1rem;
+    width: 130px;
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 0.15s ease-out, border-color 0.1s;
+    position: relative;
+    margin-right: -20px;
+    box-shadow: 0 10px 25px var(--sx-shadow);
+}
+
+.preset-card:last-child {
+    margin-right: 0;
+}
+
+.preset-card:hover {
+    transform: translateY(-8px) scale(1.05);
+    z-index: 10;
+    border-color: var(--sx-accent);
+    box-shadow: 0 15px 35px var(--sx-accent-glow);
+}
+
+.preset-card.active-preset {
+    border-color: var(--sx-accent);
+    background: var(--sx-surface-focused);
+    z-index: 5;
+}
+
+.preset-preview-swatch {
+    height: 36px;
+    border-radius: 8px;
+    margin-bottom: 0.75rem;
+    box-shadow: inset 0 2px 4px var(--sx-shadow);
+}
+
+.preset-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    color: var(--sx-text);
+    text-transform: capitalize;
+}
+
+/* Color Customization Grid */
+.color-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    background: var(--sx-surface);
+    padding: 1.25rem;
+    border-radius: 12px;
+    border: 1px solid var(--sx-border);
+}
+
+.theme-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.theme-row label {
+    font-size: 0.9rem;
+    color: var(--sx-text-muted);
+}
+
+.theme-row input[type="color"] {
+    -webkit-appearance: none;
+    border: none;
+    width: 44px;
+    height: 28px;
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+}
+
+.theme-row input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 0;
+}
+
+.theme-row input[type="color"]::-webkit-color-swatch {
+    border: 1px solid var(--sx-border);
+    border-radius: 6px;
+}
+
+.panel-close-btn {
+    width: 100%;
+    background: var(--sx-accent);
+    color: var(--sx-bg);
+    border: none;
+    padding: 0.85rem;
+    font-size: 1rem;
+    font-weight: 600;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: filter 0.2s, transform 0.1s;
+}
+
+.panel-close-btn:hover {
+    filter: brightness(1.15);
+}
+
+.panel-close-btn:active {
+    transform: scale(0.98);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.96); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* ============================================================
+   HesperUIKit — themed components available to plugin ui.js
+   code via hesperFramework.ui.*. Everything here reads the
+   same --sx-* tokens as the core app, so plugin UI re-themes
+   live with HesperTheme and never needs its own colors.
+   ============================================================ */
+
+.sx-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.sx-grid {
+    --sx-grid-min: 160px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(var(--sx-grid-min), 1fr));
+    gap: 1rem;
+}
+
+.sx-card {
+    padding: 1.5rem;
+    text-align: left;
+}
+
+.sx-list-row {
+    margin-bottom: 0;
+}
+
+.sx-btn {
+    /* inherits .nav-item / .theme-launch-btn appearance; kept as a
+       stable hook selector for plugin-authored layout only */
+}
+
+.sx-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: var(--sx-radius);
+    padding: 0.75rem 1.25rem;
+    cursor: pointer;
+}
+
+.sx-toggle-label {
+    font-size: 0.95rem;
+    color: var(--sx-text);
+}
+
+.sx-toggle-track {
+    width: 42px;
+    height: 24px;
+    border-radius: 12px;
+    background: var(--sx-border);
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+}
+
+.sx-toggle-track.on {
+    background: var(--sx-accent);
+}
+
+.sx-toggle-dot {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--sx-text);
+    transition: transform 0.2s ease;
+}
+
+.sx-toggle-track.on .sx-toggle-dot {
+    transform: translateX(18px);
+}
+
+.sx-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.sx-field-label {
+    font-size: 0.85rem;
+    color: var(--sx-text-muted);
+}
+
+.sx-text-input {
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    border-radius: 10px;
+    color: var(--sx-text);
+    padding: 0.65rem 0.9rem;
+    font-size: 0.95rem;
+    font-family: var(--sx-font);
+}
+
+.sx-text-input.focused {
+    border-color: var(--sx-border-focus);
+    box-shadow: 0 0 10px var(--sx-accent-glow);
+}
+
+.sx-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid var(--sx-border);
+}
+
+.sx-tab {
+    background: transparent;
+    border: none;
+    color: var(--sx-text-muted);
+    padding: 0.6rem 1rem;
+    font-size: 0.95rem;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+}
+
+.sx-tab.active {
+    color: var(--sx-text);
+    border-bottom-color: var(--sx-accent);
+}
+
+/* ============================================================
+   Header row + weather badge
+   ============================================================ */
+.content-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.content-header .content-title {
+    margin: 0;
+}
+
+.weather-badge {
+    background: var(--sx-surface);
+    color: var(--sx-text);
+    border: 1px solid var(--sx-border);
+    border-radius: 999px;
+    padding: 0.5rem 1.1rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+/* ============================================================
+   Folder picker + section actions
+   ============================================================ */
+.section-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.sub-heading {
+    font-size: 1.25rem;
+    margin: 1rem 0;
+    color: #f0f6fc;
+    color: var(--sx-text);
+}
+
+.browse-path {
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--sx-accent);
+    background: var(--sx-bg);
+    border: 1px solid var(--sx-border);
+    border-radius: 10px;
+    padding: 0.5rem 0.75rem;
+    margin-bottom: 0.75rem;
+    word-break: break-all;
+}
+
+.browse-list {
+    max-height: 40vh;
+    overflow-y: auto;
+    margin-bottom: 0.5rem;
+}
+
+.browse-error {
+    color: #ff6b6b;
+    font-size: 0.9rem;
+    margin: 0 0 0.75rem 0;
+}
+
+/* ============================================================
+   Full-screen plugin window (opened from the Plugins tab)
+   ============================================================ */
+.plugin-window {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    background: var(--sx-bg);
+    color: var(--sx-text);
+}
+
+.plugin-window-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: var(--sx-bg-elevated);
+    border-bottom: 1px solid var(--sx-border);
+}
+
+.plugin-window-bar h2 {
+    margin: 0;
+    font-size: 1.25rem;
+}
+
+.plugin-window-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 2rem 2.5rem;
+}
+
+/* ============================================================
+   Phone / narrow screens: sidebar becomes a top tab strip
+   ============================================================ */
+@media (max-width: 720px) {
+    .hesper-shell {
+        flex-direction: column;
+    }
+
+    .hesper-sidebar {
+        width: 100%;
+        flex-direction: row;
+        align-items: center;
+        padding: 0.5rem;
+        border-right: none;
+        border-bottom: 1px solid var(--sx-border);
+        overflow-x: auto;
+    }
+
+    .sidebar-brand,
+    .sidebar-footer {
+        display: none;
+    }
+
+    .sidebar-nav {
+        flex-direction: row;
+        flex: none;
+        gap: 0.25rem;
+    }
+
+    .nav-item {
+        white-space: nowrap;
+        padding: 0.5rem 0.9rem;
+        font-size: 0.95rem;
+    }
+
+    .hesper-content {
+        padding: 1rem;
+    }
+
+    /* Bottom tab bar (rendered only on phones, see PHONE_MQ in app.js). It is the last
+       child of the shell, so it sits above the docked mini player automatically. */
+    .hesper-bottombar {
+        position: relative;
+        z-index: 20;
+        flex: none;
+        display: flex;
+        align-items: stretch;
+        background: var(--sx-bg-elevated);
+        border-top: 1px solid var(--sx-border);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    html.hp-typing .hesper-bottombar { display: none; }
+
+    .bb-item {
+        position: relative;
+        z-index: 2;
+        flex: 1;
+        min-width: 0;
+        min-height: 56px;
+        padding: 0.4rem 0.15rem;
+        background: transparent;
+        border: 0;
+        border-top: 2px solid transparent;
+        color: var(--sx-text-muted);
+        font: inherit;
+        font-size: 0.72rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        cursor: pointer;
+    }
+    .bb-item.active {
+        color: var(--sx-accent);
+        border-top-color: var(--sx-accent);
+    }
+
+    .bb-backdrop {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        z-index: 1;
+        background: var(--sx-overlay);
+    }
+    .bb-sheet {
+        position: absolute;
+        left: 0; right: 0; bottom: 100%;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem;
+        padding: 0.75rem;
+        background: var(--sx-bg-elevated);
+        border-top: 1px solid var(--sx-border);
+        border-radius: 14px 14px 0 0;
+    }
+    .bb-sheet-item { justify-content: center; }
+
+    .content-title {
+        font-size: 1.5rem;
+    }
+
+    .weather-badge {
+        padding: 0.4rem 0.8rem;
+        font-size: 1rem;
+    }
+
+    .plugin-window-bar {
+        padding: 0.75rem 1rem;
+    }
+
+    .plugin-window-body {
+        padding: 1rem;
+    }
+}
+
+
+/* Header action group + Refresh button (uses the app's .theme-launch-btn look) */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-shrink: 0;
+}
+
+.refresh-btn {
+    padding: 0.5rem 1rem;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    flex-shrink: 0;
+}
+
+.refresh-icon {
+    display: inline-block;
+    color: var(--sx-accent);
+    font-size: 1.1rem;
+    line-height: 1;
+}
+
+.refresh-icon.spinning {
+    animation: refresh-spin 0.9s linear infinite;
+}
+
+@keyframes refresh-spin {
+    to { transform: rotate(360deg); }
+}
+
+.refresh-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.refresh-btn:disabled:hover {
+    border-color: var(--sx-border);
+    background: var(--sx-surface);
+}
+
+@media (max-width: 520px) {
+    .refresh-btn { padding: 0.4rem 0.7rem; font-size: 0.85rem; }
+}
+
+
+/* ============================================================
+   Detail hero (glass)
+   Literal fallbacks come first so old WebViews still render.
+   ============================================================ */
+.hero {
+    position: relative;
+    margin: 8px 0 24px;
+    border-radius: 20px;
+    overflow: hidden;
+    background: var(--sx-bg-elevated);
+    border: 1px solid var(--sx-glass-edge);
+    box-shadow: 0 20px 50px var(--sx-shadow);
+    animation: fadeIn 0.35s ease-out;
+}
+
+.hero-backdrop {
+    position: absolute;
+    top: -30px; right: -30px; bottom: -30px; left: -30px;
+    background-size: cover;
+    background-position: center;
+    -webkit-filter: blur(34px) saturate(1.3);
+    filter: blur(34px) saturate(1.3);
+    opacity: 0.55;
+}
+
+.hero-glass {
+    position: relative;
+    display: flex;
+    gap: 20px;
+    padding: 22px;
+    background: var(--sx-glass);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    box-shadow: inset 0 1px 0 var(--sx-glass-edge);
+}
+
+.hero-poster {
+    width: 140px;
+    flex-shrink: 0;
+    align-self: flex-start;
+    border-radius: 12px;
+    box-shadow: 0 12px 30px var(--sx-shadow), 0 0 0 1px var(--sx-glass-edge);
+}
+
+.hero-text { min-width: 0; }
+
+.hero-title {
+    margin: 0 0 6px 0;
+    font-size: 1.9rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+    color: #f0f6fc;
+    color: var(--sx-text, #f0f6fc);
+}
+
+.hero-meta {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #8b949e;
+    color: var(--sx-text-muted, #8b949e);
+}
+
+.hero-rule {
+    width: 44px;
+    height: 3px;
+    margin: 12px 0 14px;
+    border-radius: 2px;
+    background: #58a6ff;
+    background: var(--sx-accent, #58a6ff);
+    box-shadow: 0 0 12px var(--sx-accent-glow);
+}
+
+.hero-overview {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--sx-text);
+    opacity: 0.88;
+}
+
+@media (max-width: 520px) {
+    .hero-glass { padding: 16px; gap: 14px; }
+    .hero-poster { width: 96px; }
+    .hero-title { font-size: 1.5rem; }
+}
+
+/* Glass panel used for synopsis text inside the detail modal */
+.glass-panel {
+    margin: 10px 0 4px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--sx-glass-fill);
+    border: 1px solid var(--sx-glass-edge);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 0 var(--sx-glass-edge);
+    line-height: 1.6;
+}
+.glass-panel p { margin: 0; }
+
+.detail-image {
+    max-width: 100%;
+    margin: 8px 0;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px var(--sx-shadow);
+}
+
+
+/* ============================================================
+   Poster cards (movie / show tiles)
+   padding-top % keeps a 2:3 ratio on old WebViews (no aspect-ratio).
+   ============================================================ */
+.sx-poster-card {
+    position: relative;
+    padding: 150% 0 0 0;
+    overflow: hidden;
+    background: #161b22;
+    background: var(--sx-surface, #161b22);
+    -webkit-transition: -webkit-transform 0.12s ease-out;
+    transition: transform 0.12s ease-out;
+}
+
+.sx-poster-img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+}
+
+.sx-poster-card.focused {
+    z-index: 2;
+    -webkit-transform: scale(1.04);
+    transform: scale(1.04);
+}
+
+/* Long filenames / titles must not push cards past the screen edge */
+.sx-card { min-width: 0; overflow: hidden; }
+.sx-card h3 { word-break: break-word; overflow-wrap: break-word; }
+.sx-card p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* ============================================================
+   Compact poster grids on small screens (phones, either rotation).
+   TVs and tablets keep the large layout.
+   !important is needed because the grid sets its column size inline.
+   ============================================================ */
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-poster-grid {
+        --sx-grid-min: 110px !important;
+        gap: 0.6rem;
+    }
+    .sx-poster-grid .sx-poster-card { border-radius: 10px; }
+    /* plain (no poster) cards sitting in the same grid */
+    .sx-poster-grid .sx-card { padding: 0.75rem; }
+    .sx-poster-grid .sx-card h3 { font-size: 0.95rem; }
+    .sx-poster-grid .sx-card p { font-size: 0.8rem; }
+    .sx-poster-grid .sx-poster-card { padding: 150% 0 0 0; }
+}
+
+
+/* ============================================================
+   Long-press support + toast
+   ============================================================ */
+.sx-longpress {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -ms-touch-action: manipulation;
+    touch-action: manipulation;
+}
+/* A hold on a poster must reach the tile itself, not start the phone's "drag / save image" gesture. */
+.sx-longpress img {
+    pointer-events: none;
+    -webkit-user-drag: none;
+    user-drag: none;
+}
+
+.sx-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    max-width: 90%;
+    padding: 10px 18px;
+    border-radius: 14px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    word-break: break-all;
+    text-align: center;
+    color: #f0f6fc;
+    color: var(--sx-text, #f0f6fc);
+    background: var(--sx-glass-strong);
+    border: 1px solid var(--sx-glass-edge);
+    box-shadow: 0 10px 30px var(--sx-shadow);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-transform: translateX(-50%);
+    transform: translateX(-50%);
+    z-index: 10000;
+    pointer-events: none;
+    animation: sxToastIn 0.2s ease-out;
+}
+
+@keyframes sxToastIn {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+
+/* Title strip along the bottom of poster cards */
+.sx-poster-caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 30px 10px 10px;
+    background: linear-gradient(to top, rgba(5, 8, 14, 0.92), rgba(5, 8, 14, 0));
+    color: #f7f3ee;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.25;
+    text-align: left;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    pointer-events: none;
+}
+
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-poster-caption {
+        padding: 20px 7px 7px;
+        font-size: 0.78rem;
+    }
+}
+
+
+/* ============================================================
+   Header clock
+   ============================================================ */
+.clock-badge {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.15;
+    padding: 0.35rem 0.95rem;
+    border-radius: 16px;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-family: inherit;
+    background: #161b22;
+    background: var(--sx-surface, #161b22);
+    color: #f0f6fc;
+    color: var(--sx-text, #f0f6fc);
+    border: 1px solid #30363d;
+    border: 1px solid var(--sx-border, #30363d);
+}
+
+.clock-time {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    font-variant-numeric: tabular-nums;
+}
+
+.clock-date {
+    font-size: 0.72rem;
+    color: #8b949e;
+    color: var(--sx-text-muted, #8b949e);
+    white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+    .content-header { flex-wrap: wrap; }
+    .header-actions { flex-wrap: wrap; justify-content: flex-end; }
+    .clock-badge { padding: 0.3rem 0.7rem; }
+    .clock-time { font-size: 1rem; }
+}
+
+/* ---- Loading ring ---- */
+.hs-ring {
+    display: inline-block; flex: none; box-sizing: border-box;
+    width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid var(--sx-accent-glow, rgba(88, 166, 255, 0.35));
+    border-top-color: var(--sx-accent, #58a6ff);
+    animation: hs-ring-spin 0.8s linear infinite;
+}
+.hs-ring.lg { width: 48px; height: 48px; border-width: 5px; }
+.hs-loading { display: flex; align-items: center; gap: 12px; padding: 16px 4px; }
+.hs-busy {
+    position: fixed; inset: 0; z-index: 3000;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    background: var(--sx-overlay); color: var(--sx-text); font-size: 1rem;
+    pointer-events: none;   /* never traps taps, so Close/Back always work */
+}
+@keyframes hs-ring-spin { to { transform: rotate(360deg); } }
+
+
+/* ============================================================
+   Layouts (see LAYOUTS in app.js): <html data-layout=... data-poster=...>
+   data-poster only needs rules for s and l; m is the base size.
+   !important is needed because the grid sets its column size inline.
+   ============================================================ */
+html[data-poster="s"] .sx-poster-grid { --sx-grid-min: 140px !important; }
+html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 280px !important; }
+@media (max-width: 700px), (max-height: 500px) {
+    html[data-poster="s"] .sx-poster-grid { --sx-grid-min: 90px !important; }
+    html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 160px !important; }
+}
+
+/* Wide screens only: phones always use the bottom tab bar. */
+@media (min-width: 721px) {
+    html[data-layout="wall"] .hesper-sidebar { width: 200px; padding: 1.25rem 0.75rem; }
+    html[data-layout="wall"] .hesper-content,
+    html[data-layout="compact"] .hesper-content { padding: 1.25rem; }
+    html[data-layout="wall"] .sx-poster-grid,
+    html[data-layout="compact"] .sx-poster-grid { gap: 0.6rem; }
+    html[data-layout="compact"] .hesper-sidebar { width: 220px; }
+}
+
+/* Top bar: not on short (landscape phone) screens, where height is precious. */
+@media (min-width: 721px) and (min-height: 501px) {
+    html[data-layout="topbar"] .hesper-shell { flex-direction: column; }
+    html[data-layout="topbar"] .hesper-sidebar {
+        width: 100%;
+        flex-direction: row;
+        align-items: center;
+        gap: 1.5rem;
+        padding: 0.6rem 1.5rem;
+        border-right: none;
+        border-bottom: 1px solid var(--sx-border);
+    }
+    html[data-layout="topbar"] .sidebar-brand { margin: 0; padding: 0; }
+    html[data-layout="topbar"] .sidebar-nav { flex-direction: row; flex-wrap: wrap; gap: 0.25rem; }
+    html[data-layout="topbar"] .sidebar-footer { margin-left: auto; padding: 0; border-top: none; }
+    html[data-layout="topbar"] .nav-item { padding: 0.5rem 0.9rem; }
+}
+
+
+/* ============================================================
+   Settings polish
+   ============================================================ */
+
+/* Secondary buttons (ui.button without the primary variant) used to be bare text.
+   Give them the same grey surface and border as the primary ones. The sidebar and
+   bottom-bar tabs also use .nav-item but never .sx-btn, so they are not affected. */
+html .sx-btn.nav-item {
+    background: var(--sx-surface);
+    border: 1px solid var(--sx-border);
+    padding: 0.75rem 1.25rem;
+    font-size: 1rem;
+    font-weight: 500;
+}
+html .sx-btn.nav-item:hover {
+    border-color: var(--sx-accent);
+    background: var(--sx-surface-focused);
+}
+/* Marks the chosen option in a row of choices (poster size, grid/list). */
+html .sx-btn.sx-selected {
+    border-color: var(--sx-accent);
+}
+
+/* A thin line between settings sections. */
+.settings-section + .settings-section {
+    border-top: 1px solid var(--sx-border);
+    padding-top: 1.5rem;
+    margin-top: 0.5rem;
+}
+
+/* Layout cards only change the menu position, which phones don't have (they always
+   use the bottom tab bar), so on phones show just Poster size and the view mode. */
+@media (max-width: 720px) {
+    .layout-cards { display: none; }
+}
+
+/* Native-app feel: no text selection, copy callout or tap flash on buttons, cards and labels.
+   Text fields (and error output) stay selectable so typing, paste and copying errors work. */
+html, body, body * {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+input, textarea, [contenteditable], [contenteditable] *, pre {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
+
+/* ---- Plugin sandbox: trailer player (kept above the redrawn part of the screen) ---- */
+.plugin-sandbox > .sx-video { width: 100%; max-width: 960px; margin: 0 auto 1rem; }
+/* never taller than the screen, so the whole trailer fits in view (TVs and landscape phones) */
+.plugin-sandbox > .sx-video { max-width: min(960px, calc((100vh - 7rem) * 16 / 9)); }
+.sx-video-box {
+    position: relative; width: 100%; padding-top: 56.25%;   /* 16:9 without aspect-ratio (old WebViews) */
+    border-radius: 12px; overflow: hidden; background: #000;
+}
+.sx-video-box iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
+
+/* Plugins tab: Official / Third-party grouping */
+.plugin-group-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.65;
+    margin: 14px 4px 8px;
+}
+.plugin-group-label.plugin-group-sep {
+    margin-top: 28px;
+    padding-top: 16px;
+    border-top: 1px solid currentColor;
+    border-top-color: rgba(128, 128, 128, 0.35);
+}
+
+/* ---- Plugin sandbox: hero billboard (full-width backdrop, like a streaming app's top banner) ---- */
+.sx-hero {
+    position: relative; width: 100%; box-sizing: border-box; overflow: hidden;
+    display: flex; align-items: flex-end;
+    min-height: 340px; border-radius: 14px;
+    background: #10141b; background: var(--sx-surface, #10141b);
+    color: #f7f3ee;
+}
+.sx-hero-img {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    object-fit: cover; object-position: center 20%; display: block;
+}
+.sx-hero-shade {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none;
+    background: -webkit-linear-gradient(left, rgba(5, 8, 14, 0.92) 0%, rgba(5, 8, 14, 0.55) 45%, rgba(5, 8, 14, 0) 80%),
+                -webkit-linear-gradient(bottom, rgba(5, 8, 14, 0.85) 0%, rgba(5, 8, 14, 0) 55%);
+    background: linear-gradient(to right, rgba(5, 8, 14, 0.92) 0%, rgba(5, 8, 14, 0.55) 45%, rgba(5, 8, 14, 0) 80%),
+                linear-gradient(to top, rgba(5, 8, 14, 0.85) 0%, rgba(5, 8, 14, 0) 55%);
+}
+.sx-hero-body {
+    position: relative; z-index: 1; box-sizing: border-box;
+    display: flex; flex-direction: column; align-items: flex-start; gap: 0.6rem;
+    width: 100%; max-width: 640px; padding: 1.75rem 2rem;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.7);
+}
+.sx-hero-badge {
+    padding: 2px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; background: var(--sx-accent, #e50914); color: #fff; text-shadow: none;
+}
+.sx-hero-title { margin: 0; font-size: 2.2rem; line-height: 1.1; font-weight: 800; color: #fff; }
+.sx-hero-meta { margin: 0; font-size: 0.95rem; font-weight: 600; color: #e6e1da; }
+.sx-hero-text {
+    margin: 0; font-size: 1rem; line-height: 1.45; color: #ddd8d0; white-space: normal;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.sx-hero-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; text-shadow: none; }
+.sx-hero.sx-hero-noimg { background: -webkit-linear-gradient(135deg, #1b2230, #0b0e14); background: linear-gradient(135deg, #1b2230, #0b0e14); }
+
+/* TV / big screens: taller billboard, larger type (readable from the sofa) */
+@media (min-width: 1200px) {
+    .sx-hero { min-height: 52vh; border-radius: 18px; }
+    .sx-hero-body { max-width: 760px; padding: 3rem 3.5rem; gap: 0.8rem; }
+    .sx-hero-title { font-size: 3.2rem; }
+    .sx-hero-meta { font-size: 1.15rem; }
+    .sx-hero-text { font-size: 1.25rem; -webkit-line-clamp: 4; }
+    .sx-hero-badge { font-size: 0.85rem; }
+}
+
+/* Phones: picture on top, text over a bottom fade, compact */
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-hero { min-height: 0; padding-top: 64%; border-radius: 12px; }
+    .sx-hero-img { object-position: center top; }
+    .sx-hero-shade {
+        background: -webkit-linear-gradient(bottom, rgba(5, 8, 14, 0.96) 0%, rgba(5, 8, 14, 0.7) 45%, rgba(5, 8, 14, 0) 90%);
+        background: linear-gradient(to top, rgba(5, 8, 14, 0.96) 0%, rgba(5, 8, 14, 0.7) 45%, rgba(5, 8, 14, 0) 90%);
+    }
+    .sx-hero-body { position: absolute; left: 0; right: 0; bottom: 0; max-width: none; padding: 0.9rem 1rem; gap: 0.35rem; }
+    .sx-hero-title { font-size: 1.35rem; }
+    .sx-hero-meta { font-size: 0.8rem; }
+    .sx-hero-text { font-size: 0.85rem; -webkit-line-clamp: 2; }
+    .sx-hero-actions { gap: 0.4rem; }
+    .sx-hero-actions .sx-btn { padding: 0.5rem 0.9rem; font-size: 0.9rem; }
+}
+@media (max-height: 500px) and (min-width: 701px) {      /* phone held sideways */
+    .sx-hero { padding-top: 0; min-height: 230px; }
+    .sx-hero-body { position: relative; max-width: 560px; }
+}
+
+
+/* ---- "Watch on <service>" buttons (ui.providerButton) ---- */
+.sx-btn.sx-provider { display: inline-flex; align-items: center; gap: 0.5rem; }
+.sx-provider-logo { width: 28px; height: 28px; border-radius: 7px; object-fit: cover; flex: none; }
+@media (max-width: 720px) { .sx-provider-logo { width: 24px; height: 24px; } }
+
+/* ============================================================
+   Performance pass (60 fps TV): no live blur over scrolling content,
+   promoted layers for the things that move, shorter focus transitions.
+   ============================================================ */
+.glass-panel, .hero-glass, .sx-toast, .sx-toast * {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+}
+.hero-backdrop { will-change: transform; -webkit-transform: translateZ(0); transform: translateZ(0); }
+.sx-poster-card { will-change: transform; contain: paint; }
+.preset-card { will-change: transform; }
+
+
+/* ============================================================
+   TV boxes / Fire Stick (html.hesper-tv, set in index.html)
+   Cheap GPUs drop frames on live blur, wide soft shadows and on
+   hundreds of always-promoted layers. Same look, lighter paint.
+   ============================================================ */
+/* A layer per poster is hundreds of GPU textures on a 1-2 GB box: promote only the focused one. */
+.sx-poster-card, .preset-card { will-change: auto; }
+.sx-poster-card.focused, .preset-card:hover { will-change: transform; }
+html.hesper-tv * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.hesper-tv .theme-panel-overlay, html.hesper-tv .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.82); }
+html.hesper-tv .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32;
+    -webkit-transform: scale(1.12) translateZ(0); transform: scale(1.12) translateZ(0); }
+html.hesper-tv .focusable { -webkit-transition: border-color 0.08s, background-color 0.08s; transition: border-color 0.08s, background-color 0.08s; }
+html.hesper-tv .focusable.focused { box-shadow: 0 0 0 2px var(--sx-border-focus); }
+html.hesper-tv .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
+html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { animation: none; }

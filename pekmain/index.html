@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PEK</title>
+<link rel="stylesheet" href="style.css?v=10r">
+<link rel="icon" type="image/png" href="favicon.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#E9E2DA">
+<style>
+#hesper-splash{position:fixed;inset:0;z-index:2147483647;background:#E9E2DA;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
+#hesper-splash.out{opacity:0;pointer-events:none}
+#hesper-splash video{width:100%;height:100%;object-fit:cover}
+</style>
+</head>
+<body>
+<div id="hesper-splash"><video muted playsinline preload="auto"></video></div>
+<script>
+// Splash: plays once per session; tap/key skips. Skipped inside the Android app,
+// which plays the same video natively before the WebView loads.
+(function () {
+  var el = document.getElementById('hesper-splash');
+  var seen = false;
+  try { seen = sessionStorage.getItem('hesperSplash') === '1'; } catch (e) {}
+  if (window.HesperAndroid || seen) { el.remove(); return; }
+  try { sessionStorage.setItem('hesperSplash', '1'); } catch (e) {}
+  var v = el.querySelector('video'), gone = false;
+  // Portrait screens (phones) get the 9:16 cut; wide screens (TVs, desktops) the 16:9 one.
+  v.src = window.matchMedia('(orientation: portrait)').matches ? 'splash_portrait.mp4' : 'splash.mp4';
+  function end() {
+    if (gone) return; gone = true;
+    el.classList.add('out');
+    setTimeout(function () { el.remove(); }, 600);
+  }
+  v.addEventListener('ended', end);
+  v.addEventListener('error', end);
+  el.addEventListener('click', end);
+  document.addEventListener('keydown', end, { once: true });
+  setTimeout(end, 8000);               // safety net
+  var p = v.play(); if (p && p.catch) p.catch(end);
+})();
+</script>
+<script>
+if (/[?&]reset=1/.test(location.search)) { try { localStorage.clear(); } catch (e) {} location.replace(location.pathname); }
+window.onerror = function (m, u, l) {
+  document.body.insertAdjacentHTML('beforeend', '<pre style="color:#f66;padding:12px;white-space:pre-wrap">' + m + ' @ ' + u + ':' + l + '</pre>');
+};
+</script>
+<script>
+// TV / box (Android app, not a phone): lets style.css switch to the lighter look.
+try { var A = window.HesperAndroid; if (A && (typeof A.isPhone !== 'function' || !A.isPhone())) document.documentElement.classList.add('hesper-tv'); } catch (e) {}
+</script>
+<div id="app"></div>
+<script src="gsap.min.js"></script>
+<script src="plugin_sandbox.js?v=11"></script>
+<script src="hesperframework.js?v=14r"></script>
+<script src="navsound.js?v=3"></script>
+<script src="net.js?v=1"></script>
+<script src="activity.js?v=1"></script>
+<script src="favorites.js?v=2"></script>
+<script src="providers.js?v=1"></script>
+<script src="player.js?v=6"></script>
+<script src="sync.js?v=5"></script>
+<script src="busy.js?v=1"></script>
+<script src="plugin_zip.js?v=1"></script>
+<script src="plugin_installer.js?v=6"></script>
+<script src="plugin_backup.js?v=1"></script>
+<script src="torrent.js?v=4"></script>
+<script src="search_sites.js?v=1"></script>
+<script src="search_engine.js?v=1"></script>
+<script src="app_config.js?v=3"></script>
+<script src="theme_panel.js?v=1"></script>
+<script src="app.js?v=40"></script>
+<script src="app_appearance.js?v=1"></script>
+<script src="app_sources.js?v=2"></script>
+<script src="app_library.js?v=4"></script>
+<script src="app_watch.js?v=10"></script>
+<script src="app_playback.js?v=3"></script>
+<script src="app_plugins.js?v=6"></script>
+<script src="app_favorites.js?v=3"></script>
+<script src="app_torrents.js?v=2"></script>
+<script src="app_settings.js?v=1"></script>
+</body>
+</html>
