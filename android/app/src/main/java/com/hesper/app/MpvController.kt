@@ -155,9 +155,9 @@ class MpvController(
             // forth inside it needs no new download, and wait for a few seconds after a stall before resuming
             // (resuming at once just stutters again).
             m.setOptionString("cache", "yes")
-            m.setOptionString("cache-secs", "120")
-            m.setOptionString("demuxer-max-bytes", "64MiB")
-            m.setOptionString("demuxer-max-back-bytes", "32MiB")
+            m.setOptionString("cache-secs", "60")
+            m.setOptionString("demuxer-max-bytes", "32MiB")
+            m.setOptionString("demuxer-max-back-bytes", "8MiB")
             m.setOptionString("cache-pause-initial", "no")
             m.setOptionString("cache-pause-wait", "4")
             m.init()
