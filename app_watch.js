@@ -39,6 +39,11 @@ class MainAppWatchMethods {
             map[id] = Object.assign({}, meta, { id: id, position: position, duration: duration > 0 ? duration : 0, updated: Date.now() });
         }
         this._writeProgress(map);
+        // Keep the cloud copy fresh while watching, so a closed or killed app still has its resume point backed up.
+        if (window.HesperSync && window.HesperSync.isLinked() && Date.now() - (this._lastProgSync || 0) > 90000) {
+            this._lastProgSync = Date.now();
+            this._autoSync(0);
+        }
     }
 
     _removeProgress(id) {
@@ -152,7 +157,7 @@ class MainAppWatchMethods {
             }
         }
         else if (!res.ok && res.error === 'session_expired') { patch.msg = this._syncMessage(res.error); }
-        if (refresh || opts.manual || patch.msg || (pbChanged && !this._player)) {
+        if (opts.manual || (!this._player && (refresh || patch.msg || pbChanged))) {
             this.setState({
                 progress: refresh ? this._readProgress() : this.state.progress,
                 history: this._readHistory(),
@@ -172,7 +177,7 @@ class MainAppWatchMethods {
         clearTimeout(this._autoSyncTimer);
         this._autoSyncTimer = setTimeout(() => {
             // Don't rebuild the screen under a text box or a video: try again shortly instead of dropping the sync.
-            if (this.state.syncUi.mode || this._player) { this._autoSync(20000); return; }
+            if (this.state.syncUi.mode) { this._autoSync(20000); return; }   // a sign-in box is open; a player does not block uploads (the repaint is skipped below)
             this._runSync({});
         }, delayMs || 0);
     }
