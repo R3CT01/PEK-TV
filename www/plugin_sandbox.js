@@ -334,7 +334,7 @@ class HesperSandbox {
         this.container = engine.createElement('div', { className: 'plugin-sandbox' });
         this.body = engine.createElement('div', { className: 'plugin-sandbox-body' });
         this.container.appendChild(this.body);
-        this.slot = null; this._videoKey = ''; this._afKey = null;
+        this._dropVideo(); this._videoKey = ''; this._afKey = null;
         this._bindTrailerKeys();
         this._bindPlayerEvents();
         if (!this.frame) this._start();
@@ -368,7 +368,7 @@ class HesperSandbox {
         this.tree = null;
         this.canBack = false;
         if (this.container && this.engine) {
-            this.slot = null; this._videoKey = '';
+            this._dropVideo(); this._videoKey = '';
             this.container.replaceChildren(this.engine.ui.card(this.manifest.name || this.folder, 'This plugin was stopped (' + reason + ').'));
         }
     }
@@ -761,23 +761,83 @@ class HesperSandbox {
             key = src;
         }
         if (key === this._videoKey) return;
-        if (this.slot) { this.slot.remove(); this.slot = null; }
+        this._dropVideo();
         this._videoKey = key;
         if (!key) return;
+        this._vsrc = src;
+        this._vtitle = (v.title || 'Trailer').slice(0, 100);
+        // The black 16:9 box is placed at once (so the page does not jump); the YouTube frame itself
+        // is only created after a short pause and only while the box is on screen. A YouTube player is
+        // heavy on a TV WebView: it must not be built for every page flicked past, nor keep decoding
+        // video that was scrolled out of view.
+        this._vbox = this.engine.createElement('div', { className: 'sx-video-box' });
+        this.slot = this.engine.createElement('div', { className: 'sx-video' }, this._vbox);
+        this.container.insertBefore(this.slot, this.body);
+        if (this._keepScroll) this._keepScroll = false; else this._showTrailer();
+        this._watchVideo();
+        this._scheduleFrame(1200);
+    }
+
+    // Removes the trailer completely and frees the YouTube frame (blanking it first lets the WebView
+    // release the player's memory straight away instead of at some later garbage collection).
+    _dropVideo() {
+        if (this._vtimer) { clearTimeout(this._vtimer); this._vtimer = 0; }
+        if (this._vio) { try { this._vio.disconnect(); } catch (e) { /* ignore */ } this._vio = null; }
+        this._unmountFrame();
+        if (this.slot) { this.slot.remove(); this.slot = null; }
+        this._vbox = null; this._vsrc = ''; this._vvisible = undefined;
+    }
+
+    _mountFrame() {
+        const box = this._vbox;
+        if (!box || !box.isConnected || !this._vsrc || box.querySelector('iframe')) return;
         const f = document.createElement('iframe');
-        f.src = src;
+        f.src = this._vsrc;
         f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
         f.setAttribute('allowfullscreen', '');
         // Hesper sends "Referrer-Policy: no-referrer" by default and YouTube refuses to play
         // an embed that sends no referrer, so this one frame gets its own policy.
         f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
         f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
-        f.setAttribute('title', (v.title || 'Trailer').slice(0, 100));
+        f.setAttribute('title', this._vtitle || 'Trailer');
         f.tabIndex = -1;
-        const box = this.engine.createElement('div', { className: 'sx-video-box' }, f);
-        this.slot = this.engine.createElement('div', { className: 'sx-video' }, box);
-        this.container.insertBefore(this.slot, this.body);
-        if (this._keepScroll) this._keepScroll = false; else this._showTrailer();
+        box.appendChild(f);
+    }
+
+    _unmountFrame() {
+        const box = this._vbox;
+        const f = box && box.querySelector('iframe');
+        if (!f) return;
+        try { f.src = 'about:blank'; } catch (e) { /* ignore */ }
+        f.remove();
+    }
+
+    _scheduleFrame(ms) {
+        if (this._vtimer) clearTimeout(this._vtimer);
+        this._vtimer = setTimeout(() => {
+            this._vtimer = 0;
+            if (this._vvisible !== false) this._mountFrame();
+        }, ms);
+    }
+
+    // Frees the frame while the trailer is mostly scrolled out of view (or the screen is left) and
+    // brings it back when it is seen again.
+    _watchVideo() {
+        if (typeof IntersectionObserver !== 'function' || !this.slot) return;
+        try {
+            this._vio = new IntersectionObserver((entries) => {
+                const en = entries[entries.length - 1];
+                const vis = en.intersectionRatio >= 0.3;
+                if (vis === this._vvisible) return;
+                this._vvisible = vis;
+                if (vis) this._scheduleFrame(400);
+                else {
+                    if (this._vtimer) { clearTimeout(this._vtimer); this._vtimer = 0; }
+                    this._unmountFrame();
+                }
+            }, { threshold: [0, 0.3, 1] });
+            this._vio.observe(this.slot);
+        } catch (e) { this._vio = null; }
     }
 
     // The element that actually scrolls this plugin's page: the plugin window's body, or the
