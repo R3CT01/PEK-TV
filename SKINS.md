@@ -9,7 +9,7 @@ A skin can't run code and can't reach the network.
   Hesper shows the skin's name, author, version and description before it installs anything.
 - **Use it:** tap the skin in the Skins list.
 - **Remove:** hold the skin's row (OK on a remote, or a long press on a phone), then confirm.
-  The skins that ship with Hesper (Hesper Cream, Green, Neon) can't be removed.
+  The skins that ship with Hesper (PEK Ember, Green, Neon) can't be removed.
 - **A zip is a plugin or a skin, never both.** Installing a skin zip as a plugin, or a plugin
   zip as a skin, fails with a message that says which one it is.
 

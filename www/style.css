@@ -37,6 +37,19 @@ body {
     width: 100vw;
 }
 
+/* A skin's bgImage (a plain gradient) is drawn behind the app. Only while one is set
+   (html[data-sx-glow]) does the content area let it show through. */
+html[data-sx-glow] body {
+    background-image: var(--sx-bg-image);
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-attachment: fixed;
+}
+
+html[data-sx-glow] .hesper-content {
+    background: transparent;
+}
+
 /* ============================================================
    App Shell Layout
    ============================================================ */
