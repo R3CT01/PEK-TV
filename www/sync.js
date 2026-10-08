@@ -1,7 +1,7 @@
 /* Hesper watch history + cloud sync  (window.HesperSync)
  *
  * Local part: a permanent "watched" record (kept after resume points are gone).
- * Cloud part: optional sync of watch history AND resume positions between devices,
+ * Cloud part: optional sync of watch history, resume positions AND favorites between devices,
  * through the Hesper Cloud worker (cloud/worker.js). An account is an email address and
  * a password; nothing is sent until the user signs in.
  *
@@ -18,7 +18,7 @@
         legacyKey: 'hesper_sync_key',    // the old 25-character key; removed on load
         cursor: 'hesper_sync_cursor_v1',
         last: 'hesper_sync_last_v1',
-        seen: 'hesper_sync_seen_v1',       // what the cloud already has: { h:{key:updated}, p:{key:{u,d}} }
+        seen: 'hesper_sync_seen_v1',       // what the cloud already has: { h:{key:updated}, p:{key:{u,d}}, f:{key:updated} }
         pending: 'hesper_sync_pending_v1', // remote resume points whose file isn't on this device (yet)
         history: 'hesper_history_v1',
         progress: 'hesper_progress_v1'
@@ -76,6 +76,7 @@
         if (alive && now - old.watchedAt < REWATCH_WINDOW) return false;
         map[key] = Object.assign(identity(meta), { watchedAt: now, count: alive ? (old.count || 1) + 1 : 1, updated: now });
         writeHistory(map);
+        try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }   // lets the app sync soon
         return true;
     }
 
@@ -223,7 +224,8 @@
     function collectPush() {
         var seen = getJson(K.seen, { h: {}, p: {} });
         seen.h = seen.h || {}; seen.p = seen.p || {};
-        var items = { history: [], progress: [] };
+        var items = { history: [], progress: [], favorites: [] };
+        seen.f = seen.f || {};
 
         var hmap = readHistory();
         Object.keys(hmap).forEach(function (k) {
@@ -248,13 +250,27 @@
         Object.keys(seen.p).forEach(function (k) {   // finished or removed here: tell the cloud
             if (!seen.p[k].d && !local[k]) items.progress.push({ key: k, data: {}, updated: clock.now(), deleted: 1 });
         });
+
+        var FV = window.HesperFavorites;
+        if (FV && FV.snapshot) {
+            var snap = FV.snapshot();
+            snap.items.forEach(function (f) {
+                if (seen.f[f.key] === f.updated) return;
+                var d = Object.assign({}, f); delete d.key; delete d.updated;
+                items.favorites.push({ key: 'f|' + f.key, data: d, updated: f.updated, deleted: 0 });
+            });
+            Object.keys(snap.tombs).forEach(function (k) {   // removed here: tell the cloud
+                if (seen.f[k] === snap.tombs[k]) return;
+                items.favorites.push({ key: 'f|' + k, data: {}, updated: snap.tombs[k], deleted: 1 });
+            });
+        }
         return items;
     }
 
     function takeChunk(all) {
-        var chunk = { history: [], progress: [] };
+        var chunk = { history: [], progress: [], favorites: [] };
         var room = CHUNK;
-        ['history', 'progress'].forEach(function (kind) {
+        ['history', 'progress', 'favorites'].forEach(function (kind) {
             var n = Math.min(room, all[kind].length);
             chunk[kind] = all[kind].splice(0, n);
             room -= n;
@@ -264,7 +280,8 @@
 
     function markPushed(chunk) {
         var seen = getJson(K.seen, { h: {}, p: {} });
-        seen.h = seen.h || {}; seen.p = seen.p || {};
+        seen.h = seen.h || {}; seen.p = seen.p || {}; seen.f = seen.f || {};
+        chunk.favorites.forEach(function (it) { seen.f[it.key.slice(2)] = it.updated; });
         chunk.history.forEach(function (it) { seen.h[it.key] = it.updated; });
         chunk.progress.forEach(function (it) { seen.p[it.key] = { u: it.updated, d: it.deleted ? 1 : 0 }; });
         setJson(K.seen, seen);
@@ -308,6 +325,18 @@
                 seen.h[r.key] = r.updated;
             });
             writeHistory(hmap);
+
+            var FV = window.HesperFavorites;
+            if (FV && FV.merge && (resp.favorites || []).length) {
+                seen.f = seen.f || {};
+                var fres = FV.merge(resp.favorites.map(function (r) {
+                    return { key: String(r.key).slice(2), data: r.data, updated: r.updated, deleted: r.deleted };
+                }));
+                var byKey = {};
+                resp.favorites.forEach(function (r) { byKey[String(r.key).slice(2)] = r.updated; });
+                fres.settled.forEach(function (k) { seen.f[k] = byKey[k]; });
+                if (fres.changed) changed = true;
+            }
 
             var pmap = getJson(K.progress, {});
             var local = progressByKey(pmap);
@@ -356,20 +385,20 @@
         if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
 
         var all = collectPush();
-        var pushedCount = all.history.length + all.progress.length;
+        var pushedCount = all.history.length + all.progress.length + all.favorites.length;
         var anyChange = false;
 
         function round(n, first) {
             var chunk = takeChunk(all);
             var cursor = parseInt(getRaw(K.cursor), 10) || 0;
-            var body = { since: cursor, history: chunk.history, progress: chunk.progress };
+            var body = { since: cursor, history: chunk.history, progress: chunk.progress, favorites: chunk.favorites };
             return request('POST', '/v1/sync', body, true).then(function (r) {
                 if (r.status !== 200 || !r.body || !r.body.ok) return { ok: false, error: failure(r.status, r.body) };
                 markPushed(chunk);
                 return applyRemote(r.body, opts.resolve).then(function (changed) {
                     if (changed) anyChange = true;
                     setRaw(K.cursor, String(r.body.cursor || cursor));
-                    var morePush = all.history.length + all.progress.length > 0;
+                    var morePush = all.history.length + all.progress.length + all.favorites.length > 0;
                     if ((r.body.more || morePush) && n < MAX_ROUNDS) return round(n + 1, false);
                     setRaw(K.last, String(clock.now()));
                     return { ok: true, pushed: pushedCount, changed: anyChange };
@@ -384,6 +413,18 @@
                 return res;
             });
         return inflight;
+    }
+
+    // Lets other parts of Hesper (the plugin backup) talk to the cloud with this session.
+    // Resolves { ok, body } or { ok: false, error }, and signs the device out if the session is gone.
+    function cloud(method, path, body) {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        return request(method, path, body, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true, body: r.body };
+            var e = failure(r.status, r.body);
+            if (e === 'session_expired') unlink();
+            return { ok: false, error: e };
+        }, function () { return { ok: false, error: 'offline' }; });
     }
 
     // Permanently deletes the cloud account and all of its data, then signs this device out.
@@ -406,7 +447,7 @@
         verifyEmail: verifyEmail, resendCode: resendCode,
         forgotPassword: forgotPassword, resetPassword: resetPassword,
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,
-        sync: sync, deleteAccount: deleteAccount,
+        sync: sync, deleteAccount: deleteAccount, cloud: cloud,
         isLinked: function () { return !!getToken(); },
         _setApi: function (u) { API = u; },
         _setClock: function (fn) { clock.now = fn; }

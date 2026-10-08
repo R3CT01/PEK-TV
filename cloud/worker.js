@@ -21,7 +21,12 @@
 //   POST   /v1/auth/forgot   { email }                          -> { ok }   (always, so emails can't be probed)
 //   POST   /v1/auth/reset    { email, code, password }          -> { ok, token, email }
 //   POST   /v1/auth/logout                                      -> { ok }
-//   POST   /v1/sync          push changed items, pull newer ones
+//   POST   /v1/sync          push changed items (history, progress, favorites), pull newer ones
+//   GET    /v1/plugins                                          -> { ok, plugins: [{id,name,version,size,fp,updated,deleted,chunks}] }
+//   POST   /v1/plugins/chunk   { id, fp, index, total, data }   -> { ok }      (one piece of a plugin backup)
+//   POST   /v1/plugins/commit  { id, fp, total, name, version, size, updated } -> { ok, stored }  (finishes a backup)
+//   GET    /v1/plugins/chunk?id=&fp=&i=                         -> { ok, data }
+//   POST   /v1/plugins/delete  { id, updated }                  -> { ok }
 //   GET    /v1/export        everything stored for the account (JSON)
 //   DELETE /v1/account       permanently delete the account and all its data
 //
@@ -34,6 +39,14 @@ const MAX_ITEMS = 50000;          // per account
 const MAX_DATA = 2000;            // chars of JSON per item
 const MAX_KEY = 200;
 const CLOCK_SLACK = 5 * 60 * 1000;
+
+// Plugin backups (the plugin's own files, packed by the app into one text bundle and cut into chunks)
+const MAX_PLUGINS = 30;                    // per account
+const MAX_PLUGIN_RAW = 8 * 1024 * 1024;    // bytes of plugin files (same limit the app enforces when installing)
+const PLUGIN_CHUNK = 400000;               // chars per chunk (the app uses the same size)
+const MAX_PLUGIN_CHUNKS = 40;              // 40 x 400k chars is more than an 8 MB plugin needs
+const MAX_PLUGIN_TOTAL = 60 * 1024 * 1024; // all of an account's plugin backups together (raw bytes)
+const BUILTIN_PLUGINS = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
 
 const PBKDF2_ITERATIONS = 100000; // the most Cloudflare Workers allows. Stored per user, so it is safe to change later.
 const SESSION_TTL = 90 * 24 * 3600 * 1000;
@@ -73,6 +86,8 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, n INTEGER NOT NULL, reset_at INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS items (acct TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, srv INTEGER NOT NULL, PRIMARY KEY (acct, kind, key))').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS items_srv ON items (acct, srv)').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS plugins (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS plugin_chunks (acct TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (acct, id, fp, idx))').run();
     ready = true;
 }
 
@@ -173,7 +188,9 @@ async function startSession(db, userId, now) {
         db.prepare('DELETE FROM sessions WHERE expires < ?').bind(now),
         db.prepare('DELETE FROM throttle WHERE reset_at < ?').bind(now),
         db.prepare('DELETE FROM resets WHERE expires < ?').bind(now),
-        db.prepare('DELETE FROM verifs WHERE expires < ?').bind(now)
+        db.prepare('DELETE FROM verifs WHERE expires < ?').bind(now),
+        // half-finished plugin uploads (never committed) older than a day
+        db.prepare('DELETE FROM plugin_chunks WHERE created < ? AND NOT EXISTS (SELECT 1 FROM plugins p WHERE p.acct = plugin_chunks.acct AND p.id = plugin_chunks.id AND p.fp = plugin_chunks.fp)').bind(now - 24 * 3600 * 1000)
     ]);
     return token;
 }
@@ -405,10 +422,11 @@ async function handleLogout(env, sess) {
 }
 
 // ---------------------------------------------------------------- sync handlers
-function cleanItem(it, now) {
+function cleanItem(it, now, kind) {
     if (!it || typeof it !== 'object') return null;
     if (typeof it.key !== 'string' || !it.key || it.key.length > MAX_KEY) return null;
-    if (!/^[me]\|/.test(it.key)) return null;
+    // history keys start m| / e| (movie / episode), favorites are f|movie:<id> or f|tv:<id>
+    if (kind === 'f' ? !/^f\|(movie|tv):\d{1,10}$/.test(it.key) : !/^[me]\|/.test(it.key)) return null;
     const updated = Number(it.updated);
     if (!Number.isFinite(updated) || updated <= 0) return null;
     const deleted = it.deleted ? 1 : 0;
@@ -430,8 +448,8 @@ async function handleSync(request, env, acct) {
 
     // ---- push: last writer wins per item, by the item's own "updated" time
     const pushed = [];
-    for (const kind of ['h', 'p']) {
-        const list = Array.isArray(body[kind === 'h' ? 'history' : 'progress']) ? body[kind === 'h' ? 'history' : 'progress'] : [];
+    for (const [kind, field] of [['h', 'history'], ['p', 'progress'], ['f', 'favorites']]) {
+        const list = Array.isArray(body[field]) ? body[field] : [];
         for (const raw of list) pushed.push([kind, raw]);
     }
     if (pushed.length > MAX_PUSH) return json({ error: 'too_many_items' }, 413);
@@ -442,7 +460,7 @@ async function handleSync(request, env, acct) {
         const stmts = [];
         let i = 0;
         for (const [kind, raw] of pushed) {
-            const it = cleanItem(raw, now);
+            const it = cleanItem(raw, now, kind);
             if (!it) continue;
             if (total >= MAX_ITEMS) break;
             total++;
@@ -462,16 +480,99 @@ async function handleSync(request, env, acct) {
     ).bind(acct, since, PAGE).all();
     const results = rows.results || [];
 
-    const out = { history: [], progress: [] };
+    const out = { history: [], progress: [], favorites: [] };
     let cursor = since;
     for (const r of results) {
         let data = {};
         try { data = JSON.parse(r.data); } catch (e) { /* keep {} */ }
         const item = { key: r.key, data, updated: r.updated, deleted: r.deleted ? 1 : 0 };
-        (r.kind === 'h' ? out.history : out.progress).push(item);
+        (r.kind === 'h' ? out.history : r.kind === 'f' ? out.favorites : out.progress).push(item);
         if (r.srv > cursor) cursor = r.srv;
     }
-    return json({ ok: true, cursor, more: results.length === PAGE, history: out.history, progress: out.progress });
+    return json({ ok: true, cursor, more: results.length === PAGE, history: out.history, progress: out.progress, favorites: out.favorites });
+}
+
+// ---------------------------------------------------------------- plugin backup handlers
+function goodPluginId(id) { return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(id) && BUILTIN_PLUGINS.indexOf(id) === -1; }
+function goodFp(fp) { return typeof fp === 'string' && /^[a-f0-9]{8,64}$/.test(fp); }
+function shortText(v, max) { return typeof v === 'string' ? v.slice(0, max) : ''; }
+
+async function handlePluginList(env, acct) {
+    const rows = await env.DB.prepare('SELECT id, name, version, size, fp, chunks, updated, deleted FROM plugins WHERE acct = ? ORDER BY id').bind(acct).all();
+    const plugins = (rows.results || []).map(r => ({ id: r.id, name: r.name, version: r.version, size: r.size, fp: r.fp, chunks: r.chunks, updated: r.updated, deleted: r.deleted ? 1 : 0 }));
+    return json({ ok: true, plugins });
+}
+
+async function handlePluginChunk(request, env, acct) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const index = Number(body.index), total = Number(body.total);
+    if (!goodPluginId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || total > MAX_PLUGIN_CHUNKS || index < 0 || index >= total) return json({ error: 'bad_plugin' }, 400);
+    if (typeof body.data !== 'string' || !body.data.length || body.data.length > PLUGIN_CHUNK + 1000) return json({ error: 'too_large' }, 413);
+    if (await limited(db, 'plugin:chunk:' + acct, 800, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
+    await db.prepare('INSERT INTO plugin_chunks (acct, id, fp, idx, data, created) VALUES (?, ?, ?, ?, ?, ?) ' +
+        'ON CONFLICT(acct, id, fp, idx) DO UPDATE SET data = excluded.data, created = excluded.created')
+        .bind(acct, body.id, body.fp, index, body.data, now).run();
+    return json({ ok: true });
+}
+
+async function handlePluginCommit(request, env, acct) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const total = Number(body.total), size = Number(body.size), updated = Number(body.updated);
+    if (!goodPluginId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    if (!Number.isInteger(total) || total < 1 || total > MAX_PLUGIN_CHUNKS) return json({ error: 'bad_plugin' }, 400);
+    if (!Number.isFinite(size) || size < 1 || size > MAX_PLUGIN_RAW) return json({ error: 'too_large' }, 413);
+    if (!Number.isFinite(updated) || updated <= 0) return json({ error: 'bad_plugin' }, 400);
+    const when = Math.min(Math.floor(updated), now + CLOCK_SLACK);
+
+    const have = await db.prepare('SELECT COUNT(*) AS n FROM plugin_chunks WHERE acct = ? AND id = ? AND fp = ?').bind(acct, body.id, body.fp).first();
+    if (!have || have.n !== total) return json({ error: 'incomplete' }, 400);
+
+    const cur = await db.prepare('SELECT updated, size FROM plugins WHERE acct = ? AND id = ?').bind(acct, body.id).first();
+    if (cur && cur.updated >= when) {
+        // the cloud already has a newer (or the same) copy; drop what was just uploaded
+        await db.prepare('DELETE FROM plugin_chunks WHERE acct = ? AND id = ? AND fp = ? AND NOT EXISTS (SELECT 1 FROM plugins p WHERE p.acct = ? AND p.id = ? AND p.fp = ?)').bind(acct, body.id, body.fp, acct, body.id, body.fp).run();
+        return json({ ok: true, stored: false });
+    }
+    const stats = await db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM plugins WHERE acct = ? AND deleted = 0 AND id != ?').bind(acct, body.id).first();
+    if (stats && (stats.n >= MAX_PLUGINS || stats.bytes + size > MAX_PLUGIN_TOTAL)) return json({ error: 'plugin_quota' }, 413);
+
+    await db.batch([
+        db.prepare('INSERT INTO plugins (acct, id, name, version, size, fp, chunks, updated, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) ' +
+            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, version = excluded.version, size = excluded.size, fp = excluded.fp, ' +
+            'chunks = excluded.chunks, updated = excluded.updated, deleted = 0')
+            .bind(acct, body.id, shortText(body.name, 80) || body.id, shortText(body.version, 40), Math.floor(size), body.fp, total, when),
+        db.prepare('DELETE FROM plugin_chunks WHERE acct = ? AND id = ? AND fp != ?').bind(acct, body.id, body.fp)
+    ]);
+    return json({ ok: true, stored: true });
+}
+
+async function handlePluginGetChunk(url, env, acct) {
+    const id = url.searchParams.get('id'), fp = url.searchParams.get('fp'), i = Number(url.searchParams.get('i'));
+    if (!goodPluginId(id) || !goodFp(fp) || !Number.isInteger(i) || i < 0) return json({ error: 'bad_plugin' }, 400);
+    const row = await env.DB.prepare('SELECT data FROM plugin_chunks WHERE acct = ? AND id = ? AND fp = ? AND idx = ?').bind(acct, id, fp, i).first();
+    if (!row) return json({ error: 'not_found' }, 404);
+    return json({ ok: true, data: row.data });
+}
+
+async function handlePluginDelete(request, env, acct) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const updated = Number(body.updated);
+    if (!goodPluginId(body.id) || !Number.isFinite(updated) || updated <= 0) return json({ error: 'bad_plugin' }, 400);
+    const when = Math.min(Math.floor(updated), now + CLOCK_SLACK);
+    const cur = await db.prepare('SELECT updated FROM plugins WHERE acct = ? AND id = ?').bind(acct, body.id).first();
+    if (cur && cur.updated >= when) return json({ ok: true, stored: false });   // a newer backup exists
+    // keep a tiny "deleted" marker so other devices learn about the removal; the files are dropped
+    await db.batch([
+        db.prepare("INSERT INTO plugins (acct, id, name, version, size, fp, chunks, updated, deleted) VALUES (?, ?, '', '', 0, '', 0, ?, 1) " +
+            "ON CONFLICT(acct, id) DO UPDATE SET name = '', version = '', size = 0, fp = '', chunks = 0, updated = excluded.updated, deleted = 1")
+            .bind(acct, body.id, when),
+        db.prepare('DELETE FROM plugin_chunks WHERE acct = ? AND id = ?').bind(acct, body.id)
+    ]);
+    return json({ ok: true, stored: true });
 }
 
 async function handleExport(env, acct) {
@@ -482,14 +583,18 @@ async function handleExport(env, acct) {
     const items = (rows.results || []).map(r => {
         let data = {};
         try { data = JSON.parse(r.data); } catch (e) { /* keep {} */ }
-        return { kind: r.kind === 'h' ? 'history' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
+        return { kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
     });
-    return json({ exported: Date.now(), email: user ? user.email : '', items });
+    const pl = await env.DB.prepare('SELECT id, name, version, size, updated, deleted FROM plugins WHERE acct = ? ORDER BY id').bind(acct).all();
+    const plugins = (pl.results || []).map(r => ({ id: r.id, name: r.name, version: r.version, size: r.size, updated: r.updated, deleted: !!r.deleted }));
+    return json({ exported: Date.now(), email: user ? user.email : '', items, plugins });
 }
 
 async function handleDelete(env, acct) {
     await env.DB.batch([
         env.DB.prepare('DELETE FROM items WHERE acct = ?').bind(acct),
+        env.DB.prepare('DELETE FROM plugins WHERE acct = ?').bind(acct),
+        env.DB.prepare('DELETE FROM plugin_chunks WHERE acct = ?').bind(acct),
         env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(acct),
         env.DB.prepare('DELETE FROM resets WHERE user_id = ?').bind(acct),
         env.DB.prepare('DELETE FROM verifs WHERE user_id = ?').bind(acct),
@@ -523,6 +628,11 @@ export default {
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
             if (method === 'POST' && path === '/v1/sync') return await handleSync(request, env, sess.userId);
+            if (method === 'GET' && path === '/v1/plugins') return await handlePluginList(env, sess.userId);
+            if (method === 'POST' && path === '/v1/plugins/chunk') return await handlePluginChunk(request, env, sess.userId);
+            if (method === 'POST' && path === '/v1/plugins/commit') return await handlePluginCommit(request, env, sess.userId);
+            if (method === 'GET' && path === '/v1/plugins/chunk') return await handlePluginGetChunk(url, env, sess.userId);
+            if (method === 'POST' && path === '/v1/plugins/delete') return await handlePluginDelete(request, env, sess.userId);
             if (method === 'GET' && path === '/v1/export') return await handleExport(env, sess.userId);
             if (method === 'DELETE' && path === '/v1/account') return await handleDelete(env, sess.userId);
             return json({ error: 'not_found' }, 404);

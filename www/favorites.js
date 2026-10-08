@@ -12,6 +12,8 @@
     'use strict';
 
     var KEY = 'hesper_favorites_v1';
+    var TOMB = 'hesper_favorites_tomb_v1';   // { key: time removed }: lets a removal reach the cloud and other devices
+    var MAX_TOMBS = 1000;
     var MAX = 500;
     var POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
     var cache = null;
@@ -27,10 +29,25 @@
         return cache;
     }
 
-    function write(list) {
+    function readTombs() {
+        try {
+            var o = JSON.parse(localStorage.getItem(TOMB) || '{}');
+            return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+        } catch (e) { return {}; }
+    }
+    function writeTombs(t) {
+        var keys = Object.keys(t);
+        if (keys.length > MAX_TOMBS) {   // keep the newest
+            keys.sort(function (a, b) { return t[b] - t[a]; }).slice(MAX_TOMBS).forEach(function (k) { delete t[k]; });
+        }
+        try { localStorage.setItem(TOMB, JSON.stringify(t)); } catch (e) { /* storage full or blocked */ }
+    }
+
+    // `remote` = the change came from the cloud, so the app should refresh but not sync again.
+    function write(list, remote) {
         cache = list;
         try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* storage full or blocked: kept for this session */ }
-        try { document.dispatchEvent(new CustomEvent('hesper-favorites')); } catch (e) { /* no events */ }
+        try { document.dispatchEvent(new CustomEvent('hesper-favorites', { detail: { remote: !!remote } })); } catch (e) { /* no events */ }
     }
 
     function str(v, max) { return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : ''; }
@@ -49,7 +66,8 @@
             key: type + ':' + id, type: type, id: id, title: title,
             year: year > 1800 && year < 3000 ? year : 0,
             posterPath: poster, from: from,
-            added: Number(r.added) > 0 ? Number(r.added) : Date.now()
+            added: Number(r.added) > 0 ? Number(r.added) : Date.now(),
+            updated: Number(r.updated) > 0 ? Number(r.updated) : (Number(r.added) > 0 ? Number(r.added) : Date.now())
         };
     }
 
@@ -73,21 +91,74 @@
                 if (src && cur.from.indexOf(src) < 0) cur.from = cur.from.concat(src).slice(-6);
                 if (!cur.posterPath && e.posterPath) cur.posterPath = e.posterPath;
                 if (!cur.year && e.year) cur.year = e.year;
+                cur.updated = Date.now();
                 write(list);
                 return true;
             }
             if (list.length >= MAX) throw new Error('favorites are full (' + MAX + ')');
             e.from = src ? [src] : [];
             e.added = Date.now();
+            e.updated = e.added;
             list.push(e);
+            var tombs = readTombs();
+            if (tombs[e.key]) { delete tombs[e.key]; writeTombs(tombs); }   // re-added after a removal
             write(list);
             return true;
         },
 
         remove: function (key) {
             var list = read().filter(function (f) { return f.key !== key; });
-            if (list.length !== read().length) write(list);
+            if (list.length !== read().length) {
+                var tombs = readTombs();
+                tombs[key] = Date.now();
+                writeTombs(tombs);
+                write(list);
+            }
             return true;
+        },
+
+        /** For cloud sync (sync.js): a copy of the list plus the removal markers. */
+        snapshot: function () {
+            return { items: read().map(function (f) { return Object.assign({}, f); }), tombs: readTombs() };
+        },
+
+        /** For cloud sync: merge what the cloud sent ([{key:'movie:603', data, updated, deleted}]).
+         *  The newer side wins per title. Returns { changed, settled: [keys the cloud and this device now agree on] }. */
+        merge: function (remote) {
+            var list = read().slice(), tombs = readTombs(), changed = false, settled = [];
+            (remote || []).forEach(function (r) {
+                var i = list.findIndex(function (f) { return f.key === r.key; });
+                var local = i >= 0 ? list[i] : null;
+                var tomb = tombs[r.key] || 0;
+                if (r.deleted) {
+                    if (local && (local.updated || 0) > r.updated) return;      // re-added here later: ours wins and gets pushed
+                    if (local) { list.splice(i, 1); changed = true; }
+                    if (tomb < r.updated) tombs[r.key] = r.updated;
+                    settled.push(r.key);
+                    return;
+                }
+                if (tomb > r.updated) return;                                   // removed here later: ours wins and gets pushed
+                var e = clean(Object.assign({}, r.data || {}, { updated: r.updated }));
+                if (!e || e.key !== r.key) { settled.push(r.key); return; }     // not a usable entry: ignore it
+                if (!local) {
+                    if (list.length >= MAX) return;
+                    list.push(e);
+                    delete tombs[r.key];
+                    changed = true;
+                    settled.push(r.key);
+                    return;
+                }
+                if ((local.updated || 0) > r.updated) return;                   // ours is newer
+                if ((local.updated || 0) < r.updated) {
+                    e.from = (local.from || []).concat(e.from).filter(function (v, n, a) { return a.indexOf(v) === n; }).slice(-6);
+                    list[i] = e;
+                    changed = true;
+                }
+                settled.push(r.key);
+            });
+            writeTombs(tombs);
+            if (changed) write(list, true);
+            return { changed: changed, settled: settled };
         }
     };
 })();

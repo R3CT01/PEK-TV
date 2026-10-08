@@ -33,6 +33,20 @@ Accounts are an email and a password. New accounts confirm their email with a 6-
 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
    already limits sign-ups, sign-ins, reset requests and code guesses itself.
 
+## Plugin backup (no extra setup)
+
+The same worker and the same D1 database also store plugin backups. There is nothing new to configure:
+paste the new `worker.js`, deploy, and the two new tables (`plugins`, `plugin_chunks`) are created on the
+first request, like the others. Limits per account: 30 plugins, 8 MB each, 60 MB together.
+The app needs the new build too (the Android app reads plugin files through two new local routes).
+
+## What syncs, and when
+
+Watch history, resume points, favorites and the plugin backup all go through the same worker. The app syncs by
+itself: at start, every 10 minutes, and shortly after a favorite is added or removed, something is watched, a
+plugin is installed, playback ends, the device comes back online or the app is reopened. If a sync can't run
+at that moment (a video is playing), it retries 20 seconds later. Favorites need only the new `worker.js`.
+
 ## Test it
 
 1. Settings -> Cloud Sync -> Create Account. A code arrives by email; enter it to finish (you are then signed in).
@@ -50,6 +64,6 @@ Cloudflare -> Worker -> Logs shows errors (look for "Brevo send failed").
   At most 5 verification emails per address per hour.
 - Accounts made before verification existed are treated as already verified.
 - Resetting a password also confirms the email, and signs out every device (they just sign in again with the new password).
-- Settings -> Cloud Sync -> Delete Account removes the account and all its synced data.
+- Settings -> Cloud Sync -> Delete Account removes the account and all its synced data, plugin backups included.
 - Old 25-character-key accounts no longer work. Their rows can stay (harmless) or be removed in the
   D1 console with:  `DELETE FROM items WHERE acct NOT IN (SELECT id FROM users);  DROP TABLE IF EXISTS accounts;`
