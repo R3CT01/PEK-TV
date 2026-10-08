@@ -1,6 +1,6 @@
 """Snake Skin backend.
 
-Runs once when Hesper starts. It asks Hesper for the titles in your library
+Runs once when PEK starts. It asks PEK for the titles in your library
 (titles and years only, never file names or folders) and saves a small list to
 data/library.json, which ui.js reads to mark the titles you already own.
 
@@ -10,7 +10,7 @@ ui.js when you press Play, because that is where the click happens.
 """
 import hesper_host as h
 
-try:  # optional: needs `requests` and `beautifulsoup4` in Hesper's Python
+try:  # optional: needs `requests` and `beautifulsoup4` in PEK's Python
     import release_search as rs
 except Exception as err:  # the library badge feature must keep working without them
     rs = None

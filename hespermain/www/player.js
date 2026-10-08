@@ -9,7 +9,7 @@ function hesperAnnouncePlayer(active) {
 }
 
 /* ============================================================
-   Hesper shared player: on-screen controls + backend contract
+   PEK shared player: on-screen controls + backend contract
 
    One set of controls (this file) is used on every platform. Each platform
    only supplies a *backend* that decodes and draws the video:
@@ -306,7 +306,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     // ---- theme: derive the player's colours from the active skin's --sx-* tokens ----
     // The player sits on top of a picture, so it always uses dark glass with light text. The skin
     // decides the tint of the glass, the highlight colour (play button, seek bar, focus) and the
-    // roundness. "Hesper Cream" gets a warm cream highlight; Green / Neon get their accent colour.
+    // roundness. "PEK Cream" gets a warm cream highlight; Green / Neon get their accent colour.
     function parseColor(str) {
         str = String(str || '').trim();
         let m = /^#([0-9a-f]{3,8})$/i.exec(str);

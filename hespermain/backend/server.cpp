@@ -255,7 +255,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     if (remoteOpen) {
         const char* t = std::getenv("HESPER_TOKEN");
         token = (t && *t) ? t : makeRandomToken();
-        std::cout << "[Hesper Server] REMOTE ACCESS IS ON (" << bindAddr << "). Other devices must open "
+        std::cout << "[PEK Server] REMOTE ACCESS IS ON (" << bindAddr << "). Other devices must open "
                   << "http://<this-device-ip>:" << port << "/?token=" << token << std::endl;
     }
 
@@ -319,7 +319,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     // 1b. Serve your JavaScript UI frontend files from the www folder
     auto ret = svr.set_mount_point("/", www_dir);
     if (!ret) {
-        std::cout << "[Hesper Server Warning] Directory '" << www_dir << "' not found. Running API only." << std::endl;
+        std::cout << "[PEK Server Warning] Directory '" << www_dir << "' not found. Running API only." << std::endl;
     }
 
     // 2. Create the JSON API endpoint that feeds live data to your JS frontend framework
@@ -448,7 +448,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     });
 
     // 3b-2. Plugin backup: list an installed plugin's files, and read one of them. Used by the app to
-    //       back plugins up to Hesper Cloud. plugin_install.h only lets through plain allowed files
+    //       back plugins up to PEK Cloud. plugin_install.h only lets through plain allowed files
     //       (never data/, hidden files or built-in plugins).
     svr.Get("/api/plugins/files", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
         std::vector<hesper_plugins::ListedFile> files;
@@ -484,7 +484,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(outcomeJson(out), "application/json");
     });
 
-    // 3c. In-app file picker for plugin .zip files. Hesper draws its own picker because TV
+    // 3c. In-app file picker for plugin .zip files. PEK draws its own picker because TV
     //     boxes have no system one. These two routes can only (1) list folders and .zip files
     //     and (2) read ONE .zip of at most 8 MB, on this device or on a network share
     //     (smb://, nfs://, ftp://, dav://). Nothing else can be read through them.
@@ -549,7 +549,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             const fs::path dir(path);
             if (!fs::is_directory(dir, ec)) { fail("That folder isn't available.", false); return; }
             fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
-            if (ec) { fail("Hesper isn't allowed to open this folder on this device. Try a network folder instead.", false); return; }
+            if (ec) { fail("PEK isn't allowed to open this folder on this device. Try a network folder instead.", false); return; }
             for (; it != fs::directory_iterator(); it.increment(ec)) {
                 if (ec) break;
                 const std::string name = it->path().filename().string();
@@ -618,7 +618,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             const uint64_t size = fs::file_size(p, ec);
             if (ec || size == 0 || size > kZipPickMax) { fail("That file is too large to be a plugin (limit 8 MB)."); return; }
             std::ifstream in(p, std::ios::binary);
-            if (!in) { fail("Hesper isn't allowed to open that file."); return; }
+            if (!in) { fail("PEK isn't allowed to open that file."); return; }
             data.resize(static_cast<size_t>(size));
             in.read(&data[0], static_cast<std::streamsize>(size));
             if (static_cast<uint64_t>(in.gcount()) != size) { fail("The file could not be read completely."); return; }
@@ -1146,6 +1146,6 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
-    std::cout << "[Hesper Server] Web UI & API online at http://" << (remoteOpen ? bindAddr : std::string("127.0.0.1")) << ":" << port << std::endl;
+    std::cout << "[PEK Server] Web UI & API online at http://" << (remoteOpen ? bindAddr : std::string("127.0.0.1")) << ":" << port << std::endl;
     svr.listen(bindAddr, port);
 }

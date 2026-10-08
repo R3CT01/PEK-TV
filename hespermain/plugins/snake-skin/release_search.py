@@ -1,4 +1,4 @@
-"""Release search for Snake Skin (runs inside Hesper's plugin guard: no requests / bs4).
+"""Release search for Snake Skin (runs inside PEK's plugin guard: no requests / bs4).
 
 Add search sites in the SITES list below (or run add_site.py). Each entry is a search address
 with {q} where the search words go. The page may be JSON or a web page that shows magnet links.

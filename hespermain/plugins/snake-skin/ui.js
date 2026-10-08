@@ -5,9 +5,9 @@
 // Snake Skin also adds a Play button to every title: pick a movie, or a season and episode, and
 // the built-in release search (see "release search" below) builds the query, fetches and parses
 // the results, scores them (title / season / episode / year / quality / seeders) and hands the best
-// one to Hesper to buffer and play. No Torznab address or key is needed.
+// one to PEK to buffer and play. No Torznab address or key is needed.
 //
-// Third-party Hesper plugin. It runs in the plugin sandbox and talks straight to TMDb with the
+// Third-party PEK plugin. It runs in the plugin sandbox and talks straight to TMDb with the
 // user's own free v3 API key (Settings tab), stored only in this plugin's private storage.
 // Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 (function () {
@@ -392,7 +392,7 @@
         if (/HTTP 429/.test(m)) return 'TMDb is busy right now (429). Try again in a moment.';
         if (/HTTP 5\d\d/.test(m)) return 'TMDb had a problem (' + m.replace('HTTP ', '') + '). Try again later.';
         if (/abort/i.test(m)) return 'TMDb took too long to answer.';
-        if (/too large/i.test(m)) return 'TMDb sent more data than Hesper allows.';
+        if (/too large/i.test(m)) return 'TMDb sent more data than PEK allows.';
         return "Couldn't reach TMDb. Check your connection.";
     }
 
@@ -411,7 +411,7 @@
     function top() { if (hesper.scrollTop) hesper.scrollTop(); }
     function noop() { /* ignore */ }
 
-    // Older Hesper builds do not know spinner / toggle; fall back to plain text / a button.
+    // Older PEK builds do not know spinner / toggle; fall back to plain text / a button.
     function spin(ui, text, big) { return ui.spinner ? ui.spinner(text, big) : ui.text(text); }
 
     function merge(a, b) {
@@ -807,11 +807,11 @@
         if (/^Search sites failed/.test(m)) return 'Could not get results from any search site. ' + m.replace(/^Search sites failed\.\s*/, '');
         if (/network permissions/i.test(m)) return 'A search site is missing from this plugin\'s network list. Add its host to plugin.json and reinstall.';
         if (/No search sites/i.test(m)) return m;
-        if (/Unknown release|Not an allowed release link/i.test(m)) return 'Hesper refused this download link. Update Hesper to the latest build (older builds only accept links from their own search), or pick a release that has a magnet link.';
+        if (/Unknown release|Not an allowed release link/i.test(m)) return 'PEK refused this download link. Update PEK to the latest build (older builds only accept links from their own search), or pick a release that has a magnet link.';
         if (/HTTP (403|429)/.test(m)) return 'The release source refused the request. Try again later.';
         if (/HTTP \d\d\d|network|fetch|reach/i.test(m)) return 'Could not reach the release source. Check your connection.';
         if (/torrent. permission/i.test(m)) return 'This plugin was installed without the torrent permission. Reinstall it.';
-        if (/not available|not built/i.test(m)) return 'This build of Hesper cannot play torrents.';
+        if (/not available|not built/i.test(m)) return 'This build of PEK cannot play torrents.';
         return m || 'Something went wrong.';
     }
 
@@ -889,7 +889,7 @@
         var it = d.item, info = d.info || {}, P = playState(d), kids = [];
         kids.push(ui.heading('Watch'));
         if (!haveTorrent()) {
-            kids.push(ui.text('Update Hesper to play titles from here.'));
+            kids.push(ui.text('Update PEK to play titles from here.'));
             return ui.column.apply(ui, kids);
         }
         var working = P.searching || P.busy;
@@ -941,7 +941,7 @@
         var d = S.detail, it = d.item, info = d.info || {};
         var kids = [];
 
-        // The trailer goes first: Hesper pins it to the very top of the page.
+        // The trailer goes first: PEK pins it to the very top of the page.
         if (d.loading) kids.push(spin(ui, 'Loading\u2026', true));
         else if (!d.error && ui.video) {
             var tr = pickTrailer(info);
@@ -1024,7 +1024,7 @@
             kids.push(ui.toggle('Auto-play trailers when a title opens', S.autoplay, function (v) { setAutoplay(v === 'true'); }));
             kids.push(ui.toggle('Trailer sound', S.sound, function (v) { setSound(v === 'true'); }));
         } else {
-            kids.push(ui.text('Update Hesper to change the trailer settings.'));
+            kids.push(ui.text('Update PEK to change the trailer settings.'));
         }
         kids.push(ui.text('Trailers play from YouTube. If your device blocks sound from starting by itself, turn Trailer sound off.'));
         kids.push(ui.heading('Playing'));
@@ -1032,8 +1032,8 @@
             kids.push(ui.toggle('Let me choose the release (otherwise the best match plays)', S.pick, function (v) { setPick(v === 'true'); }));
         }
         kids.push(ui.text(haveTorrent()
-            ? 'Releases are found by this plugin\'s built-in search (no Torznab setup needed) and played through Hesper.'
-            : 'This version of Hesper cannot play torrents. Update Hesper.'));
+            ? 'Releases are found by this plugin\'s built-in search (no Torznab setup needed) and played through PEK.'
+            : 'This version of PEK cannot play torrents. Update PEK.'));
         kids.push(ui.heading('Region'));
         kids.push(ui.text('Streaming services and "now playing" follow your device region (' + detectLocale().region + '). Using: ' + S.region + '.'));
         kids.push(ui.textInput('Country code', S.regionDraft, function (v) { S.regionDraft = v; },
@@ -1042,8 +1042,8 @@
         if (S.keyMsg) kids.push(ui.text(S.keyMsg));
         kids.push(ui.heading('Your library'));
         kids.push(ui.text(S.lib.loaded
-            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time Hesper starts.'
-            : 'Library list not available yet. It is created when Hesper starts, so close and reopen Hesper once after installing.'));
+            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time PEK starts.'
+            : 'Library list not available yet. It is created when PEK starts, so close and reopen PEK once after installing.'));
         kids.push(attribution(ui));
         return ui.column.apply(ui, kids);
     }

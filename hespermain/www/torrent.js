@@ -5,7 +5,7 @@
 //   - reads/saves the search-provider settings (Settings > Torrents),
 //   - searches for releases of a movie / episode,
 //   - starts a torrent, shows a "Buffering" box with live progress, and hands the stream
-//     URL to Hesper's player once enough is downloaded,
+//     URL to PEK's player once enough is downloaded,
 //   - stops the torrent (and deletes its temporary data) when the player closes.
 // Plugins never touch this directly: plugin_sandbox.js calls it for plugins that declare
 // "torrent": true in plugin.json.
@@ -19,7 +19,7 @@
 
     async function call(url, opts) {
         let res;
-        try { res = await fetch(url, opts); } catch (e) { throw new Error("Couldn't reach Hesper's server."); }
+        try { res = await fetch(url, opts); } catch (e) { throw new Error("Couldn't reach PEK's server."); }
         let data = {};
         try { data = await res.json(); } catch (e) { /* not JSON */ }
         if (!res.ok || data.error) throw new Error(data.error || ('Request failed (' + res.status + ')'));
@@ -117,7 +117,7 @@
         //   opts: { source, title, season, episode, track?: { meta }, startSec? }
         async open(opts) {
             if (busy) throw new Error('Another stream is already starting');
-            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('Hesper cannot play streams here');
+            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('PEK cannot play streams here');
             busy = true;
             let hash = '';
             let cancelled = false;

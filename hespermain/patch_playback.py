@@ -34,7 +34,7 @@ else:
                 window.HesperAndroid.play(url, title || '');
                 return;
             }
-        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
+        } catch (e) { console.warn('[PEK] native play failed, falling back', e); }
         window.open(url, '_blank');
     }'''
     js = js.replace(marker, marker + method, 1)

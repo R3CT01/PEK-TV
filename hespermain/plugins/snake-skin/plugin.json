@@ -1,7 +1,7 @@
 {
   "name": "Snake Skin",
   "version": "2.2.0",
-  "author": "Hesper user",
+  "author": "PEK user",
   "description": "Browse movies and TV with trailers, cast and streaming services, then press Play: Snake Skin finds a release with its built-in release search and streams it. Uses your own free TMDb API key.",
   "permissions": {
     "network": [

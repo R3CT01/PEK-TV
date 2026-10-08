@@ -2,15 +2,15 @@
 // streaming-service chips, search, a detail page with an auto-playing trailer, cast and
 // related titles, numbered pages for every list, and a badge on titles you already own.
 //
-// Official Hesper plugin. It still runs in the plugin sandbox, but it uses Hesper's built-in
-// TMDb access (a proxy that holds Hesper's key), so nobody has to enter a key. Settings has an
+// Official PEK plugin. It still runs in the plugin sandbox, but it uses PEK's built-in
+// TMDb access (a proxy that holds PEK's key), so nobody has to enter a key. Settings has an
 // optional "use my own key" override, stored only in this plugin's private storage.
 // Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 (function () {
     'use strict';
 
     var API = 'https://api.themoviedb.org/3';                       // only used with a personal key
-    var PROXY = 'https://hesper-tmdb.aquariusibeats.workers.dev';   // Hesper's built-in access (holds the key)
+    var PROXY = 'https://hesper-tmdb.aquariusibeats.workers.dev';   // PEK's built-in access (holds the key)
     var IMG = 'https://image.tmdb.org/t/p/w342';
     var IMG_PERSON = 'https://image.tmdb.org/t/p/w185';
     var PER_ROW = 18;
@@ -39,10 +39,10 @@
         query: '',
         lib: { movies: {}, shows: {}, nMovies: 0, nShows: 0, loaded: false },
         authError: false,
-        favs: {},                // 'movie:603' -> true  (the shared Favorites list in Hesper)
+        favs: {},                // 'movie:603' -> true  (the shared Favorites list in PEK)
         favMsg: '',
         streamers: [],           // other plugins that can play titles: [{ id, name }]
-        pendingLaunch: null      // a title Hesper asked us to open before we were ready
+        pendingLaunch: null      // a title PEK asked us to open before we were ready
     };
 
     // ---------------------------------------------------------------- helpers
@@ -120,12 +120,12 @@
         var m = String((e && e.message) || e || '');
         if (/HTTP (401|403)/.test(m)) return S.key
             ? 'TMDb rejected your API key. Check it in Settings.'
-            : "Hesper's built-in TMDb access was refused. Try again later, or add your own key in Settings.";
+            : "PEK's built-in TMDb access was refused. Try again later, or add your own key in Settings.";
         if (/HTTP 404/.test(m)) return 'TMDb could not find that (404).';
         if (/HTTP 429/.test(m)) return 'TMDb is busy right now (429). Try again in a moment.';
         if (/HTTP 5\d\d/.test(m)) return 'TMDb had a problem (' + m.replace('HTTP ', '') + '). Try again later.';
         if (/abort/i.test(m)) return 'TMDb took too long to answer.';
-        if (/too large/i.test(m)) return 'TMDb sent more data than Hesper allows.';
+        if (/too large/i.test(m)) return 'TMDb sent more data than PEK allows.';
         return "Couldn't reach TMDb. Check your connection.";
     }
 
@@ -137,7 +137,7 @@
         Object.keys(params || {}).forEach(function (k) {
             q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
         });
-        // Personal key: straight to TMDb. No key: Hesper's built-in access (the proxy adds the key).
+        // Personal key: straight to TMDb. No key: PEK's built-in access (the proxy adds the key).
         return hesper.fetchJSON((S.key ? API : PROXY) + path + '?' + q.join('&'));
     }
 
@@ -228,7 +228,7 @@
         }))];
     }
 
-    // Hesper opened this plugin on a title (Favorites tab, or another plugin's button).
+    // PEK opened this plugin on a title (Favorites tab, or another plugin's button).
     function launch(intent) {
         if (!intent || !intent.id || !intent.type) return;
         if (!S.ready) { S.pendingLaunch = intent; return; }
@@ -245,7 +245,7 @@
     function top() { if (hesper.scrollTop) hesper.scrollTop(); }
     function noop() { /* ignore */ }
 
-    // Older Hesper builds do not know spinner / toggle; fall back to plain text / a button.
+    // Older PEK builds do not know spinner / toggle; fall back to plain text / a button.
     function spin(ui, text, big) { return ui.spinner ? ui.spinner(text, big) : ui.text(text); }
 
     function merge(a, b) {
@@ -503,7 +503,7 @@
     }
 
     function removeKey() {
-        S.key = ''; S.keyDraft = ''; S.keyMsg = "Key removed. Using Hesper's built-in access."; S.authError = false; S.pages = {}; resetViews();
+        S.key = ''; S.keyDraft = ''; S.keyMsg = "Key removed. Using PEK's built-in access."; S.authError = false; S.pages = {}; resetViews();
         hesper.storage.remove('tmdb_key').then(redraw, redraw);
     }
 
@@ -619,7 +619,7 @@
         var d = S.detail, it = d.item, info = d.info || {};
         var kids = [];
 
-        // The trailer goes first: Hesper pins it to the very top of the page.
+        // The trailer goes first: PEK pins it to the very top of the page.
         if (d.loading) kids.push(spin(ui, 'Loading\u2026', true));
         else if (!d.error && ui.video) {
             var tr = pickTrailer(info);
@@ -697,7 +697,7 @@
         kids.push(ui.heading('TMDb access'));
         kids.push(ui.text(S.key
             ? 'Using your own TMDb key. Remove it to go back to the built-in access.'
-            : "Built in: Hesper's own TMDb access is used, so there is nothing to set up. Optional: paste your own free v3 API key (themoviedb.org > Settings > API) to use that instead. It is stored only inside this plugin on this device."));
+            : "Built in: PEK's own TMDb access is used, so there is nothing to set up. Optional: paste your own free v3 API key (themoviedb.org > Settings > API) to use that instead. It is stored only inside this plugin on this device."));
         kids.push(ui.textInput('API Key (v3)', S.keyDraft, function (v) { S.keyDraft = v; },
             { type: 'password', placeholder: '32-character key', onSubmit: saveKey }));
         kids.push(ui.row(
@@ -709,7 +709,7 @@
             kids.push(ui.toggle('Auto-play trailers when a title opens', S.autoplay, function (v) { setAutoplay(v === 'true'); }));
             kids.push(ui.toggle('Trailer sound', S.sound, function (v) { setSound(v === 'true'); }));
         } else {
-            kids.push(ui.text('Update Hesper to change the trailer settings.'));
+            kids.push(ui.text('Update PEK to change the trailer settings.'));
         }
         kids.push(ui.text('Trailers play from YouTube. If your device blocks sound from starting by itself, turn Trailer sound off.'));
         kids.push(ui.heading('Region'));
@@ -720,8 +720,8 @@
         if (S.keyMsg) kids.push(ui.text(S.keyMsg));
         kids.push(ui.heading('Your library'));
         kids.push(ui.text(S.lib.loaded
-            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time Hesper starts.'
-            : 'Library list not available yet. It is created when Hesper starts, so close and reopen Hesper once after installing.'));
+            ? S.lib.nMovies + ' movies and ' + S.lib.nShows + ' shows are marked "In library". The list is refreshed each time PEK starts.'
+            : 'Library list not available yet. It is created when PEK starts, so close and reopen PEK once after installing.'));
         kids.push(attribution(ui));
         return ui.column.apply(ui, kids);
     }
@@ -729,7 +729,7 @@
     function browseView(ui) {
         if (S.authError) {
             return ui.column(
-                ui.card(S.key ? 'TMDb rejected your API key' : "Hesper's built-in TMDb access was refused",
+                ui.card(S.key ? 'TMDb rejected your API key' : "PEK's built-in TMDb access was refused",
                     S.key ? 'Tap to open Settings and check it.' : 'Tap to open Settings and add your own key instead.',
                     function () { selectTab('settings'); }));
         }

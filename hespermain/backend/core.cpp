@@ -22,10 +22,10 @@ private:
     bool is_running;
 
     void backgroundPluginScanner(const std::string& path_str) {
-        std::cout << "[Hesper Background Worker] Scanning path: " << path_str << std::endl;
+        std::cout << "[PEK Background Worker] Scanning path: " << path_str << std::endl;
         
         if (!fs::exists(path_str) || !fs::is_directory(path_str)) {
-            std::cout << "[Hesper Background Worker] Directory missing. Creating path..." << std::endl;
+            std::cout << "[PEK Background Worker] Directory missing. Creating path..." << std::endl;
             fs::create_directories(path_str);
             return;
         }
@@ -36,20 +36,20 @@ private:
                     std::string filename = entry.path().stem().string();
                     std::lock_guard<std::mutex> lock(plugin_mutex);
                     loaded_plugins.push_back(filename);
-                    std::cout << "[Hesper Background Worker] Discovered Python Plugin Module: " << filename << std::endl;
+                    std::cout << "[PEK Background Worker] Discovered Python Plugin Module: " << filename << std::endl;
                 }
             }
         } catch (const std::exception& e) {
-            std::cout << "[Hesper Background Worker] Plugin scan aborted: " << e.what() << std::endl;
+            std::cout << "[PEK Background Worker] Plugin scan aborted: " << e.what() << std::endl;
         }
     }
 
 public:
     HesperCore(std::string v) : version(v), is_running(true) {
-        std::cout << "[Hesper Backend] Initialized v" << version << std::endl;
+        std::cout << "[PEK Backend] Initialized v" << version << std::endl;
         Py_Initialize();
         if (Py_IsInitialized()) {
-            std::cout << "[Hesper Python Bridge] Embedded Python Interpreter online." << std::endl;
+            std::cout << "[PEK Python Bridge] Embedded Python Interpreter online." << std::endl;
         }
     }
 
@@ -59,7 +59,7 @@ public:
             worker_thread.join();
         }
         Py_Finalize();
-        std::cout << "[Hesper Backend] Shut down cleanly." << std::endl;
+        std::cout << "[PEK Backend] Shut down cleanly." << std::endl;
     }
 
     void startPluginScanAsync(const std::string& path_str) {
@@ -78,7 +78,7 @@ public:
     // Every plugin backend goes through hesper_guard.py, which decides whether it may
     // run and applies the manifest permissions, static scan and runtime backstop (see
     // that file). If the guard itself cannot be loaded this FAILS CLOSED: only the
-    // plugins that ship with Hesper still run, everything else is refused.
+    // plugins that ship with PEK still run, everything else is refused.
     void executePluginModule(const std::string& module_name, const std::string& plugins_path) {
         std::string safe_guard;
         for (char c : guard_dir) {
@@ -97,11 +97,11 @@ public:
         PyErr_Print();
         std::string id = (module_name == "backend") ? fs::path(plugins_path).filename().string() : module_name;
         if (id != "weather") {
-            std::cout << "[Hesper Plugin Guard] hesper_guard.py not found in '" << guard_dir
+            std::cout << "[PEK Plugin Guard] hesper_guard.py not found in '" << guard_dir
                       << "' - REFUSING to run plugin '" << id << "'." << std::endl;
             return;
         }
-        std::cout << "[Hesper Plugin Guard] hesper_guard.py not found; running bundled plugin '" << id << "' only." << std::endl;
+        std::cout << "[PEK Plugin Guard] hesper_guard.py not found; running bundled plugin '" << id << "' only." << std::endl;
         executePluginModuleUnguarded(module_name, plugins_path);
     }
 
@@ -137,12 +137,12 @@ public:
                 }
                 Py_DECREF(pFunc);
             } else {
-                std::cout << "[Hesper Python Bridge] '" << module_name << "' has no callable run()." << std::endl;
+                std::cout << "[PEK Python Bridge] '" << module_name << "' has no callable run()." << std::endl;
                 PyErr_Clear();
             }
             Py_DECREF(pModule);
         } else {
-            std::cout << "[Hesper Python Bridge] Failed to import '" << module_name << "':" << std::endl;
+            std::cout << "[PEK Python Bridge] Failed to import '" << module_name << "':" << std::endl;
             PyErr_Print();
         }
     }
@@ -160,7 +160,7 @@ public:
             fs::path backend_file = entry.path() / "backend.py";
 
             if (fs::exists(backend_file)) {
-                std::cout << "[Hesper Backend] Running plugin backend: " << folder_name << std::endl;
+                std::cout << "[PEK Backend] Running plugin backend: " << folder_name << std::endl;
                 executePluginModule("backend", entry.path().string());
 
                 std::lock_guard<std::mutex> lock(plugin_mutex);
@@ -173,7 +173,7 @@ public:
 
     void status() {
         std::lock_guard<std::mutex> lock(plugin_mutex);
-        std::cout << "[Hesper Backend] Active registered plugins count: " << loaded_plugins.size() << std::endl;
+        std::cout << "[PEK Backend] Active registered plugins count: " << loaded_plugins.size() << std::endl;
     }
 };
 
@@ -233,7 +233,7 @@ int main(int argc, char* argv[]) {
 
     hesper.status();
 
-    std::cout << "[Hesper Core] System active. Listening for UI connections. Press Ctrl+C to exit." << std::endl;
+    std::cout << "[PEK Core] System active. Listening for UI connections. Press Ctrl+C to exit." << std::endl;
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }

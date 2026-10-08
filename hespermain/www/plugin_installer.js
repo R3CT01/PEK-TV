@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper: plugin installer (data side; the screens are in app_plugins.js).
+// PEK: plugin installer (data side; the screens are in app_plugins.js).
 //
 //   pickZip()    opens the system file picker for a .zip
 //   prepare(f)   unpacks it in memory, finds plugin.json, works out the plugin id
@@ -14,7 +14,7 @@
 
 const HesperPluginInstaller = (() => {
 
-    // Official plugins: the ones that ship with Hesper (kept in step with plugin_install.h).
+    // Official plugins: the ones that ship with PEK (kept in step with plugin_install.h).
     // Everything else is third party.
     const BUILTIN = ['weather', 'tmdb-discover'];
     const isBuiltin = (folder) => BUILTIN.indexOf(folder) !== -1;
@@ -141,7 +141,7 @@ const HesperPluginInstaller = (() => {
         try {
             res = await fetch(url, { method: 'POST', body: form });
         } catch (e) {
-            throw new Error("Couldn't reach Hesper's server.");
+            throw new Error("Couldn't reach PEK's server.");
         }
         let data = null;
         try { data = await res.json(); } catch (e) { /* not JSON */ }
@@ -163,14 +163,14 @@ const HesperPluginInstaller = (() => {
         return fd;
     }
 
-    // Reads a .zip chosen in Hesper's own picker (local or network) through the server and
+    // Reads a .zip chosen in PEK's own picker (local or network) through the server and
     // hands it back in the shape prepare() expects.
     async function fetchZip(path) {
         let res;
         try {
             res = await fetch('/api/plugins/fetch', { method: 'POST', body: new URLSearchParams({ path }) });
         } catch (e) {
-            throw new Error("Couldn't reach Hesper's server.");
+            throw new Error("Couldn't reach PEK's server.");
         }
         const type = res.headers.get('content-type') || '';
         if (!res.ok || type.indexOf('application/json') === 0) {
@@ -191,7 +191,7 @@ const HesperPluginInstaller = (() => {
         installedListeners.forEach(fn => { try { fn(prep.id); } catch (e) { /* a listener must never break an install */ } });
         return data;
     };
-    // Other parts of Hesper (the cloud plugin backup) can ask to hear about a removal the user confirmed.
+    // Other parts of PEK (the cloud plugin backup) can ask to hear about a removal the user confirmed.
     const removedListeners = [];
     const onRemoved = (fn) => { if (typeof fn === 'function') removedListeners.push(fn); };
     const remove = async (id) => {

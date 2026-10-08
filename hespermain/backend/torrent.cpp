@@ -76,8 +76,8 @@ void setDataDir(const std::string& dir) { g_dir = dir.empty() ? "." : dir; }
 // ------------------------------------------------------------------------------------------
 namespace torrent {
 bool available() { return false; }
-std::string add(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this Hesper"; return ""; }
-std::string addFile(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this Hesper"; return ""; }
+std::string add(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this PEK"; return ""; }
+std::string addFile(const std::string&, int, int, std::string& err) { err = "Torrent support is not built into this PEK"; return ""; }
 bool status(const std::string&, Status&, bool) { return false; }
 int64_t read(const std::string&, uint64_t, void*, size_t, bool (*)(void*), void*) { return -1; }
 void remove(const std::string&) {}

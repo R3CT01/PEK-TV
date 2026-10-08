@@ -33,7 +33,7 @@ class MainAppSourcesMethods {
             const data = await res.json();
             this.setState({ sources: data.sources || [] });
         } catch (err) {
-            console.warn('[Hesper] Could not load sources:', err);
+            console.warn('[PEK] Could not load sources:', err);
         }
     }
 
@@ -189,7 +189,7 @@ class MainAppSourcesMethods {
             } });
         } catch (err) {
             if (!this.state.netPicker) return;
-            this.setState({ netPicker: { ...this.state.netPicker, loading: false, error: 'Could not reach the Hesper server.' } });
+            this.setState({ netPicker: { ...this.state.netPicker, loading: false, error: 'Could not reach the PEK server.' } });
         }
     }
 
@@ -229,7 +229,7 @@ class MainAppSourcesMethods {
             setTimeout(() => this.refreshLibrary(), 4000);
             setTimeout(() => this.refreshLibrary(), 15000);
         } catch (err) {
-            this.setState({ netPicker: { ...this.state.netPicker, error: 'Could not reach the Hesper server.' } });
+            this.setState({ netPicker: { ...this.state.netPicker, error: 'Could not reach the PEK server.' } });
         }
     }
 
@@ -237,7 +237,7 @@ class MainAppSourcesMethods {
         try {
             await fetch(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
         } catch (err) {
-            console.warn('[Hesper] Could not remove source:', err);
+            console.warn('[PEK] Could not remove source:', err);
         }
         await this.loadSources();
         this.refreshLibrary();
@@ -331,7 +331,7 @@ class MainAppSourcesMethods {
                 }
             }
         } catch (err) {
-            console.warn('[Hesper] Rescan failed:', err);
+            console.warn('[PEK] Rescan failed:', err);
         }
         window.HesperActivity.end('scan', 'Scan finished');
         this.setState({ refreshing: false });

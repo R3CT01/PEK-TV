@@ -210,12 +210,12 @@ bool getCredentials(const std::string& scheme, const std::string& host, std::str
 #ifndef HESPER_SMB
 std::unique_ptr<Share> smbConnect(const Url&, Error& err) {
     err.auth = false;
-    err.msg = "This build of Hesper has no SMB support.";
+    err.msg = "This build of PEK has no SMB support.";
     return nullptr;
 }
 bool smbListShares(const Url&, std::vector<std::string>&, Error& err) {
     err.auth = false;
-    err.msg = "This build of Hesper has no SMB support.";
+    err.msg = "This build of PEK has no SMB support.";
     return false;
 }
 #endif
@@ -223,12 +223,12 @@ bool smbListShares(const Url&, std::vector<std::string>&, Error& err) {
 #ifndef HESPER_NFS
 std::unique_ptr<Share> nfsConnect(const Url&, Error& err) {
     err.auth = false;
-    err.msg = "This build of Hesper has no NFS support.";
+    err.msg = "This build of PEK has no NFS support.";
     return nullptr;
 }
 bool nfsListShares(const Url&, std::vector<std::string>&, Error& err) {
     err.auth = false;
-    err.msg = "This build of Hesper has no NFS support.";
+    err.msg = "This build of PEK has no NFS support.";
     return false;
 }
 #endif

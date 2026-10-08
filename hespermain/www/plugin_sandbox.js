@@ -1,35 +1,35 @@
 // ============================================================
-// Hesper plugin sandbox
+// PEK plugin sandbox
 //
 // Plugin UI code (plugins/<id>/ui.js) runs inside an <iframe sandbox="allow-scripts">
 // with NO allow-same-origin, so it gets an opaque origin: it cannot touch this page's
-// DOM, cookies, localStorage, the Hesper API, or window.HesperAndroid. A CSP inside
+// DOM, cookies, localStorage, the PEK API, or window.HesperAndroid. A CSP inside
 // the frame also forbids every network request and every sub-frame.
 //
 // The only way out is postMessage to this file, which enforces plugin.json:
 //   permissions.network  list of https host names the plugin may fetch from
 //   permissions.storage  true => small private key/value store + its own data/ files
-//   permissions.torrent  true => the plugin's UI may call hesper.torrent.search / .play: Hesper looks up
+//   permissions.torrent  true => the plugin's UI may call hesper.torrent.search / .play: PEK looks up
 //                        releases with the provider YOU set in Settings and streams the one picked.
 //                        The plugin never sees the provider address or key, only the results.
 //                        A plugin with this permission may also (a) play a https .torrent link from a host it
-//                        listed under network, and (b) have Hesper's server fetch its allow-listed network
+//                        listed under network, and (b) have PEK's server fetch its allow-listed network
 //                        hosts when the browser blocks the request (CORS).
 //   permissions.library  true => the plugin's Python backend may read the titles and years
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   permissions.favorites true => hesper.favorites.list / add / remove: the shared Favorites list that
-//                        Hesper's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
-//   permissions.providers true => ui.providerButton: a "Watch on <service>" button. Hesper decides what it
+//                        PEK's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
+//   permissions.providers true => ui.providerButton: a "Watch on <service>" button. PEK decides what it
 //                        opens (the service's app on Android, its website elsewhere); the plugin only names the
 //                        service and the title.
 //   permissions.plugins  true => hesper.plugins.streamers() lists installed plugins that can play titles
 //                        (plugin.json "provides": {"stream": true}); hesper.plugins.open(id, title) opens one of
 //                        them on that title. Only from a tap.
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
-//                        closeOnRemove. They only change how Hesper's own screens behave.
+//                        closeOnRemove. They only change how PEK's own screens behave.
 //
 // hero: a wide backdrop billboard (picture + title + blurb + buttons). Same image rules as posterCard.
-// Images: posterCard art is loaded by Hesper's page (not by the frame), and only from https
+// Images: posterCard art is loaded by PEK's page (not by the frame), and only from https
 // hosts the plugin listed under permissions.network.
 //
 // A plugin describes its screen as plain data (card, button, ...). THIS file turns
@@ -43,7 +43,7 @@
 //    dropped, but a single request to the new address may already have left. So the
 //    network permission governs hesper.fetch*, and the real protection is that a
 //    plugin only ever holds data you gave it access to (its own storage and data
-//    files, and what it fetched), never Hesper's API, files, or saved logins.
+//    files, and what it fetched), never PEK's API, files, or saved logins.
 // ============================================================
 
 const HESPER_SANDBOX_LIMITS = {
@@ -73,7 +73,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         return new Promise(function (resolve, reject) {
             var id = nextReq++;
             var timer = setTimeout(function () {
-                pending.delete(id); reject(new Error('Hesper did not answer in time'));
+                pending.delete(id); reject(new Error('PEK did not answer in time'));
             }, timeoutMs || 15000);
             pending.set(id, { resolve: resolve, reject: reject, timer: timer });
             post({ t: 'req', id: id, op: op, args: args });
@@ -102,7 +102,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         toggle:  function (label, checked, fn) { return { t: 'toggle', label: str(label), checked: !!checked, on: on(fn) }; },
         video:   function (o) { o = o || {}; return { t: 'video', provider: str(o.provider || 'youtube'), id: str(o.id), autoplay: !!o.autoplay, muted: !!o.muted, title: str(o.title) }; },
         // A "Watch on <service>" button (needs permissions.providers). name = the service's name as TMDb gives it,
-        // logo = TMDb's logo_path for it. Hesper picks what the button opens; the plugin gets no callback.
+        // logo = TMDb's logo_path for it. PEK picks what the button opens; the plugin gets no callback.
         providerButton: function (o) {
             o = o || {};
             return { t: 'providerButton', name: str(o.name), logo: str(o.logo), title: str(o.title),
@@ -153,13 +153,13 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
     var api = {
         ui: ui,
         // Register what the Back key / Back button should do inside the plugin (or null when
-        // there is nothing to step out of). Hesper then calls it before closing the plugin.
+        // there is nothing to step out of). PEK then calls it before closing the plugin.
         setBack: function (fn) {
             backFn = typeof fn === 'function' ? fn : null;
             if (backSet !== !!backFn) { backSet = !!backFn; post({ t: 'canBack', v: backSet }); }
         },
         scrollTop: function () { post({ t: 'scrollTop' }); },
-        // Called when Hesper opens this plugin on a particular title (the Favorites tab, or another plugin):
+        // Called when PEK opens this plugin on a particular title (the Favorites tab, or another plugin):
         // fn({type: 'movie' | 'tv', id: <TMDb id>, title, year}).
         onLaunch: function (fn) { launchFn = typeof fn === 'function' ? fn : null; flushLaunch(); },
         // Needs permissions.favorites. list() -> ['movie:603', 'tv:1396', ...]
@@ -193,7 +193,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
             remove: function (k) { return request('storageRemove', { key: str(k) }); }
         },
         // Needs "torrent": true in plugin.json. search -> [{title, source, sizeText, seeders, quality, pack}];
-        // play opens Hesper's buffering box and then the player, and resolves once the player is open.
+        // play opens PEK's buffering box and then the player, and resolves once the player is open.
         torrent: {
             info: function () { return request('torrentInfo', {}, 20000).then(JSON.parse); },
             search: function (q) {
@@ -391,7 +391,7 @@ class HesperSandbox {
         this._send({ t: 'launch', intent });
     }
 
-    /** Hesper's Back key / button asks here first. True = the plugin stepped back inside itself. */
+    /** PEK's Back key / button asks here first. True = the plugin stepped back inside itself. */
     handleBack() {
         if (!this.canBack || !this.frame || !this.container || !this.container.isConnected) return false;
         this._send({ t: 'back' });
@@ -459,13 +459,13 @@ class HesperSandbox {
 
     _need(perm) {
         if (!this.manifest.permissions[perm]) throw new Error("plugin.json does not request the '" + perm + "' permission");
-        if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this Hesper');
-        if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this Hesper');
+        if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this PEK');
+        if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this PEK');
     }
 
     _favAdd(a) {
         this._need('favorites');
-        // Hesper tags the entry with this plugin's folder, so the Favorites tab knows where to open it.
+        // PEK tags the entry with this plugin's folder, so the Favorites tab knows where to open it.
         return window.HesperFavorites.add({ type: a.type, id: a.id, title: a.title, year: a.year, posterPath: a.posterPath }, this.folder);
     }
 
@@ -494,11 +494,11 @@ class HesperSandbox {
     }
 
     // ---------------- torrent (permission "torrent") ----------------
-    // Hesper does the work; the plugin only gets search results and the result of play().
+    // PEK does the work; the plugin only gets search results and the result of play().
 
     _torrentGuard() {
         if (!this.manifest.permissions.torrent) throw new Error("plugin.json does not request the 'torrent' permission");
-        if (!window.HesperTorrent) throw new Error('Torrent playback is not available in this Hesper');
+        if (!window.HesperTorrent) throw new Error('Torrent playback is not available in this PEK');
     }
 
     async _torrentInfo() {
@@ -528,7 +528,7 @@ class HesperSandbox {
         if (!/^(magnet:\?|https?:\/\/)/i.test(source) || source.length > 4000) throw new Error('invalid release');
         if (!/^magnet:\?/i.test(source)) {
             // A .torrent link: only https, and only from a host this plugin declared in plugin.json.
-            // Hesper's server then agrees to download it (it refuses links nobody vouched for).
+            // PEK's server then agrees to download it (it refuses links nobody vouched for).
             let ru;
             try { ru = new URL(source); } catch (e) { throw new Error('invalid release'); }
             if (ru.protocol !== 'https:' || !HesperSandbox.hostAllowed(ru.hostname, this.manifest.permissions.network)) {
@@ -537,7 +537,7 @@ class HesperSandbox {
             await window.HesperTorrent.allowLink(source);
         }
         const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
-        // Optional: what is being watched. With it, Hesper keeps the position under Resume Watching
+        // Optional: what is being watched. With it, PEK keeps the position under Resume Watching
         // and a later "resume" starts the same release again at that position.
         let track = null;
         const kind = a.kind === 'movie' || a.kind === 'episode' ? a.kind : '';
@@ -561,7 +561,7 @@ class HesperSandbox {
         // A plugin that gave no usable kind/name is still remembered, under the title it gave.
         const plainTitle = typeof a.title === 'string' ? a.title.trim().slice(0, 200) : '';
         if (!track && plainTitle) track = { meta: { kind: 'other', title: plainTitle, season: int(a.season, 200), episode: int(a.episode, 2000) } };
-        // Where it was started: set here by Hesper from the plugin's own folder/name, so a plugin cannot claim to be another one.
+        // Where it was started: set here by PEK from the plugin's own folder/name, so a plugin cannot claim to be another one.
         if (track) track.origin = { id: String(this.folder || '').slice(0, 80), name: String(this.manifest.name || this.folder || '').slice(0, 60) };
         await window.HesperTorrent.open({
             source, title: typeof a.title === 'string' ? a.title.slice(0, 200) : '',
@@ -592,13 +592,13 @@ class HesperSandbox {
                 res = await fetch(u.href, { credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer', signal: ctl.signal });
             } catch (e) {
                 // Browser refused (most sites do not send CORS headers). Plugins with the torrent permission
-                // may ask Hesper's server to fetch the same, already allow-listed address instead.
+                // may ask PEK's server to fetch the same, already allow-listed address instead.
                 if (!(e instanceof TypeError) || !this.manifest.permissions.torrent) throw e;
                 viaServer = true;
                 res = await fetch('/api/torrent/fetch?url=' + encodeURIComponent(u.href), { cache: 'no-store', signal: ctl.signal });
             }
             if (!res.ok) {
-                // Hesper's server explains why it could not get the page ({"error": "..."}): pass that on,
+                // PEK's server explains why it could not get the page ({"error": "..."}): pass that on,
                 // so a bare "HTTP 502" becomes e.g. "HTTP 502 - Could not reach the site (SSL server verification failed)".
                 let why = '';
                 if (viaServer) {
@@ -768,7 +768,7 @@ class HesperSandbox {
         f.src = src;
         f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
         f.setAttribute('allowfullscreen', '');
-        // Hesper sends "Referrer-Policy: no-referrer" by default and YouTube refuses to play
+        // PEK sends "Referrer-Policy: no-referrer" by default and YouTube refuses to play
         // an embed that sends no referrer, so this one frame gets its own policy.
         f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
         f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
@@ -904,7 +904,7 @@ class HesperSandbox {
                 }
                 return null;
             case 'providerButton': {
-                // Hesper, not the plugin, decides what this opens: see providers.js.
+                // PEK, not the plugin, decides what this opens: see providers.js.
                 if (!this.manifest.permissions.providers || !window.HesperProviders) return null;
                 const name = s(n.name).slice(0, 60);
                 if (!name) return null;

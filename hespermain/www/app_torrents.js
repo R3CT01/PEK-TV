@@ -2,7 +2,7 @@
 // MainApp: Torrent settings
 // Loaded after app.js. These methods are added to MainApp.prototype.
 //
-// Hesper has no built-in torrent search site. You give it the address of your own Torznab
+// PEK has no built-in torrent search site. You give it the address of your own Torznab
 // provider (Jackett, Prowlarr, ...) here; plugins with the "torrent" permission then search
 // and stream through it without ever seeing the address or key.
 // ============================================================
@@ -82,7 +82,7 @@ class MainAppTorrentMethods {
 
         if (m.stage === 'magnet') {
             return ui.modal('Play a magnet link', createElement('div', {},
-                createElement('p', { className: 'sub' }, 'Paste a magnet link. Hesper downloads the start, then opens the player while the rest arrives.'),
+                createElement('p', { className: 'sub' }, 'Paste a magnet link. PEK downloads the start, then opens the player while the rest arrives.'),
                 err,
                 ui.textInput('Magnet link', this._tMagnet || '', (v) => { this._tMagnet = v; }, { placeholder: 'magnet:?xt=urn:btih:\u2026' }),
                 createElement('div', { className: 'section-actions' },
@@ -96,8 +96,8 @@ class MainAppTorrentMethods {
         const built = m.info && m.info.available;
         return ui.modal('Torrent settings', createElement('div', {},
             createElement('p', { className: 'sub' }, m.info
-                ? (built ? 'Torrent playback is built into this Hesper.'
-                         : 'This build of Hesper does not include the torrent engine, so releases can be searched but not played.')
+                ? (built ? 'Torrent playback is built into this PEK.'
+                         : 'This build of PEK does not include the torrent engine, so releases can be searched but not played.')
                 : ''),
             err,
             m.note ? createElement('p', { className: 'sub' }, m.note) : null,

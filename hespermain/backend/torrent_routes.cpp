@@ -532,7 +532,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
     });
 
     // Ranked releases for a movie or an episode from the user's own Torznab provider
-    // (Jackett, Prowlarr, ...). Hesper ships with no provider.
+    // (Jackett, Prowlarr, ...). PEK ships with no provider.
     svr.Get("/api/torrent/search", [](const httplib::Request& req, httplib::Response& res) {
         std::string url, key;
         {
@@ -613,7 +613,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
     });
 
     svr.Post("/api/torrent/start", [](const httplib::Request& req, httplib::Response& res) {
-        if (!torrent::available()) { jsonErr(res, 501, "Torrent playback is not built into this Hesper"); return; }
+        if (!torrent::available()) { jsonErr(res, 501, "Torrent playback is not built into this PEK"); return; }
         std::string source = req.get_param_value("source");
         int season = std::atoi(req.get_param_value("season").c_str());
         int episode = std::atoi(req.get_param_value("episode").c_str());

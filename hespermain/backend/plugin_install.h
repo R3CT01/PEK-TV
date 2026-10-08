@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper plugin installer (header-only, no extra libraries).
+// PEK plugin installer (header-only, no extra libraries).
 //
 // The web UI unpacks a plugin .zip itself and sends the files to
 // POST /api/plugins/install. Everything that decides what ends up on
@@ -62,14 +62,14 @@ constexpr size_t kMaxManifest    = 16u * 1024;
 constexpr size_t kMaxPathLen     = 120;
 constexpr size_t kMaxDepth       = 6;
 
-// Plugins that ship with Hesper. They can't be replaced or removed here (on Android
+// Plugins that ship with PEK. They can't be replaced or removed here (on Android
 // the app also re-copies them from its assets on every launch).
 inline bool isReservedId(const std::string& id) {
     return id == "weather" || id == "tmdb-discover";
 }
 
-// Hesper's built-in TMDb access (a proxy that holds Hesper's key) is for official plugins only.
-// A plugin installed from a .zip can't list it, so it can't borrow Hesper's key.
+// PEK's built-in TMDb access (a proxy that holds PEK's key) is for official plugins only.
+// A plugin installed from a .zip can't list it, so it can't borrow PEK's key.
 inline const char* reservedHost() { return "hesper-tmdb.aquariusibeats.workers.dev"; }
 
 // Python backends are accepted unless HESPER_ALLOW_PLUGIN_BACKEND=0.
@@ -159,7 +159,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
         const std::string ext = extensionOf(f.path);
         if (!allowedExtension(ext)) {
             if (ext == "py")
-                return "this build of Hesper doesn't install plugins that include Python code (" + f.path + ")";
+                return "this build of PEK doesn't install plugins that include Python code (" + f.path + ")";
             return "file type not allowed in plugins: " + f.path;
         }
         if (ext == "py" && f.data.size() > kMaxPythonBytes)
@@ -172,7 +172,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             while (a < f.data.size() && std::isspace(static_cast<unsigned char>(f.data[a]))) ++a;
             if (a >= f.data.size() || f.data[a] != '{') return "plugin.json is not a JSON object";
             if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
-                return std::string(reservedHost()) + " is reserved for Hesper's official plugins";
+                return std::string(reservedHost()) + " is reserved for PEK's official plugins";
         }
         if (f.path == "ui.js") hasUi = true;
     }
