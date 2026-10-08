@@ -1,0 +1,5 @@
+{
+  "name": "Tap Counter",
+  "version": "1.0.0",
+  "permissions": { "storage": true }
+}

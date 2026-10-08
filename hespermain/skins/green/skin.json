@@ -1,0 +1,26 @@
+{
+  "name": "Green",
+  "author": "Hesper",
+  "version": "1.0.0",
+  "description": "Soft, rounded and flat.",
+  "hesper_api": 1,
+  "tokens": {
+    "bg": "#07120b",
+    "bgElevated": "#0b1a10",
+    "surface": "#112218",
+    "surfaceFocused": "#3ddc8433",
+    "border": "#1f4a31",
+    "borderFocus": "#3ddc84",
+    "text": "#e9fff1",
+    "textMuted": "#8fb9a0",
+    "accent": "#3ddc84",
+    "accentGlow": "rgba(61, 220, 132, 0.35)",
+    "radius": "24px",
+    "overlay": "rgba(5, 8, 15, 0.75)",
+    "shadow": "rgba(0, 0, 0, 0.5)",
+    "glass": "rgba(10, 14, 24, 0.45)",
+    "glassStrong": "rgba(13, 18, 30, 0.92)",
+    "glassFill": "rgba(255, 255, 255, 0.05)",
+    "glassEdge": "rgba(255, 255, 255, 0.10)"
+  }
+}
