@@ -820,8 +820,10 @@ function hesperStepScroll(current, target, dir) {
         if (sp.scrollTop <= 0) return false;
         need = c.top + margin - r.top;
     }
-    if (need <= 0) return false;
-    const dy = Math.min(need, cap) * (dir === 'down' ? 1 : -1);
+    // Sub-pixel / tiny remainders: scrolling that little does nothing visible, so moving focus is right.
+    // (Without this, Down could be swallowed forever when the target sat a fraction of a pixel off screen.)
+    if (need < 8) return false;
+    const dy = Math.min(Math.ceil(need), cap) * (dir === 'down' ? 1 : -1);
     try { sp.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { sp.scrollTop += dy; }
     return true;
 }
