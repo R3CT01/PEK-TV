@@ -2,8 +2,8 @@
  *
  * Local part: a permanent "watched" record (kept after resume points are gone).
  * Cloud part: optional sync of watch history AND resume positions between devices,
- * through the Hesper Cloud worker (cloud/worker.js). An account is just a secret
- * sync key made on the device; nothing is sent until the user links one.
+ * through the Hesper Cloud worker (cloud/worker.js). An account is an email address and
+ * a password; nothing is sent until the user signs in.
  *
  * Items are matched across devices by title (not file id), so a movie or episode
  * is the same item on a phone and a TV even though the files are different.
@@ -13,7 +13,9 @@
 
     var API = 'https://hesper-sync-9275.aquariusibeats.workers.dev';
     var K = {
-        key: 'hesper_sync_key',
+        token: 'hesper_sync_token',      // session token from signing in (never the password)
+        email: 'hesper_sync_email',
+        legacyKey: 'hesper_sync_key',    // the old 25-character key; removed on load
         cursor: 'hesper_sync_cursor_v1',
         last: 'hesper_sync_last_v1',
         seen: 'hesper_sync_seen_v1',       // what the cloud already has: { h:{key:updated}, p:{key:{u,d}} }
@@ -95,39 +97,40 @@
         writeHistory(map);
     }
 
-    // ---------------- sync key ----------------
-    var ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    // ---------------- account (email + password) ----------------
+    function cleanEmail(s) { return String(s || '').trim().toLowerCase(); }
+    function validEmail(s) { var e = cleanEmail(s); return e.length >= 5 && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e); }
+    function validPassword(s) { return typeof s === 'string' && s.length >= 8 && s.length <= 200; }
 
-    function newKey() {
-        var bytes = new Uint8Array(25);
-        crypto.getRandomValues(bytes);
-        var s = '';
-        for (var i = 0; i < 25; i++) {
-            s += ALPHABET.charAt(bytes[i] % 32);     // 256 % 32 == 0, so no bias
-            if (i % 5 === 4 && i < 24) s += '-';
-        }
-        return s;
-    }
-    function normKey(s) { return String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
-    function prettyKey(s) { return normKey(s).replace(/(.{5})(?=.)/g, '$1-'); }
-    function validKey(s) { var k = normKey(s); return k.length >= 20 && k.length <= 64; }
-
-    function getKey() { return getRaw(K.key) || ''; }
-    function setKey(s) { setRaw(K.key, prettyKey(s)); }
+    function getToken() { return getRaw(K.token) || ''; }
+    function getEmail() { return getRaw(K.email) || ''; }
     function lastSync() { return parseInt(getRaw(K.last), 10) || 0; }
 
+    // Forget what we know about the cloud (cursor, what was already uploaded). Local history stays.
+    function resetSyncState() {
+        [K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
+    }
+    // Starts a signed-in session. Sync state is reset so this account gets a full two-way merge.
+    function startSession(token, email) {
+        resetSyncState();
+        setRaw(K.token, token);
+        setRaw(K.email, email);
+    }
+    // Signs this device out locally. Watch history and resume points on the device are kept.
     function unlink() {
-        [K.key, K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
+        [K.token, K.email, K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
     }
 
+    // The old key-based accounts no longer exist; drop the stale key.
+    delRaw(K.legacyKey);
+
     // ---------------- network ----------------
-    function request(method, path, body) {
+    function request(method, path, body, withToken) {
         var ctl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
         var timer = ctl ? setTimeout(function () { ctl.abort(); }, 20000) : null;
-        var opts = {
-            method: method,
-            headers: { 'Authorization': 'Bearer ' + getKey(), 'Content-Type': 'application/json' }
-        };
+        var headers = { 'Content-Type': 'application/json' };
+        if (withToken) headers['Authorization'] = 'Bearer ' + getToken();
+        var opts = { method: method, headers: headers };
         if (body !== undefined) opts.body = JSON.stringify(body);
         if (ctl) opts.signal = ctl.signal;
         return fetch(API + path, opts).then(function (res) {
@@ -139,11 +142,68 @@
         });
     }
 
+    // Short error code for the screen to turn into words.
     function failure(status, body) {
-        if (status === 404) return 'no_account';
-        if (status === 401) return 'bad_key';
+        var e = body && body.error;
+        if (status === 401 && e === 'bad_session') return 'session_expired';
+        if (status === 401 && !e) return 'session_expired';
         if (status === 413) return 'too_large';
-        return (body && body.error) || 'server';
+        if (status === 429) return 'rate_limited';
+        return e || 'server';
+    }
+
+    // ---------------- sign up / sign in / reset ----------------
+    function authCall(path, body) {
+        return request('POST', path, body, false).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true, body: r.body };
+            return { ok: false, error: failure(r.status, r.body) };
+        }, function () { return { ok: false, error: 'offline' }; });
+    }
+    function authSession(path, body) {
+        return authCall(path, body).then(function (res) {
+            if (!res.ok) return res;
+            if (res.body.needsVerify) return { ok: true, needsVerify: true };   // account made; email code still to enter
+            if (!res.body.token) return { ok: false, error: 'server' };
+            startSession(res.body.token, res.body.email || cleanEmail(body.email));
+            return { ok: true };
+        });
+    }
+    function signUp(email, password) {
+        if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
+        if (!validPassword(password)) return Promise.resolve({ ok: false, error: 'weak_password' });
+        return authSession('/v1/auth/signup', { email: cleanEmail(email), password: password });
+    }
+    // Finishes sign-up with the 6-digit code from the email, and signs this device in.
+    function verifyEmail(email, code) {
+        if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
+        return authSession('/v1/auth/verify', { email: cleanEmail(email), code: String(code || '').replace(/\D/g, '') });
+    }
+    // Emails a new verification code (the server answers "ok" either way).
+    function resendCode(email) {
+        if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
+        return authCall('/v1/auth/resend', { email: cleanEmail(email) }).then(function (res) { return res.ok ? { ok: true } : res; });
+    }
+    function signIn(email, password) {
+        if (!validEmail(email) || !password) return Promise.resolve({ ok: false, error: 'bad_credentials' });
+        return authSession('/v1/auth/login', { email: cleanEmail(email), password: password });
+    }
+    // Emails a 6-digit code. The server answers "ok" whether or not the address has an account.
+    function forgotPassword(email) {
+        if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
+        return authCall('/v1/auth/forgot', { email: cleanEmail(email) }).then(function (res) { return res.ok ? { ok: true } : res; });
+    }
+    // Sets a new password using the emailed code, and signs this device in.
+    function resetPassword(email, code, password) {
+        if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
+        if (!validPassword(password)) return Promise.resolve({ ok: false, error: 'weak_password' });
+        return authSession('/v1/auth/reset', { email: cleanEmail(email), code: String(code || '').replace(/\D/g, ''), password: password });
+    }
+    // Signs out here and (best effort) ends the session on the server.
+    function signOut() {
+        var had = !!getToken();
+        var done = function () { unlink(); return { ok: true }; };
+        if (!had) return Promise.resolve(done());
+        return request('POST', '/v1/auth/logout', {}, true).then(done, done);
     }
 
     // ---------------- sync ----------------
@@ -289,11 +349,11 @@
         });
     }
 
-    // opts: { create: bool, resolve: fn }.  Resolves { ok, error?, pushed, changed }.
+    // opts: { resolve: fn }.  Resolves { ok, error?, pushed, changed }.
     function sync(opts) {
         opts = opts || {};
         if (inflight) return inflight;
-        if (!getKey()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
 
         var all = collectPush();
         var pushedCount = all.history.length + all.progress.length;
@@ -303,8 +363,7 @@
             var chunk = takeChunk(all);
             var cursor = parseInt(getRaw(K.cursor), 10) || 0;
             var body = { since: cursor, history: chunk.history, progress: chunk.progress };
-            if (opts.create) body.create = true;
-            return request('POST', '/v1/sync', body).then(function (r) {
+            return request('POST', '/v1/sync', body, true).then(function (r) {
                 if (r.status !== 200 || !r.body || !r.body.ok) return { ok: false, error: failure(r.status, r.body) };
                 markPushed(chunk);
                 return applyRemote(r.body, opts.resolve).then(function (changed) {
@@ -319,14 +378,18 @@
         }
 
         inflight = round(1, true).catch(function () { return { ok: false, error: 'offline' }; })
-            .then(function (res) { inflight = null; return res; });
+            .then(function (res) {
+                inflight = null;
+                if (res && res.error === 'session_expired') unlink();   // signed out elsewhere or expired: ask the user to sign in again
+                return res;
+            });
         return inflight;
     }
 
-    // Permanently deletes the cloud account and all of its data, then unlinks this device.
+    // Permanently deletes the cloud account and all of its data, then signs this device out.
     function deleteAccount() {
-        if (!getKey()) return Promise.resolve({ ok: false, error: 'not_linked' });
-        return request('DELETE', '/v1/account').then(function (r) {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        return request('DELETE', '/v1/account', undefined, true).then(function (r) {
             if (r.status !== 200) return { ok: false, error: failure(r.status, r.body) };
             unlink();
             return { ok: true };
@@ -338,10 +401,13 @@
         recordWatched: recordWatched,
         listHistory: listHistory,
         clearHistory: clearHistory,
-        newKey: newKey, normKey: normKey, prettyKey: prettyKey, validKey: validKey,
-        getKey: getKey, setKey: setKey, lastSync: lastSync, unlink: unlink,
+        validEmail: validEmail, validPassword: validPassword,
+        signUp: signUp, signIn: signIn, signOut: signOut,
+        verifyEmail: verifyEmail, resendCode: resendCode,
+        forgotPassword: forgotPassword, resetPassword: resetPassword,
+        getEmail: getEmail, lastSync: lastSync, unlink: unlink,
         sync: sync, deleteAccount: deleteAccount,
-        isLinked: function () { return !!getKey(); },
+        isLinked: function () { return !!getToken(); },
         _setApi: function (u) { API = u; },
         _setClock: function (fn) { clock.now = fn; }
     };

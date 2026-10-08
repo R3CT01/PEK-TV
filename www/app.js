@@ -43,7 +43,7 @@ class MainApp extends HesperComponent {
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
             history: this._readHistory(),    // finished items, newest first (see sync.js)
             histAvail: null,                 // item key -> local file id, null until checked
-            syncUi: { busy: false, linking: false, showKey: false, confirmDelete: false, confirmClear: false, msg: '' }
+            syncUi: { busy: false, mode: '', confirmDelete: false, confirmClear: false, msg: '' }
         };
     }
 
