@@ -49,6 +49,7 @@ class MainActivity : Activity() {
         surfaceView.visibility = View.GONE
         webView = WebView(this)
         webView.setBackgroundColor(Color.TRANSPARENT)
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         mpv = MpvController(this, surfaceView, webView)
         webView.settings.apply {
             javaScriptEnabled = true
@@ -99,6 +100,7 @@ class MainActivity : Activity() {
 
         Thread {
             val root = File(filesDir, "hesper")
+            File(root, "plugins/sample_counter").deleteRecursively()   // retired built-in; older installs still have a copy
             copyAssetDir("hesper", root)
             NativeBridge.startServer(root.absolutePath)
             startPythonPlugins(File(root, "plugins"))
@@ -297,6 +299,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         bridge.setMulticast(false)
+        bridge.releaseNavSound()
         mpv.destroy()
         super.onDestroy()
     }
@@ -308,6 +311,12 @@ class MainActivity : Activity() {
 
 /** Exposed to the web UI as window.HesperAndroid. */
 class HesperBridge(private val activity: MainActivity, private val mpv: MpvController) {
+
+    // Navigation sounds, played natively so they are not tied to the page's frame rate (see NavSound.kt).
+    private val nav = NavSound()
+    @JavascriptInterface fun navSoundReady(): Boolean = nav.isReady()
+    @JavascriptInterface fun navSound(kind: Int, volume: Double) { nav.play(kind, volume.toFloat()) }
+    fun releaseNavSound() { nav.release() }
 
     // libmpv backend for the web player (player.js MpvBackend). JS calls arrive on a
     // background thread, so each one hops to the UI thread.
