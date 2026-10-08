@@ -147,7 +147,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
     if (files.empty()) return "the plugin has no files";
     if (files.size() > kMaxFiles) return "too many files (limit " + std::to_string(kMaxFiles) + ")";
     std::set<std::string> seen;
-    bool hasManifest = false, hasUi = false;
+    bool hasManifest = false, hasUi = false, hasSkin = false;
     for (const auto& f : files) {
         std::string why = checkRelativePath(f.path);
         if (!why.empty()) return why;
@@ -175,7 +175,11 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
                 return std::string(reservedHost()) + " is reserved for Hesper's official plugins";
         }
         if (f.path == "ui.js") hasUi = true;
+        if (f.path == "skin.json") hasSkin = true;
     }
+    // A skin is not a plugin (and a zip that is both is refused by both installers).
+    if (hasSkin && !hasManifest) return "this is a skin, not a plugin. Install it from Settings -> Skins.";
+    if (hasSkin) return "this zip has both plugin.json and skin.json, so it is not clearly a plugin or a skin";
     if (!hasManifest) return "plugin.json is missing";
     if (!hasUi) return "ui.js is missing";
     return "";

@@ -5,6 +5,7 @@
 #include "vfs.h"
 #include "httplib.h"
 #include "plugin_install.h"
+#include "skin_install.h"
 #include <iostream>
 #include <fstream>
 #include <functional>
@@ -443,6 +444,34 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
             out = hesper_plugins::install(plugins_dir, id, files, dry);
         }
+        res.status = out.ok ? 200 : 400;
+        res.set_content(outcomeJson(out), "application/json");
+    });
+
+    // 3b-1. Install / remove a skin. Same upload shape as a plugin; all checking and writing
+    //       is done by hesper_skins:: (skin_install.h). A plugin zip is refused here and a skin
+    //       zip is refused by the plugin installer.
+    svr.Post("/api/skins/install", [skins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
+        const std::string id = req.form.get_field("id");
+        const bool dry = req.form.get_field("dry") == "1";
+        const auto paths = req.form.get_fields("path");
+        const auto parts = req.form.get_files("file");
+        hesper_plugins::Outcome out;
+        out.id = id;
+        if (paths.size() != parts.size()) {
+            out.error = "the upload was incomplete";
+        } else {
+            std::vector<hesper_plugins::InFile> files;
+            files.reserve(parts.size());
+            for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
+            out = hesper_skins::install(skins_dir, id, files, dry);
+        }
+        res.status = out.ok ? 200 : 400;
+        res.set_content(outcomeJson(out), "application/json");
+    });
+
+    svr.Post("/api/skins/uninstall", [skins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
+        const hesper_plugins::Outcome out = hesper_skins::uninstall(skins_dir, req.form.get_field("id"));
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
     });

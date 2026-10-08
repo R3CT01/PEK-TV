@@ -70,8 +70,8 @@ const HESPER_DARK_EXTRAS = {
     glassEdge: 'rgba(255, 255, 255, 0.10)'
 };
 
-// Default look: warm cream (matches the Hesper splash screen), ink-dark text.
-const HESPER_DEFAULT_THEME = {
+// The old default look: warm cream, ink-dark text. Still available as the "cream" preset.
+const HESPER_CREAM = {
     bg: '#E9E2DA',
     bgElevated: '#F3EEE7',
     surface: '#F8F4EE',
@@ -91,6 +91,52 @@ const HESPER_DEFAULT_THEME = {
     glassEdge: 'rgba(60, 48, 38, 0.14)'
 };
 
+
+// Default look: "Ember", a dim, radiant orange. bgImage is the gradient behind the app
+// (a theme/skin that sets its own bg colour without a bgImage gets no gradient).
+const HESPER_DEFAULT_THEME = {
+    bg: '#150a05',
+    bgElevated: '#1e0f07',
+    surface: '#2b160b',
+    surfaceFocused: '#ff8a3d2e',
+    border: '#4d2813',
+    borderFocus: '#ffa24d',
+    text: '#fff0e2',
+    textMuted: '#cfa68a',
+    accent: '#ffa24d',
+    accentGlow: 'rgba(255, 150, 60, 0.5)',
+    radius: '16px',
+    overlay: 'rgba(16, 7, 3, 0.72)',
+    shadow: 'rgba(0, 0, 0, 0.55)',
+    glass: 'rgba(43, 22, 11, 0.55)',
+    glassStrong: 'rgba(30, 15, 7, 0.95)',
+    glassFill: 'rgba(255, 170, 90, 0.07)',
+    glassEdge: 'rgba(255, 170, 90, 0.18)',
+    // A soft orange glow top-right, a deeper ember glow bottom-left, over a dim brown base.
+    bgImage: 'radial-gradient(1300px 820px at 86% -10%, rgba(255, 146, 54, 0.46) 0%, rgba(255, 146, 54, 0) 64%), radial-gradient(1000px 680px at -8% 112%, rgba(224, 84, 24, 0.36) 0%, rgba(224, 84, 24, 0) 66%), radial-gradient(700px 500px at 55% 60%, rgba(180, 70, 20, 0.12) 0%, rgba(180, 70, 20, 0) 70%), linear-gradient(160deg, #2a140a 0%, #180b05 52%, #0f0603 100%)'
+};
+
+// Presets and skins that choose their own background colour are flat unless they ask for an image.
+function hesperMergePreset(preset) {
+    return {
+        ...HESPER_DEFAULT_THEME,
+        ...(hesperIsDark(preset.bg) ? HESPER_DARK_EXTRAS : {}),
+        ...(preset.bg && preset.bgImage === undefined ? { bgImage: 'none' } : {}),
+        ...preset
+    };
+}
+
+// Only plain gradients (or none) are accepted as the background image: no url(), so a skin can't
+// make the app load anything from the network through a token.
+function hesperSafeBgImage(v) {
+    if (typeof v !== 'string') return 'none';
+    const t = v.trim();
+    if (t === 'none') return 'none';
+    const low = t.toLowerCase();
+    if (t.length > 800 || /url\(|image\(|image-set\(|element\(|cross-fade\(|[;{}@\\<]/.test(low)) return 'none';
+    return /^(?:(?:repeating-)?(?:linear|radial|conic)-gradient\([^]*\)\s*,?\s*)+$/.test(low) ? t : 'none';
+}
+
 // The previous dark default, kept as the "midnight" preset.
 const HESPER_MIDNIGHT = {
     ...HESPER_DARK_EXTRAS,
@@ -106,7 +152,8 @@ function hesperIsDark(hex) {
 }
 
 const HESPER_BUILTIN_PRESETS = {
-    cream: { ...HESPER_DEFAULT_THEME },
+    ember: { ...HESPER_DEFAULT_THEME },
+    cream: { ...HESPER_CREAM, bgImage: 'none' },
     midnight: { ...HESPER_MIDNIGHT },
     amoled: {
         bg: '#000000', bgElevated: '#000000', surface: '#0a0a0a', surfaceFocused: '#ffffff14',
@@ -197,6 +244,7 @@ class HesperTheme {
             return this;
         }
         this.tokens[key] = value;
+        if (key === 'bg') this.tokens.bgImage = 'none';     // a custom background colour replaces the gradient
         this._apply();
         this._save();
         this._notify();
@@ -210,7 +258,8 @@ class HesperTheme {
             return this;
         }
         const extras = (partialTokens.bg && !partialTokens.glass && hesperIsDark(partialTokens.bg)) ? HESPER_DARK_EXTRAS : {};
-        this.tokens = { ...this.tokens, ...extras, ...partialTokens };
+        const flat = (partialTokens.bg && partialTokens.bgImage === undefined) ? { bgImage: 'none' } : {};
+        this.tokens = { ...this.tokens, ...extras, ...flat, ...partialTokens };
         this._apply();
         this._save();
         this._notify();
@@ -232,7 +281,7 @@ class HesperTheme {
             return this;
         }
         const preset = this.presets[name];
-        this.tokens = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(preset.bg) ? HESPER_DARK_EXTRAS : {}), ...preset };
+        this.tokens = hesperMergePreset(preset);
         this._apply();
         this._save();
         this._notify();
@@ -241,7 +290,7 @@ class HesperTheme {
 
     /** Register a reusable custom preset a developer defines once, e.g. for a branded add-on */
     registerPreset(name, tokens) {
-        this.presets[name] = { ...HESPER_DEFAULT_THEME, ...(hesperIsDark(tokens.bg) ? HESPER_DARK_EXTRAS : {}), ...tokens };
+        this.presets[name] = hesperMergePreset(tokens);
         return this;
     }
 
@@ -252,7 +301,7 @@ class HesperTheme {
     reset() {
         this.tokens = { ...HESPER_DEFAULT_THEME };
         this._apply();
-        this._save();
+        try { localStorage.removeItem(this.storageKey); } catch (err) { /* ignore */ }
         this._notify();
         return this;
     }
@@ -268,7 +317,7 @@ class HesperTheme {
     _apply() {
         const root = document.documentElement;
         for (const [key, value] of Object.entries(this.tokens)) {
-            root.style.setProperty(`--sx-${this._kebab(key)}`, value);
+            root.style.setProperty(`--sx-${this._kebab(key)}`, key === 'bgImage' ? hesperSafeBgImage(value) : value);
         }
     }
 
@@ -279,6 +328,7 @@ class HesperTheme {
     _save() {
         try {
             localStorage.setItem(this.storageKey, JSON.stringify(this.tokens));
+            localStorage.setItem(this.storageKey + '-v', '2');
         } catch (err) {
             console.warn('[HesperTheme] Could not persist theme:', err);
         }
@@ -295,8 +345,16 @@ class HesperTheme {
                     localStorage.removeItem(this.storageKey);
                     return;
                 }
+                // Saved before the Ember default existed and never customised (an untouched copy of the old
+                // cream default): drop it so the new default shows. Once a theme was saved by this version
+                // the marker is set, so choosing the cream preset on purpose is kept.
+                if (localStorage.getItem(this.storageKey + '-v') !== '2' && Object.keys(HESPER_CREAM).every(k => parsed[k] === HESPER_CREAM[k])) {
+                    localStorage.removeItem(this.storageKey);
+                    return;
+                }
                 const extras = (!parsed.glass && parsed.bg && hesperIsDark(parsed.bg)) ? HESPER_DARK_EXTRAS : {};
-                const merged = { ...this.tokens, ...extras, ...parsed };
+                const flat = (parsed.bg && parsed.bgImage === undefined) ? { bgImage: 'none' } : {};
+                const merged = { ...this.tokens, ...extras, ...flat, ...parsed };
                 if (hesperThemeUnreadable(merged)) {
                     console.warn('[HesperTheme] Saved theme was unreadable (text matches background); using defaults.');
                     localStorage.removeItem(this.storageKey);

@@ -142,7 +142,7 @@ class MainAppAppearanceMethods {
     // ---------------- Skins ----------------
 
     async loadSkins() {
-        const builtIn = { id: 'default', name: 'Hesper Cream', author: 'Hesper', description: 'The standard look: warm cream and ink.' };
+        const builtIn = { id: 'default', name: 'PEK Ember', author: 'PEK', description: 'The standard look: a dim, radiant orange glow.' };
         let skins = [];
         try {
             const res = await fetch('/api/skins');

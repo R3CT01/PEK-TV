@@ -16,6 +16,8 @@ class MainApp extends HesperComponent {
             pluginPick: null,     // Hesper's own .zip picker for plugin install (null = closed)
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
+            skinInstall: null,    // skin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
+            skinRemove: null,     // remove-skin confirmation: null = closed, else { id, name, busy, error }
             appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
             favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
@@ -135,6 +137,8 @@ class MainApp extends HesperComponent {
         }
         if (this.state.resumeAsk) { this.setState({ resumeAsk: null }); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
+        if (this.state.skinRemove) { this.cancelRemoveSkin(); return true; }
+        if (this.state.skinInstall) { this.cancelSkinInstall(); return true; }
         if (this.state.pluginPick) { this.pluginPickBack(); return true; }
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
@@ -226,13 +230,18 @@ class MainApp extends HesperComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
+                    createElement('p', { className: 'sub' }, 'Add a skin from a .zip file. To remove one you added, hold its row.'),
                     createElement('div', { className: 'plugin-list' },
                         ...this.state.skins.map(s => ui.listRow(
                             s.name,
-                            [s.author ? `by ${s.author}` : '', s.description || ''].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
+                            [s.version ? `v${s.version}` : '', s.author ? `by ${s.author}` : '', s.description || ''].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
                             () => this.applySkin(s.id),
-                            { statusDot: s.id === this.state.activeSkin }
+                            Object.assign({ statusDot: s.id === this.state.activeSkin },
+                                HesperSkinInstaller.isBuiltin(s.id) ? {} : { onLongPress: () => this.askRemoveSkin(s) })
                         ))
+                    ),
+                    createElement('div', { className: 'section-actions' },
+                        ui.button('Install skin from .zip', () => this.startSkinInstall(), { variant: 'primary' })
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -360,6 +369,8 @@ class MainApp extends HesperComponent {
             this._renderNetPicker(),
             this._renderResumeAskModal(),
             this._renderPluginPickModal(),
+            this._renderSkinInstallModal(),
+            this._renderSkinRemoveModal(),
             this._renderPluginInstallModal(),
             this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
