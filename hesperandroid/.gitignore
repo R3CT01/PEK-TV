@@ -1,0 +1,37 @@
+# Compiled binaries
+backend/media_core
+backend/core_test
+backend/bin/
+*.o
+*.out
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Runtime data
+sources.tsv
+media_cache.tsv
+*.tsv
+
+# Secrets / local config
+.env
+*.env
+*.key
+
+# Logs
+*.log
+nohup.out
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~
+.nomedia
+
+# optional torrent build inputs (cloned by the workflow)
+android/libtorrent/
+android/boost/

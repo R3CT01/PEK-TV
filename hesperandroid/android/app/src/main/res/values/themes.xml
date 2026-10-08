@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown the instant the app launches, before the splash video starts. -->
+    <style name="Theme.Hesper.Splash" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@color/hesper_cream</item>
+    </style>
+</resources>
