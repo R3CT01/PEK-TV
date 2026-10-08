@@ -1,7 +1,27 @@
 {
   "name": "PEK Ember",
   "author": "PEK",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "The standard look: a dim, radiant orange glow.",
-  "hesper_api": 1
+  "hesper_api": 1,
+  "tokens": {
+    "bg": "#140b07",
+    "bgElevated": "#1b0f0a",
+    "surface": "#26150d",
+    "surfaceFocused": "#ff8a3d26",
+    "border": "#3d2314",
+    "borderFocus": "#ff8a3d",
+    "text": "#fff3ea",
+    "textMuted": "#c9a590",
+    "accent": "#ff8a3d",
+    "accentGlow": "rgba(255, 138, 61, 0.40)",
+    "radius": "16px",
+    "overlay": "rgba(10, 5, 3, 0.75)",
+    "shadow": "rgba(0, 0, 0, 0.55)",
+    "glass": "rgba(30, 16, 10, 0.50)",
+    "glassStrong": "rgba(27, 15, 10, 0.94)",
+    "glassFill": "rgba(255, 190, 140, 0.06)",
+    "glassEdge": "rgba(255, 170, 110, 0.14)",
+    "bgImage": "radial-gradient(ellipse at 50% -10%, rgba(255, 122, 42, 0.30) 0%, rgba(255, 122, 42, 0.12) 38%, rgba(20, 11, 7, 0) 72%), radial-gradient(ellipse at 50% 115%, rgba(255, 90, 20, 0.18) 0%, rgba(20, 11, 7, 0) 60%)"
+  }
 }

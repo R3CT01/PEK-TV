@@ -163,6 +163,21 @@ class MainAppAppearanceMethods {
         }
         if (!skins.some(s => s.id === 'default')) skins.unshift(builtIn);
         this.setState({ skins });
+        this._ensureEmberOnce();
+    }
+
+    // PEK Ember used to have no colours of its own, so it showed the plain cream theme.
+    // Once, for someone on the default skin who never changed the colours, apply it for real.
+    _ensureEmberOnce() {
+        try {
+            if (localStorage.getItem('hesper-ember-seen')) return;
+            localStorage.setItem('hesper-ember-seen', '1');
+            if (this.state.activeSkin !== 'default') return;
+            const t = this.props.engine.theme.getAll();
+            const untouched = !localStorage.getItem('hesper-theme') ||
+                (!t.bgImage && Object.keys(HESPER_DEFAULT_THEME).every(k => t[k] === HESPER_DEFAULT_THEME[k]));
+            if (untouched) this.applySkin('default');
+        } catch (e) { /* storage unavailable: nothing to do */ }
     }
 
     // Choosing a skin sets its colours (tokens) and swaps its stylesheet.

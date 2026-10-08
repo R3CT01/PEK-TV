@@ -171,6 +171,17 @@ function hesperContrast(a, b) {
     return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
+// A skin's bgImage must be a plain CSS gradient: no url(), no @import, no escapes.
+// Returns the cleaned value, or '' if it isn't allowed.
+function hesperSafeBgImage(v) {
+    if (typeof v !== 'string') return '';
+    const s = v.trim();
+    if (!s || s.length > 800) return '';
+    if (!/^(repeating-)?(radial|linear|conic)-gradient\(/i.test(s)) return '';
+    if (/url\(|image-set\(|image\(|element\(|@|\\|[;{}<>]/i.test(s)) return '';
+    return s;
+}
+
 // True if a token set would make the UI unreadable (text same as its background).
 function hesperThemeUnreadable(t) {
     const pairs = [['text', 'bg'], ['text', 'surface'], ['text', 'bgElevated']];
@@ -210,7 +221,9 @@ class HesperTheme {
             return this;
         }
         const extras = (partialTokens.bg && !partialTokens.glass && hesperIsDark(partialTokens.bg)) ? HESPER_DARK_EXTRAS : {};
-        this.tokens = { ...this.tokens, ...extras, ...partialTokens };
+        // A skin that sets its own bg without a bgImage gets a flat background (no leftover glow).
+        const flat = (partialTokens.bg && !('bgImage' in partialTokens)) ? { bgImage: '' } : {};
+        this.tokens = { ...this.tokens, ...extras, ...flat, ...partialTokens };
         this._apply();
         this._save();
         this._notify();
@@ -268,7 +281,17 @@ class HesperTheme {
     _apply() {
         const root = document.documentElement;
         for (const [key, value] of Object.entries(this.tokens)) {
+            if (key === 'bgImage') continue;   // handled below: only a plain gradient is allowed
             root.style.setProperty(`--sx-${this._kebab(key)}`, value);
+        }
+        // bgImage: a gradient drawn behind the app (style.css uses html[data-sx-glow]).
+        const glow = hesperSafeBgImage(this.tokens.bgImage);
+        if (glow) {
+            root.style.setProperty('--sx-bg-image', glow);
+            root.setAttribute('data-sx-glow', '1');
+        } else {
+            root.style.removeProperty('--sx-bg-image');
+            root.removeAttribute('data-sx-glow');
         }
     }
 
