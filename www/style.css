@@ -68,6 +68,8 @@ html[data-sx-glow] .hesper-content {
     flex-direction: column;
     padding: 1.5rem 1rem;
     flex-shrink: 0;
+    min-height: 0;          /* the sidebar is never taller than the screen... */
+    overflow: hidden;       /* ...so a long list scrolls inside it instead of spilling out the bottom */
 }
 
 .sidebar-brand {
@@ -82,8 +84,17 @@ html[data-sx-glow] .hesper-content {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    /* room for the focus ring, which would otherwise be clipped by the scroll box */
+    padding: 4px;
+    margin: -4px;
 }
+.sidebar-nav::-webkit-scrollbar { display: none; }
+.sidebar-nav > .nav-item { flex-shrink: 0; }
 
 .nav-item {
     display: flex;
@@ -672,6 +683,9 @@ html[data-sx-glow] .hesper-content {
         flex-direction: row;
         flex: none;
         gap: 0.25rem;
+        overflow: visible;
+        padding: 0;
+        margin: 0;
     }
 
     .nav-item {
@@ -1147,7 +1161,7 @@ html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 280px !important; }
         border-bottom: 1px solid var(--sx-border);
     }
     html[data-layout="topbar"] .sidebar-brand { margin: 0; padding: 0; }
-    html[data-layout="topbar"] .sidebar-nav { flex-direction: row; flex-wrap: wrap; gap: 0.25rem; }
+    html[data-layout="topbar"] .sidebar-nav { flex-direction: row; flex-wrap: wrap; gap: 0.25rem; overflow: visible; padding: 0; margin: 0; }
     html[data-layout="topbar"] .sidebar-footer { margin-left: auto; padding: 0; border-top: none; }
     html[data-layout="topbar"] .nav-item { padding: 0.5rem 0.9rem; }
 }
@@ -1332,3 +1346,6 @@ html.hesper-tv .focusable { -webkit-transition: border-color 0.08s, background-c
 html.hesper-tv .focusable.focused { box-shadow: 0 0 0 2px var(--sx-border-focus); }
 html.hesper-tv .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
 html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { animation: none; }
+
+/* A plugin row with its "show in the sidebar" switch underneath */
+.plugin-row-group { display: flex; flex-direction: column; gap: 0.35rem; }

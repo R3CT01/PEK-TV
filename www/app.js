@@ -111,13 +111,39 @@ class MainApp extends HesperComponent {
         if (id === 'history') this._refreshHistoryAvailability();
     }
 
+    // Plugins that ask for a tab of their own (plugin.json ui.navTab).
+    _tabPlugins() {
+        return (this.state.pluginsList || []).filter(p => p.manifest && p.manifest.ui && p.manifest.ui.navTab);
+    }
+
+    // Which of those the person put in the sidebar. Until they choose, the first three are shown.
+    _sidebarPinned() {
+        let saved = null;
+        try {
+            const v = JSON.parse(localStorage.getItem('hesper_sidebar_plugins') || 'null');
+            if (Array.isArray(v)) saved = v.filter(x => typeof x === 'string');
+        } catch (e) { /* unreadable: use the default */ }
+        const tabs = this._tabPlugins().map(p => p.folder);
+        return saved ? tabs.filter(f => saved.indexOf(f) >= 0) : tabs.slice(0, 3);
+    }
+
+    _setSidebarPinned(folder, on) {
+        const now = this._sidebarPinned().filter(f => f !== folder);
+        if (on) now.push(folder);
+        try { localStorage.setItem('hesper_sidebar_plugins', JSON.stringify(now)); } catch (e) { /* not saved */ }
+        this.setState({});
+    }
+
     _navItems() {
         const items = NAV_ITEMS.slice();
         let at = 1;
         if (this._resumeItems().length) { items.splice(at, 0, RESUME_NAV_ITEM); at++; }
         if ((this.state.history || []).length) items.splice(at, 0, HISTORY_NAV_ITEM);
-        const pluginTabs = (this.state.pluginsList || [])
-            .filter(p => p.manifest && p.manifest.ui && p.manifest.ui.navTab)
+        // Only plugins pinned to the sidebar get a tab of their own; every plugin stays reachable
+        // from the Plugins tab, so twenty plugins no longer push the menu off the screen.
+        const pins = this._sidebarPinned();
+        const pluginTabs = this._tabPlugins()
+            .filter(p => pins.indexOf(p.folder) >= 0)
             .map(p => ({ id: 'plugin:' + p.folder, label: p.manifest.ui.navTab }));
         if (pluginTabs.length) {
             const pluginsAt = items.findIndex(i => i.id === 'plugins');
@@ -261,16 +287,24 @@ class MainApp extends HesperComponent {
         } else if (activeTab === 'plugins') {
             // Built-in plugins can't be removed; installed ones can (hold the row).
             const removable = (p) => !HesperPluginInstaller.isBuiltin(p.folder);
+            const pinned = this._sidebarPinned();
+            const hasTab = (p) => p.manifest && p.manifest.ui && p.manifest.ui.navTab;
             const row = (p) => {
                 const official = HesperPluginInstaller.isOfficial(p.folder);
                 const note = official
                     ? (p.sandboxed ? 'official' : 'official \u00b7 full access')
                     : 'third party \u00b7 sandboxed \u00b7 hold to remove';
-                return ui.listRow(
+                const main = ui.listRow(
                     p.app_name,
                     `${p.folder} \u00b7 ${note}`,
                     () => this.openPlugin(p),
                     { statusDot: true, onLongPress: removable(p) ? () => this.askRemovePlugin(p) : undefined }
+                );
+                if (!hasTab(p)) return main;
+                const on = pinned.indexOf(p.folder) >= 0;
+                return createElement('div', { className: 'plugin-row-group' },
+                    main,
+                    ui.toggle('Show \u201c' + p.manifest.ui.navTab + '\u201d in the sidebar', on, (next) => this._setSidebarPinned(p.folder, next))
                 );
             };
             // Official plugins first, then a separator, then third-party ones.
@@ -327,12 +361,11 @@ class MainApp extends HesperComponent {
         const isPhone = window.matchMedia(PHONE_MQ).matches;
         const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
-                createElement('div', { className: 'sidebar-nav' }, ...navElements),
+                createElement('div', { className: 'sidebar-nav', 'data-keep-scroll': 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
                     createElement('span', { className: 'status-badge' }, 'System Online')
                 )
             );
-        if (sidebar) sidebar.dataset.keepScroll = 'sidebar';
 
         let bottomBar = null;
         if (isPhone) {
