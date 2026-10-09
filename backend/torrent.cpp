@@ -147,7 +147,9 @@ struct Entry {
     Clock::time_point last_access = Clock::now();
     std::map<int, std::shared_ptr<std::vector<char>>> cache;   // downloaded pieces we have read back
     std::deque<int> cache_order;
-    std::map<int, bool> reading;                                // read_piece() issued, answer pending
+    std::map<int, Clock::time_point> reading;                   // read_piece() issued (when), answer pending
+    std::deque<uint64_t> recent_ends;                           // where the last few reads ended (mpv reads from 2+ places)
+    int dl_p0 = -1;                                             // piece the lookahead deadlines were last set from
 };
 
 std::mutex g_mx;
@@ -194,6 +196,8 @@ void selectFile(Entry& e) {
     e.last_piece  = static_cast<int>((e.file_offset + (e.file_size ? e.file_size - 1 : 0)) / static_cast<uint64_t>(e.piece_len));
     e.tail_needed = needsTail(e.files[static_cast<size_t>(idx)].path);
     e.last_end = 0;
+    e.recent_ends.clear();
+    e.dl_p0 = -1;
     e.aimed_piece = -1;
     // By bytes, not by pieces: with 16 MB pieces 40 of them would spread the bandwidth over 640 MB at once
     // and the piece the player needs next would arrive late.
@@ -291,7 +295,6 @@ void ensureSession() {   // g_mx held
     sp.set_int(lt::settings_pack::connections_limit, 60);
     sp.set_int(lt::settings_pack::max_queued_disk_bytes, 4 * 1024 * 1024);
     sp.set_int(lt::settings_pack::send_buffer_watermark, 256 * 1024);
-    sp.set_int(lt::settings_pack::alert_queue_size, 200);
     // Find peers sooner and give up on dead / silent ones sooner: all of it is time spent staring at "Buffering".
     sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
     sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
@@ -363,6 +366,7 @@ std::shared_ptr<Entry> find(const std::string& hash) {
 std::shared_ptr<std::vector<char>> getPiece(Entry& e, int piece, bool (*aborted)(void*), void* ctx) {
     auto lastProgress = Clock::now();
     int lastHave = -1;
+    Clock::time_point readSince{};
     std::unique_lock<std::mutex> lk(g_mx);
     for (;;) {
         // The torrent was removed (stop / evicted for a newer one / idle sweep) while the player was still reading.
@@ -372,8 +376,16 @@ std::shared_ptr<std::vector<char>> getPiece(Entry& e, int piece, bool (*aborted)
         if (c != e.cache.end()) return c->second;
         if (!e.err.empty()) return nullptr;
         if (e.h.have_piece(lt::piece_index_t(piece))) {
-            if (!e.reading[piece]) { e.reading[piece] = true; e.h.read_piece(lt::piece_index_t(piece)); }
-            lastProgress = Clock::now();
+            const auto nowT = Clock::now();
+            if (readSince == Clock::time_point{}) readSince = nowT;
+            else if (nowT - readSince > std::chrono::seconds(20)) return nullptr;   // never read back: fail, do not hang
+            auto rit = e.reading.find(piece);
+            // Issue the read, and issue it again if the answer was lost or failed (not on every 100 ms turn).
+            if (rit == e.reading.end() || nowT - rit->second > std::chrono::seconds(3)) {
+                e.reading[piece] = nowT;
+                e.h.read_piece(lt::piece_index_t(piece));
+            }
+            lastProgress = nowT;
         } else {
             lt::torrent_status st = e.h.status();            // no piece bitfield needed: just the count
             int have = st.num_pieces;
@@ -416,7 +428,7 @@ std::string addFile(const std::string& bytes, int season, int episode, std::stri
 
 bool status(const std::string& hash, Status& out, bool withMap) {
     std::shared_ptr<Entry> e = find(hash);
-    if (!e) return false;
+    if (!e || !e->h.is_valid()) return false;
     lt::torrent_status st = withMap ? e->h.status(lt::torrent_handle::query_pieces) : e->h.status();
 
     std::lock_guard<std::mutex> lk(g_mx);
@@ -491,7 +503,13 @@ int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
         if (!e->h.is_valid()) return -1;
         try {
         e->last_access = Clock::now();
-        bool jumped = offset < e->last_end || offset > e->last_end + 4ull * 1024 * 1024;
+        // A jump is a read far from ALL recent read positions. mpv reads from more than one place at once
+        // (index at the end, audio and video far apart); comparing with the last read only made every such
+        // read look like a seek: deadlines cleared and the whole torrent re-prioritised again and again.
+        bool nearRecent = false;
+        for (uint64_t end : e->recent_ends)
+            if (offset + 8ull * 1024 * 1024 >= end && offset <= end + 4ull * 1024 * 1024) { nearRecent = true; break; }
+        bool jumped = e->recent_ends.empty() ? offset > 4ull * 1024 * 1024 : !nearRecent;
         int p0 = static_cast<int>((e->file_offset + offset) / static_cast<uint64_t>(e->piece_len));
         if (jumped) {
             e->h.clear_piece_deadlines();
@@ -505,9 +523,13 @@ int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
                 e->aimed_piece = p0;
             }
         }
-        for (int k = 0; k < e->lookahead && p0 + k <= e->last_piece; k++) {
-            lt::piece_index_t pi(p0 + k);
-            if (!e->h.have_piece(pi)) e->h.set_piece_deadline(pi, 50 + k * 120);
+        // Each of these is a synchronous call into libtorrent's network thread: once per piece, not once per 256 KB read.
+        if (jumped || p0 != e->dl_p0) {
+            e->dl_p0 = p0;
+            for (int k = 0; k < e->lookahead && p0 + k <= e->last_piece; k++) {
+                lt::piece_index_t pi(p0 + k);
+                if (!e->h.have_piece(pi)) e->h.set_piece_deadline(pi, 50 + k * 120);
+            }
         }
         } catch (const std::exception&) { return -1; }
     }
@@ -528,6 +550,11 @@ int64_t read(const std::string& hash, uint64_t offset, void* buf, size_t len,
     {
         std::lock_guard<std::mutex> lk(g_mx);
         e->last_end = offset + done;
+        const uint64_t endp = offset + done;
+        bool merged = false;
+        for (auto& end : e->recent_ends)
+            if (offset + 8ull * 1024 * 1024 >= end && offset <= end + 4ull * 1024 * 1024) { end = endp; merged = true; break; }
+        if (!merged) { e->recent_ends.push_back(endp); if (e->recent_ends.size() > 4) e->recent_ends.pop_front(); }
     }
     return static_cast<int64_t>(done);
 }
