@@ -1,0 +1,27 @@
+--- a/www/hesperframework.js	2026-10-09 04:18:56.228441188 +0000
++++ b/www/hesperframework.js	2026-10-09 04:18:27.709116141 +0000
+@@ -894,6 +894,11 @@
+     if (!sp || !sp.contains(target)) return false;
+     const c = sp.getBoundingClientRect(), f = current.getBoundingClientRect(), r = target.getBoundingClientRect();
+     const margin = 24, minGap = 100, cap = Math.max(120, Math.round(sp.clientHeight * 0.6));
++    // A press is only "spent" on scrolling when that scroll is big enough to see. A nudge of a few
++    // pixels (the target just poking past the edge) used to eat the key press and leave the highlight
++    // where it was, so Up / Down looked dead; in that case focus moves and the normal scroll-into-view
++    // brings the target fully on screen.
++    const minStep = 48;
+     let need;
+     if (dir === 'down') {
+         if (r.bottom <= c.bottom - margin || r.top - f.bottom <= minGap) return false;
+@@ -902,9 +907,11 @@
+     } else {
+         if (r.top >= c.top + margin || f.top - r.bottom <= minGap) return false;
+         if (sp.scrollTop <= 0) return false;
++        // Only when the target is wholly out of view; a partly visible one just takes focus.
++        if (r.bottom > c.top + margin) return false;
+         need = c.top + margin - r.top;
+     }
+-    if (need <= 0) return false;
++    if (need < minStep) return false;
+     const dy = Math.min(need, cap) * (dir === 'down' ? 1 : -1);
+     hesperAnimateScroll(sp, Math.max(0, Math.min(sp.scrollHeight - sp.clientHeight, sp.scrollTop + dy)), null, 110);
+     return true;
