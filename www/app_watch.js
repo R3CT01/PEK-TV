@@ -32,13 +32,25 @@ class MainAppWatchMethods {
     _saveProgress(id, meta, position, duration) {
         const map = this._readProgress();
         const finished = duration > 0 && position / duration >= RESUME_DONE_RATIO;
-        if (finished && window.HesperSync) window.HesperSync.recordWatched(meta);
+        if (finished && window.HesperSync) window.HesperSync.recordWatched(this._historyMeta(id, meta));
         if (finished || !(position >= RESUME_MIN_SEC)) {
             delete map[id];
         } else {
             map[id] = Object.assign({}, meta, { id: id, position: position, duration: duration > 0 ? duration : 0, updated: Date.now() });
         }
         this._writeProgress(map);
+    }
+
+    // What goes into Watch History: the item plus its artwork, so the card still has a picture later,
+    // even on another device or after the file is gone. Plugin streams bring their own artwork.
+    _historyMeta(id, meta) {
+        const m = Object.assign({}, meta);
+        if (!m.image && !m.torrent) {
+            const P = this.state.posters || {};
+            const art = m.kind === 'movie' ? P['m:' + id] : (P['e:' + id] || P['s:' + m.showTitle]);
+            if (art) m.image = art;
+        }
+        return m;
     }
 
     _removeProgress(id) {
@@ -64,7 +76,7 @@ class MainAppWatchMethods {
     async _ensureLibIndex() {
         const S = window.HesperSync;
         if (this._libIndex && Date.now() - this._libIndex.t < 120000) return this._libIndex.map;
-        const map = {};
+        const map = {}, items = {};
         try {
             const [mv, sh] = await Promise.all([
                 fetch('/api/movies').then(r => r.json()),
@@ -72,14 +84,14 @@ class MainAppWatchMethods {
             ]);
             (mv.movies || []).forEach(m => {
                 const k = S.histKey({ kind: 'movie', title: m.title, year: m.year || 0 });
-                if (k && !map[k]) map[k] = m.id;
+                if (k && !map[k]) { map[k] = m.id; items[k] = { kind: 'movie', id: m.id, title: m.title, year: m.year || 0 }; }
             });
             (sh.shows || []).forEach(show => (show.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
                 const k = S.histKey({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
-                if (k && !map[k]) map[k] = e.id;
+                if (k && !map[k]) { map[k] = e.id; items[k] = { kind: 'episode', id: e.id, showTitle: show.showTitle, season: e.season, episode: e.episode }; }
             })));
         } catch (err) { return null; }
-        this._libIndex = { t: Date.now(), map: map };
+        this._libIndex = { t: Date.now(), map: map, items: items };
         return map;
     }
 
@@ -95,6 +107,24 @@ class MainAppWatchMethods {
         this._libIndex = null;
         const map = await this._ensureLibIndex();
         if (map && this.state.activeTab === 'history') this.setState({ histAvail: map });
+        if (map) this._queueHistoryArt(map);
+    }
+
+    // Pictures for history cards that have none stored (older entries): local files first, then episode stills by title.
+    _queueHistoryArt(avail) {
+        const jobs = [];
+        (this.state.history || []).slice(0, 60).forEach(it => {
+            if (it.image) return;
+            const id = avail && avail[it.key];
+            if (it.kind === 'movie') {
+                if (id) jobs.push({ key: 'm:' + id, url: '/api/movie-details?id=' + encodeURIComponent(id) });
+                return;
+            }
+            const q = '?show=' + encodeURIComponent(it.showTitle) + '&season=' + (it.season | 0) + '&episode=' + (it.episode | 0);
+            jobs.push({ key: id ? 'e:' + id : 'he:' + it.key, url: '/api/episode-details' + q });
+            jobs.push({ key: 's:' + it.showTitle, url: '/api/show-details?title=' + encodeURIComponent(it.showTitle) });
+        });
+        if (jobs.length) this._queuePosters(jobs);
     }
 
     _syncMessage(err) {
@@ -172,7 +202,7 @@ class MainAppWatchMethods {
         clearTimeout(this._autoSyncTimer);
         this._autoSyncTimer = setTimeout(() => {
             // Don't rebuild the screen under a text box or a video: try again shortly instead of dropping the sync.
-            if (this.state.syncUi.mode || this._player) { this._autoSync(20000); return; }
+            if (this.state.syncUi.mode || this._player || this.state.searchOpen) { this._autoSync(20000); return; }
             this._runSync({});
         }, delayMs || 0);
     }
@@ -308,24 +338,152 @@ class MainAppWatchMethods {
         this._autoSync(500);
     }
 
+    // ---------------- Watch History cards ----------------
+
+    _historyArt(it, id) {
+        if (it.image) return it.image;
+        const P = this.state.posters || {};
+        if (it.kind === 'movie') return (id && P['m:' + id]) || '';
+        return (id && P['e:' + id]) || P['he:' + it.key] || P['s:' + it.showTitle] || '';
+    }
+
+    _historyTitle(it) { return it.kind === 'movie' ? it.title : it.showTitle; }
+
+    _historySub(it) {
+        return it.kind === 'movie' ? (it.year ? String(it.year) : '') : 'Season ' + it.season + ' \u00b7 Episode ' + it.episode;
+    }
+
+    // Everything we can say about where an item is: on this device's library, and the plugins that streamed it.
+    //   here  = file on THIS device (checked live)   libWas = it was played from a library (maybe another device's)
+    //   plugs = [{ id, name, plugin }]  plugin = the installed plugin, or null when it is not installed here
+    _historySources(it, id) {
+        const list = this.state.pluginsList || [];
+        const plugs = (Array.isArray(it.plug) ? it.plug : []).map(pg => {
+            const inst = list.find(x => x.folder === pg.id) || null;
+            return { id: pg.id, name: (inst && inst.app_name) || pg.name || 'A plugin', plugin: inst };
+        });
+        return { here: !!id, libWas: !!it.lib, plugs: plugs };
+    }
+
+    _historyChips(it, src) {
+        const { createElement } = this.props.engine;
+        const chips = [];
+        const chip = (text, cls) => chips.push(createElement('span', { className: 'sx-chip ' + cls }, text));
+        if (src.here) chip('Your library', 'on');
+        else if (src.libWas) chip('Library \u00b7 not on this device', 'off');
+        src.plugs.forEach(pg => chip(pg.plugin ? pg.name : pg.name + ' \u00b7 not installed', pg.plugin ? 'on' : 'off'));
+        if (!chips.length) chip(this.state.histAvail ? 'Source unknown' : 'Checking\u2026', 'off');
+        return createElement('div', { className: 'sx-hist-chips' }, ...chips);
+    }
+
+    _historyCard(it, fmt) {
+        const { createElement, ui } = this.props.engine;
+        const avail = this.state.histAvail;
+        const id = avail ? avail[it.key] : null;
+        const src = this._historySources(it, id);
+        const title = this._historyTitle(it);
+        const img = this._historyArt(it, id);
+        const when = ['Watched ' + fmt(it.watchedAt), it.count > 1 ? it.count + ' times' : ''].filter(Boolean).join(' \u00b7 ');
+
+        const thumb = createElement('div', { className: 'sx-hist-thumb' });
+        const placeholder = () => createElement('div', { className: 'sx-hist-ph' }, String(title || '?').trim().charAt(0).toUpperCase());
+        if (img) {
+            const im = createElement('img', { src: img, alt: '' });
+            im.decoding = 'async';
+            im.addEventListener('error', () => { if (im.parentNode) im.parentNode.replaceChild(placeholder(), im); });
+            thumb.appendChild(im);
+        } else {
+            thumb.appendChild(placeholder());
+        }
+
+        const sub = this._historySub(it);
+        const el = createElement('div', { className: 'empty-state focusable sx-card sx-hist-card', onClick: () => this.setState({ histOpen: it }) },
+            thumb,
+            createElement('div', { className: 'sx-hist-body' },
+                createElement('h3', {}, title),
+                sub ? createElement('p', {}, sub) : null,
+                createElement('p', {}, when),
+                this._historyChips(it, src)));
+        return ui._longPress(el, () => ui.toast(title + (sub ? ' \u00b7 ' + sub : '') + ' \u00b7 ' + when));
+    }
+
     _renderHistory() {
         const { createElement, ui } = this.props.engine;
         const items = (this.state.history || []).slice(0, 300);
-        const avail = this.state.histAvail;
         if (!items.length) return ui.card('No watch history yet', 'Things you finish watching will be listed here.');
         const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
-        const rows = items.map(it => {
-            const title = it.kind === 'movie' ? it.title : `${it.showTitle} \u00b7 S${it.season}E${it.episode}`;
-            const here = avail ? !!avail[it.key] : null;     // null = still checking
-            const sub = [it.kind === 'movie' && it.year ? String(it.year) : '', 'Watched ' + fmt(it.watchedAt), it.count > 1 ? `${it.count} times` : '',
-                here === true ? 'On this device' : here === false ? 'Not on this device' : ''].filter(Boolean).join(' \u00b7 ');
-            return ui.listRow(title, sub, null, { statusDot: here === true });
-        });
         return createElement('div', {},
-            createElement('div', { className: 'plugin-list' }, ...rows),
+            ui.grid(items.map(it => this._historyCard(it, fmt)), { minColWidth: '340px', className: 'sx-hist-grid' }),
             createElement('div', { className: 'section-actions' },
                 ui.button(this.state.syncUi.confirmClear ? 'Tap again to clear all history' : 'Clear Watch History', () => this.clearWatchHistory()))
         );
+    }
+
+    // Tapping a card: a bigger picture and the way to get to it (library, plugin, or both).
+    _renderHistoryModal() {
+        const it = this.state.histOpen;
+        if (!it) return null;
+        const { createElement, ui } = this.props.engine;
+        const avail = this.state.histAvail;
+        const id = avail ? avail[it.key] : null;
+        const src = this._historySources(it, id);
+        const img = this._historyArt(it, id);
+        const close = () => this.setState({ histOpen: null });
+        const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); } catch (e) { return ''; } };
+        const sub = [this._historySub(it), 'Watched ' + fmt(it.watchedAt), it.count > 1 ? it.count + ' times' : ''].filter(Boolean).join(' \u00b7 ');
+
+        const rows = [];
+        if (src.here) {
+            rows.push(createElement('p', { className: 'sub' }, 'This is in the library on this device.'));
+            rows.push(createElement('div', { className: 'section-actions' },
+                ui.button('Open in Your Library', () => this._openHistoryInLibrary(it), { variant: 'primary' })));
+        } else if (src.libWas) {
+            rows.push(createElement('p', { className: 'sub' }, 'You watched this from a library, but the file is not in a library on this device.'));
+        }
+        src.plugs.forEach(pg => {
+            if (pg.plugin) {
+                rows.push(createElement('p', { className: 'sub' }, 'You watched this with ' + pg.name + '.'));
+                rows.push(createElement('div', { className: 'section-actions' },
+                    ui.button('Open ' + pg.name, () => this._openHistoryPlugin(pg), { variant: src.here ? undefined : 'primary' })));
+            } else {
+                rows.push(createElement('p', { className: 'sub' }, 'You watched this with ' + pg.name + ', which is not installed on this device. Install it in Settings \u2192 Plugins to find it again.'));
+            }
+        });
+        if (!rows.length) {
+            rows.push(createElement('p', { className: 'sub' }, avail
+                ? 'This is not in a library on this device and no source was saved for it.'
+                : 'Checking your library\u2026'));
+        }
+
+        const body = createElement('div', {},
+            sub ? createElement('p', { className: 'sub' }, sub) : null,
+            img ? createElement('img', { className: 'detail-image sx-hist-modal-img', src: img, alt: '' }) : null,
+            createElement('h2', { className: 'sub-heading' }, 'Where to find it'),
+            ...rows);
+        return ui.modal(this._historyTitle(it), body, close);
+    }
+
+    // Jumps to the item in the Movies / TV Shows tab and opens its page.
+    _openHistoryInLibrary(it) {
+        const m = this._libIndex && this._libIndex.items && this._libIndex.items[it.key];
+        if (!m) return;
+        this.setState({ histOpen: null, moreOpen: false });
+        if (m.kind === 'movie') {
+            this.setState({ activeTab: 'movies' });
+            this.loadLibrary('movies');
+            this.openMovieDetail({ id: m.id, title: m.title, year: m.year });
+        } else {
+            this.setState({ activeTab: 'shows', showNav: { show: m.showTitle, season: m.season } });
+            this.loadLibrary('shows');
+            this.loadShowInfo(m.showTitle);
+            this.openEpisodeDetail(m.showTitle, { id: m.id, season: m.season, episode: m.episode });
+        }
+    }
+
+    _openHistoryPlugin(pg) {
+        if (!pg || !pg.plugin) return;
+        this.setState({ histOpen: null });
+        this.openPlugin(pg.plugin);
     }
 
     // ---------------- Plugin backup (see plugin_backup.js) ----------------

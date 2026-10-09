@@ -61,6 +61,41 @@
         return { kind: m.kind, title: m.title || '', year: m.year || 0, showTitle: m.showTitle || '', season: m.season || 0, episode: m.episode || 0 };
     }
 
+    // ---------------- where something came from ----------------
+    // Kept small: the cloud caps each history item at 2000 characters.
+    //   lib   = 1 when it was played from a media library
+    //   plug  = [{ id, name }] plugins that streamed it (max 4)
+    //   image = artwork URL (poster or still) when one was known
+    function cleanUrl(u) { u = String(u == null ? '' : u); return /^https?:\/\//i.test(u) && u.length <= 400 ? u : ''; }
+
+    function sourceInfo(meta) {
+        var out = { lib: 0, plug: [] };
+        if (!meta) return out;
+        var og = meta.origin && meta.origin.name ? meta.origin : null;
+        if (og) out.plug.push({ id: String(og.id || '').slice(0, 80), name: String(og.name).slice(0, 60) });
+        else if (meta.torrent) out.plug.push({ id: '', name: 'A plugin' });
+        else out.lib = 1;
+        return out;
+    }
+
+    // Joins what an entry already knows with new source info. Returns { fields, changed }.
+    function mergeExtras(old, info, img) {
+        old = old || {};
+        var plug = [];
+        (Array.isArray(old.plug) ? old.plug : []).concat(info && Array.isArray(info.plug) ? info.plug : []).forEach(function (p) {
+            if (!p || typeof p !== 'object' || plug.length >= 4) return;
+            var id = String(p.id || ''), name = String(p.name || '');
+            if (!plug.some(function (q) { return q.id === id && (id || q.name === name); })) plug.push({ id: id.slice(0, 80), name: name.slice(0, 60) });
+        });
+        var fields = {};
+        if (old.lib || (info && info.lib)) fields.lib = 1;
+        if (plug.length) fields.plug = plug;
+        var image = cleanUrl(img) || cleanUrl(old.image);
+        if (image) fields.image = image;
+        var before = JSON.stringify({ lib: old.lib ? 1 : undefined, plug: Array.isArray(old.plug) && old.plug.length ? old.plug : undefined, image: old.image || undefined });
+        return { fields: fields, changed: JSON.stringify(fields) !== before };
+    }
+
     // ---------------- local watch history ----------------
     function readHistory() { return getJson(K.history, {}); }
     function writeHistory(map) { setJson(K.history, map); }
@@ -73,8 +108,19 @@
         var map = readHistory();
         var old = map[key];
         var alive = old && !old.deleted;
-        if (alive && now - old.watchedAt < REWATCH_WINDOW) return false;
-        map[key] = Object.assign(identity(meta), { watchedAt: now, count: alive ? (old.count || 1) + 1 : 1, updated: now });
+        var info = sourceInfo(meta), img = meta.image;
+        if (alive && now - old.watchedAt < REWATCH_WINDOW) {
+            // Same watch, but it may tell us something new (seen in a plugin as well as the library, artwork found ...).
+            var mx = mergeExtras(old, info, img);
+            if (mx.changed) {
+                map[key] = Object.assign({}, old, mx.fields, { updated: now });
+                writeHistory(map);
+                try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }
+            }
+            return false;
+        }
+        map[key] = Object.assign(identity(meta), mergeExtras(alive ? old : null, info, img).fields,
+            { watchedAt: now, count: alive ? (old.count || 1) + 1 : 1, updated: now });
         writeHistory(map);
         try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }   // lets the app sync soon
         return true;
@@ -319,7 +365,13 @@
                 var local = hmap[r.key];
                 if (local && local.updated > r.updated) return;                 // ours is newer; it gets pushed
                 if (!local || local.updated < r.updated) {
-                    hmap[r.key] = r.deleted ? { deleted: 1, updated: r.updated } : Object.assign({}, r.data, { updated: r.updated });
+                    var next = r.deleted ? { deleted: 1, updated: r.updated } : Object.assign({}, r.data, { updated: r.updated });
+                    // Keep what this device knew about where it came from (library AND plugin stay listed).
+                    if (!r.deleted && local && !local.deleted) {
+                        var rd = r.data || {};
+                        Object.assign(next, mergeExtras(local, { lib: rd.lib ? 1 : 0, plug: Array.isArray(rd.plug) ? rd.plug : [] }, rd.image).fields);
+                    }
+                    hmap[r.key] = next;
                     changed = true;
                 }
                 seen.h[r.key] = r.updated;

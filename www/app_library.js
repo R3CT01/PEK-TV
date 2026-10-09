@@ -81,6 +81,11 @@ class MainAppLibraryMethods {
     }
 
     _flushPosters() {
+        // A repaint would close the keyboard under the search box: hold the new posters back until it is closed.
+        if (this.state.searchOpen) {
+            if (!this._posterTimer) this._posterTimer = setTimeout(() => { this._posterTimer = null; this._flushPosters(); }, 1500);
+            return;
+        }
         const pending = this._posterPending;
         this._posterPending = {};
         const keys = Object.keys(pending);
@@ -264,12 +269,134 @@ class MainAppLibraryMethods {
         win._sandbox = p.sandboxed ? p.sandbox : null;   // what Back asks first while this window is on top
     }
 
+
+    // ---------------- Search your library ----------------
+    // One box that looks through movies, shows and episodes on this device. The results are drawn straight into
+    // their own box (not through setState) so typing never repaints the screen and the keyboard stays open.
+
+    openSearch() {
+        this._searchQ = '';
+        this._searchCache = null;
+        this._searchSeq = 0;
+        this._searchFocusPending = true;
+        this.setState({ searchOpen: true, moreOpen: false });
+    }
+
+    closeSearch() {
+        clearTimeout(this._searchT);
+        this._searchBox = null;
+        this.setState({ searchOpen: false });
+    }
+
+    async _searchData() {
+        const c = this._searchCache;
+        if (c && Date.now() - c.t < 120000) return c;
+        try {
+            const [mv, sh] = await Promise.all([
+                fetch('/api/movies').then(r => r.json()),
+                fetch('/api/shows').then(r => r.json())
+            ]);
+            this._searchCache = { t: Date.now(), movies: mv.movies || [], shows: sh.shows || [] };
+            return this._searchCache;
+        } catch (e) { return { movies: [], shows: [], error: true }; }
+    }
+
+    _onSearchInput(v) {
+        this._searchQ = v;
+        clearTimeout(this._searchT);
+        this._searchT = setTimeout(() => {
+            if (this._searchBox && this._searchBox.isConnected) this._fillSearch(this._searchBox);
+        }, 140);
+    }
+
+    async _fillSearch(box) {
+        const { createElement, ui } = this.props.engine;
+        const clear = () => { while (box.firstChild) box.removeChild(box.firstChild); };
+        const say = (text) => { clear(); box.appendChild(createElement('p', { className: 'sub' }, text)); };
+        const norm = (t) => String(t == null ? '' : t).toLowerCase().replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ').trim();
+        const words = norm(this._searchQ).split(' ').filter(Boolean);
+        const seq = ++this._searchSeq;
+        if (!words.length) { say('Type a title to search your library.'); this.props.engine.refreshFocusList(); return; }
+        const data = await this._searchData();
+        if (seq !== this._searchSeq || !box.isConnected) return;
+        if (data.error) { say('Could not reach your library. Is the server running?'); this.props.engine.refreshFocusList(); return; }
+
+        const hit = (hay) => { const h = norm(hay); return words.every(w => h.indexOf(w) >= 0); };
+        const pad = (n) => (n < 10 ? '0' : '') + n;
+        const movies = data.movies.filter(m => hit(m.title + ' ' + (m.year || '') + ' ' + (m.filename || ''))).slice(0, 24);
+        const shows = data.shows.filter(s => hit(s.showTitle)).slice(0, 24);
+        const eps = [];
+        data.shows.forEach(sh => (sh.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
+            if (eps.length < 30 && hit(sh.showTitle + ' season ' + se.season + ' episode ' + e.episode + ' s' + pad(se.season) + 'e' + pad(e.episode) + ' ' + (e.filename || ''))) eps.push({ show: sh.showTitle, e: e });
+        })));
+
+        clear();
+        const P = this.state.posters || {};
+        const heading = (t) => box.appendChild(createElement('h2', { className: 'sub-heading' }, t));
+        if (movies.length) {
+            heading('Movies');
+            box.appendChild(ui.grid(movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : '', P['m:' + m.id], () => {
+                this.closeSearch();
+                this.openMovieDetail(m);
+            })), { minColWidth: '120px', className: 'sx-poster-grid' }));
+        }
+        if (shows.length) {
+            heading('TV Shows');
+            box.appendChild(ui.grid(shows.map(s => ui.posterCard(s.showTitle, '', P['s:' + s.showTitle], () => {
+                this.closeSearch();
+                this.setState({ activeTab: 'shows', showNav: { show: s.showTitle, season: null } });
+                this.loadLibrary('shows');
+                this.loadShowInfo(s.showTitle);
+            })), { minColWidth: '120px', className: 'sx-poster-grid' }));
+        }
+        if (eps.length) {
+            heading('Episodes');
+            box.appendChild(createElement('div', { className: 'plugin-list' }, ...eps.map(x => ui.listRow(
+                x.show + ' \u00b7 S' + x.e.season + 'E' + x.e.episode, null, () => {
+                    this.closeSearch();
+                    this.setState({ activeTab: 'shows', showNav: { show: x.show, season: x.e.season } });
+                    this.loadLibrary('shows');
+                    this.loadShowInfo(x.show);
+                    this.openEpisodeDetail(x.show, x.e);
+                }))));
+        }
+        if (!movies.length && !shows.length && !eps.length) say('Nothing in your library matches \u201c' + this._searchQ.trim() + '\u201d.');
+        this.props.engine.refreshFocusList();
+    }
+
+    _renderSearchModal() {
+        if (!this.state.searchOpen) return null;
+        const { createElement, ui } = this.props.engine;
+        const results = createElement('div', { className: 'sx-search-results' });
+        this._searchBox = results;
+        const input = ui.textInput('', this._searchQ || '', (v) => this._onSearchInput(v), { placeholder: 'Search movies, shows and episodes' });
+        const body = createElement('div', {}, input, results);
+        const modal = ui.modal('Search your library', body, () => this.closeSearch());
+        const panel = modal.firstChild;
+        if (panel && panel.classList) panel.classList.add('sx-search-panel');
+        this._fillSearch(results);
+        if (this._searchFocusPending) {
+            this._searchFocusPending = false;
+            setTimeout(() => { const f = input.querySelector('input'); if (f && f.isConnected) f.focus(); }, 60);
+        }
+        return modal;
+    }
+
     // ---------------- Rendering ----------------
 
-    _renderHeader(title, showRefresh = false) {
+    _renderHeader(title, showRefresh = false, showSearch = showRefresh) {
         const { createElement } = this.props.engine;
         const weatherPlugin = this._findWeatherPlugin();
         const { refreshCooldown, refreshing } = this.state;
+
+        let searchBtn = null;
+        if (showSearch) {
+            searchBtn = createElement('button', {
+                className: 'theme-launch-btn refresh-btn focusable',
+                title: 'Search your library',
+                onClick: () => this.openSearch()
+            }, createElement('span', {}, 'Search'));
+        }
 
         let refreshBtn = null;
         if (showRefresh) {
@@ -292,6 +419,7 @@ class MainAppLibraryMethods {
         return createElement('div', { className: 'content-header' },
             createElement('h1', { className: 'content-title' }, title),
             createElement('div', { className: 'header-actions' },
+                searchBtn,
                 refreshBtn,
                 this._renderClockBadge(),
                 createElement('button', {
