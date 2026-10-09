@@ -22,6 +22,7 @@ class MainApp extends HesperComponent {
             favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
             favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
+            exitAsk: false,       // "exit Hesper?" confirmation (Android Back at the top level)
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
@@ -162,6 +163,7 @@ class MainApp extends HesperComponent {
         if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
         const { engine } = this.props;
         if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
+        if (this.state.exitAsk) { this.setState({ exitAsk: false }); return true; }   // Back on the exit question = stay
         // while minimized the player is just a bar; Back belongs to the app
         if (this._player && !this._player.mini) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
@@ -184,8 +186,38 @@ class MainApp extends HesperComponent {
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
         if (this.state.netPicker) { this.netBack(); return true; }
         if (this.state.picker) { this.closePicker(); return true; }
-        if (this.state.activeTab === 'shows') return this.showBack();
-        return false;
+        if (this.state.activeTab === 'shows' && this.showBack()) return true;
+        return this._askExit();   // nothing left to close: on Android ask before leaving
+    }
+
+    // ---------------- exit confirmation (Android) ----------------
+    // Only the Android app can really exit; in a browser / desktop this returns false and Back behaves as before.
+    _askExit() {
+        const a = window.HesperAndroid;
+        if (!a || typeof a.exitApp !== 'function') return false;
+        this.setState({ exitAsk: true });
+        return true;
+    }
+
+    // Clears what the app itself cached in the page (NOT favorites, watch progress or settings), then the
+    // Android side clears its own caches, stops everything and ends the process.
+    _confirmExit() {
+        this.setState({ exitAsk: false });
+        try { sessionStorage.clear(); } catch (e) { /* nothing to clear */ }
+        try { localStorage.removeItem('hesper_posters_v1'); } catch (e) { /* nothing to clear */ }   // poster cache
+        try { if (window.caches && caches.keys) caches.keys().then(ks => ks.forEach(k => caches.delete(k))); } catch (e) { /* none */ }
+        try { window.HesperAndroid.exitApp(); } catch (e) { console.warn('[Hesper] exit failed', e); }
+    }
+
+    _renderExitModal() {
+        if (!this.state.exitAsk) return null;
+        const { createElement, ui } = this.props.engine;
+        const close = () => this.setState({ exitAsk: false });
+        const body = createElement('div', {},
+            createElement('p', { className: 'sub' }, 'Hesper will stop running and its temporary cache will be cleared.'),
+            createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
+                ui.button('Yes, exit', () => this._confirmExit(), { variant: 'primary' })));
+        return ui.modal('Are you sure you want to exit?', body, close);   // the modal's own button is "Close" = stay
     }
 
     render() {
@@ -420,6 +452,7 @@ class MainApp extends HesperComponent {
             this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
             this._renderFavoriteRemoveModal(),
+            this._renderExitModal(),
             this._renderBusy(),
             this._renderAppCloseModal()
         );

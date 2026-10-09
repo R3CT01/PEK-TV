@@ -2,6 +2,7 @@ package com.hesper.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.UiModeManager
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -12,6 +13,9 @@ import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import android.view.SurfaceView
@@ -304,8 +308,40 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    // The web UI asks "Are you sure you want to exit?" itself (app.js goBack). This native question is only the
+    // fallback for when the page is not there (e.g. the server failed to start) and Back would just leave.
     override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
+        if (webView.canGoBack()) { webView.goBack(); return }
+        AlertDialog.Builder(this)
+            .setTitle("Are you sure you want to exit?")
+            .setMessage("Hesper will stop running and its temporary cache will be cleared.")
+            .setPositiveButton("Yes, exit") { _, _ -> exitApp() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Full exit: clears the app's cache (WebView cache + cache folders; favorites, watch progress and
+     * settings are kept), stops playback and the background server / plugins, and ends the process
+     * so nothing keeps running.
+     */
+    fun exitApp() {
+        runOnUiThread {
+            try { webView.clearCache(true); webView.clearHistory() } catch (e: Throwable) { Log.w("Hesper", "clearCache failed", e) }
+            try { mpv.destroy() } catch (e: Throwable) { /* already gone */ }
+            Thread {
+                try {
+                    cacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                    externalCacheDir?.listFiles()?.forEach { it.deleteRecursively() }
+                    codeCacheDir.listFiles()?.forEach { it.deleteRecursively() }
+                } catch (e: Throwable) { Log.w("Hesper", "cache cleanup failed", e) }
+                runOnUiThread {
+                    finishAndRemoveTask()
+                    // The server and Python plugins run on their own threads; ending the process stops them all.
+                    Handler(Looper.getMainLooper()).postDelayed({ Process.killProcess(Process.myPid()) }, 300)
+                }
+            }.start()
+        }
     }
 }
 
@@ -336,6 +372,9 @@ class HesperBridge(private val activity: MainActivity, private val mpv: MpvContr
     }
 
     @JavascriptInterface fun isPhone(): Boolean = phone
+
+    // "Yes, exit" in the web UI's exit question: clear cache, stop everything, close (see MainActivity.exitApp).
+    @JavascriptInterface fun exitApp() { activity.exitApp() }
 
     // False on devices with no file picker (most TV boxes); the web UI uses it to avoid the picker.
     @JavascriptInterface fun canPickFiles(): Boolean = activity.canPickFiles()
