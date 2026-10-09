@@ -336,7 +336,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                '<path d="M15.4 9.2a4.2 4.2 0 0 1 0 5.6M17.9 6.7a7.6 7.6 0 0 1 0 10.6" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
         subs: '<rect x="3" y="5.2" width="18" height="13.6" rx="3.2" fill="none" stroke="currentColor" stroke-width="1.9"/>' +
               '<path d="M7 10.8h3.2M12.6 10.8H17M7 14.6h5.2M14.6 14.6H17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>',
-        close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'
+        close: '<path d="M6.5 6.5l11 11M17.5 6.5l-11 11" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>',
+        skip: '<path fill="currentColor" d="M4.5 6v12l8-6-8-6zm8.5 0v12l8-6-8-6z"/>'
     };
 
     function setIcon(btn, name) {
@@ -546,6 +547,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._waitSince = 0;
             this._waitTimer = null;
             this._streamTick = null;
+            // Skip intro / recap (skip_segments.js). opts.skipMeta = what is playing.
+            this.skip = window.HesperSkip ? new window.HesperSkip.Controller(this, opts.skipMeta || null) : null;
             this._streamFlight = false;
         }
 
@@ -571,6 +574,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 if (!this._dragging && !this._pendingSeek) this.state.position = d.position || 0;
                 this._settleSeek();
                 this._updateTime();
+                if (this.skip) this.skip.tick(this.state.position, this.state.duration);
                 this._reportProgress(false);
             });
             b.on('state', (d) => {
@@ -584,6 +588,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             b.on('tracks', (d) => {
                 this.state.audio = d.audio || [];
                 this.state.subtitles = d.subtitles || [];
+                if (this.skip && d.chapters) this.skip.setChapters(d.chapters);
                 this._updateButtons();
             });
             b.on('ended', () => this.close());
@@ -609,6 +614,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             clearTimeout(this._waitTimer);
             clearTimeout(this._seekDebounce);
             this._reportProgress(true);
+            if (this.skip) this.skip.destroy();
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
@@ -698,6 +704,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             const end = el('div', 'hp-grp hp-grp-end');
             end.appendChild(mk('audio', 'Audio', 'audio', () => this._openMenu('audio'), 'hp-sm'));
             end.appendChild(mk('subs', 'Subtitles', 'subs', () => this._openMenu('subs'), 'hp-sm'));
+            end.appendChild(mk('skip', 'Skip intro / recap', 'skip', () => this._openMenu('skip'), 'hp-sm'));
             end.appendChild(mk('exit', 'Exit', 'close', () => this._askExit(), 'hp-sm'));
             const row = el('div', 'hp-row');
             row.appendChild(left);
@@ -739,6 +746,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             root.appendChild(bottom);
             root.appendChild(this.menuEl);
             root.appendChild(this.confirmEl);
+            if (this.skip) { this.skip.mount(root); this.btns.skipnow = this.skip.el; }
 
             // tap the picture to show / hide the controls
             root.addEventListener('pointerdown', (ev) => {
@@ -998,8 +1006,10 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 
         _focusOrder() {
             const order = ['seek', 'rew', 'play', 'fwd'];
+            if (this.skip && this.skip.cur) order.push('skipnow');
             if (this.state.audio.length > 1) order.push('audio');
             if (this.state.subtitles.length > 0) order.push('subs');
+            if (this.skip && this.skip.available()) order.push('skip');
             order.push('exit');
             return order;
         }
@@ -1010,6 +1020,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.btns.play.title = this.state.playing ? 'Pause' : 'Play';
             this.btns.audio.style.display = this.state.audio.length > 1 ? '' : 'none';
             this.btns.subs.style.display = this.state.subtitles.length > 0 ? '' : 'none';
+            this.btns.skip.style.display = this.skip && this.skip.available() ? '' : 'none';
             const waiting = this.state.buffering && this.errorBox.style.display !== 'block';
             this.spinner.classList.toggle('hp-on', waiting);
             if (this._streamUrl) this._renderStream();
@@ -1074,6 +1085,13 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         }
 
         _openMenu(kind) {
+            if (kind === 'skip') {
+                if (!this.skip) return;
+                this.menu = { kind: 'skip', items: this.skip.menuItems(), index: 0 };
+                this.mode = 'menu';
+                this._renderMenu();
+                return;
+            }
             const tracks = kind === 'audio' ? this.state.audio : this.state.subtitles;
             const items = kind === 'subs'
                 ? [{ id: null, label: 'Off', selected: !tracks.some(t => t.selected) }].concat(tracks)
@@ -1089,7 +1107,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         _renderMenu() {
             const m = this.menu;
             this.menuEl.textContent = '';
-            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : 'Subtitles'));
+            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : (m.kind === 'skip' ? 'Skip intro & recap' : 'Subtitles')));
             m.items.forEach((it, i) => {
                 const row = el('div', 'hp-menu-item' + (i === m.index ? ' hp-focused' : ''),
                     (it.selected ? '\u2713  ' : '     ') + it.label);
@@ -1103,6 +1121,13 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             const m = this.menu;
             if (!m) return;
             const item = m.items[m.index];
+            if (m.kind === 'skip') {
+                try { item.action(); } catch (e) { console.error('[HesperPlayer]', e); }
+                m.items = this.skip.menuItems();
+                m.index = Math.min(m.index, m.items.length - 1);
+                this._renderMenu();
+                return;
+            }
             const list = m.kind === 'audio' ? this.state.audio : this.state.subtitles;
             if (m.kind === 'audio') this.backend.setAudioTrack(item.id);
             else this.backend.setSubtitleTrack(item.id);
@@ -1155,7 +1180,10 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 // controls are hidden: arrows skip, OK pauses
                 if (key === 'left') this._seekBy(-10);
                 else if (key === 'right') this._seekBy(10);
-                else if (key === 'ok') this._toggle();
+                else if (key === 'ok') {
+                    if (this.skip && this.skip.cur) { this.skip.skip(); return; }
+                    this._toggle();
+                }
                 this._show();
                 return;
             }

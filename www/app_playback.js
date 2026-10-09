@@ -17,6 +17,7 @@ class MainAppPlaybackMethods {
         const player = new window.HesperPlayer({
             title: title || '',
             backend: backend || new window.HtmlVideoBackend(),
+            skipMeta: track ? track.meta : null,
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
                 if (typeof onCloseCb === 'function') { try { onCloseCb(); } catch (e) { /* ignore */ } }
@@ -178,7 +179,8 @@ class MainAppPlaybackMethods {
             d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
             d.image ? createElement('img', { className: 'detail-image', src: d.image, alt: '' }) : null,
             createElement('div', { className: 'glass-panel' }, createElement('p', {}, text)),
-            d.playId ? this._renderPlayButtons(d) : null
+            d.playId ? this._renderPlayButtons(d) : null,
+            d.meta ? this._renderWatchedButton(d) : null
         );
         return ui.modal(d.title, body, () => this.closeDetail());
     }
