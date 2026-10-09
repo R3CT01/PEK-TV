@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "torrent.h"
+#include "range_stream.h"
 
 #include <algorithm>
 #include <cctype>
@@ -655,6 +656,16 @@ void registerTorrentRoutes(httplib::Server& svr) {
         if (!validHash(hash) || !torrent::status(hash, s)) { jsonErr(res, 404, "Unknown torrent"); return; }
         if (s.state == "error") { jsonErr(res, 502, s.error); return; }
         if (s.state == "metadata" || s.file_index < 0) { jsonErr(res, 409, "Still fetching the file list"); return; }
+
+        // 32-bit builds: a file this big cannot be described by httplib's own (32-bit) range code, so the
+        // stream is served with 64-bit ranges instead (see range_stream.h).
+        if (rangestream::needsOwnRanges(s.file_size)) {
+            rangestream::serve(req, res, s.file_size, mimeFor(s.file_name),
+                [hash](uint64_t off, char* buf, size_t len, httplib::DataSink& sink) -> int64_t {
+                    return torrent::read(hash, off, buf, len, clientGone, &sink);
+                });
+            return;
+        }
 
         res.set_header("Accept-Ranges", "bytes");
         res.set_content_provider(
