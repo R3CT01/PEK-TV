@@ -20,6 +20,7 @@
 #include <atomic>
 #include <chrono>
 #include <random>
+#include <mutex>
 
 namespace fs = std::filesystem;
 
@@ -183,6 +184,32 @@ std::string normalizeName(const std::string& s) {
     for (unsigned char c : s) if (std::isalnum(c)) out += static_cast<char>(std::tolower(c));
     return out;
 }
+
+// First "key": 123 number as text ("" if absent). Used for TMDb ids.
+std::string extractJsonNumber(const std::string& json, const std::string& key) {
+    std::string needle = "\"" + key + "\"";
+    size_t pos = json.find(needle);
+    if (pos == std::string::npos) return "";
+    pos = json.find(':', pos);
+    if (pos == std::string::npos) return "";
+    ++pos;
+    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\n' || json[pos] == '\t')) ++pos;
+    size_t end = pos;
+    while (end < json.size() && std::isdigit((unsigned char)json[end])) ++end;
+    return json.substr(pos, end - pos);
+}
+
+// ---- Intro / recap timestamps from a community database (IntroDB) ----------
+// The page asks us (not the database) so the request leaves from the backend, and the
+// answers are cached: one lookup per episode, one show -> IMDb id lookup per show.
+constexpr const char* kIntroDbHost = "https://api.introdb.app";
+constexpr long long kSkipHitTtlMs  = 7LL * 24 * 3600 * 1000;   // found: keep a week
+constexpr long long kSkipMissTtlMs = 6LL * 3600 * 1000;        // not found / offline: retry in 6 h
+
+struct SkipCacheEntry { std::string body; long long at = 0; bool found = false; };
+std::mutex g_skip_mu;
+std::map<std::string, SkipCacheEntry> g_skip_cache;       // "imdb|s|e" -> raw answer
+std::map<std::string, std::string> g_imdb_by_show;       // normalized show name -> imdb id
 
 // Rescan throttle: at most one manual rescan per 10 seconds, and
 // never two at once. Enforced here so it can't be bypassed from the browser.
@@ -948,6 +975,78 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
                             "\", \"overview\": \"" + jsonEscape(overview) +
                             "\", \"still\": \"" + jsonEscape(still_url) + "\"}";
         res.set_content(json, "application/json");
+    });
+
+    // 6d. Intro / recap times for one episode, so the player can offer Skip Intro / Skip Recap
+    //     without anyone marking them. Show name -> TMDb id -> IMDb id -> IntroDB.
+    //     Always answers 200 with {"found": bool, ...}; the raw database answer is passed on
+    //     in "data" and the page picks the intro / recap out of it.
+    svr.Get("/api/skip-segments", [](const httplib::Request& req, httplib::Response& res) {
+        auto reply = [&](bool found, const std::string& imdb, const std::string& data) {
+            std::string out = std::string("{\"found\": ") + (found ? "true" : "false") +
+                              ", \"imdb\": \"" + jsonEscape(imdb) + "\"" +
+                              (data.empty() ? "" : ", \"data\": " + data) + "}";
+            res.set_header("Cache-Control", "no-store");
+            res.set_content(out, "application/json");
+        };
+        std::string show = req.get_param_value("show");
+        int season  = std::atoi(req.get_param_value("season").c_str());
+        int episode = std::atoi(req.get_param_value("episode").c_str());
+        if (show.empty() || season < 0 || episode <= 0) {
+            res.status = 400;
+            res.set_content("{\"error\": \"Missing show, season or episode\"}", "application/json");
+            return;
+        }
+
+        // 1) IMDb id for the show (cached per show for the life of the app).
+        const std::string showKey = normalizeName(show);
+        std::string imdb;
+        { std::lock_guard<std::mutex> lk(g_skip_mu); auto it = g_imdb_by_show.find(showKey); if (it != g_imdb_by_show.end()) imdb = it->second; }
+        if (imdb.empty()) {
+            httplib::Client tm(tmdbProxyUrl());
+            applyTls(tm);
+            tm.set_connection_timeout(5);
+            tm.set_read_timeout(6);
+            auto s1 = tm.Get(("/search/tv?query=" + httplib::encode_uri(show)).c_str());
+            if (!s1 || s1->status != 200) { reply(false, "", ""); return; }
+            size_t rp = s1->body.find("\"results\"");
+            std::string tvId = extractJsonNumber(rp != std::string::npos ? s1->body.substr(rp) : s1->body, "id");
+            if (tvId.empty()) { reply(false, "", ""); return; }
+            auto s2 = tm.Get(("/tv/" + tvId + "?append_to_response=external_ids").c_str());
+            if (!s2 || s2->status != 200) { reply(false, "", ""); return; }
+            imdb = extractJsonString(s2->body, "imdb_id");
+            if (imdb.empty()) { reply(false, "", ""); return; }
+            std::lock_guard<std::mutex> lk(g_skip_mu);
+            g_imdb_by_show[showKey] = imdb;
+        }
+
+        // 2) The episode's segments (cached; misses expire sooner so a new submission shows up).
+        const std::string key = imdb + "|" + std::to_string(season) + "|" + std::to_string(episode);
+        const long long now = nowMs();
+        {
+            std::lock_guard<std::mutex> lk(g_skip_mu);
+            auto it = g_skip_cache.find(key);
+            if (it != g_skip_cache.end() && now - it->second.at < (it->second.found ? kSkipHitTtlMs : kSkipMissTtlMs)) {
+                reply(it->second.found, imdb, it->second.body);
+                return;
+            }
+        }
+        httplib::Client db(kIntroDbHost);
+        applyTls(db);
+        db.set_connection_timeout(5);
+        db.set_read_timeout(6);
+        db.set_follow_location(true);
+        auto r = db.Get(("/segments?imdb_id=" + httplib::encode_uri(imdb) + "&season=" + std::to_string(season) +
+                         "&episode=" + std::to_string(episode)).c_str());
+        bool ok = r && r->status == 200 && !r->body.empty() && (r->body[0] == '{' || r->body[0] == '[');
+        if (!r || (r->status != 200 && r->status != 404)) { reply(false, imdb, ""); return; }   // offline / rate limited: do not cache
+        std::string body = ok ? r->body : "";
+        {
+            std::lock_guard<std::mutex> lk(g_skip_mu);
+            if (g_skip_cache.size() > 500) g_skip_cache.clear();
+            g_skip_cache[key] = SkipCacheEntry{body, now, ok};
+        }
+        reply(ok, imdb, body);
     });
 
     // 7. Manually trigger a rescan (e.g. a "Refresh Library" button).
