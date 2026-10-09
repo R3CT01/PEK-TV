@@ -539,6 +539,7 @@
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,
         sync: sync, deleteAccount: deleteAccount, cloud: cloud,
         isLinked: function () { return !!getToken(); },
+        api: function () { return API; },
         _setApi: function (u) { API = u; },
         _setClock: function (fn) { clock.now = fn; }
     };
