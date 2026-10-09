@@ -407,13 +407,124 @@ class MainAppWatchMethods {
         return ui._longPress(el, () => ui.toast(title + (sub ? ' \u00b7 ' + sub : '') + ' \u00b7 ' + when));
     }
 
+    // ---- Episodes of one show share one card (movies and unparsed items stay single) ----
+    _showKey(name) { return String(name || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+
+    _historyGroups(items) {
+        const out = [], byShow = {};
+        items.forEach(it => {
+            const k = it.kind === 'episode' && it.showTitle ? this._showKey(it.showTitle) : '';
+            if (!k) { out.push({ single: it }); return; }
+            if (byShow[k]) { byShow[k].eps.push(it); return; }
+            byShow[k] = { show: it.showTitle, k: k, eps: [it] };
+            out.push(byShow[k]);                                   // the card sits where the show's newest item was
+        });
+        return out;
+    }
+
+    _historyShowCard(g, fmt) {
+        const { createElement, ui } = this.props.engine;
+        const avail = this.state.histAvail;
+        const latest = g.eps.reduce((x, y) => ((y.watchedAt || 0) > (x.watchedAt || 0) ? y : x), g.eps[0]);
+        // Where the show can be found = everything its episodes were seen through.
+        const src = { here: false, libWas: false, plugs: [] };
+        g.eps.forEach(ep => {
+            const s = this._historySources(ep, avail ? avail[ep.key] : null);
+            src.here = src.here || s.here;
+            src.libWas = src.libWas || s.libWas;
+            s.plugs.forEach(pg => { if (!src.plugs.some(x => x.id === pg.id)) src.plugs.push(pg); });
+        });
+        const P = this.state.posters || {};
+        const img = P['s:' + g.show] || this._historyArt(latest, avail ? avail[latest.key] : null);
+        const n = g.eps.length;
+        const sub = n + (n === 1 ? ' episode' : ' episodes') + ' watched';
+        const last = 'Last: Season ' + latest.season + ' \u00b7 Episode ' + latest.episode + ' \u00b7 ' + fmt(latest.watchedAt);
+
+        const thumb = createElement('div', { className: 'sx-hist-thumb' });
+        const placeholder = () => createElement('div', { className: 'sx-hist-ph' }, String(g.show || '?').trim().charAt(0).toUpperCase());
+        if (img) {
+            const im = createElement('img', { src: img, alt: '' });
+            im.decoding = 'async';
+            im.addEventListener('error', () => { if (im.parentNode) im.parentNode.replaceChild(placeholder(), im); });
+            thumb.appendChild(im);
+        } else {
+            thumb.appendChild(placeholder());
+        }
+        const el = createElement('div', { className: 'empty-state focusable sx-card sx-hist-card', onClick: () => this._openHistoryShow(g.k) },
+            thumb,
+            createElement('div', { className: 'sx-hist-body' },
+                createElement('h3', {}, g.show),
+                createElement('p', {}, sub),
+                createElement('p', {}, last),
+                this._historyChips(latest, src)));
+        return ui._longPress(el, () => ui.toast(g.show + ' \u00b7 ' + sub + ' \u00b7 ' + last));
+    }
+
+    // Opens a show's episode list and makes sure each of its episodes has its own picture (not only the newest 60 history items).
+    _openHistoryShow(k) {
+        this.setState({ histShow: k });
+        const avail = this.state.histAvail;
+        const jobs = [];
+        (this.state.history || []).forEach(it => {
+            if (it.kind !== 'episode' || !it.showTitle || this._showKey(it.showTitle) !== k || it.image) return;
+            const id = avail && avail[it.key];
+            jobs.push({ key: id ? 'e:' + id : 'he:' + it.key,
+                url: '/api/episode-details?show=' + encodeURIComponent(it.showTitle) + '&season=' + (it.season | 0) + '&episode=' + (it.episode | 0) });
+        });
+        if (jobs.length) this._queuePosters(jobs);
+    }
+
+    // Tapping a show card: its watched episodes by season. Tapping one opens the usual "where to find it" popup on top.
+    _renderHistoryShowModal() {
+        const k = this.state.histShow;
+        if (!k) return null;
+        const eps = (this.state.history || []).filter(it => it.kind === 'episode' && it.showTitle && this._showKey(it.showTitle) === k);
+        if (!eps.length) return null;
+        const { createElement, ui } = this.props.engine;
+        const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
+        const bySeason = {};
+        eps.forEach(ep => { const s = ep.season | 0; (bySeason[s] = bySeason[s] || []).push(ep); });
+        const rows = [];
+        Object.keys(bySeason).map(Number).sort((x, y) => x - y).forEach(sn => {
+            rows.push(createElement('h2', { className: 'sub-heading' }, sn === 0 ? 'Specials' : 'Season ' + sn));
+            const cards = bySeason[sn].sort((x, y) => (x.episode | 0) - (y.episode | 0)).map(ep => {
+                const sub = ['Watched ' + fmt(ep.watchedAt), ep.count > 1 ? ep.count + ' times' : ''].filter(Boolean).join(' \u00b7 ');
+                const id = this.state.histAvail ? this.state.histAvail[ep.key] : null;
+                const P = this.state.posters || {};
+                const still = ep.image || (id && P['e:' + id]) || P['he:' + ep.key] || '';
+                const thumb = createElement('div', { className: 'sx-hist-thumb sx-hist-still' });
+                const placeholder = () => createElement('div', { className: 'sx-hist-ph' }, 'E' + (ep.episode | 0));
+                if (still) {
+                    const im = createElement('img', { src: still, alt: '' });
+                    im.decoding = 'async';
+                    im.addEventListener('error', () => { if (im.parentNode) im.parentNode.replaceChild(placeholder(), im); });
+                    thumb.appendChild(im);
+                } else {
+                    thumb.appendChild(placeholder());
+                }
+                const el = createElement('div', { className: 'empty-state focusable sx-card sx-hist-card', onClick: () => this.setState({ histOpen: ep }) },
+                    thumb,
+                    createElement('div', { className: 'sx-hist-body' },
+                        createElement('h3', {}, 'Episode ' + ep.episode),
+                        createElement('p', {}, sub)));
+                return ui._longPress(el, () => ui.toast(eps[0].showTitle + ' \u00b7 Season ' + sn + ' \u00b7 Episode ' + ep.episode + ' \u00b7 ' + sub));
+            });
+            rows.push(ui.grid(cards, { minColWidth: '300px', className: 'sx-hist-grid' }));
+        });
+        const body = createElement('div', {},
+            createElement('p', { className: 'sub' }, eps.length + (eps.length === 1 ? ' episode' : ' episodes') + ' watched'),
+            ...rows);
+        return ui.modal(eps[0].showTitle, body, () => this.setState({ histShow: null }));
+    }
+
     _renderHistory() {
         const { createElement, ui } = this.props.engine;
         const items = (this.state.history || []).slice(0, 300);
         if (!items.length) return ui.card('No watch history yet', 'Things you finish watching will be listed here.');
         const fmt = (t) => { try { return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return ''; } };
         return createElement('div', {},
-            ui.grid(items.map(it => this._historyCard(it, fmt)), { minColWidth: '340px', className: 'sx-hist-grid' }),
+            ui.grid(this._historyGroups(items).map(g => g.single ? this._historyCard(g.single, fmt) : this._historyShowCard(g, fmt)),
+                { minColWidth: '340px', className: 'sx-hist-grid' }),
             createElement('div', { className: 'section-actions' },
                 ui.button(this.state.syncUi.confirmClear ? 'Tap again to clear all history' : 'Clear Watch History', () => this.clearWatchHistory()))
         );
@@ -467,7 +578,7 @@ class MainAppWatchMethods {
     _openHistoryInLibrary(it) {
         const m = this._libIndex && this._libIndex.items && this._libIndex.items[it.key];
         if (!m) return;
-        this.setState({ histOpen: null, moreOpen: false });
+        this.setState({ histOpen: null, histShow: null, moreOpen: false });
         if (m.kind === 'movie') {
             this.setState({ activeTab: 'movies' });
             this.loadLibrary('movies');
@@ -482,7 +593,7 @@ class MainAppWatchMethods {
 
     _openHistoryPlugin(pg) {
         if (!pg || !pg.plugin) return;
-        this.setState({ histOpen: null });
+        this.setState({ histOpen: null, histShow: null });
         this.openPlugin(pg.plugin);
     }
 
