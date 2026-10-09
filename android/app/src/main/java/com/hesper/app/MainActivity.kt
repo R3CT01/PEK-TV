@@ -384,4 +384,6 @@ class HesperBridge(private val activity: MainActivity, private val mpv: MpvContr
     @JavascriptInterface fun mpvSetAudio(id: Int) { activity.runOnUiThread { mpv.setAudio(id) } }
     @JavascriptInterface fun mpvSetSubtitle(id: Int) { activity.runOnUiThread { mpv.setSubtitle(id) } }
     @JavascriptInterface fun mpvDestroy() { activity.runOnUiThread { mpv.destroy() } }
+    @JavascriptInterface fun mpvSetLite(on: Boolean) { activity.runOnUiThread { mpv.setLite(on) } }
+    @JavascriptInterface fun mpvIsLite(): Boolean = mpv.isLite()
 }
