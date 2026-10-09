@@ -65,10 +65,10 @@ Official plugins are published by you on the site's owner page, so one pipeline 
 **4. The app**: in `www/plugin_store.js` set `HESPER_SUBMIT_SITE` to your Pages address if you want the app to show where to share a plugin.
 
 Using it
-   - Anyone: open the site, sign in with GitHub, choose a plugin .zip, **Send for review**. In Hesper: Settings -> Plugins -> Plugin Store
+   - Anyone: open the site, sign in with GitHub, choose a plugin .zip, **Send for review**. In PEK: Settings -> Plugins -> Plugin Store
      -> pick a shelf -> tap a plugin -> Install. No sign-in is needed to download.
    - You: open `owner.html` on the site and sign in. **Waiting** lists uploads; **Review** shows the permissions and lets you read every
-     text file (code included) before **Approve** or **Reject**. **Publish official** puts a plugin on the Hesper Official shelf at once.
+     text file (code included) before **Approve** or **Reject**. **Publish official** puts a plugin on the PEK Official shelf at once.
 
 Rules the worker enforces: the author shown on Community plugins is always the uploader's GitHub name; nobody can overwrite an
 official plugin or someone else's upload; 10 plugins per account; 8 MB per plugin; 20 uploads a day per account. Approval names

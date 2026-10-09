@@ -1,7 +1,7 @@
 // ============================================================
-// Hesper Plugin Store (in the app): browse and install. Nothing else.
+// PEK Plugin Store (in the app): browse and install. Nothing else.
 //
-//   Hesper Official   plugins published by the owner.
+//   PEK Official      plugins published by the owner.
 //   Community         plugins other people uploaded on the GitHub Pages site and the owner approved.
 //
 // Uploading is NOT done from the app. People upload on the GitHub Pages site (site/), signed in
@@ -155,14 +155,14 @@ class MainAppPluginStoreMethods {
                 ));
             });
             if (!ps.busy && !(ps.items || []).length && !ps.error) rows.push(sub(official ? 'Nothing on the Official shelf yet.' : 'No community plugins yet.'));
-            return wrap(official ? 'Hesper Official' : 'Community plugins',
-                sub(official ? 'Published by the Hesper owner. Tap one to install it.'
+            return wrap(official ? 'PEK Official' : 'Community plugins',
+                sub(official ? 'Published by the PEK owner. Tap one to install it.'
                              : 'Uploaded by other people and approved by the owner. Only install plugins from people you trust. Tap one to see what it asks for.'),
                 err, note, busy, list(...rows));
         }
 
         const rows = [
-            ui.listRow('Hesper Official', 'Published by the Hesper owner', () => this.storeOpenShelf('official')),
+            ui.listRow('PEK Official', 'Published by the PEK owner', () => this.storeOpenShelf('official')),
             ui.listRow('Community plugins', 'Made by other people, approved by the owner', () => this.storeOpenShelf('community'))
         ];
         return wrap('Plugin Store',
