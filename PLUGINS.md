@@ -22,6 +22,17 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with Hesper runs *
 - `library`: lets the plugin's **Python backend** call `hesper_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
 - No permission listed means no access.
 - `ui` (optional, only changes Hesper's own screens): `navTab` adds a sidebar / More entry that opens the plugin; `reloadOnInstall` reloads the app right after installing; `closeOnRemove` makes Hesper ask the user to close and reopen it after the plugin is removed (it cannot be dismissed until the app is really closed). The install and remove screens say so.
+- `warning` (optional): a screen shown **before** the permissions screen when someone installs your plugin. Use it for disclaimers or advice you want every user to see. The user can cancel from it; "continue" moves on to the normal install screen. Plain text only (no HTML or links). Leave it out and no extra screen is shown.
+
+  ```json
+  "warning": {
+    "title": "Before you install",
+    "text": ["First paragraph (max 400 characters).", "Second paragraph (up to 5 in total)."],
+    "button": "I understand, continue"
+  }
+  ```
+
+  `title` (max 60) and `button` (max 40) are optional and default to the text above. Shortcuts: `"warning": "one paragraph"` or `"warning": ["para 1", "para 2"]`.
 
 ## UI (`ui.js`)
 
