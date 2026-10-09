@@ -19,9 +19,9 @@ android {
     defaultConfig {
         applicationId 'com.hesper.app'
         minSdk 26
-        // 28 keeps old-style storage access working for reading media
-        // folders; this app is sideloaded, not on Play.
-        targetSdk 28
+        // 36 = Android 16, the level Google Play requires for new apps and
+        // updates from Aug 31, 2026.
+        targetSdk 36
         versionCode 1
         versionName '0.1.0'
 

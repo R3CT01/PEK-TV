@@ -55,6 +55,8 @@ target_link_libraries(hesper
     ${OPENSSL_ROOT}/lib/libcrypto.a
     log)
 target_compile_definitions(hesper PRIVATE _FILE_OFFSET_BITS=64)
+# Google Play (apps targeting Android 15+) needs native libraries aligned for 16 KB memory pages.
+target_link_options(hesper PRIVATE -Wl,-z,max-page-size=16384)
 
 # NFS via libnfs: off by default so a libnfs build problem can never break the
 # app. To turn it on, clone https://github.com/sahlberg/libnfs into android/libnfs

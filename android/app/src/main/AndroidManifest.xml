@@ -2,7 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- Reading the video folders: READ_EXTERNAL_STORAGE up to Android 12, READ_MEDIA_VIDEO from Android 13 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <!-- Network folder discovery: mDNS needs a multicast lock on Wi-Fi -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
@@ -56,7 +58,9 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:banner="@drawable/tv_banner"
         android:usesCleartextTraffic="true"
-        android:requestLegacyExternalStorage="true">
+        android:enableOnBackInvokedCallback="false">
+        <!-- enableOnBackInvokedCallback=false: apps targeting Android 16 otherwise stop getting
+             KEYCODE_BACK / onBackPressed, which the web UI (TV remote Back) and the exit dialog rely on. -->
 
         <activity
             android:name=".MainActivity"

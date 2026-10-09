@@ -12,6 +12,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -20,6 +21,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.SurfaceView
 import android.view.View
+import android.view.WindowInsets
 import android.widget.FrameLayout
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
@@ -94,6 +96,17 @@ class MainActivity : Activity() {
         val layout = FrameLayout(this)
         layout.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
         layout.addView(webView, FrameLayout.LayoutParams(-1, -1))
+        // Android 15+ forces edge-to-edge: the window runs under the system bars and display cutout.
+        // Pad the layout by those insets so the UI keeps sitting inside the safe area, as before.
+        // (Older Android versions already lay out inside the bars, so nothing is added there.)
+        if (Build.VERSION.SDK_INT >= 35) {
+            layout.setBackgroundColor(Color.BLACK)
+            layout.setOnApplyWindowInsetsListener { v, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                WindowInsets.CONSUMED
+            }
+        }
         setContentView(layout)
         webView.requestFocus()
 
@@ -149,7 +162,10 @@ class MainActivity : Activity() {
 
     // ---- storage permission ----
     private val storageRequest = 4712
-    private val storagePerm = Manifest.permission.READ_EXTERNAL_STORAGE
+    // Android 13+ replaced READ_EXTERNAL_STORAGE with per-type media permissions. Hesper only scans video.
+    private val storagePerm =
+        if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO
+        else Manifest.permission.READ_EXTERNAL_STORAGE
 
     fun hasStoragePermission(): Boolean =
         checkSelfPermission(storagePerm) == PackageManager.PERMISSION_GRANTED
@@ -310,6 +326,7 @@ class MainActivity : Activity() {
 
     // The web UI asks "Are you sure you want to exit?" itself (app.js goBack). This native question is only the
     // fallback for when the page is not there (e.g. the server failed to start) and Back would just leave.
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (webView.canGoBack()) { webView.goBack(); return }
         AlertDialog.Builder(this)
