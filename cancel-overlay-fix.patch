@@ -1,0 +1,139 @@
+--- a/www/torrent.js
++++ b/www/torrent.js
+@@ -31,10 +31,29 @@
+     const fmtSize = b => b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB';
+ 
+     let busy = false;
++    let cancelActive = null;   // cancels the stream that is starting right now (null when none)
++
++    // Tell the D-pad focus system the box appeared / went away, so the remote's arrows and OK act on the
++    // box (Cancel) and not on the screen behind it. When the box closes, focus goes back to where it was.
++    function refocus(restoreEl) {
++        try {
++            const fw = window.hesperFramework;
++            if (!fw || typeof fw.refreshFocusList !== 'function') return;
++            fw.refreshFocusList();
++            if (restoreEl && restoreEl.isConnected) {
++                const i = fw.focusableElements.indexOf(restoreEl);
++                if (i >= 0) { fw.currentIndex = i; fw._applyFocus(false); }
++            }
++        } catch (e) { /* focus is a nicety, never fatal */ }
++    }
+ 
+     function makeOverlay(title, onCancel) {
++        let prevEl = null;       // what had the highlight before the box opened
++        try { const fw = window.hesperFramework; if (fw) prevEl = fw.focusableElements[fw.currentIndex] || null; } catch (e) { /* ignore */ }
+         const box = document.createElement('div');
+         box.setAttribute('role', 'dialog');
++        box.setAttribute('aria-modal', 'true');
++        box.className = 'hs-stream-overlay';
+         box.style.cssText = 'position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;' +
+             'background:rgba(0,0,0,.72);font-family:inherit;padding:16px';
+         const card = document.createElement('div');
+@@ -53,6 +72,7 @@
+         bar.appendChild(fill);
+         const btn = document.createElement('button');
+         btn.type = 'button';
++        btn.className = 'focusable';
+         btn.textContent = 'Cancel';
+         btn.style.cssText = 'margin-top:16px;padding:10px 18px;border-radius:10px;border:1px solid var(--sx-border,#ffffff33);' +
+             'background:transparent;color:inherit;font-size:15px;cursor:pointer';
+@@ -61,9 +81,10 @@
+         box.appendChild(card);
+         document.body.appendChild(box);
+         btn.focus();
++        refocus();
+         return {
+             set(text, frac) { line.textContent = text; if (frac != null) fill.style.width = Math.max(3, Math.min(100, frac * 100)) + '%'; },
+-            done() { box.remove(); }
++            done() { box.remove(); refocus(prevEl); }
+         };
+     }
+ 
+@@ -93,6 +114,10 @@
+     }
+ 
+     window.HesperTorrent = {
++        // True while the "starting stream" box is up. cancelStarting() cancels it and returns true
++        // (the app's Back handler uses it, so Back cancels instead of acting on the screen behind).
++        isStarting() { return !!cancelActive; },
++        cancelStarting() { if (!cancelActive) return false; cancelActive(); return true; },
+         info() { return call(API + '/info'); },
+         getSettings() { return call(API + '/settings'); },
+         saveSettings(url, key) { return post(API + '/settings', { url: url || '', key: key || '' }); },
+@@ -121,16 +146,30 @@
+             busy = true;
+             let hash = '';
+             let cancelled = false;
+-            const overlay = makeOverlay(opts.title, () => { cancelled = true; });
++            let startP = null;
++            // Cancel must work at once, even while a request to the server is still in flight: every wait
++            // below is raced against this signal instead of only being checked between polls.
++            let signalCancel;
++            const cancelSignal = new Promise(r => { signalCancel = r; });
++            const race = (p) => Promise.race([p, cancelSignal.then(() => { throw new Error('Cancelled'); })]);
++            const doCancel = () => {
++                if (cancelled) return;
++                cancelled = true;
++                overlay.set('Cancelling\u2026');
++                signalCancel();
++            };
++            const overlay = makeOverlay(opts.title, doCancel);
++            cancelActive = doCancel;
+             try {
+                 overlay.set('Contacting the swarm\u2026', 0.03);
+-                const started = await post(API + '/start', { source: opts.source, season: opts.season | 0, episode: opts.episode | 0 });
++                startP = post(API + '/start', { source: opts.source, season: opts.season | 0, episode: opts.episode | 0 });
++                const started = await race(startP);
+                 hash = started.hash;
+                 const t0 = Date.now();
+                 let lastGood = Date.now();
+                 for (;;) {
+                     if (cancelled) throw new Error('Cancelled');
+-                    const s = await call(API + '/' + hash + '/status');
++                    const s = await race(call(API + '/' + hash + '/status'));
+                     if (s.state === 'error') throw new Error(s.error || 'The torrent failed');
+                     if (s.state === 'metadata') {
+                         overlay.set('Getting the file list\u2026 (' + s.peers + ' peers)', 0.05);
+@@ -143,9 +182,10 @@
+                             (s.fileSize ? ' \u00b7 ' + fmtSize(s.fileSize) : ''), 0.1 + 0.9 * (s.bufferProgress || 0));
+                         if (Date.now() - lastGood > NO_PEERS_MS) throw new Error('No one is sending data for this release. Try another one.');
+                     }
+-                    await new Promise(r => setTimeout(r, POLL_MS));
++                    await race(new Promise(r => setTimeout(r, POLL_MS)));
+                 }
+                 overlay.done();
++                cancelActive = null;
+                 const url = window.location.origin + API + '/' + hash + '/stream';
+                 window.HesperHost.playStream(url, opts.title || '', () => {
+                     post(API + '/' + hash + '/stop').catch(() => {});
+@@ -154,7 +194,10 @@
+                 return { hash: hash };
+             } catch (e) {
+                 if (hash) post(API + '/' + hash + '/stop').catch(() => {});
++                // Cancelled before the server even answered /start: stop the torrent it is about to create.
++                else if (startP) startP.then(r => { if (r && r.hash) post(API + '/' + r.hash + '/stop').catch(() => {}); }, () => {});
+                 overlay.done();
++                cancelActive = null;
+                 busy = false;
+                 throw e;
+             }
+--- a/www/app.js
++++ b/www/app.js
+@@ -132,2 +132,4 @@
+     goBack() {
++        // a stream is starting: Back cancels it and nothing behind the box moves
++        if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
+         const { engine } = this.props;
+--- a/www/hesperframework.js
++++ b/www/hesperframework.js
+@@ -1148,6 +1148,9 @@
+     // whole screen, and a modal overlay covers the shell — arrow keys must not
+     // wander onto the hidden elements underneath.
+     _focusScope() {
++        // The "starting stream" box (torrent.js) sits above everything, so focus stays on it.
++        const streamBox = document.querySelectorAll('.hs-stream-overlay');
++        if (streamBox.length) return streamBox[streamBox.length - 1];
+         const wins = this.root.querySelectorAll('.plugin-window');
+         if (wins.length) return wins[wins.length - 1];
+         const modals = this.root.querySelectorAll('.theme-panel-overlay');
