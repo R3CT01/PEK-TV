@@ -1603,7 +1603,7 @@ public:
   FormDataReader formdata_reader_;
 };
 
-using Range = std::pair<ssize_t, ssize_t>;
+using Range = std::pair<int64_t, int64_t>;
 using Ranges = std::vector<Range>;
 
 #ifdef CPPHTTPLIB_SSL_ENABLED
@@ -9084,7 +9084,7 @@ inline bool parse_range_header(const std::string &s, Ranges &ranges) try {
         return;
       }
 
-      ssize_t first = -1;
+      int64_t first = -1;
       if (!lhs.empty()) {
         // Reject an overflowing first-byte-pos; treating it as absent (-1)
         // would turn the range into a suffix range.
@@ -9096,11 +9096,11 @@ inline bool parse_range_header(const std::string &s, Ranges &ranges) try {
         }
       }
 
-      ssize_t last = -1;
+      int64_t last = -1;
       if (!rhs.empty()) {
         // An overflowing last-byte-pos is past any content length, so keeping
         // -1 ("remainder", RFC 9110 14.1.2) is correct here.
-        ssize_t v;
+        int64_t v;
         auto res = detail::from_chars(rhs.data(), rhs.data() + rhs.size(), v);
         if (res.ec == std::errc{}) { last = v; }
       }
@@ -9736,21 +9736,21 @@ inline void coalesce_ranges(Ranges &ranges, size_t content_length) {
     // Handle special cases like in range_error
     if (first_pos == -1 && last_pos == -1) {
       first_pos = 0;
-      last_pos = static_cast<ssize_t>(content_length);
+      last_pos = static_cast<int64_t>(content_length);
     }
 
     if (first_pos == -1) {
-      first_pos = static_cast<ssize_t>(content_length) - last_pos;
-      last_pos = static_cast<ssize_t>(content_length) - 1;
+      first_pos = static_cast<int64_t>(content_length) - last_pos;
+      last_pos = static_cast<int64_t>(content_length) - 1;
     }
 
-    if (last_pos == -1 || last_pos >= static_cast<ssize_t>(content_length)) {
-      last_pos = static_cast<ssize_t>(content_length) - 1;
+    if (last_pos == -1 || last_pos >= static_cast<int64_t>(content_length)) {
+      last_pos = static_cast<int64_t>(content_length) - 1;
     }
 
     // Skip invalid ranges
     if (!(0 <= first_pos && first_pos <= last_pos &&
-          last_pos < static_cast<ssize_t>(content_length))) {
+          last_pos < static_cast<int64_t>(content_length))) {
       continue;
     }
 
@@ -9785,10 +9785,10 @@ inline bool range_error(Request &req, Response &res) {
       return false;
     }
 
-    ssize_t content_len = static_cast<ssize_t>(
+    int64_t content_len = static_cast<int64_t>(
         res.content_length_ ? res.content_length_ : res.body.size());
 
-    std::vector<std::pair<ssize_t, ssize_t>> processed_ranges;
+    std::vector<std::pair<int64_t, int64_t>> processed_ranges;
     size_t overwrapping_count = 0;
 
     // NOTE: The following Range check is based on '14.2. Range' in RFC 9110
@@ -9854,9 +9854,9 @@ inline bool range_error(Request &req, Response &res) {
 inline std::pair<size_t, size_t>
 get_range_offset_and_length(Range r, size_t content_length) {
   assert(r.first != -1 && r.second != -1);
-  assert(0 <= r.first && r.first < static_cast<ssize_t>(content_length));
+  assert(0 <= r.first && r.first < static_cast<int64_t>(content_length));
   assert(r.first <= r.second &&
-         r.second < static_cast<ssize_t>(content_length));
+         r.second < static_cast<int64_t>(content_length));
   (void)(content_length);
   return std::make_pair(static_cast<size_t>(r.first),
                         static_cast<size_t>(r.second - r.first) + 1);
