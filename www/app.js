@@ -127,6 +127,8 @@ class MainApp extends HesperComponent {
     // One "Back" for the whole app, used by the keyboard, the remote and the
     // browser's own Back button. Returns true if it closed or stepped out of something.
     goBack() {
+        // a stream is starting: Back cancels it and nothing behind the box moves
+        if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
         const { engine } = this.props;
         if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
         if (this._player) { this._player.onBack(); return true; }

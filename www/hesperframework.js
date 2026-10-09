@@ -1148,6 +1148,9 @@ class HesperEngine {
     // whole screen, and a modal overlay covers the shell — arrow keys must not
     // wander onto the hidden elements underneath.
     _focusScope() {
+        // The "starting stream" box (torrent.js) sits above everything, so focus stays on it.
+        const streamBox = document.querySelectorAll('.hs-stream-overlay');
+        if (streamBox.length) return streamBox[streamBox.length - 1];
         const wins = this.root.querySelectorAll('.plugin-window');
         if (wins.length) return wins[wins.length - 1];
         const modals = this.root.querySelectorAll('.theme-panel-overlay');
