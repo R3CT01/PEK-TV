@@ -151,13 +151,26 @@ class MpvController(
             m.setOptionString("hwdec", "mediacodec,mediacodec-copy")
             m.setOptionString("ao", "audiotrack,opensles")
             m.setOptionString("keep-open", "no")
+            // Smooth playback on weak TV chips: cheapest scalers, no extra video processing, and let every
+            // codec the chip can decode use hardware. Each option is set on its own, so one this libmpv build
+            // does not know cannot stop the player from starting.
+            for ((key, value) in arrayOf(
+                "hwdec-codecs" to "all",
+                "scale" to "bilinear", "dscale" to "bilinear", "cscale" to "bilinear",
+                "correct-downscaling" to "no", "sigmoid-upscaling" to "no",
+                "deband" to "no", "interpolation" to "no", "dither-depth" to "no",
+                "video-sync" to "audio", "framedrop" to "vo",
+                "vd-lavc-fast" to "yes", "vd-lavc-skiploopfilter" to "nonref"
+            )) {
+                try { m.setOptionString(key, value) } catch (t: Throwable) { Log.w("Hesper", "mpv option $key not set", t) }
+            }
             // Streaming from a torrent: keep a good stretch decoded-ahead AND behind, so scrubbing back and
             // forth inside it needs no new download, and wait for a few seconds after a stall before resuming
             // (resuming at once just stutters again).
             m.setOptionString("cache", "yes")
             m.setOptionString("cache-secs", "60")
-            m.setOptionString("demuxer-max-bytes", "32MiB")
-            m.setOptionString("demuxer-max-back-bytes", "8MiB")
+            m.setOptionString("demuxer-max-bytes", "48MiB")
+            m.setOptionString("demuxer-max-back-bytes", "16MiB")
             m.setOptionString("cache-pause-initial", "no")
             m.setOptionString("cache-pause-wait", "4")
             m.init()
