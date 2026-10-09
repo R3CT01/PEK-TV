@@ -44,6 +44,8 @@ class MainApp extends HesperComponent {
             weatherText: this._readWeather(),
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
             history: this._readHistory(),    // finished items, newest first (see sync.js)
+            histOpen: null,                  // a Watch History card was tapped: the popup with where to find it
+            searchOpen: false,               // the library search box
             histAvail: null,                 // item key -> local file id, null until checked
             syncUi: { busy: false, mode: '', confirmDelete: false, confirmClear: false, msg: '' }
         };
@@ -167,6 +169,8 @@ class MainApp extends HesperComponent {
             engine.windows.back();
             return true;
         }
+        if (this.state.searchOpen) { this.closeSearch(); return true; }
+        if (this.state.histOpen) { this.setState({ histOpen: null }); return true; }
         if (this.state.resumeAsk) { this.setState({ resumeAsk: null }); return true; }
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.skinRemove) { this.cancelRemoveSkin(); return true; }
@@ -331,7 +335,7 @@ class MainApp extends HesperComponent {
             );
         } else if (activeTab === 'history') {
             mainContent = createElement('div', {},
-                this._renderHeader('Watch History'),
+                this._renderHeader('Watch History', false, true),
                 this._renderHistory()
             );
         } else if (activeTab === 'resume') {
@@ -346,7 +350,7 @@ class MainApp extends HesperComponent {
             );
         } else {
             mainContent = createElement('div', {},
-                this._renderHeader(currentLabel),
+                this._renderHeader(currentLabel, false, activeTab === 'dashboard'),
                 ui.card(`Welcome to ${currentLabel}`, 'Select items or configure plugins to populate this section.')
             );
         }
@@ -407,6 +411,8 @@ class MainApp extends HesperComponent {
             this._renderPicker(),
             this._renderNetPicker(),
             this._renderResumeAskModal(),
+            this._renderHistoryModal(),
+            this._renderSearchModal(),
             this._renderPluginPickModal(),
             this._renderSkinInstallModal(),
             this._renderSkinRemoveModal(),

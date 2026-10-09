@@ -1349,3 +1349,62 @@ html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { an
 
 /* A plugin row with its "show in the sidebar" switch underneath */
 .plugin-row-group { display: flex; flex-direction: column; gap: 0.35rem; }
+
+/* ============================================================
+   Watch History cards + library search
+   ============================================================ */
+.sx-hist-grid { gap: 0.9rem; }
+.sx-hist-card {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 1rem;
+    padding: 0.7rem;
+    text-align: left;
+}
+.sx-hist-thumb {
+    flex: 0 0 auto;
+    width: 92px;
+    height: 138px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--sx-bg-elevated);
+}
+.sx-hist-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sx-hist-ph {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: var(--sx-text-muted);
+}
+.sx-hist-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.2rem; }
+.sx-hist-body h3 { margin: 0; font-size: 1.05rem; }
+.sx-hist-body p { margin: 0; font-size: 0.85rem; }
+.sx-hist-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.4rem; }
+.sx-chip {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    border: 1px solid var(--sx-border);
+    background: var(--sx-bg-elevated);
+    color: var(--sx-text);
+    white-space: nowrap;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.sx-chip.on { border-color: var(--sx-accent); }
+.sx-chip.off { color: var(--sx-text-muted); border-style: dashed; }
+.sx-hist-modal-img { max-height: 260px; display: block; margin: 8px auto; }
+.sx-search-panel { width: 820px; }
+.sx-search-results { margin-top: 0.75rem; }
+.sx-search-results .sx-grid { margin-bottom: 0.5rem; }
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-hist-thumb { width: 72px; height: 108px; }
+    .sx-hist-card { gap: 0.7rem; }
+}
