@@ -114,7 +114,7 @@ const HesperPluginInstaller = (() => {
         const m = (typeof HesperSandbox !== 'undefined' && HesperSandbox.normalizeManifest)
             ? HesperSandbox.normalizeManifest(raw)
             : { name: typeof raw.name === 'string' ? raw.name : null, version: null,
-                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false },
+                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false, watched: false },
                 provides: { stream: false },
                 ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -131,6 +131,7 @@ const HesperPluginInstaller = (() => {
             library: m.permissions.library === true,
             torrent: m.permissions.torrent === true,
             favorites: m.permissions.favorites === true,
+            watched: m.permissions.watched === true,
             providers: m.permissions.providers === true,
             plugins: m.permissions.plugins === true,
             stream: !!(m.provides && m.provides.stream === true),

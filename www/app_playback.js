@@ -20,6 +20,7 @@ class MainAppPlaybackMethods {
         const player = new window.HesperPlayer({
             title: title || '',
             backend: backend || new window.HtmlVideoBackend(),
+            skipMeta: track ? track.meta : null,   // lets the player offer Skip Intro / Skip Recap (library files and torrents)
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
                 if (typeof onCloseCb === 'function') { try { onCloseCb(); } catch (e) { /* ignore */ } }

@@ -637,6 +637,16 @@
                 function () { toggleFav(it); }, { selected: isFav })));
             if (S.favMsg) kids.push(ui.text(S.favMsg));
         } else kids.push(backBtn);
+        if (hesper.watched && it.type === 'movie' && !d.loading) {
+            if (S.seen === undefined || S.seenFor !== it.id) {
+                S.seenFor = it.id; S.seen = false;
+                hesper.watched.check([{ kind: 'movie', title: it.title, year: it.year || 0 }]).then(function (r) { S.seen = !!(r && r[0]); redraw(); }, function () {});
+            }
+            kids.push(ui.button(S.seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', function () {
+                var next = !S.seen;
+                hesper.watched.set({ kind: 'movie', title: it.title, year: it.year || 0 }, next).then(function () { S.seen = next; redraw(); }, function () {});
+            }, { selected: !!S.seen }));
+        }
         kids.push(ui.heading(it.title));
         kids.push(ui.text(meta.filter(Boolean).join(' \u00b7 ')));
         if (owned(it)) kids.push(ui.text('\u2713 In your library'));

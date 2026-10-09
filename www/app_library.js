@@ -195,15 +195,20 @@ class MainAppLibraryMethods {
 
         // Level 2: the seasons you have for this show.
         if (!season) {
+            const isW = this._watchedLookup();
+            const epW = (e) => isW({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
+            const seenIn = (se) => se.episodes.filter(epW).length;
+            const allSeen = show.seasons.length > 0 && show.seasons.every(se => se.episodes.length > 0 && seenIn(se) === se.episodes.length);
             return createElement('div', {},
                 createElement('div', { className: 'section-actions' },
-                    ui.button('\u2190 All Shows', () => this.showBack())
+                    ui.button('\u2190 All Shows', () => this.showBack()),
+                    ui.button(allSeen ? 'Mark show as unwatched' : 'Mark show as watched', () => this._setSeasonWatched(show, show.seasons, !allSeen))
                 ),
                 this._renderShowHero(show, `${plural(show.seasons.length, 'season')} \u00b7 ${plural(show.episodeCount, 'episode')}`),
                 ui.grid(
                     show.seasons.map(se => ui.card(
                         `Season ${se.season}`,
-                        plural(se.episodes.length, 'episode'),
+                        plural(se.episodes.length, 'episode') + (seenIn(se) ? ` \u00b7 ${seenIn(se)} watched` : ''),
                         () => this.openSeason(se.season)
                     )),
                     { minColWidth: '200px' }
@@ -212,13 +217,17 @@ class MainAppLibraryMethods {
         }
 
         // Level 3: the episodes you have in that season.
+        const isW = this._watchedLookup();
+        const epW = (e) => isW({ kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode });
+        const allSeen = season.episodes.length > 0 && season.episodes.every(epW);
         return createElement('div', {},
             createElement('div', { className: 'section-actions' },
-                ui.button(`\u2190 ${show.showTitle}`, () => this.showBack())
+                ui.button(`\u2190 ${show.showTitle}`, () => this.showBack()),
+                ui.button(allSeen ? 'Mark season as unwatched' : 'Mark season as watched', () => this._setSeasonWatched(show, [season], !allSeen))
             ),
             createElement('h2', { className: 'sub-heading' }, `${show.showTitle} \u00b7 Season ${season.season}`),
             createElement('div', { className: 'plugin-list' },
-                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, null, () => this.openEpisodeDetail(show.showTitle, e), { onLongPress: () => ui.toast(e.filename) }))
+                ...season.episodes.map(e => ui.listRow(`Episode ${e.episode}`, epW(e) ? '\u2713 Watched' : null, () => this.openEpisodeDetail(show.showTitle, e), { onLongPress: () => ui.toast(e.filename) }))
             )
         );
     }
@@ -476,12 +485,14 @@ class MainAppLibraryMethods {
         if (tab === 'movies') {
             const movies = data.movies || [];
             if (!movies.length) return this._renderEmptyLibrary('movies');
+            const isW = this._watchedLookup();
+            const msub = (m) => ((isW({ kind: 'movie', title: m.title, year: m.year || 0 }) ? '\u2713 ' : '') + (m.year ? String(m.year) : '')).trim();
             if (this.state.viewMode === 'list') {
                 return createElement('div', { className: 'plugin-list' },
-                    ...movies.map(m => ui.listRow(m.title, m.year ? String(m.year) : '', () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })));
+                    ...movies.map(m => ui.listRow(m.title, msub(m), () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })));
             }
             return ui.grid(
-                movies.map(m => ui.posterCard(m.title, m.year ? String(m.year) : '', this.state.posters['m:' + m.id], () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })),
+                movies.map(m => ui.posterCard(m.title, msub(m), this.state.posters['m:' + m.id], () => this.openMovieDetail(m), { onLongPress: () => ui.toast(m.filename) })),
                 { minColWidth: '200px', className: 'sx-poster-grid' }
             );
         }

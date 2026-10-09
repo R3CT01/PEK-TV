@@ -19,6 +19,9 @@
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   permissions.favorites true => hesper.favorites.list / add / remove: the shared Favorites list that
 //                        Hesper's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
+//   permissions.watched  true => hesper.watched.check(items) / set(item, on): read and change what Hesper's
+//                        Watch History says is watched. An item is {kind:'movie', title, year} or
+//                        {kind:'episode', showTitle, season, episode}. Nothing else of the history is visible.
 //   permissions.providers true => ui.providerButton: a "Watch on <service>" button. Hesper decides what it
 //                        opens (the service's app on Android, its website elsewhere); the plugin only names the
 //                        service and the title.
@@ -149,6 +152,11 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         drawQueued = true; setTimeout(draw, 0);
     }
 
+    function wItem(it) {
+        it = it || {};
+        return { kind: str(it.kind), title: str(it.title), year: Number(it.year) || 0,
+            showTitle: str(it.showTitle), season: Number(it.season) || 0, episode: Number(it.episode) || 0 };
+    }
     var backFn = null, backSet = false;
     var api = {
         ui: ui,
@@ -171,6 +179,14 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
                     year: Number(it.year) || 0, posterPath: str(it.posterPath) });
             },
             remove: function (key) { return request('favRemove', { key: str(key) }); }
+        },
+        // Needs permissions.watched. check([item, ...]) -> [true, false, ...]; set(item, true | false) marks one
+        // watched / unwatched in Watch History (it syncs like anything else the user watches).
+        watched: {
+            check: function (items) {
+                return request('watchedCheck', { items: (Array.isArray(items) ? items : []).slice(0, 300).map(wItem) }).then(JSON.parse);
+            },
+            set: function (item, on) { return request('watchedSet', { item: wItem(item), on: on === true }); }
         },
         // Needs permissions.plugins. streamers() -> [{id, name}]; open(id, {type, id, title, year}) must come from a tap.
         plugins: {
@@ -211,7 +227,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
     Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
-    Object.freeze(api.favorites); Object.freeze(api.plugins); Object.freeze(api);
+    Object.freeze(api.favorites); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });
 
     window.addEventListener('message', function (ev) {
@@ -259,7 +275,7 @@ class HesperSandbox {
         const out = {
             name: null, version: null,
             permissions: { network: [], storage: false, library: false, torrent: false,
-                favorites: false, providers: false, plugins: false },
+                favorites: false, providers: false, plugins: false, watched: false },
             provides: { stream: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
@@ -277,6 +293,7 @@ class HesperSandbox {
         out.permissions.favorites = perms.favorites === true;
         out.permissions.providers = perms.providers === true;
         out.permissions.plugins = perms.plugins === true;
+        out.permissions.watched = perms.watched === true;
         // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
         // "plugins" permission are offered it as a "Play with ..." button.
         const pv = raw.provides && typeof raw.provides === 'object' ? raw.provides : {};
@@ -446,6 +463,8 @@ class HesperSandbox {
                 case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.HesperFavorites.keys())); break;
                 case 'favAdd': reply(true, this._favAdd(a)); break;
                 case 'favRemove': reply(true, this._favRemove(a)); break;
+                case 'watchedCheck': reply(true, this._watchedCheck(a)); break;
+                case 'watchedSet': reply(true, this._watchedSet(a)); break;
                 case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
                 case 'pluginOpen': reply(true, this._pluginOpen(a)); break;
                 default: throw new Error('unknown request');
@@ -460,6 +479,7 @@ class HesperSandbox {
     _need(perm) {
         if (!this.manifest.permissions[perm]) throw new Error("plugin.json does not request the '" + perm + "' permission");
         if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this Hesper');
+        if (perm === 'watched' && !(window.HesperSync && window.HesperSync.setWatched)) throw new Error('Watch history is not available in this Hesper');
         if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this Hesper');
     }
 
@@ -473,6 +493,34 @@ class HesperSandbox {
         this._need('favorites');
         if (typeof a.key !== 'string' || !/^(movie|tv):\d{1,10}$/.test(a.key)) throw new Error('invalid key');
         return window.HesperFavorites.remove(a.key);
+    }
+
+    // ---------------- watched marks (permission "watched") ----------------
+
+    _watchedItem(o) {
+        if (!o || typeof o !== 'object') throw new Error('invalid item');
+        const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
+        const text = (v) => (typeof v === 'string' ? v.trim().slice(0, 200) : '');
+        if (o.kind === 'movie' && text(o.title)) return { kind: 'movie', title: text(o.title), year: int(o.year, 3000) };
+        if (o.kind === 'episode' && text(o.showTitle) && int(o.season, 200) && int(o.episode, 2000)) {
+            return { kind: 'episode', showTitle: text(o.showTitle), season: int(o.season, 200), episode: int(o.episode, 2000) };
+        }
+        throw new Error('invalid item');
+    }
+
+    _watchedCheck(a) {
+        this._need('watched');
+        const S = window.HesperSync, W = S.watchedMap();
+        const items = Array.isArray(a.items) ? a.items.slice(0, 300) : [];
+        return JSON.stringify(items.map(i => { try { const k = S.histKey(this._watchedItem(i)); return !!(k && W[k]); } catch (e) { return false; } }));
+    }
+
+    _watchedSet(a) {
+        this._need('watched');
+        const meta = this._watchedItem(a.item);
+        // Tag it with this plugin, so Watch History can say where it was watched and open the plugin again.
+        if (a.on === true) meta.origin = { id: this.folder, name: this.manifest.name || this.folder };
+        return window.HesperSync.setWatched(meta, a.on === true);
     }
 
     _pluginStreamers() {

@@ -124,12 +124,14 @@ Hesper ships with no search provider. The engine (libtorrent) is optional at bui
 
 ## Favorites, provider buttons and plugin launching
 
-Three optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true}`):
+Four optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true, "watched": true}`):
 
 | Call | Needs | What it does |
 |---|---|---|
 | `hesper.favorites.list()` | `favorites` | Resolves to `['movie:603', 'tv:1396', ...]`: the shared Favorites list shown in Hesper's Favorites tab. |
 | `hesper.favorites.add({type, id, title, year, posterPath})` / `.remove('movie:603')` | `favorites` | `type` is `'movie'` or `'tv'`, `id` the TMDb id, `posterPath` TMDb's `poster_path` (e.g. `/abc.jpg`). Hesper builds the poster address itself and records which plugin added the title, so Favorites can open it there. |
+| `hesper.watched.check(items)` | `watched` | Resolves to `[true, false, ...]`, one per item: is it marked watched in Hesper's Watch History. An item is `{kind: 'movie', title, year}` or `{kind: 'episode', showTitle, season, episode}` (max 300 per call). |
+| `hesper.watched.set(item, true \| false)` | `watched` | Marks the item watched or unwatched. Same history the user sees (and that syncs), so it also shows in the library. Plugins that stream with `hesper.torrent.play({kind, name, season, episode, year})` are marked automatically when playback finishes. |
 | `ui.providerButton({name, logo, title, type, tmdbId, region})` | `providers` | A "Watch on <service>" button. `name` and `logo` are TMDb's `provider_name` and `logo_path`. Hesper decides what it opens (the service's app on Android, its website elsewhere; unknown services open the title's TMDb "where to watch" page). The logo loads only if `image.tmdb.org` is in `network`. No callback. |
 | `hesper.plugins.streamers()` | `plugins` | `[{id, name}]` of the other installed plugins whose plugin.json has `"provides": {"stream": true}`. |
 | `hesper.plugins.open(id, {type, id, title, year})` | `plugins` | Opens that plugin on the title. Only works inside a tap handler. |

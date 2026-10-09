@@ -436,7 +436,22 @@ class MpvController(
                 if (type == "audio") audio.put(t) else subs.put(t)
             }
         }
-        return JSONObject().put("audio", audio).put("subtitles", subs)
+        // Chapters (title + start second): the page turns "Intro" / "Opening" / "Recap" / "Previously on" ones into
+        // Skip Intro / Skip Recap buttons (www/skip_segments.js). Works the same for library files and torrent streams.
+        val chapters = JSONArray()
+        if (m != null) {
+            try {
+                val cn = m.getPropertyInt("chapter-list/count") ?: 0
+                for (i in 0 until minOf(cn, 200)) {
+                    val time = m.getPropertyString("chapter-list/$i/time")?.toDoubleOrNull() ?: continue
+                    val c = JSONObject()
+                    c.put("title", m.getPropertyString("chapter-list/$i/title") ?: "")
+                    c.put("time", time)
+                    chapters.put(c)
+                }
+            } catch (t: Throwable) { Log.w("Hesper", "chapter list unavailable", t) }
+        }
+        return JSONObject().put("audio", audio).put("subtitles", subs).put("chapters", chapters)
     }
 
     private fun emit(event: String, data: JSONObject) {

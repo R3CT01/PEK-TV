@@ -1,6 +1,6 @@
 {
   "name": "TMDb Discover",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Hesper",
   "description": "Browse trending, top rated, popular and now playing movies and TV page by page, filter by streaming service, watch trailers, see the cast and related titles, and see what you already own.",
   "permissions": {
@@ -14,7 +14,8 @@
     "library": true,
     "favorites": true,
     "providers": true,
-    "plugins": true
+    "plugins": true,
+    "watched": true
   },
   "ui": {
     "navTab": "Discover",

@@ -144,6 +144,43 @@
         writeHistory(map);
     }
 
+    // ---------------- marking things watched by hand ----------------
+    // "Watched" means: there is a live entry in the watch history. Finishing something adds one by itself;
+    // these let the user (or a plugin with the "watched" permission) add or remove one manually.
+    function isWatched(meta) {
+        var key = histKey(meta);
+        if (!key) return false;
+        var e = readHistory()[key];
+        return !!(e && !e.deleted);
+    }
+
+    // { historyKey: 1, ... } for everything watched: one read, for lists that check many items.
+    function watchedMap() {
+        var map = readHistory(), out = {};
+        Object.keys(map).forEach(function (k) { if (!map[k].deleted) out[k] = 1; });
+        return out;
+    }
+
+    // Returns true if something changed. Unwatching keeps a "deleted" marker so the removal syncs too.
+    function setWatched(meta, on) {
+        var key = histKey(meta);
+        if (!key) return false;
+        var changed = false;
+        if (on) {
+            if (isWatched(meta)) return false;
+            changed = recordWatched(meta);
+        } else {
+            var map = readHistory();
+            if (!map[key] || map[key].deleted) return false;
+            map[key] = { deleted: 1, updated: clock.now() };
+            writeHistory(map);
+            changed = true;
+            try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }
+        }
+        if (changed) { try { document.dispatchEvent(new CustomEvent('hesper-watched')); } catch (e) { /* no events */ } }
+        return changed;
+    }
+
     // ---------------- account (email + password) ----------------
     function cleanEmail(s) { return String(s || '').trim().toLowerCase(); }
     function validEmail(s) { var e = cleanEmail(s); return e.length >= 5 && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e); }
@@ -494,6 +531,7 @@
         recordWatched: recordWatched,
         listHistory: listHistory,
         clearHistory: clearHistory,
+        isWatched: isWatched, watchedMap: watchedMap, setWatched: setWatched,
         validEmail: validEmail, validPassword: validPassword,
         signUp: signUp, signIn: signIn, signOut: signOut,
         verifyEmail: verifyEmail, resendCode: resendCode,

@@ -66,6 +66,62 @@ class MainAppWatchMethods {
         return it && it.position >= RESUME_MIN_SEC ? it : null;
     }
 
+    // ---------------- Marking things watched by hand ----------------
+    // "Watched" = an entry in Watch History (sync.js). Marking adds one, unmarking removes it (and syncs).
+
+    _isWatched(meta) { const S = window.HesperSync; return !!(S && S.isWatched(meta)); }
+
+    // One read of the history, then a fast meta -> true/false check (for long lists).
+    _watchedLookup() {
+        const S = window.HesperSync;
+        if (!S) return () => false;
+        const W = S.watchedMap();
+        return (meta) => { const k = S.histKey(meta); return !!(k && W[k]); };
+    }
+
+    // items = [{ meta, id }]  (id = this device's file id when there is one). Returns how many changed.
+    _setWatchedMany(items, on) {
+        const S = window.HesperSync;
+        if (!S) return 0;
+        let changed = 0, prog = null;
+        items.forEach(({ meta, id }) => {
+            if (S.setWatched(on ? this._historyMeta(id, meta) : meta, on)) changed++;
+            if (on && id) { prog = prog || this._readProgress(); delete prog[id]; }   // finished: nothing left to resume
+        });
+        const patch = { history: this._readHistory() };
+        if (prog) {
+            this._writeProgress(prog);
+            patch.progress = prog;
+            const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
+            if (!left && this.state.activeTab === 'resume') patch.activeTab = 'dashboard';
+        }
+        this.setState(patch);
+        return changed;
+    }
+
+    _toggleWatched(meta, id) {
+        const on = !this._isWatched(meta);
+        this._setWatchedMany([{ meta: meta, id: id }], on);
+        this.props.engine.ui.toast(on ? 'Marked as watched' : 'Marked as unwatched');
+    }
+
+    // Every episode of the given seasons of one show.
+    _setSeasonWatched(show, seasons, on) {
+        const items = [];
+        seasons.forEach(se => se.episodes.forEach(e => items.push({
+            id: e.id, meta: { kind: 'episode', showTitle: show.showTitle, season: e.season, episode: e.episode } })));
+        this._setWatchedMany(items, on);
+        this.props.engine.ui.toast((on ? 'Marked ' : 'Unmarked ') + items.length + (items.length === 1 ? ' episode' : ' episodes') + (on ? ' as watched' : ' as unwatched'));
+    }
+
+    // The button on a movie / episode page.
+    _renderWatchedButton(d) {
+        const { createElement, ui } = this.props.engine;
+        const w = this._isWatched(d.meta);
+        return createElement('div', { className: 'section-actions', style: { margin: '6px 0' } },
+            ui.button(w ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', () => this._toggleWatched(d.meta, d.playId)));
+    }
+
     // ---------------- Watch history + cloud sync (see sync.js, cloud/worker.js) ----------------
 
     _readHistory() { return window.HesperSync ? window.HesperSync.listHistory() : []; }
@@ -217,6 +273,7 @@ class MainAppWatchMethods {
             this._autoHooked = true;
             const S = window.HesperSync;
             document.addEventListener('hesper-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000); });   // added or removed a favorite
+            document.addEventListener('hesper-watched', () => this.setState({ history: this._readHistory() }));                         // marked by hand (here or from a plugin)
             document.addEventListener('hesper-history', () => this._autoSync(2000));                                                   // finished watching something
             window.addEventListener('online', () => this._autoSync(1500));                                                             // back online
             document.addEventListener('visibilitychange', () => {                                                                     // came back to the app
@@ -459,7 +516,13 @@ class MainAppWatchMethods {
             sub ? createElement('p', { className: 'sub' }, sub) : null,
             img ? createElement('img', { className: 'detail-image sx-hist-modal-img', src: img, alt: '' }) : null,
             createElement('h2', { className: 'sub-heading' }, 'Where to find it'),
-            ...rows);
+            ...rows,
+            createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
+                ui.button('Mark as unwatched', () => {
+                    this._setWatchedMany([{ meta: it }], false);
+                    this.setState({ histOpen: null });
+                    ui.toast('Marked as unwatched');
+                })));
         return ui.modal(this._historyTitle(it), body, close);
     }
 
