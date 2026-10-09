@@ -97,6 +97,20 @@ const HesperPluginInstaller = (() => {
         return buildPrep(files, folder, file.name, skipped);
     }
 
+    // Optional "warning" in plugin.json: a screen the plugin's author wants shown before install.
+    // Accepts a string, an array of paragraphs, or { title, text, button }. Plain text only, length-capped.
+    // Returns null when the plugin declares none.
+    function parseWarning(w) {
+        if (w == null || w === false) return null;
+        const obj = (typeof w === 'object' && !Array.isArray(w)) ? w : { text: w };
+        const raw = Array.isArray(obj.text) ? obj.text : [obj.text];
+        const text = raw.filter(t => typeof t === 'string' && t.trim()).slice(0, 5).map(t => t.trim().slice(0, 400));
+        if (!text.length) return null;
+        const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim().slice(0, 60) : 'Before you install';
+        const button = typeof obj.button === 'string' && obj.button.trim() ? obj.button.trim().slice(0, 40) : 'I understand, continue';
+        return { title, text, button };
+    }
+
     // Turns a list of files ({path, data: Uint8Array}) into what the install screen needs.
     // Used for a .zip (prepare) and for a plugin restored from the cloud (prepareFiles).
     function buildPrep(files, folder, fileName, skipped) {
@@ -126,6 +140,7 @@ const HesperPluginInstaller = (() => {
             version: m.version || '',
             author: str(raw.author, 80),
             description: str(raw.description, 200),
+            warning: parseWarning(raw.warning),
             network: m.permissions.network,
             storage: m.permissions.storage === true,
             library: m.permissions.library === true,

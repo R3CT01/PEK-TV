@@ -286,6 +286,22 @@ class MainAppPluginsMethods {
         }
 
         const p = pi.prep;
+
+        // Warning screen declared by the plugin itself (plugin.json "warning"). Plugins without one skip this.
+        // (Close = cancel; the button moves on to the normal permissions screen.)
+        if (pi.stage === 'confirm' && p.warning && !pi.warned) {
+            const warnBody = createElement('div', {},
+                createElement('div', { className: 'glass-panel' },
+                    ...p.warning.text.map(t => createElement('p', {}, t))
+                ),
+                ui.button(p.warning.button, () => {
+                    const cur = this.state.pluginInstall;
+                    if (cur && cur.stage === 'confirm') this.setState({ pluginInstall: Object.assign({}, cur, { warned: true }) });
+                }, { variant: 'primary' })
+            );
+            return ui.modal(p.warning.title, warnBody, close);
+        }
+
         const net = p.network.length ? `Can connect to: ${p.network.join(', ')}` : 'No network access';
         const lines = [
             [p.version ? `Version ${p.version}` : null, p.author ? `by ${p.author}` : null].filter(Boolean).join(' \u00b7 '),

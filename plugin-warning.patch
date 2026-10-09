@@ -1,0 +1,79 @@
+diff -ruN a/PLUGINS.md b/PLUGINS.md
+--- a/PLUGINS.md	2026-10-09 20:32:49.298664126 +0000
++++ b/PLUGINS.md	2026-10-09 20:32:49.300370196 +0000
+@@ -22,6 +22,17 @@
+ - `library`: lets the plugin's **Python backend** call `hesper_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
+ - No permission listed means no access.
+ - `ui` (optional, only changes Hesper's own screens): `navTab` adds a sidebar / More entry that opens the plugin; `reloadOnInstall` reloads the app right after installing; `closeOnRemove` makes Hesper ask the user to close and reopen it after the plugin is removed (it cannot be dismissed until the app is really closed). The install and remove screens say so.
++- `warning` (optional): a screen shown **before** the permissions screen when someone installs your plugin. Use it for disclaimers or advice you want every user to see. The user can cancel from it; "continue" moves on to the normal install screen. Plain text only (no HTML or links). Leave it out and no extra screen is shown.
++
++  ```json
++  "warning": {
++    "title": "Before you install",
++    "text": ["First paragraph (max 400 characters).", "Second paragraph (up to 5 in total)."],
++    "button": "I understand, continue"
++  }
++  ```
++
++  `title` (max 60) and `button` (max 40) are optional and default to the text above. Shortcuts: `"warning": "one paragraph"` or `"warning": ["para 1", "para 2"]`.
+ 
+ ## UI (`ui.js`)
+ 
+diff -ruN a/www/app_plugins.js b/www/app_plugins.js
+--- a/www/app_plugins.js	2026-10-09 20:32:49.292514202 +0000
++++ b/www/app_plugins.js	2026-10-09 20:32:49.293979444 +0000
+@@ -287,6 +287,22 @@
+         }
+ 
+         const p = pi.prep;
++
++        // Warning screen declared by the plugin itself (plugin.json "warning"). Plugins without one skip this.
++        // (Close = cancel; the button moves on to the normal permissions screen.)
++        if (pi.stage === 'confirm' && p.warning && !pi.warned) {
++            const warnBody = createElement('div', {},
++                createElement('div', { className: 'glass-panel' },
++                    ...p.warning.text.map(t => createElement('p', {}, t))
++                ),
++                ui.button(p.warning.button, () => {
++                    const cur = this.state.pluginInstall;
++                    if (cur && cur.stage === 'confirm') this.setState({ pluginInstall: Object.assign({}, cur, { warned: true }) });
++                }, { variant: 'primary' })
++            );
++            return ui.modal(p.warning.title, warnBody, close);
++        }
++
+         const net = p.network.length ? `Can connect to: ${p.network.join(', ')}` : 'No network access';
+         const lines = [
+             [p.version ? `Version ${p.version}` : null, p.author ? `by ${p.author}` : null].filter(Boolean).join(' \u00b7 '),
+diff -ruN a/www/plugin_installer.js b/www/plugin_installer.js
+--- a/www/plugin_installer.js	2026-10-09 20:32:49.285451480 +0000
++++ b/www/plugin_installer.js	2026-10-09 20:32:49.286661307 +0000
+@@ -97,6 +97,20 @@
+         return buildPrep(files, folder, file.name, skipped);
+     }
+ 
++    // Optional "warning" in plugin.json: a screen the plugin's author wants shown before install.
++    // Accepts a string, an array of paragraphs, or { title, text, button }. Plain text only, length-capped.
++    // Returns null when the plugin declares none.
++    function parseWarning(w) {
++        if (w == null || w === false) return null;
++        const obj = (typeof w === 'object' && !Array.isArray(w)) ? w : { text: w };
++        const raw = Array.isArray(obj.text) ? obj.text : [obj.text];
++        const text = raw.filter(t => typeof t === 'string' && t.trim()).slice(0, 5).map(t => t.trim().slice(0, 400));
++        if (!text.length) return null;
++        const title = typeof obj.title === 'string' && obj.title.trim() ? obj.title.trim().slice(0, 60) : 'Before you install';
++        const button = typeof obj.button === 'string' && obj.button.trim() ? obj.button.trim().slice(0, 40) : 'I understand, continue';
++        return { title, text, button };
++    }
++
+     // Turns a list of files ({path, data: Uint8Array}) into what the install screen needs.
+     // Used for a .zip (prepare) and for a plugin restored from the cloud (prepareFiles).
+     function buildPrep(files, folder, fileName, skipped) {
+@@ -126,6 +140,7 @@
+             version: m.version || '',
+             author: str(raw.author, 80),
+             description: str(raw.description, 200),
++            warning: parseWarning(raw.warning),
+             network: m.permissions.network,
+             storage: m.permissions.storage === true,
+             library: m.permissions.library === true,
