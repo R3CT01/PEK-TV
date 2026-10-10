@@ -11,7 +11,7 @@
 (function () {
     'use strict';
 
-    var API = 'https://hesper-sync-9275.aquariusibeats.workers.dev';
+    var API = 'https://pek-sync.aquariusibeats.workers.dev';
     var K = {
         token: 'hesper_sync_token',      // session token from signing in (never the password)
         email: 'hesper_sync_email',
@@ -501,7 +501,6 @@
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,
         sync: sync, deleteAccount: deleteAccount, cloud: cloud,
         isLinked: function () { return !!getToken(); },
-        api: function () { return API; },
         _setApi: function (u) { API = u; },
         _setClock: function (fn) { clock.now = fn; }
     };

@@ -15,10 +15,12 @@
 // Shown to users as "want to share one? go to ...". Put your GitHub Pages address here (leave '' to hide the line).
 const HESPER_SUBMIT_SITE = '';
 
+// The Plugin Store worker (separate from the sync worker). See cloud/STORE-DEPLOY.md.
+const HESPER_STORE_API = 'https://pek-store.aquariusibeats.workers.dev';
+
 const HesperPluginStore = (() => {
     const I = () => window.HesperPluginInstaller;
-    const S = () => window.HesperSync;
-    const base = () => (S() && S().api ? S().api() : '');
+    const base = () => HESPER_STORE_API;
 
     function fromB64(b64) {
         const bin = atob(b64), out = new Uint8Array(bin.length);
