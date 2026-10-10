@@ -28,7 +28,7 @@ Accounts are an email and a password. New accounts confirm their email with a 6-
    Then **Deploy** so they take effect.
 4. Visit the worker URL in a browser. It should say: `hesper-sync ok`
    (tables are created automatically on the first request).
-5. The app calls `https://hesper-sync-9275.aquariusibeats.workers.dev`. If your worker's URL is
+5. The app calls `https://pek-sync.aquariusibeats.workers.dev`. If your worker's URL is
    different, change `API` at the top of `www/sync.js`.
 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
    already limits sign-ups, sign-ins, reset requests and code guesses itself.
@@ -39,41 +39,6 @@ The same worker and the same D1 database also store plugin backups. There is not
 paste the new `worker.js`, deploy, and the two new tables (`plugins`, `plugin_chunks`) are created on the
 first request, like the others. Limits per account: 30 plugins, 8 MB each, 60 MB together.
 The app needs the new build too (the Android app reads plugin files through two new local routes).
-
-## Plugin Store (GitHub Pages site + GitHub sign-in)
-
-How it fits together: people upload plugins on a **GitHub Pages site** (the `site/` folder), signed in with **GitHub**
-(mandatory). The worker stores the uploads and holds them until an owner approves them. The app only browses and installs.
-Official plugins are published by you on the site's owner page, so one pipeline serves everything.
-
-**1. GitHub OAuth App** (github.com -> your profile -> Settings -> Developer settings -> OAuth Apps -> New OAuth App)
-   - Homepage URL: your Pages address (step 3). Authorization callback URL: `https://<your worker>.workers.dev/v1/gh/callback`
-   - Create it, then **Generate a new client secret**. Copy the Client ID and the secret.
-
-**2. Worker settings** (Worker -> Settings -> Variables and Secrets), then Deploy:
-   - Secret `GITHUB_CLIENT_SECRET` = the client secret
-   - Text `GITHUB_CLIENT_ID` = the client ID
-   - Text `SITE_URL` = your Pages address, e.g. `https://yourname.github.io/hesper-plugins/`
-   - Text `OWNER_GITHUB` = your GitHub username (several: comma separated). Owners can publish official plugins and approve uploads.
-   - Optional Text `MIN_ACCOUNT_DAYS` = how old a GitHub account must be to upload (default 7)
-   - Optional Text `BLOCKED_GITHUB` = usernames to refuse, comma separated (takes effect immediately, even for people already signed in)
-   Paste the new `worker.js` first. The new tables are created on the first request.
-
-**3. The site** (see `site/README.md`): make a public GitHub repo, upload the files in `site/`, turn on Pages. If your worker's
-   address is not `hesper-sync-9275.aquariusibeats.workers.dev`, edit `site/config.js`.
-
-**4. The app**: in `www/plugin_store.js` set `HESPER_SUBMIT_SITE` to your Pages address if you want the app to show where to share a plugin.
-
-Using it
-   - Anyone: open the site, sign in with GitHub, choose a plugin .zip, **Send for review**. In PEK: Settings -> Plugins -> Plugin Store
-     -> pick a shelf -> tap a plugin -> Install. No sign-in is needed to download.
-   - You: open `owner.html` on the site and sign in. **Waiting** lists uploads; **Review** shows the permissions and lets you read every
-     text file (code included) before **Approve** or **Reject**. **Publish official** puts a plugin on the PEK Official shelf at once.
-
-Rules the worker enforces: the author shown on Community plugins is always the uploader's GitHub name; nobody can overwrite an
-official plugin or someone else's upload; 10 plugins per account; 8 MB per plugin; 20 uploads a day per account. Approval names
-the exact version you reviewed, so a re-upload goes back to waiting and the old version is hidden meanwhile. Whatever is
-installed still goes through the app's own checks (server safety checks, the author's warning, the permissions screen, your confirm).
 
 ## What syncs, and when
 
