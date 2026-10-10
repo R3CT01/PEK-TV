@@ -311,14 +311,15 @@ class MainApp extends HesperComponent {
                         ))
                     ),
                     createElement('div', { className: 'section-actions' },
-                        ui.button('Install skin from .zip', () => this.startSkinInstall(), { variant: 'primary' })
+                        ui.button('PEK Store', () => this.openPluginStore('skin'), { variant: 'primary' }),
+                        ui.button('Install skin from .zip', () => this.startSkinInstall())
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Plugins'),
-                    createElement('p', { className: 'sub' }, 'Get plugins from the Plugin Store, or add one from a .zip file. To remove one, hold its row in the Plugins tab.'),
+                    createElement('p', { className: 'sub' }, 'Get plugins from the PEK Store, or add one from a .zip file. To remove one, hold its row in the Plugins tab.'),
                     createElement('div', { className: 'section-actions' },
-                        ui.button('Plugin Store', () => this.openPluginStore(), { variant: 'primary' }),
+                        ui.button('PEK Store', () => this.openPluginStore(), { variant: 'primary' }),
                         ui.button('Install plugin from .zip', () => this.startPluginInstall())
                     )
                 )
@@ -357,7 +358,7 @@ class MainApp extends HesperComponent {
             }
             pluginRows.push(label('Third-party plugins', officialPlugins.length > 0));
             if (thirdParty.length) thirdParty.forEach(p => pluginRows.push(row(p)));
-            else pluginRows.push(ui.card('No third-party plugins', 'Get one from Settings \u2192 Plugins \u2192 Plugin Store.'));
+            else pluginRows.push(ui.card('No third-party plugins', 'Get one from Settings \u2192 Plugins \u2192 PEK Store.'));
 
             mainContent = createElement('div', {},
                 this._renderHeader('Plugins'),

@@ -100,6 +100,23 @@ const HesperSkinInstaller = (() => {
         };
     }
 
+    // For a skin downloaded from the Skin Store: the files are already in memory, so there is no zip to open.
+    function prepareFiles(id, files) {
+        if (!Array.isArray(files) || !files.some(f => f.path === 'skin.json')) throw new Error('the download has no skin.json');
+        let raw;
+        try { raw = JSON.parse(new TextDecoder('utf-8').decode(files.find(f => f.path === 'skin.json').data).replace(/^\uFEFF/, '')); }
+        catch (e) { throw new Error('skin.json is not valid JSON'); }
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw) || typeof raw.name !== 'string' || !raw.name.trim()) throw new Error('skin.json needs a \u201cname\u201d');
+        const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+        return {
+            id,
+            name: str(raw.name, 60), author: str(raw.author, 80), description: str(raw.description, 200), version: str(raw.version, 20),
+            tokenCount: raw.tokens && typeof raw.tokens === 'object' ? Object.keys(raw.tokens).length : 0,
+            hasCss: files.some(f => f.path === 'skin.css'),
+            files, skipped: 0
+        };
+    }
+
     async function post(url, form) {
         let res;
         try {
@@ -130,6 +147,6 @@ const HesperSkinInstaller = (() => {
     const install = (prep) => post('/api/skins/install', uploadForm(prep, false));
     const remove = (id) => { const fd = new FormData(); fd.append('id', id); return post('/api/skins/uninstall', fd); };
 
-    return { prepare, check, install, remove, isBuiltin, slug };
+    return { prepare, prepareFiles, check, install, remove, isBuiltin, slug };
 })();
 window.HesperSkinInstaller = HesperSkinInstaller;

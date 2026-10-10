@@ -1,4 +1,4 @@
-# PEK Plugin Store: setup (its own worker, its own database)
+# PEK Store: setup (its own worker, its own database)
 
 The store is separate from the sync worker (`worker.js`). Different worker, different database, nothing shared.
 
@@ -29,3 +29,11 @@ GitHub -> Settings -> Developer settings -> OAuth Apps -> New OAuth App
 - `.../v1/store?shelf=official` shows `{"ok":true,"items":[]}`
 
 Owners publish and review at `<site>/owner.html`. Uploads from `<site>/` wait for approval.
+
+## Skins
+Skins use the same store: same worker, same database, same site. A skin zip has `skin.json` (and optionally `skin.css`
+and images) instead of `plugin.json`. The site tells them apart on its own.
+- Plugins and skins are on separate shelves in the app (Settings -> Plugins -> PEK Store, Settings -> Skins -> PEK Store).
+- A plugin and a skin can't share an id. Skin ids `default`, `green` and `neon` are reserved.
+- The worker adds its new `kind` column by itself on the first request after you paste the update. Nothing to run, nothing lost.
+- Skin size limit is 6 MB (plugins 8 MB).

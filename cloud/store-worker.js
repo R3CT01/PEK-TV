@@ -1,11 +1,11 @@
-// PEK Plugin Store worker. Separate from the sync worker (worker.js) on purpose:
+// PEK Store worker. Separate from the sync worker (worker.js) on purpose:
 // own code, own database, nothing shared. Setup: STORE-DEPLOY.md.
 //
 // GitHub sign-in (used by the GitHub Pages site):
 //   GET  /v1/gh/login?ret=upload|owner  -> redirects to GitHub;  GET /v1/gh/callback -> back to the site with #token=
 //   GET  /v1/gh/me ; POST /v1/gh/logout                                           (GitHub token)
 // Store:
-//   GET  /v1/store?shelf=official|community                   -> { ok, items }     (public)
+//   GET  /v1/store?shelf=official|community&kind=plugin|skin  -> { ok, items }     (public; no kind = plugins)
 //   GET  /v1/store/chunk?id=&fp=&i=                           -> { ok, data }      (public, approved only)
 //   POST /v1/store/chunk | /v1/store/submit | /v1/store/remove ; GET /v1/store/mine  (GitHub token)
 //   POST /v1/store/owner/{chunk,commit,approve,remove} ; GET /v1/store/owner/{all,chunk}  (owner accounts only)
@@ -15,6 +15,8 @@ const MAX_PLUGIN_RAW = 8 * 1024 * 1024;    // bytes of plugin files
 const PLUGIN_CHUNK = 400000;               // chars per chunk (the app and the site use the same size)
 const MAX_PLUGIN_CHUNKS = 40;
 const BUILTIN_PLUGINS = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
+const BUILTIN_SKINS = ['default', 'green', 'neon'];
+const MAX_SKIN_RAW = 6 * 1024 * 1024;
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -31,10 +33,11 @@ let ready = false;
 async function init(db) {
     if (ready) return;
     await db.prepare('CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, n INTEGER NOT NULL, reset_at INTEGER NOT NULL)').run();
-    await db.prepare('CREATE TABLE IF NOT EXISTS store_plugins (id TEXT PRIMARY KEY, shelf TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL DEFAULT \'\', description TEXT NOT NULL DEFAULT \'\', size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, status TEXT NOT NULL, owner TEXT NOT NULL, updated INTEGER NOT NULL)').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS store_plugins (id TEXT PRIMARY KEY, shelf TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL DEFAULT \'\', description TEXT NOT NULL DEFAULT \'\', size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, status TEXT NOT NULL, owner TEXT NOT NULL, updated INTEGER NOT NULL, kind TEXT NOT NULL DEFAULT \'plugin\')').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS store_chunks (owner TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (owner, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_states (state TEXT PRIMARY KEY, ret TEXT NOT NULL, created INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_sessions (token_hash TEXT PRIMARY KEY, gh_id TEXT NOT NULL, login TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
+    try { await db.prepare("ALTER TABLE store_plugins ADD COLUMN kind TEXT NOT NULL DEFAULT 'plugin'").run(); } catch (e) { /* column already there */ }
     ready = true;
 }
 
@@ -70,7 +73,8 @@ async function limited(db, key, max, windowMs, now) {
     return false;
 }
 function clientIp(request) { return request.headers.get('CF-Connecting-IP') || 'unknown'; }
-function goodPluginId(id) { return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(id) && BUILTIN_PLUGINS.indexOf(id) === -1; }
+function goodId(id) { return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(id); }
+function goodStoreId(id, kind) { return goodId(id) && (kind === 'skin' ? BUILTIN_SKINS : BUILTIN_PLUGINS).indexOf(id) === -1; }
 function goodFp(fp) { return typeof fp === 'string' && /^[a-f0-9]{8,64}$/.test(fp); }
 function shortText(v, max) { return typeof v === 'string' ? v.slice(0, max) : ''; }
 
@@ -181,14 +185,15 @@ async function ghSession(request, env, now) {
 
 function storeItem(r) {
     return { id: r.id, shelf: r.shelf, name: r.name, version: r.version, author: r.author, description: r.description,
-             size: r.size, fp: r.fp, chunks: r.chunks, status: r.status, updated: r.updated };
+             kind: r.kind === 'skin' ? 'skin' : 'plugin', size: r.size, fp: r.fp, chunks: r.chunks, status: r.status, updated: r.updated };
 }
 
 async function storeList(url, env) {
     const shelf = url.searchParams.get('shelf');
+    const kind = url.searchParams.get('kind') === 'skin' ? 'skin' : 'plugin';   // no kind = plugins
     const q = shelf === 'official' || shelf === 'community'
-        ? env.DB.prepare("SELECT * FROM store_plugins WHERE status = 'approved' AND shelf = ? ORDER BY name").bind(shelf)
-        : env.DB.prepare("SELECT * FROM store_plugins WHERE status = 'approved' ORDER BY shelf, name");
+        ? env.DB.prepare("SELECT * FROM store_plugins WHERE status = 'approved' AND kind = ? AND shelf = ? ORDER BY name").bind(kind, shelf)
+        : env.DB.prepare("SELECT * FROM store_plugins WHERE status = 'approved' AND kind = ? ORDER BY shelf, name").bind(kind);
     const rows = await q.all();
     return json({ ok: true, items: (rows.results || []).map(storeItem) });
 }
@@ -196,7 +201,7 @@ async function storeList(url, env) {
 // Download one chunk. Public for approved items; owners may also read pending ones (to review them).
 async function storeGetChunk(url, env, allowPending) {
     const id = url.searchParams.get('id'), fp = url.searchParams.get('fp'), i = Number(url.searchParams.get('i'));
-    if (!goodPluginId(id) || !goodFp(fp) || !Number.isInteger(i) || i < 0) return json({ error: 'bad_plugin' }, 400);
+    if (!goodId(id) || !goodFp(fp) || !Number.isInteger(i) || i < 0) return json({ error: 'bad_plugin' }, 400);
     const row = await env.DB.prepare('SELECT owner, status FROM store_plugins WHERE id = ? AND fp = ?').bind(id, fp).first();
     if (!row || (row.status !== 'approved' && !allowPending)) return json({ error: 'not_found' }, 404);
     const c = await env.DB.prepare('SELECT data FROM store_chunks WHERE owner = ? AND id = ? AND fp = ? AND idx = ?').bind(row.owner, id, fp, i).first();
@@ -209,7 +214,7 @@ async function storePutChunk(request, env, who) {
     const { body, err } = await readJson(request); if (err) return err;
     const db = env.DB, now = Date.now();
     const index = Number(body.index), total = Number(body.total);
-    if (!goodPluginId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    if (!goodId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
     if (!Number.isInteger(index) || !Number.isInteger(total) || total < 1 || total > MAX_PLUGIN_CHUNKS || index < 0 || index >= total) return json({ error: 'bad_plugin' }, 400);
     if (typeof body.data !== 'string' || !body.data.length || body.data.length > PLUGIN_CHUNK + 1000) return json({ error: 'too_large' }, 413);
     if (!who.owner && await limited(db, 'store:chunk:' + who.id, 400, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
@@ -224,13 +229,15 @@ async function storeCommit(request, env, who, official) {
     const { body, err } = await readJson(request); if (err) return err;
     const db = env.DB, now = Date.now();
     const total = Number(body.total), size = Number(body.size);
-    if (!goodPluginId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    const kind = body.kind === 'skin' ? 'skin' : 'plugin';
+    if (!goodStoreId(body.id, kind) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
     if (!Number.isInteger(total) || total < 1 || total > MAX_PLUGIN_CHUNKS) return json({ error: 'bad_plugin' }, 400);
-    if (!Number.isFinite(size) || size < 1 || size > STORE_MAX_SIZE) return json({ error: 'too_large' }, 413);
+    if (!Number.isFinite(size) || size < 1 || size > (kind === 'skin' ? MAX_SKIN_RAW : STORE_MAX_SIZE)) return json({ error: 'too_large' }, 413);
     const have = await db.prepare('SELECT COUNT(*) AS n FROM store_chunks WHERE owner = ? AND id = ? AND fp = ?').bind(who.id, body.id, body.fp).first();
     if (!have || have.n !== total) return json({ error: 'incomplete' }, 400);
 
-    const cur = await db.prepare('SELECT owner, shelf FROM store_plugins WHERE id = ?').bind(body.id).first();
+    const cur = await db.prepare('SELECT owner, shelf, kind FROM store_plugins WHERE id = ?').bind(body.id).first();
+    if (cur && (cur.kind === 'skin' ? 'skin' : 'plugin') !== kind) return json({ error: 'id_taken' }, 409);   // ids are shared by plugins and skins
     if (!official) {
         if (cur && (cur.shelf === 'official' || cur.owner !== who.id)) return json({ error: 'id_taken' }, 409);
         const mine = await db.prepare("SELECT COUNT(*) AS n FROM store_plugins WHERE owner = ? AND shelf = 'community' AND id != ?").bind(who.id, body.id).first();
@@ -242,11 +249,11 @@ async function storeCommit(request, env, who, official) {
     // On Community the author is always the signed-in GitHub account, whatever plugin.json says.
     const author = official ? (shortText(body.author, 80) || who.login) : who.login;
     await db.batch([
-        db.prepare('INSERT INTO store_plugins (id, shelf, name, version, author, description, size, fp, chunks, status, owner, updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+        db.prepare('INSERT INTO store_plugins (id, shelf, name, version, author, description, size, fp, chunks, status, owner, updated, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
             'ON CONFLICT(id) DO UPDATE SET shelf = excluded.shelf, name = excluded.name, version = excluded.version, author = excluded.author, ' +
-            'description = excluded.description, size = excluded.size, fp = excluded.fp, chunks = excluded.chunks, status = excluded.status, owner = excluded.owner, updated = excluded.updated')
+            'description = excluded.description, size = excluded.size, fp = excluded.fp, chunks = excluded.chunks, status = excluded.status, owner = excluded.owner, updated = excluded.updated, kind = excluded.kind')
             .bind(body.id, shelf, shortText(body.name, 80) || body.id, shortText(body.version, 40), author,
-                  shortText(body.description, 200), Math.floor(size), body.fp, total, status, who.id, now),
+                  shortText(body.description, 200), Math.floor(size), body.fp, total, status, who.id, now, kind),
         db.prepare('DELETE FROM store_chunks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM store_plugins p WHERE p.id = store_chunks.id AND p.owner = store_chunks.owner AND p.fp = store_chunks.fp)')
             .bind(body.id)
     ]);
@@ -260,7 +267,7 @@ async function storeMine(env, who) {
 
 async function storeRemove(request, env, who, asOwner) {
     const { body, err } = await readJson(request); if (err) return err;
-    if (!goodPluginId(body.id)) return json({ error: 'bad_plugin' }, 400);
+    if (!goodId(body.id)) return json({ error: 'bad_plugin' }, 400);
     const row = await env.DB.prepare('SELECT owner FROM store_plugins WHERE id = ?').bind(body.id).first();
     if (!row || (!asOwner && row.owner !== who.id)) return json({ error: 'not_found' }, 404);
     await env.DB.batch([
@@ -277,7 +284,7 @@ async function storeOwnerAll(env) {
 
 async function storeOwnerApprove(request, env) {
     const { body, err } = await readJson(request); if (err) return err;
-    if (!goodPluginId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    if (!goodId(body.id) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
     // approving names the exact version (fp) that was reviewed, so a re-upload can't slip in between
     const r = await env.DB.prepare("UPDATE store_plugins SET status = 'approved' WHERE id = ? AND fp = ? AND shelf = 'community'").bind(body.id, body.fp).run();
     if (!r.meta || !r.meta.changes) return json({ error: 'not_found' }, 404);
@@ -298,10 +305,10 @@ export default {
             // GitHub sign-in (used by the GitHub Pages site)
             if (method === 'GET' && path === '/v1/gh/login') return await ghLogin(url, request, env);
             if (method === 'GET' && path === '/v1/gh/callback') return await ghCallback(url, env);
-            // Plugin Store: browsing and downloading need no sign-in at all
+            // PEK Store: browsing and downloading need no sign-in at all
             if (method === 'GET' && path === '/v1/store') return await storeList(url, env);
             if (method === 'GET' && path === '/v1/store/chunk') return await storeGetChunk(url, env, false);
-            // Plugin Store: uploads and owner tools need a GitHub sign-in
+            // PEK Store: uploads and owner tools need a GitHub sign-in
             if (path.indexOf('/v1/store/') === 0 || path.indexOf('/v1/gh/') === 0) {
                 const who = await ghSession(request, env, Date.now());
                 if (!who) return json({ error: 'bad_session' }, 401);
