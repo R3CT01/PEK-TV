@@ -549,6 +549,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._streamTick = null;
             // Skip intro / recap (skip_segments.js). opts.skipMeta = what is playing.
             this.skip = window.HesperSkip ? new window.HesperSkip.Controller(this, opts.skipMeta || null) : null;
+            // Up next (next_episode.js): opts.next = { resolve, start } from the app, or none.
+            this.next = window.HesperNext && opts.next ? new window.HesperNext.Controller(this, opts.next) : null;
             this._streamFlight = false;
         }
 
@@ -575,6 +577,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 this._settleSeek();
                 this._updateTime();
                 if (this.skip) this.skip.tick(this.state.position, this.state.duration);
+                if (this.next) this.next.tick(this.state.position, this.state.duration);
                 this._reportProgress(false);
             });
             b.on('state', (d) => {
@@ -591,7 +594,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 if (this.skip && d.chapters) this.skip.setChapters(d.chapters);
                 this._updateButtons();
             });
-            b.on('ended', () => this.close());
+            b.on('ended', () => { if (this.next && this.next.onEnded()) return; this.close(); });
             b.on('error', (d) => {
                 this.errorBox.textContent = (d && d.message) || 'Playback failed.';
                 this.errorBox.style.display = 'block';
@@ -615,6 +618,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             clearTimeout(this._seekDebounce);
             this._reportProgress(true);
             if (this.skip) this.skip.destroy();
+            if (this.next) this.next.destroy();
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
@@ -747,6 +751,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             root.appendChild(this.menuEl);
             root.appendChild(this.confirmEl);
             if (this.skip) { this.skip.mount(root); this.btns.skipnow = this.skip.el; }
+            if (this.next) { this.next.mount(root); if (this.next.playBtn) this.btns.nextnow = this.next.playBtn; }
 
             // tap the picture to show / hide the controls
             root.addEventListener('pointerdown', (ev) => {
@@ -1007,6 +1012,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         _focusOrder() {
             const order = ['seek', 'rew', 'play', 'fwd'];
             if (this.skip && this.skip.cur) order.push('skipnow');
+            if (this.next && this.next.visible()) order.push('nextnow');
             if (this.state.audio.length > 1) order.push('audio');
             if (this.state.subtitles.length > 0) order.push('subs');
             if (this.skip && this.skip.available()) order.push('skip');
@@ -1182,6 +1188,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 else if (key === 'right') this._seekBy(10);
                 else if (key === 'ok') {
                     if (this.skip && this.skip.cur) { this.skip.skip(); return; }
+                    if (this.next && this.next.visible()) { this.next.activate(); return; }
                     this._toggle();
                 }
                 this._show();
