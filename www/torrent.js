@@ -142,7 +142,7 @@
         //   opts: { source, title, season, episode, track?: { meta }, startSec? }
         async open(opts) {
             if (busy) throw new Error('Another stream is already starting');
-            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('Hesper cannot play streams here');
+            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('PEK TV cannot play streams here');
             busy = true;
             let hash = '';
             let cancelled = false;

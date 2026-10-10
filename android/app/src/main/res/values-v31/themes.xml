@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Android 12+ draws its own launch screen: cream with the Hesper icon,
-         then hands over to the video. -->
-    <style name="Theme.Hesper.Splash" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
-        <item name="android:windowBackground">@color/hesper_cream</item>
-        <item name="android:windowSplashScreenBackground">@color/hesper_cream</item>
+    <!-- Android 12+ draws its own launch screen (PEK TV icon on PEK orange), then hands over to the video. -->
+    <style name="Theme.Hesper.Launch" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@color/pek_splash_bg</item>
+        <item name="android:windowSplashScreenBackground">@color/pek_splash_bg</item>
         <item name="android:windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>

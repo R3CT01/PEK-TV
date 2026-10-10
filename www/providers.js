@@ -110,7 +110,7 @@
             }
             if (A && typeof A.openUrl === 'function') { A.openUrl(p.url); return p; }
             var w = window.open(p.url, '_blank', 'noopener,noreferrer');
-            if (!w) toast('Your browser blocked the new tab. Allow pop-ups for Hesper and try again.');
+            if (!w) toast('Your browser blocked the new tab. Allow pop-ups for PEK TV and try again.');
         } catch (e) {
             toast("Couldn't open " + p.name + '.');
         }

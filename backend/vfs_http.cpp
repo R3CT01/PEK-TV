@@ -535,7 +535,7 @@ std::unique_ptr<Share> davConnect(const Url& u, Error& err) {
 #ifndef CPPHTTPLIB_OPENSSL_SUPPORT
     if (u.scheme == "davs") {
         err.auth = false;
-        err.msg = "This build of Hesper has no HTTPS support, so davs:// cannot be used.";
+        err.msg = "This build of PEK TV has no HTTPS support, so davs:// cannot be used.";
         return nullptr;
     }
 #endif

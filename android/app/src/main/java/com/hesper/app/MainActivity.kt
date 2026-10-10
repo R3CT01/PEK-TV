@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -19,6 +20,8 @@ import android.os.Looper
 import android.os.Process
 import android.provider.Settings
 import android.util.Log
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowInsets
@@ -47,8 +50,22 @@ class MainActivity : Activity() {
     private var filePathCallback: ValueCallback<Array<Uri>>? = null
     private val fileChooserRequest = 4711
 
+    // ---- PEK splash (see SplashOverlay.kt) ----
+    // Plays on top of the WebView while the app loads underneath. Controls are locked until the video
+    // has finished (and the page is up), so the splash can't be skipped.
+    private var splash: SplashOverlay? = null
+    private var splashVideoDone = false
+    private var pageReady = false
+    private var splashDismissing = false
+    private val ui = Handler(Looper.getMainLooper())
+    private val splashHardCap = Runnable { splash?.forceDone(); pageReady = true; dismissSplashIfReady() }   // video never finished
+    private val splashPageWait = Runnable { pageReady = true; dismissSplashIfReady() }                      // page never finished loading
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // The launch theme paints the PEK splash colour for the first instant; behind the app itself
+        // the window must be black again (mpv's video surface sits behind the transparent WebView).
+        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
 
         // mpv draws on this surface, BEHIND the (transparent) WebView.
         val surfaceView = SurfaceView(this)
@@ -63,7 +80,12 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                if (!pageReady) { pageReady = true; dismissSplashIfReady() }
+            }
+        }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowFileChooser(
                 view: WebView,
@@ -108,12 +130,14 @@ class MainActivity : Activity() {
             }
         }
         setContentView(layout)
-        webView.requestFocus()
 
-        // First start: ask for storage access straight away. (If it is refused, the folder browsers ask again when opened.)
-        if (!hasStoragePermission() && !getSharedPreferences("hesper", MODE_PRIVATE).getBoolean("asked_storage", false)) {
-            requestStoragePermission(true)
-        }
+        // Splash on top of everything. The app keeps loading below it (server start, page load).
+        val overlay = SplashOverlay(this) { splashVideoDone = true; dismissSplashIfReady() }
+        splash = overlay
+        addContentView(overlay, FrameLayout.LayoutParams(-1, -1))
+        overlay.requestFocus()
+        overlay.start()
+        ui.postDelayed(splashHardCap, 15000)   // safety net only; the video is 5 s
 
         Thread {
             val root = File(filesDir, "hesper")
@@ -139,6 +163,54 @@ class MainActivity : Activity() {
         }.start()
     }
 
+
+    // The splash is gone only when its video has finished AND the page has loaded underneath it. If the page is
+    // slow, the last video frame is held (at most 8 s) instead of showing a blank screen.
+    private fun dismissSplashIfReady() {
+        val overlay = splash ?: return
+        if (!splashVideoDone) return
+        if (!pageReady) {
+            ui.removeCallbacks(splashPageWait)
+            ui.postDelayed(splashPageWait, 8000)
+            return
+        }
+        if (splashDismissing) return
+        splashDismissing = true
+        ui.removeCallbacks(splashHardCap)
+        ui.removeCallbacks(splashPageWait)
+        overlay.animate().alpha(0f).setDuration(350).withEndAction {
+            overlay.release()
+            (overlay.parent as? android.view.ViewGroup)?.removeView(overlay)
+            splash = null
+            onSplashFinished()
+        }.start()
+    }
+
+    // Controls are live from here on.
+    private fun onSplashFinished() {
+        webView.requestFocus()
+        // First start: ask for storage access (held back until now so the prompt can't interrupt the splash).
+        // If it is refused, the folder browsers ask again when opened.
+        if (!hasStoragePermission() && !getSharedPreferences("hesper", MODE_PRIVATE).getBoolean("asked_storage", false)) {
+            requestStoragePermission(true)
+        }
+    }
+
+    // While the splash is up every touch, key (remote / keyboard / gamepad) and Back press is swallowed here,
+    // before it can reach the WebView.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        if (splash != null) true else super.dispatchKeyEvent(event)
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean =
+        if (splash != null) true else super.dispatchTouchEvent(ev)
+
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean =
+        if (splash != null) true else super.dispatchGenericMotionEvent(ev)
+
+    override fun onResume() {
+        super.onResume()
+        splash?.resumeIfNeeded()
+    }
 
     // The picker intent, or null when this device has no app that can answer it (typical on TV).
     // No createChooser(): on TV firmware the chooser itself can freeze or crash.
@@ -318,6 +390,9 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        ui.removeCallbacks(splashHardCap)
+        ui.removeCallbacks(splashPageWait)
+        splash?.release()
         bridge.setMulticast(false)
         bridge.releaseNavSound()
         mpv.destroy()
@@ -328,10 +403,11 @@ class MainActivity : Activity() {
     // fallback for when the page is not there (e.g. the server failed to start) and Back would just leave.
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (splash != null) return   // splash can't be skipped
         if (webView.canGoBack()) { webView.goBack(); return }
         AlertDialog.Builder(this)
             .setTitle("Are you sure you want to exit?")
-            .setMessage("Hesper will stop running and its temporary cache will be cleared.")
+            .setMessage("PEK TV will stop running and its temporary cache will be cleared.")
             .setPositiveButton("Yes, exit") { _, _ -> exitApp() }
             .setNegativeButton("Cancel", null)
             .show()

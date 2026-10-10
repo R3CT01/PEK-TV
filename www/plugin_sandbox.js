@@ -76,7 +76,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         return new Promise(function (resolve, reject) {
             var id = nextReq++;
             var timer = setTimeout(function () {
-                pending.delete(id); reject(new Error('Hesper did not answer in time'));
+                pending.delete(id); reject(new Error('PEK TV did not answer in time'));
             }, timeoutMs || 15000);
             pending.set(id, { resolve: resolve, reject: reject, timer: timer });
             post({ t: 'req', id: id, op: op, args: args });
@@ -524,9 +524,9 @@ class HesperSandbox {
 
     _need(perm) {
         if (!this.manifest.permissions[perm]) throw new Error("plugin.json does not request the '" + perm + "' permission");
-        if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this Hesper');
-        if (perm === 'watched' && !(window.HesperSync && window.HesperSync.setWatched)) throw new Error('Watch history is not available in this Hesper');
-        if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this Hesper');
+        if (perm === 'favorites' && !window.HesperFavorites) throw new Error('Favorites are not available in this PEK TV');
+        if (perm === 'watched' && !(window.HesperSync && window.HesperSync.setWatched)) throw new Error('Watch history is not available in this PEK TV');
+        if (perm === 'plugins' && !(window.HesperHost && window.HesperHost.streamers)) throw new Error('Plugin launching is not available in this PEK TV');
     }
 
     _favAdd(a) {
@@ -592,7 +592,7 @@ class HesperSandbox {
 
     _torrentGuard() {
         if (!this.manifest.permissions.torrent) throw new Error("plugin.json does not request the 'torrent' permission");
-        if (!window.HesperTorrent) throw new Error('Torrent playback is not available in this Hesper');
+        if (!window.HesperTorrent) throw new Error('Torrent playback is not available in this PEK TV');
     }
 
     async _torrentInfo() {

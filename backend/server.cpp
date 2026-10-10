@@ -605,7 +605,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             const fs::path dir(path);
             if (!fs::is_directory(dir, ec)) { fail("That folder isn't available.", false); return; }
             fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
-            if (ec) { fail("Hesper isn't allowed to open this folder on this device. Try a network folder instead.", false); return; }
+            if (ec) { fail("PEK TV isn't allowed to open this folder on this device. Try a network folder instead.", false); return; }
             for (; it != fs::directory_iterator(); it.increment(ec)) {
                 if (ec) break;
                 const std::string name = it->path().filename().string();
@@ -674,7 +674,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             const uint64_t size = fs::file_size(p, ec);
             if (ec || size == 0 || size > kZipPickMax) { fail("That file is too large to be a plugin (limit 8 MB)."); return; }
             std::ifstream in(p, std::ios::binary);
-            if (!in) { fail("Hesper isn't allowed to open that file."); return; }
+            if (!in) { fail("PEK TV isn't allowed to open that file."); return; }
             data.resize(static_cast<size_t>(size));
             in.read(&data[0], static_cast<std::streamsize>(size));
             if (static_cast<uint64_t>(in.gcount()) != size) { fail("The file could not be read completely."); return; }

@@ -20,10 +20,10 @@ class MainAppStorageMethods {
         return new Promise((resolve) => {
             const done = (granted) => {
                 if (window.__hesperStorage === handler) window.__hesperStorage = null;
-                if (!granted) ui.toast('Hesper needs storage access to browse files. Allow it in the permission prompt, or in Android Settings \u2192 Apps \u2192 Hesper \u2192 Permissions.', 6000);
+                if (!granted) ui.toast('PEK TV needs storage access to browse files. Allow it in the permission prompt, or in Android Settings \u2192 Apps \u2192 PEK TV \u2192 Permissions.', 6000);
                 resolve(!!granted);
             };
-            const handler = (granted, opened) => { if (opened) { ui.toast('Turn on Storage for Hesper, then come back and try again.', 6000); resolve(false); } else done(granted); };
+            const handler = (granted, opened) => { if (opened) { ui.toast('Turn on Storage for PEK TV, then come back and try again.', 6000); resolve(false); } else done(granted); };
             window.__hesperStorage = handler;
             try { a.requestStoragePermission(false); } catch (e) { done(false); }
         });

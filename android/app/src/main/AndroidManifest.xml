@@ -53,7 +53,7 @@
     </queries>
 
     <application
-        android:label="Hesper"
+        android:label="PEK TV"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:banner="@drawable/tv_banner"
@@ -62,18 +62,13 @@
         <!-- enableOnBackInvokedCallback=false: apps targeting Android 16 otherwise stop getting
              KEYCODE_BACK / onBackPressed, which the web UI (TV remote Back) and the exit dialog rely on. -->
 
+        <!-- Launcher entry. The PEK splash video plays inside this activity, on top of the app while it loads
+             (see SplashOverlay.kt); controls are locked until the video is done. -->
         <activity
             android:name=".MainActivity"
-            android:exported="false"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
-            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
-
-        <!-- Launcher entry: plays the splash video, then opens MainActivity -->
-        <activity
-            android:name=".SplashActivity"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
-            android:theme="@style/Theme.Hesper.Splash">
+            android:theme="@style/Theme.Hesper.Launch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -614,7 +614,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
     });
 
     svr.Post("/api/torrent/start", [](const httplib::Request& req, httplib::Response& res) {
-        if (!torrent::available()) { jsonErr(res, 501, "Torrent playback is not built into this Hesper"); return; }
+        if (!torrent::available()) { jsonErr(res, 501, "Torrent playback is not built into this PEK TV"); return; }
         std::string source = req.get_param_value("source");
         int season = std::atoi(req.get_param_value("season").c_str());
         int episode = std::atoi(req.get_param_value("episode").c_str());
