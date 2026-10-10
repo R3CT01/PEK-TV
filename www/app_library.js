@@ -228,7 +228,7 @@ class MainAppLibraryMethods {
     // Back inside a sandboxed plugin (close a detail page, previous page of results ...).
     // True when the plugin handled it, so the plugin window itself stays open.
     _pluginBack() {
-        // The plugin window that is on top (a plugin can open another one, e.g. "Play with Snake Skin").
+        // The plugin window that is on top (a plugin can open another one, e.g. a "Play with ..." button).
         const win = this.props.engine.windows.activeWindow;
         const sb = win && win._sandbox;
         return !!(sb && sb.handleBack && sb.handleBack());
@@ -434,7 +434,7 @@ class MainAppLibraryMethods {
     _renderEmptyLibrary(what) {
         const { createElement, ui } = this.props.engine;
         return createElement('div', {},
-            ui.card(`No ${what} yet`, 'Add a media folder and Hesper will scan it and sort your videos here.'),
+            ui.card(`No ${what} yet`, 'Add a media folder and PEK TV will scan it and sort your videos here.'),
             createElement('div', { className: 'section-actions' },
                 ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' }),
                 ui.button('Add Network Folder', () => this.openNetPicker())
@@ -454,7 +454,7 @@ class MainAppLibraryMethods {
         return createElement('div', {},
             ui.card(
                 `${plural(groups.length, 'duplicate group')} found`,
-                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. Hesper only lists duplicates; delete files from your file manager.`
+                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. PEK TV only lists duplicates; delete files from your file manager.`
             ),
             ...groups.map(g => createElement('div', { className: 'settings-section' },
                 createElement('h2', {}, g.kind === 'size' ? `${g.label}: ${hesperFormatBytes(g.files[0].size)}` : g.label),

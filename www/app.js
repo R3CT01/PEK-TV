@@ -13,16 +13,16 @@ class MainApp extends HesperComponent {
             showThemePanel: false,
             pluginsList: [],
             resumeAsk: null,      // a Resume Watching card was tapped: ask Continue / Start over
-            pluginPick: null,     // Hesper's own .zip picker for plugin install (null = closed)
+            pluginPick: null,     // PEK TV's own .zip picker for plugin install (null = closed)
             pluginInstall: null,  // plugin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             pluginRemove: null,   // remove-plugin confirmation: null = closed, else { folder, name, busy, error }
             skinInstall: null,    // skin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             skinRemove: null,     // remove-skin confirmation: null = closed, else { id, name, busy, error }
-            appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until Hesper is closed
+            appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until PEK TV is closed
             favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
             favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
-            exitAsk: false,       // "exit Hesper?" confirmation (Android Back at the top level)
+            exitAsk: false,       // "exit PEK TV?" confirmation (Android Back at the top level)
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
             picker: null,         // null = closed, else { path, parent, dirs, loading, error }
@@ -160,7 +160,7 @@ class MainApp extends HesperComponent {
         // a stream is starting: Back cancels it and nothing behind the box moves
         if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
         const { engine } = this.props;
-        if (this.state.appClose) return true;   // the "close Hesper" screen cannot be dismissed
+        if (this.state.appClose) return true;   // the "close PEK TV" screen cannot be dismissed
         if (this.state.exitAsk) { this.setState({ exitAsk: false }); return true; }
         if (this._player) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
@@ -212,7 +212,7 @@ class MainApp extends HesperComponent {
         const { createElement, ui } = this.props.engine;
         const close = () => this.setState({ exitAsk: false });
         const body = createElement('div', {},
-            createElement('p', { className: 'sub' }, 'Hesper will stop running and its temporary cache will be cleared.'),
+            createElement('p', { className: 'sub' }, 'PEK TV will stop running and its temporary cache will be cleared.'),
             createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
                 ui.button('Yes, exit', () => this._confirmExit(), { variant: 'primary' })));
         return ui.modal('Are you sure you want to exit?', body, close);   // the modal's own button is "Close" = stay
@@ -232,7 +232,7 @@ class MainApp extends HesperComponent {
             }, item.label);
         });
 
-        const currentLabel = navItems.find(i => i.id === activeTab)?.label || 'Hesper';
+        const currentLabel = navItems.find(i => i.id === activeTab)?.label || 'PEK TV';
 
         // Tab View Content
         let mainContent;
@@ -278,7 +278,7 @@ class MainApp extends HesperComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Background activity'),
-                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what Hesper is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
+                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what PEK TV is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
                     createElement('div', { className: 'section-actions' },
                         ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
                             this._choiceButton(label, window.HesperActivity.get() === id,
@@ -396,7 +396,7 @@ class MainApp extends HesperComponent {
 
         const isPhone = window.matchMedia(PHONE_MQ).matches;
         const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
-                createElement('div', { className: 'sidebar-brand' }, 'Hesper'),
+                createElement('div', { className: 'sidebar-brand' }, 'PEK TV'),
                 createElement('div', { className: 'sidebar-nav', 'data-keep-scroll': 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
                     createElement('span', { className: 'status-badge' }, 'System Online')

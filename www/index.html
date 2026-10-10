@@ -9,7 +9,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="theme-color" content="#E9E2DA">
 <style>
-#hesper-splash{position:fixed;inset:0;z-index:2147483647;background:#E9E2DA;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
+#hesper-splash{position:fixed;inset:0;z-index:2147483647;background:#E04A00;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
 #hesper-splash.out{opacity:0;pointer-events:none}
 #hesper-splash video{width:100%;height:100%;object-fit:cover}
 </style>
@@ -17,28 +17,46 @@
 <body>
 <div id="hesper-splash"><video muted playsinline preload="auto"></video></div>
 <script>
-// Splash: plays once per session; tap/key skips. Skipped inside the Android app,
-// which plays the same video natively before the WebView loads.
+// Splash: plays once per session and can't be skipped - clicks, taps and keys are blocked until the video
+// ends. The app keeps loading underneath it. Skipped inside the Android app, which plays the same video
+// natively (SplashOverlay.kt) with the same lock.
 (function () {
   var el = document.getElementById('hesper-splash');
   var seen = false;
   try { seen = sessionStorage.getItem('hesperSplash') === '1'; } catch (e) {}
   if (window.HesperAndroid || seen) { el.remove(); return; }
   try { sessionStorage.setItem('hesperSplash', '1'); } catch (e) {}
-  var v = el.querySelector('video'), gone = false;
+  var v = el.querySelector('video'), gone = false, videoDone = false, net;
   // Portrait screens (phones) get the 9:16 cut; wide screens (TVs, desktops) the 16:9 one.
   v.src = window.matchMedia('(orientation: portrait)').matches ? 'splash_portrait.mp4' : 'splash.mp4';
+
+  // Lock: swallow keys (so nothing behind the splash can be focused or activated) and gestures.
+  function lock(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+  var lockEvents = ['keydown', 'keyup', 'keypress', 'wheel', 'touchmove', 'contextmenu'];
+  lockEvents.forEach(function (n) { window.addEventListener(n, lock, { capture: true, passive: false }); });
+
   function end() {
     if (gone) return; gone = true;
+    clearTimeout(net);
+    lockEvents.forEach(function (n) { window.removeEventListener(n, lock, { capture: true }); });
     el.classList.add('out');
     setTimeout(function () { el.remove(); }, 600);
   }
-  v.addEventListener('ended', end);
-  v.addEventListener('error', end);
-  el.addEventListener('click', end);
-  document.addEventListener('keydown', end, { once: true });
-  setTimeout(end, 8000);               // safety net
-  var p = v.play(); if (p && p.catch) p.catch(end);
+  // Video finished: leave as soon as the page has loaded too (hold the last frame up to 6 s if it is slow).
+  function videoEnded() {
+    if (videoDone) return; videoDone = true;
+    if (document.readyState === 'complete') { end(); return; }
+    window.addEventListener('load', end, { once: true });
+    clearTimeout(net); net = setTimeout(end, 6000);
+  }
+  v.addEventListener('ended', videoEnded);
+  v.addEventListener('error', videoEnded);   // a broken video must never block the app
+  // Safety nets only: if it never starts, or stalls part-way.
+  net = setTimeout(videoEnded, 15000);
+  v.addEventListener('playing', function () {
+    clearTimeout(net); net = setTimeout(videoEnded, ((v.duration || 5) + 3) * 1000);
+  });
+  var p = v.play(); if (p && p.catch) p.catch(videoEnded);
 })();
 </script>
 <script>

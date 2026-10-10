@@ -189,7 +189,7 @@ class MainAppSourcesMethods {
             } });
         } catch (err) {
             if (!this.state.netPicker) return;
-            this.setState({ netPicker: { ...this.state.netPicker, loading: false, error: 'Could not reach the Hesper server.' } });
+            this.setState({ netPicker: { ...this.state.netPicker, loading: false, error: 'Could not reach the PEK TV server.' } });
         }
     }
 
@@ -229,7 +229,7 @@ class MainAppSourcesMethods {
             setTimeout(() => this.refreshLibrary(), 4000);
             setTimeout(() => this.refreshLibrary(), 15000);
         } catch (err) {
-            this.setState({ netPicker: { ...this.state.netPicker, error: 'Could not reach the Hesper server.' } });
+            this.setState({ netPicker: { ...this.state.netPicker, error: 'Could not reach the PEK TV server.' } });
         }
     }
 

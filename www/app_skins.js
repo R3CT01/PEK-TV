@@ -64,7 +64,7 @@ class MainAppSkinsMethods {
             p.description,
             p.tokenCount ? `Sets ${p.tokenCount} colours and sizes` + (p.hasCss ? ' and adds its own styling.' : '.') : (p.hasCss ? 'Adds its own styling.' : null),
             si.replaced ? 'This replaces the version you already have.' : null,
-            'A skin only changes how Hesper looks. It can\u2019t run code or reach the network.'
+            'A skin only changes how PEK TV looks. It can\u2019t run code or reach the network.'
         ].filter(Boolean);
         const installing = si.stage === 'installing';
         const body = createElement('div', {},
@@ -115,7 +115,7 @@ class MainAppSkinsMethods {
         const body = createElement('div', {},
             createElement('div', { className: 'glass-panel' },
                 createElement('p', {}, 'This deletes the skin and its files from this device. You can install it again from its .zip.'),
-                this.state.activeSkin === sr.id ? createElement('p', {}, 'It is the skin in use, so Hesper goes back to the default look.') : null,
+                this.state.activeSkin === sr.id ? createElement('p', {}, 'It is the skin in use, so PEK TV goes back to the default look.') : null,
                 sr.error ? createElement('p', {}, sr.error) : null
             ),
             ui.button(sr.busy ? 'Removing\u2026' : 'Remove skin', () => this.confirmRemoveSkin(), { variant: 'primary' })

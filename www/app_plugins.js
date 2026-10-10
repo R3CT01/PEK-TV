@@ -68,7 +68,7 @@ class MainAppPluginsMethods {
             const res = await fetch('/api/plugins/browse', { method: 'POST', body: new URLSearchParams({ path }) });
             data = await res.json();
         } catch (e) {
-            data = { ok: false, error: "Couldn't reach Hesper's server." };
+            data = { ok: false, error: "Couldn't reach PEK TV's server." };
         }
         const cur = this.state.pluginPick;
         if (!cur) return;
@@ -217,12 +217,12 @@ class MainAppPluginsMethods {
             this.setState({ pluginInstall: null });
             if (pi.prep.ui && pi.prep.ui.reloadOnInstall) {
                 // This plugin changes Hesper's own layout (it adds a tab), so the whole app reloads.
-                ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}. Reloading Hesper\u2026`, 2500);
+                ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}. Reloading PEK TV\u2026`, 2500);
                 setTimeout(() => { try { location.reload(); } catch (e) { /* stay on this screen */ } }, 1200);
                 return;
             }
             ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}` +
-                (pi.prep.hasBackend ? '. Restart Hesper to start its Python backend.' : ''), pi.prep.hasBackend ? 7000 : 3500);
+                (pi.prep.hasBackend ? '. Restart PEK TV to start its Python backend.' : ''), pi.prep.hasBackend ? 7000 : 3500);
         } catch (err) {
             window.HesperActivity.end('install', 'Plugin install failed');
             this.setState({ pluginInstall: { stage: 'error', error: String((err && err.message) || err) } });
@@ -309,15 +309,15 @@ class MainAppPluginsMethods {
             net,
             p.storage ? 'Can keep its own private data' : null,
             p.library ? 'Its Python code can read the titles and years in your library (never file names or folders).' : null,
-            p.torrent ? 'Can search for releases and start torrent streams through Hesper (it never sees your provider key). Streams download and upload from your connection.' : null,
+            p.torrent ? 'Can search for releases and start torrent streams through PEK TV (it never sees your provider key). Streams download and upload from your connection.' : null,
             p.favorites ? 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).' : null,
-            p.providers ? 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. Hesper decides what they open: the service\u2019s app on Android, its website elsewhere.' : null,
+            p.providers ? 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.' : null,
             p.plugins ? 'Can list your plugins that play titles and open one of them when you tap a button.' : null,
             p.stream ? 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with ' + p.name + '\u201d button.' : null,
-            p.ui && p.ui.navTab ? `Adds a \u201c${p.ui.navTab}\u201d tab to Hesper.` : null,
-            p.ui && p.ui.reloadOnInstall ? 'Hesper reloads right after installing. Then close and reopen Hesper once so the plugin\u2019s Python part starts.' : null,
-            p.ui && p.ui.closeOnRemove ? 'Removing it later means closing Hesper once to restore the normal layout.' : null,
-            p.hasBackend ? 'Includes Python code that runs on this device after a restart. Hesper only runs it if it declares its permissions and passes a safety scan, and then it can only reach the hosts listed above and its own data folder.' : null,
+            p.ui && p.ui.navTab ? `Adds a \u201c${p.ui.navTab}\u201d tab to PEK TV.` : null,
+            p.ui && p.ui.reloadOnInstall ? 'PEK TV reloads right after installing. Then close and reopen PEK TV once so the plugin\u2019s Python part starts.' : null,
+            p.ui && p.ui.closeOnRemove ? 'Removing it later means closing PEK TV once to restore the normal layout.' : null,
+            p.hasBackend ? 'Includes Python code that runs on this device after a restart. PEK TV only runs it if it declares its permissions and passes a safety scan, and then it can only reach the hosts listed above and its own data folder.' : null,
             pi.replaced ? 'This replaces the version you already have (its saved data is kept).' : null,
             'It runs in a sandbox and can only do the things listed here. Only install plugins from people you trust.'
         ].filter(Boolean);
@@ -354,10 +354,10 @@ class MainAppPluginsMethods {
         const { createElement } = this.props.engine;
         return createElement('div', { className: 'theme-panel-overlay' },
             createElement('div', { className: 'theme-panel' },
-                createElement('h2', {}, 'Close Hesper to finish'),
+                createElement('h2', {}, 'Close PEK TV to finish'),
                 createElement('div', { className: 'glass-panel' },
-                    createElement('p', {}, `\u201c${ac.name}\u201d was removed. It had changed Hesper\u2019s layout.`),
-                    createElement('p', {}, 'Close Hesper completely (on Android, swipe it away from your recent apps), then open it again. Your Movies and TV Shows will look the way they did before.')
+                    createElement('p', {}, `\u201c${ac.name}\u201d was removed. It had changed PEK TV\u2019s layout.`),
+                    createElement('p', {}, 'Close PEK TV completely (on Android, swipe it away from your recent apps), then open it again. Your Movies and TV Shows will look the way they did before.')
                 )
             )
         );
@@ -370,7 +370,7 @@ class MainAppPluginsMethods {
         const body = createElement('div', {},
             createElement('div', { className: 'glass-panel' },
                 createElement('p', {}, `This deletes the plugin and its files from this device. You can install it again from its .zip.`),
-                pr.closeOnRemove ? createElement('p', {}, 'This plugin changed Hesper\u2019s layout. After removing it you will need to close Hesper and open it again.') : null,
+                pr.closeOnRemove ? createElement('p', {}, 'This plugin changed PEK TV\u2019s layout. After removing it you will need to close PEK TV and open it again.') : null,
                 pr.error ? createElement('p', {}, pr.error) : null
             ),
             ui.button(pr.busy ? 'Removing\u2026' : 'Remove plugin', () => this.confirmRemovePlugin(), { variant: 'primary' })

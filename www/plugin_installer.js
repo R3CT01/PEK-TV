@@ -76,7 +76,7 @@ const HesperPluginInstaller = (() => {
         };
         if (hasAt('skin.json')) {
             throw new Error(hasAt('plugin.json')
-                ? 'This zip has both plugin.json and skin.json, so Hesper can\u2019t tell whether it is a plugin or a skin.'
+                ? 'This zip has both plugin.json and skin.json, so PEK TV can\u2019t tell whether it is a plugin or a skin.'
                 : 'This is a skin, not a plugin. Install it from Settings \u2192 Skins.');
         }
         let prefix = '', folder = '';
@@ -169,7 +169,7 @@ const HesperPluginInstaller = (() => {
         try {
             res = await fetch(url, { method: 'POST', body: form });
         } catch (e) {
-            throw new Error("Couldn't reach Hesper's server.");
+            throw new Error("Couldn't reach PEK TV's server.");
         }
         let data = null;
         try { data = await res.json(); } catch (e) { /* not JSON */ }
@@ -198,7 +198,7 @@ const HesperPluginInstaller = (() => {
         try {
             res = await fetch('/api/plugins/fetch', { method: 'POST', body: new URLSearchParams({ path }) });
         } catch (e) {
-            throw new Error("Couldn't reach Hesper's server.");
+            throw new Error("Couldn't reach PEK TV's server.");
         }
         const type = res.headers.get('content-type') || '';
         if (!res.ok || type.indexOf('application/json') === 0) {

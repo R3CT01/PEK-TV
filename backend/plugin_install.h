@@ -159,7 +159,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
         const std::string ext = extensionOf(f.path);
         if (!allowedExtension(ext)) {
             if (ext == "py")
-                return "this build of Hesper doesn't install plugins that include Python code (" + f.path + ")";
+                return "this build of PEK TV doesn't install plugins that include Python code (" + f.path + ")";
             return "file type not allowed in plugins: " + f.path;
         }
         if (ext == "py" && f.data.size() > kMaxPythonBytes)

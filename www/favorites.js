@@ -1,7 +1,7 @@
 /* Hesper favorites  (window.HesperFavorites)
  *
- * One list for the whole app: TMDb Discover, Snake Skin (any plugin with the "favorites"
- * permission) add titles here, and the Favorites tab shows them.
+ * One list for the whole app: TMDb Discover (or any plugin with the "favorites"
+ * permission) adds titles here, and the Favorites tab shows them.
  *
  * Plugins never touch this storage directly. plugin_sandbox.js passes their requests through
  * add() / remove() / keys(), and every entry is cleaned here: only a TMDb type + id, a title,
