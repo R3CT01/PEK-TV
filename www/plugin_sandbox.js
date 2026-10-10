@@ -70,7 +70,7 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
     var pending = new Map(), nextReq = 1;
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
-    var launchFn = null, pendingLaunch = null;
+    var launchFn = null, pendingLaunch = null, nextFn = null;
 
     function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
@@ -170,6 +170,11 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
         // Called when Hesper opens this plugin on a particular title (the Favorites tab, or another plugin):
         // fn({type: 'movie' | 'tv', id: <TMDb id>, title, year}).
         onLaunch: function (fn) { launchFn = typeof fn === 'function' ? fn : null; flushLaunch(); },
+        // Called when the player nears the end of an episode this plugin started and Hesper wants to offer the next one.
+        // fn({phase: 'check' | 'play', showTitle, season, episode}) returns a promise of {ok, season, episode, name}.
+        //   'check': the episode that was playing; answer with the NEXT one and ok:true only if it can be played.
+        //   'play':  season/episode are the one to start now (the player is already closed); resolve once it is playing.
+        onNextEpisode: function (fn) { nextFn = typeof fn === 'function' ? fn : null; },
         // Needs permissions.favorites. list() -> ['movie:603', 'tv:1396', ...]
         favorites: {
             list: function () { return request('favList', {}).then(JSON.parse); },
@@ -241,6 +246,13 @@ const HESPER_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-
                 document.body.appendChild(s);
             } catch (e) { post({ t: 'log', text: 'plugin failed to start: ' + e }); }
             post({ t: 'started', hasRender: !!renderFn });
+        } else if (m.t === 'next') {
+            var nrid = m.rid, nreq = m.req;
+            var nreply = function (ok, v) { post({ t: 'nextRes', rid: nrid, ok: ok, value: v }); };
+            if (!nextFn || !nreq || typeof nreq !== 'object') { nreply(false, 'no handler'); return; }
+            try {
+                Promise.resolve(nextFn(nreq)).then(function (v) { nreply(true, v); }, function (e) { nreply(false, String((e && e.message) || e)); });
+            } catch (e) { nreply(false, String(e)); }
         } else if (m.t === 'launch') {
             if (m.intent && typeof m.intent === 'object') { pendingLaunch = m.intent; flushLaunch(); }
         } else if (m.t === 'back') {
@@ -329,6 +341,8 @@ class HesperSandbox {
         this._afKey = null;          // which screen the plugin last asked to focus
         this._lastTap = 0;           // when the user last tapped something in this plugin
         this._pendingLaunch = null;  // a title to open as soon as the plugin has started
+        this._nextPending = new Map(); // next-episode questions waiting for the plugin's answer
+        this._nextId = 0;
         this._focusMemo = {};        // screen key -> element that had focus when we left it
         this._onMessage = this._onMessage.bind(this);
         HesperSandbox._initNav();
@@ -395,6 +409,37 @@ class HesperSandbox {
         if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage(msg, '*');
     }
 
+    /** Ask the plugin about the next episode (see hesper.onNextEpisode). Always resolves: { ok, season, episode, name, error }. */
+    nextEpisode(req, timeoutMs) {
+        return new Promise((resolve) => {
+            if (!this.started || !this.frame) { resolve({ ok: false, error: 'not running' }); return; }
+            const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
+            const clean = {
+                phase: req && req.phase === 'play' ? 'play' : 'check',
+                showTitle: String((req && req.showTitle) || '').slice(0, 200),
+                season: Math.max(0, Math.floor(Number(req && req.season)) || 0) % 201,
+                episode: int(req && req.episode, 2000)
+            };
+            const rid = ++this._nextId;
+            const timer = setTimeout(() => { this._nextPending.delete(rid); resolve({ ok: false, error: 'timeout' }); }, timeoutMs || 60000);
+            this._nextPending.set(rid, (m) => {
+                clearTimeout(timer);
+                const v = (m.ok && m.value && typeof m.value === 'object') ? m.value : {};
+                resolve({
+                    ok: v.ok === true, season: Math.max(0, Math.min(200, Math.floor(Number(v.season)) || 0)), episode: int(v.episode, 2000),
+                    name: typeof v.name === 'string' ? v.name.slice(0, 120) : '',
+                    error: String(v.error || (m.ok ? '' : m.value) || '').slice(0, 200)
+                });
+            });
+            this._send({ t: 'next', rid, req: clean });
+        });
+    }
+
+    _onNextRes(m) {
+        const cb = typeof m.rid === 'number' ? this._nextPending.get(m.rid) : null;
+        if (cb) { this._nextPending.delete(m.rid); cb(m); }
+    }
+
     /** Ask the plugin to open a title ({type, id, title, year}). Held until the plugin has started. */
     launch(intent) {
         this._pendingLaunch = intent;
@@ -441,6 +486,7 @@ class HesperSandbox {
                 break;
             case 'log': this._log(m.text); break;
             case 'req': this._handleRequest(m); break;
+            case 'nextRes': this._onNextRes(m); break;
         }
     }
 

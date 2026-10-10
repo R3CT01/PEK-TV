@@ -150,3 +150,23 @@ Four optional permissions (`"permissions": {"favorites": true, "providers": true
 
 Services and their Android packages are listed in `www/providers.js`. On Android run `node tools/sync_providers.js` after editing it
 (it regenerates the allow-list in `MainActivity.kt` and the `<queries>` in `AndroidManifest.xml`).
+
+## Up next (optional): `hesper.onNextEpisode`
+
+Near the end of an episode your plugin started, PEK's player can offer the next one on the right side of the screen. PEK looks in the
+user's own library folders first; if the next episode is not there, it asks the plugin the episode came from (only plugins that started
+the stream with `kind: 'episode'` and a `name`, which PEK records as the stream's origin).
+
+```js
+hesper.onNextEpisode(function (req) {
+    // req = { phase: 'check' | 'play', showTitle, season, episode }
+    // 'check': season/episode = the one that was playing. Resolve { ok: true, season, episode, name } for the NEXT episode,
+    //          only if it has aired and you have a stream for it. Resolve { ok: false } otherwise (no card is shown).
+    //          This runs a few minutes before the end, so do the searching here and keep the result.
+    // 'play':  season/episode = the one to start (PEK has already closed the player). Call hesper.torrent.play(...)
+    //          and resolve { ok: true } once it started, or { ok: false, error } if it did not.
+});
+```
+
+Needs the `torrent` permission to play anything. A plugin that does not call `onNextEpisode` simply gets no card. Answers are
+size-limited by PEK (name 120 characters) and a plugin that does not answer within a minute counts as "no".
