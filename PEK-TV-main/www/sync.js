@@ -248,6 +248,27 @@
         if (!validPassword(password)) return Promise.resolve({ ok: false, error: 'weak_password' });
         return authSession('/v1/auth/reset', { email: cleanEmail(email), code: String(code || '').replace(/\D/g, ''), password: password });
     }
+    // The account's profiles as the cloud has them (sends none of ours). Resolves { ok, profiles } or { ok: false, error }.
+    function peekProfiles() {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        return request('POST', '/v1/profiles/sync', { profiles: [] }, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true, profiles: r.body.profiles || [] };
+            return { ok: false, error: failure(r.status, r.body) };
+        }, function () { return { ok: false, error: 'offline' }; });
+    }
+
+    // Checks the account password against the cloud for the current session (used to reset a forgotten profile passcode).
+    // Resolves { ok } or { ok: false, error }  ('bad_credentials', 'rate_limited', 'offline', 'not_found' on an older cloud service ...).
+    function confirmPassword(password) {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        if (!password) return Promise.resolve({ ok: false, error: 'bad_credentials' });
+        return request('POST', '/v1/auth/confirm', { password: String(password).slice(0, 200) }, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true };
+            if (r.status === 401 && r.body && r.body.error === 'bad_credentials') return { ok: false, error: 'bad_credentials' };
+            if (r.status === 404) return { ok: false, error: 'not_found' };
+            return { ok: false, error: failure(r.status, r.body) };
+        }, function () { return { ok: false, error: 'offline' }; });
+    }
     // Signs out here and (best effort) ends the session on the server.
     function signOut() {
         var had = !!getToken();
@@ -446,7 +467,7 @@
         var HP = window.PekProfiles;
         if (!HP || !HP.enabled || !HP.snapshot) return Promise.resolve({ ok: true });
         var snap = HP.snapshot();
-        var list = snap.list.map(function (p) { return { id: p.id, name: p.name, color: p.color, updated: p.updated || 0, deleted: 0 }; });
+        var list = snap.list.map(function (p) { return { id: p.id, name: p.name, color: p.color, updated: p.updated || 0, deleted: 0, avatar: p.avatar || '', pin: p.pin || '' }; });
         Object.keys(snap.tombs).forEach(function (id) { list.push({ id: id, name: '', color: '', updated: snap.tombs[id], deleted: 1 }); });
         return request('POST', '/v1/profiles/sync', { profiles: list }, true).then(function (r) {
             if (r.status === 200 && r.body && r.body.ok) { HP.mergeRemote(r.body.profiles || []); return { ok: true }; }
@@ -543,7 +564,7 @@
         listHistory: listHistory,
         clearHistory: clearHistory,
         validEmail: validEmail, validPassword: validPassword,
-        signUp: signUp, signIn: signIn, signOut: signOut,
+        signUp: signUp, signIn: signIn, signOut: signOut, confirmPassword: confirmPassword, peekProfiles: peekProfiles,
         verifyEmail: verifyEmail, resendCode: resendCode,
         forgotPassword: forgotPassword, resetPassword: resetPassword,
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,

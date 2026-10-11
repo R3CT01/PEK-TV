@@ -22,7 +22,9 @@
 //   POST   /v1/auth/forgot   { email }                          -> { ok }   (always, so emails can't be probed)
 //   POST   /v1/auth/reset    { email, code, password }          -> { ok, token, email }
 //   POST   /v1/auth/logout                                      -> { ok }
-//   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins)
+//   POST   /v1/auth/confirm  { password }                      -> { ok }   (re-checks the signed-in account's password, e.g. to reset a forgotten profile passcode; rate limited)
+//   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted,avatar,pin}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins;
+//                                                                  avatar = built-in picture id or a small photo, pin = salted passcode hash, both optional)
 //   POST   /v1/sync          push changed items (history, progress, favorites) of ONE profile ({ profile, since, ... }), pull newer ones
 //   GET    /v1/plugins                                          -> { ok, plugins: [{id,name,version,size,fp,updated,deleted,chunks}] }
 //   POST   /v1/plugins/chunk   { id, fp, index, total, data }   -> { ok }      (one piece of a plugin backup)
@@ -98,6 +100,9 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS items (acct TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, srv INTEGER NOT NULL, PRIMARY KEY (acct, kind, key))').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS items_srv ON items (acct, srv)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS profiles (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
+    // Profile picture and passcode hash (added later: older tables get the columns here).
+    try { await db.prepare("ALTER TABLE profiles ADD COLUMN avatar TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    try { await db.prepare("ALTER TABLE profiles ADD COLUMN pin TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
     await db.prepare('CREATE TABLE IF NOT EXISTS plugins (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS plugin_chunks (acct TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (acct, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS store_plugins (id TEXT PRIMARY KEY, shelf TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL DEFAULT \'\', description TEXT NOT NULL DEFAULT \'\', size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, status TEXT NOT NULL, owner TEXT NOT NULL, updated INTEGER NOT NULL)').run();
@@ -492,11 +497,38 @@ function goodProfileId(id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{1,
 function itemsAcct(userId, profile) { return (!profile || profile === 'p1') ? userId : userId + ':' + profile; }
 function likeProfiles(userId) { return userId + ':%'; }   // user ids are hex: no wildcard characters
 
-// POST /v1/profiles/sync  { profiles: [{ id, name, color, updated, deleted }] } -> { ok, profiles, rejected }
+// A profile picture is a built-in avatar id ("b:cat") or a small JPEG photo ("d:data:image/jpeg;base64,..."). The passcode is only ever a
+// salted hash made on the device ("<16 hex>:<64 hex>"), never the digits.
+function goodAvatar(a) {
+    if (a === '') return true;
+    if (typeof a !== 'string' || a.length > 14000) return false;
+    return /^b:[a-z]{2,16}$/.test(a) || /^d:data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(a);
+}
+function goodPin(p) { return p === '' || (typeof p === 'string' && /^[0-9a-f]{16}:[0-9a-f]{64}$/.test(p)); }
+
+// POST /v1/auth/confirm  { password } -> { ok }   (session required)
+// Lets the app re-check the account password, e.g. so a forgotten profile passcode can be removed. Shares the login
+// failure limit, so it cannot be used to guess the password.
+async function handleConfirm(request, env, userId) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const password = typeof body.password === 'string' ? body.password.slice(0, MAX_PASSWORD) : '';
+    if (!password) return json({ error: 'bad_credentials' }, 401);
+    const key = 'confirm:' + userId;
+    const lim = await db.prepare('SELECT n, reset_at FROM throttle WHERE k = ?').bind(key).first();
+    if (lim && lim.reset_at > now && lim.n >= 6) return json({ error: 'rate_limited' }, 429);
+    const row = await db.prepare('SELECT pw FROM users WHERE id = ?').bind(userId).first();
+    const ok = row ? await checkPassword(password, row.pw) : false;
+    if (!ok) { await limited(db, key, 6, 15 * 60 * 1000, now); return json({ error: 'bad_credentials' }, 401); }
+    await clearLimit(db, key);
+    return json({ ok: true });
+}
+
+// POST /v1/profiles/sync  { profiles: [{ id, name, color, updated, deleted, avatar, pin }] } -> { ok, profiles, rejected }
 // Last writer wins per profile, by its own "updated" time. Removing a profile (deleted: 1) also removes its stored items.
 async function handleProfiles(request, env, userId) {
     const text = await request.text();
-    if (text.length > 64 * 1024) return json({ error: 'too_large' }, 413);
+    if (text.length > 160 * 1024) return json({ error: 'too_large' }, 413);   // up to 5 small photos
     let body;
     try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad_json' }, 400); }
     const incoming = body && Array.isArray(body.profiles) ? body.profiles.slice(0, 40) : null;
@@ -504,9 +536,9 @@ async function handleProfiles(request, env, userId) {
 
     const db = env.DB;
     const now = Date.now();
-    const rows = (await db.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ?').bind(userId).all()).results || [];
+    const rows = (await db.prepare('SELECT id, name, color, updated, deleted, avatar, pin FROM profiles WHERE acct = ?').bind(userId).all()).results || [];
     const have = {};
-    rows.forEach(r => { have[r.id] = { id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: r.deleted ? 1 : 0 }; });
+    rows.forEach(r => { have[r.id] = { id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: r.deleted ? 1 : 0, avatar: r.avatar || '', pin: r.pin || '' }; });
     let live = rows.filter(r => !r.deleted).length;
     let total = rows.length;
     const stmts = [];
@@ -520,6 +552,8 @@ async function handleProfiles(request, env, userId) {
         const name = deleted ? '' : String(raw.name == null ? '' : raw.name).replace(/\s+/g, ' ').trim().slice(0, 40);
         const color = deleted ? '' : (/^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : '#E04A00');
         if (!deleted && !name) continue;
+        const avatar = deleted ? '' : goodAvatar(raw.avatar) ? raw.avatar : '';
+        const pin = deleted ? '' : goodPin(raw.pin) ? raw.pin : '';
         const cur = have[raw.id];
         if (cur && updated <= cur.updated) continue;                       // the cloud's copy is as new or newer
         if (!cur && !deleted && live >= MAX_PROFILES) { rejected.push(raw.id); continue; }
@@ -529,11 +563,11 @@ async function handleProfiles(request, env, userId) {
         if (!cur) total++;
         if (!cur || cur.deleted) { if (!deleted) live++; }
         else if (deleted) live--;
-        have[raw.id] = { id: raw.id, name, color, updated, deleted };
+        have[raw.id] = { id: raw.id, name, color, updated, deleted, avatar, pin };
         stmts.push(db.prepare(
-            'INSERT INTO profiles (acct, id, name, color, updated, deleted) VALUES (?, ?, ?, ?, ?, ?) ' +
-            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, color = excluded.color, updated = excluded.updated, deleted = excluded.deleted'
-        ).bind(userId, raw.id, name, color, updated, deleted));
+            'INSERT INTO profiles (acct, id, name, color, updated, deleted, avatar, pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
+            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, color = excluded.color, updated = excluded.updated, deleted = excluded.deleted, avatar = excluded.avatar, pin = excluded.pin'
+        ).bind(userId, raw.id, name, color, updated, deleted, avatar, pin));
         if (deleted) stmts.push(db.prepare('DELETE FROM items WHERE acct = ?').bind(itemsAcct(userId, raw.id)));
     }
     if (stmts.length) await db.batch(stmts);
@@ -702,8 +736,8 @@ async function handleExport(env, acct) {
         const profile = r.owner === acct ? 'p1' : r.owner.slice(acct.length + 1);
         return { profile, kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
     });
-    const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
-    const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted }));
+    const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted, avatar, pin FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
+    const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted, avatar: r.avatar || '', hasPasscode: !!r.pin }));   // the passcode hash is not exported
     const pl = await env.DB.prepare('SELECT id, name, version, size, updated, deleted FROM plugins WHERE acct = ? ORDER BY id').bind(acct).all();
     const plugins = (pl.results || []).map(r => ({ id: r.id, name: r.name, version: r.version, size: r.size, updated: r.updated, deleted: !!r.deleted }));
     return json({ exported: Date.now(), email: user ? user.email : '', profiles, items, plugins });
@@ -987,6 +1021,7 @@ export default {
             if (!sess) return json({ error: 'bad_session' }, 401);
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
+            if (method === 'POST' && path === '/v1/auth/confirm') return await handleConfirm(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/profiles/sync') return await handleProfiles(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/sync') return await handleSync(request, env, sess.userId);
             if (method === 'GET' && path === '/v1/plugins') return await handlePluginList(env, sess.userId);

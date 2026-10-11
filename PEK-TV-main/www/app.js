@@ -214,10 +214,11 @@ class MainApp extends PekComponent {
         try { window.PekAndroid.exitApp(); } catch (e) { console.warn('[PEK TV] exit failed', e); }
     }
 
-    // Settings > Profiles: who is watching, switch, manage (profiles.js). Hidden when the page has no storage.
+    // Settings > Profiles: who is watching, switch, manage (profiles.js). Hidden when the page has no storage or nobody is signed in to an account.
     _renderProfileSettings() {
         const hp = window.PekProfiles;
         if (!hp || !hp.enabled) return null;
+        if (typeof hp.hasAccount === 'function' && !hp.hasAccount()) return null;   // profiles need a signed-in account
         const { createElement, ui } = this.props.engine;
         const me = hp.current();
         return createElement('div', { className: 'settings-section' },
@@ -225,7 +226,7 @@ class MainApp extends PekComponent {
             createElement('p', { className: 'sub' },
                 `Watching as ${me ? me.name : 'Profile 1'}. Each profile keeps its own favorites, watch history, resume points, skip settings and look. Plugins and your library are shared.`),
             createElement('div', { className: 'section-actions' },
-                ui.button('Switch profile', () => hp.openPicker(false), { variant: 'primary' }),
+                ui.button('Sign out of profile', () => hp.openPicker(false), { variant: 'primary' }),
                 ui.button('Manage profiles', () => hp.openPicker(true))
             )
         );

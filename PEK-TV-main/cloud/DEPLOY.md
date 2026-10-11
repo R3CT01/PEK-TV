@@ -90,3 +90,10 @@ with "check your email" instead of a session, and only the updated app knows wha
 an older app would not be able to finish signing in (devices that are already signed in are not
 affected). Codes work once, for 30 minutes, with 5 tries per code and at most 6 code emails per
 address per hour. Brevo must be set up (part A), or sign-in answers "Email is not set up".
+
+## Profile pictures and passcodes
+
+Profile pictures, passcodes (stored only as a salted hash) and "forgot passcode" (re-checks the account password through the new
+`POST /v1/auth/confirm`) need the newest `worker.js`: paste it, deploy, done. The `profiles` table gets its two new columns
+(`avatar`, `pin`) by itself. Until the worker is updated everything still works on the device; pictures and passcodes just don't
+reach other devices, and "Forgot passcode?" says the cloud service needs an update.

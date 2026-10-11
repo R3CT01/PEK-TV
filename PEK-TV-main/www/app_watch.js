@@ -243,13 +243,24 @@ class MainAppWatchMethods {
     }
 
     // Called after any successful sign up / sign in / reset.
-    async _afterSignIn(toast) {
+    // created: this sign-in finishes a brand-new account (the only time the device's own data is carried into an account).
+    async _afterSignIn(toast, created) {
         const f = this._authForm();
         f.password = ''; f.confirm = ''; f.code = '';
         this._setSyncUi({ mode: '', busy: true, msg: '' });
         this.props.engine.ui.toast(toast);
+        const hp = window.PekProfiles, S = window.PekSync;
+        // An account that already has profiles replaces what is on this device (a brand-new account keeps it). The page
+        // reloads at once and the download of the account's data happens right after the profile is picked.
+        if (hp && hp.enabled && hp.adoptCloudProfiles && S && S.peekProfiles) {
+            const peek = await S.peekProfiles();
+            const replaced = hp.adoptCloudProfiles(peek.ok ? peek.profiles : [], S.getEmail(), !!created);
+            if (replaced && peek.ok) { hp.afterSignIn(); return; }
+        }
         const res = await this._runSync({ manual: true });
         if (!res.ok && res.error !== 'busy') this._setSyncUi({ busy: false });
+        // Profiles belong to the account: go to "Who's watching?" (or the first-time profile setup) now that one is signed in.
+        if (hp && hp.enabled && hp.afterSignIn) hp.afterSignIn();
     }
 
     async signUpAccount() {
@@ -262,6 +273,7 @@ class MainAppWatchMethods {
         const res = await S.signUp(f.email, f.password);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
         f.code = '';
+        this._createdEmail = f.email.trim().toLowerCase();   // this account is brand new: its first sign-in keeps what is on the device
         this._setSyncUi({ busy: false, mode: 'verify', msg: 'We emailed a 6-digit code to ' + f.email.trim() + '. Enter it to finish. It can take a minute. Check spam too.' });
     }
 
@@ -272,7 +284,9 @@ class MainAppWatchMethods {
         this._setSyncUi({ busy: true, msg: '' });
         const res = await S.verifyEmail(f.email, f.code);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
-        await this._afterSignIn('Signed in. Your history is syncing.');
+        const created = !!this._createdEmail && this._createdEmail === f.email.trim().toLowerCase();
+        this._createdEmail = null;
+        await this._afterSignIn('Signed in. Your history is syncing.', created);
     }
 
     async resendVerifyCode() {
@@ -331,7 +345,7 @@ class MainAppWatchMethods {
         if (!this.state.signOutAsk) return null;
         const { createElement, ui } = this.props.engine;
         const body = createElement('div', {},
-            createElement('p', { className: 'sub' }, 'Syncing stops on this device. Your favorites and watch history stay here. To sign in again you will need your password and a new code from your email.'),
+            createElement('p', { className: 'sub' }, 'This signs you out of your account and clears its profiles, favorites, watch history and settings from this device, so the app starts fresh. Everything stays safe in your cloud account and comes back when you sign in again. You will need your password and a new code from your email.'),
             createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
                 ui.button('Yes, sign out', () => { this.setState({ signOutAsk: false }); this.signOutDevice(); }, { variant: 'primary' })));
         return ui.modal('Are you sure you want to sign out?', body, () => this.setState({ signOutAsk: false }));   // the modal's own button is "Close" = stay
@@ -339,8 +353,16 @@ class MainAppWatchMethods {
 
     async signOutDevice() {
         this._setSyncUi({ busy: true });
+        // Save the latest changes to the cloud first: they are about to be cleared from this device.
+        const last = await this._runSync({});
+        if (!last.ok && last.error === 'offline') {
+            this._setSyncUi({ busy: false, msg: 'Cannot reach the cloud to save your latest changes. Connect to the internet and try again.' });
+            return;
+        }
         await window.PekSync.signOut();
-        this._setSyncUi({ busy: false, confirmDelete: false, msg: 'Signed out. Your local history is kept on this device.' });
+        const hp = window.PekProfiles;
+        if (hp && hp.afterSignOut) { hp.afterSignOut(); return; }   // clears the account's data from the device and restarts clean
+        this._setSyncUi({ busy: false, confirmDelete: false, msg: 'Signed out.' });
     }
 
     async deleteCloudData() {
@@ -724,14 +746,14 @@ class MainAppWatchMethods {
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
                 parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
             } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in. Signing in to an account that already has data replaces what is on this device with the account\'s data. Only what you watched before creating an account is carried into it.'));
                 parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
             const last = S.lastSync();
             parts.push(ui.listRow('Signed in', S.getEmail(), null));
             { const hp = window.PekProfiles, me = hp && hp.enabled ? hp.current() : null;
-              if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Switch profile (Settings > Profiles) to sync another one.`)); }
+              if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Use Sign out of profile (Settings > Profiles) to sync another one.`)); }
             parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
                 last ? 'Last synced ' + new Date(last).toLocaleString() : 'Not synced yet', null, { statusDot: !u.busy && !!last }));
             parts.push(row(
