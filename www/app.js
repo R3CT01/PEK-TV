@@ -41,6 +41,9 @@ class MainApp extends HesperComponent {
             posters: this._readPosters(),   // 'm:<id>' / 's:<title>' -> poster url ('' = none found)
             clock: this._readClock(),        // { hour12, showDate, tz }
             showClockSettings: false,
+            dash: this._readDash(),      // dashboard widgets (app_dashboard.js)
+            dashEdit: false,             // dashboard is in customize mode
+            dashAdd: false,              // the "Add widget" list is open
             moreOpen: false,      // phone bottom bar: the "More" sheet
             weatherText: this._readWeather(),
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
@@ -87,6 +90,7 @@ class MainApp extends HesperComponent {
         this.loadSources();
         this.loadSkins();
         this._startClockTicker();
+        this._dashLoad();
         this._watchNetwork();
         this._queueResumeArt();
         this._startAutoSync();
@@ -109,8 +113,9 @@ class MainApp extends HesperComponent {
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
         if (id === 'favorites' && window.HesperFavorites) this.state.favorites = window.HesperFavorites.list();
-        this.setState({ activeTab: id, showNav, moreOpen: false });
+        this.setState({ activeTab: id, showNav, moreOpen: false, dashEdit: false });
         this.loadLibrary(id);
+        if (id === 'dashboard') this._dashLoad();
         if (id === 'resume') this._queueResumeArt();
         if (id === 'history') this._refreshHistoryAvailability();
     }
@@ -185,7 +190,9 @@ class MainApp extends HesperComponent {
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
         if (this.state.favRemove) { this.cancelRemoveFavorite(); return true; }
         if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
+        if (this.state.dashAdd) { this.setState({ dashAdd: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
+        if (this.state.dashEdit && this.state.activeTab === 'dashboard') { this.setState({ dashEdit: false }); return true; }
         if (this.state.netPicker) { this.netBack(); return true; }
         if (this.state.picker) { this.closePicker(); return true; }
         if (this.state.activeTab === 'shows' && this.showBack()) return true;
@@ -403,6 +410,11 @@ class MainApp extends HesperComponent {
                 this._renderHeader('Resume Watching'),
                 this._renderResume()
             );
+        } else if (activeTab === 'dashboard') {
+            mainContent = createElement('div', {},
+                this._renderHeader(currentLabel, false, true),
+                this._renderDashboard()
+            );
         } else if (LIBRARY_ENDPOINTS[activeTab]) {
             mainContent = createElement('div', {},
                 this._renderHeader(currentLabel, true),
@@ -460,6 +472,7 @@ class MainApp extends HesperComponent {
             bottomBar,
             this._renderDetailModal(),
             this._renderClockSettings(),
+            this._renderDashAdd(),
             this._renderPicker(),
             this._renderNetPicker(),
             this._renderResumeAskModal(),

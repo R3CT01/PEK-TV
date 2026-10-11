@@ -13,7 +13,7 @@ window.render = function (engine) {
     const LAST_KEY = 'hesper_weather_last';       // last good reading, used if the network is down
 
     let unit = localStorage.getItem('hesper_weather_unit') || 'F';
-    let currentCity = localStorage.getItem(CITY_KEY) || 'St. Louis, MO';
+    let currentCity = localStorage.getItem(CITY_KEY) || '';
 
     const readJson = (key) => {
         try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
@@ -21,9 +21,7 @@ window.render = function (engine) {
     
     let weatherData = {
         city: currentCity,
-        temp_c: 22,
-        temp_f: 72,
-        condition: 'Standard Cache'
+        condition: 'No city chosen'
     };
 
     const titleText = createElement('div', { style: 'font-size: 1.2rem; font-weight: 600; margin-bottom: 4px; color: var(--sx-text-primary, #fff);' }, 'Loading...');
@@ -55,7 +53,9 @@ window.render = function (engine) {
         if (weatherData.temp_c === undefined || weatherData.temp_c === null || !Number.isFinite(tempC)) {
             // No reading yet (e.g. offline): show a placeholder and keep the last shared temperature.
             titleText.textContent = '--\u00B0';
-            subText.textContent = `${weatherData.condition || 'Weather unavailable'} \u2014 ${weatherData.city}`;
+            subText.textContent = weatherData.city
+                ? `${weatherData.condition || 'Weather unavailable'} \u2014 ${weatherData.city}`
+                : 'Choose your city below';
             return;
         }
         const tempF = Number.isFinite(Number(weatherData.temp_f)) ? Number(weatherData.temp_f) : Math.round((tempC * 9/5) + 32);
@@ -81,7 +81,7 @@ window.render = function (engine) {
         className: 'focusable sx-text-input',
         type: 'text',
         value: currentCity,
-        placeholder: 'Type a city (e.g. St. Louis)\u2026',
+        placeholder: 'Type a city\u2026',
         onInput: (e) => {
             const query = e.target.value;
             currentCity = query;
@@ -135,28 +135,18 @@ window.render = function (engine) {
                 console.warn('[Weather Widget] Could not look up saved city:', err);
             }
         }
-        return fetchWeatherCache();
+        return showNoCity();
     }
 
-    async function fetchWeatherCache() {
-        try {
-            titleText.textContent = 'Updating...';
-            const cacheBuster = Date.now();
-            
-            // Restored the absolute path structure so the Termux host can locate the file
-            const res = await fetchWithTimeout(`/plugins/weather/weather.json?t=${cacheBuster}`, 2500);
-            if (!res.ok) throw new Error('Failed to load local weather cache');
-            
-            const data = await res.json();
-            weatherData = data;
-            if (data.city) currentCity = data.city;
-            cityInput.value = currentCity;
-            
-        } catch (err) {
-            console.warn('[Weather Widget] Network halted; forcing fallback sequence:', err);
-        } finally {
-            updateUI();
+    // No city chosen yet: show a prompt, and drop any old reading so the header badge does not show a stale one.
+    function showNoCity() {
+        weatherData = { city: '', condition: 'No city chosen' };
+        cityInput.value = '';
+        if (localStorage.getItem('hesper_weather_current_temp') !== null) {
+            localStorage.removeItem('hesper_weather_current_temp');
+            window.dispatchEvent(new Event('storage'));
         }
+        updateUI();
     }
 
     async function fetchCitySuggestions(query) {
