@@ -21,6 +21,7 @@ class MainApp extends HesperComponent {
             favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
             favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
+            signOutAsk: false,    // "sign out of cloud sync?" confirmation (Settings > Cloud Sync)
             exitAsk: false,       // "exit PEK TV?" confirmation (Android Back at the top level)
             sources: [],
             library: {},          // { movies: {...}, shows: {...}, unknown: {...} }
@@ -164,6 +165,7 @@ class MainApp extends HesperComponent {
         const { engine } = this.props;
         if (this.state.appClose) return true;   // the "close PEK TV" screen cannot be dismissed
         if (this.state.exitAsk) { this.setState({ exitAsk: false }); return true; }   // Back on the exit question = stay
+        if (this.state.signOutAsk) { this.setState({ signOutAsk: false }); return true; }   // Back on the sign-out question = stay signed in
         // while minimized the player is just a bar; Back belongs to the app
         if (this._player && !this._player.mini) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
@@ -207,6 +209,23 @@ class MainApp extends HesperComponent {
         try { localStorage.removeItem('hesper_posters_v1'); } catch (e) { /* nothing to clear */ }   // poster cache
         try { if (window.caches && caches.keys) caches.keys().then(ks => ks.forEach(k => caches.delete(k))); } catch (e) { /* none */ }
         try { window.HesperAndroid.exitApp(); } catch (e) { console.warn('[Hesper] exit failed', e); }
+    }
+
+    // Settings > Profiles: who is watching, switch, manage (profiles.js). Hidden when the page has no storage.
+    _renderProfileSettings() {
+        const hp = window.HesperProfiles;
+        if (!hp || !hp.enabled) return null;
+        const { createElement, ui } = this.props.engine;
+        const me = hp.current();
+        return createElement('div', { className: 'settings-section' },
+            createElement('h2', {}, 'Profiles'),
+            createElement('p', { className: 'sub' },
+                `Watching as ${me ? me.name : 'Profile 1'}. Each profile keeps its own favorites, watch history, resume points, skip settings and look. Plugins and your library are shared.`),
+            createElement('div', { className: 'section-actions' },
+                ui.button('Switch profile', () => hp.openPicker(false), { variant: 'primary' }),
+                ui.button('Manage profiles', () => hp.openPicker(true))
+            )
+        );
     }
 
     _renderExitModal() {
@@ -254,6 +273,7 @@ class MainApp extends HesperComponent {
                         ui.button(this.state.refreshing ? 'Scanning\u2026' : this.state.refreshCooldown > 0 ? `Rescan Library (${this.state.refreshCooldown}s)` : 'Rescan Library', () => this.rescan())
                     )
                 ),
+                this._renderProfileSettings(),
                 this._renderSyncSettings(),
                 this._renderTorrentSettings(),
                 createElement('div', { className: 'settings-section' },
@@ -454,6 +474,7 @@ class MainApp extends HesperComponent {
             this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
             this._renderFavoriteRemoveModal(),
+            this._renderSignOutModal(),
             this._renderExitModal(),
             this._renderBusy(),
             this._renderAppCloseModal()
@@ -463,6 +484,8 @@ class MainApp extends HesperComponent {
 
 // Bootstrapping
 document.addEventListener('DOMContentLoaded', () => {
+    // "Who's watching?" (profiles.js) is showing: the app starts after a profile is picked (the page reloads).
+    if (window.HesperProfiles && window.HesperProfiles.pending) return;
     const appRoot = document.getElementById('app');
     if (!appRoot) {
         console.error('[Hesper] Missing #app element in index.html');

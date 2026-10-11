@@ -11,17 +11,19 @@
 // Settings (Worker -> Settings -> Variables and Secrets):
 //   BREVO_API_KEY       (Secret)  your Brevo API key
 //   BREVO_SENDER_EMAIL  (Text)    a sender address you verified in Brevo
-//   BREVO_SENDER_NAME   (Text, optional)  shown as the sender name, default "Hesper"
+//   BREVO_SENDER_NAME   (Text, optional)  shown as the sender name, default "PEK TV"
 //
 // Routes:
 //   POST   /v1/auth/signup   { email, password }                -> { ok, needsVerify, email }   (code emailed)
-//   POST   /v1/auth/verify   { email, code }                    -> { ok, token, email }
-//   POST   /v1/auth/resend   { email }                          -> { ok }   (always)
-//   POST   /v1/auth/login    { email, password }                -> { ok, token, email }  or 403 email_not_verified
+//   POST   /v1/auth/verify   { email, code }                    -> { ok, token, email }   (finishes a sign-up OR a sign-in)
+//   POST   /v1/auth/resend   { email }                          -> { ok }   (always; new code for an unconfirmed account or a pending sign-in)
+//   POST   /v1/auth/login    { email, password }                -> { ok, needsVerify, email }  (a 6-digit code is emailed; every sign-in needs it)
+//                                                                  or 403 email_not_verified (new account that never confirmed its email)
 //   POST   /v1/auth/forgot   { email }                          -> { ok }   (always, so emails can't be probed)
 //   POST   /v1/auth/reset    { email, code, password }          -> { ok, token, email }
 //   POST   /v1/auth/logout                                      -> { ok }
-//   POST   /v1/sync          push changed items (history, progress, favorites), pull newer ones
+//   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins)
+//   POST   /v1/sync          push changed items (history, progress, favorites) of ONE profile ({ profile, since, ... }), pull newer ones
 //   GET    /v1/plugins                                          -> { ok, plugins: [{id,name,version,size,fp,updated,deleted,chunks}] }
 //   POST   /v1/plugins/chunk   { id, fp, index, total, data }   -> { ok }      (one piece of a plugin backup)
 //   POST   /v1/plugins/commit  { id, fp, total, name, version, size, updated } -> { ok, stored }  (finishes a backup)
@@ -45,6 +47,8 @@ const PAGE = 2000;                // items returned per pull page
 const MAX_ITEMS = 50000;          // per account
 const MAX_DATA = 2000;            // chars of JSON per item
 const MAX_KEY = 200;
+const MAX_PROFILES = 5;           // live profiles per account (Netflix-style: each person has their own history and favorites)
+const MAX_PROFILE_ROWS = 40;      // profile rows incl. removal markers, per account
 const CLOCK_SLACK = 5 * 60 * 1000;
 
 // Plugin backups (the plugin's own files, packed by the app into one text bundle and cut into chunks)
@@ -93,6 +97,7 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS throttle (k TEXT PRIMARY KEY, n INTEGER NOT NULL, reset_at INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS items (acct TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, srv INTEGER NOT NULL, PRIMARY KEY (acct, kind, key))').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS items_srv ON items (acct, srv)').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS profiles (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS plugins (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS plugin_chunks (acct TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (acct, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS store_plugins (id TEXT PRIMARY KEY, shelf TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL DEFAULT \'\', description TEXT NOT NULL DEFAULT \'\', size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, status TEXT NOT NULL, owner TEXT NOT NULL, updated INTEGER NOT NULL)').run();
@@ -222,24 +227,31 @@ async function sessionFor(request, db, now) {
 // ---------------------------------------------------------------- email (Brevo)
 const MAILS = {
     reset: {
-        subject: 'Your Hesper password reset code',
-        title: 'Reset your Hesper password',
+        subject: 'Your PEK TV password reset code',
+        title: 'Reset your PEK TV password',
         lead: 'Enter this code in the app:',
         foot: 'It works for 15 minutes. If you did not ask to reset your password, ignore this email; your password has not changed.',
-        text: 'Your Hesper password reset code is {code}\n\nIt works for 15 minutes. If you did not ask to reset your password, you can ignore this email; your password has not changed.'
+        text: 'Your PEK TV password reset code is {code}\n\nIt works for 15 minutes. If you did not ask to reset your password, you can ignore this email; your password has not changed.'
+    },
+    login: {
+        subject: 'Your PEK TV sign-in code',
+        title: 'Confirm your sign-in',
+        lead: 'Enter this code in the app to finish signing in:',
+        foot: 'It works for 30 minutes. If you did not just try to sign in, someone has your password: use \"Forgot password\" in the app to choose a new one.',
+        text: 'Your PEK TV sign-in code is {code}\n\nIt works for 30 minutes. If you did not just try to sign in, someone has your password: use \"Forgot password\" in the app to choose a new one.'
     },
     verify: {
-        subject: 'Verify your email for Hesper',
+        subject: 'Verify your email for PEK TV',
         title: 'Verify your email',
-        lead: 'Enter this code in the app to finish creating your Hesper account:',
-        foot: 'It works for 30 minutes. If you did not create a Hesper account, ignore this email and nothing will happen.',
-        text: 'Your Hesper verification code is {code}\n\nIt works for 30 minutes. If you did not create a Hesper account, you can ignore this email.'
+        lead: 'Enter this code in the app to finish creating your PEK TV account:',
+        foot: 'It works for 30 minutes. If you did not create a PEK TV account, ignore this email and nothing will happen.',
+        text: 'Your PEK TV verification code is {code}\n\nIt works for 30 minutes. If you did not create a PEK TV account, you can ignore this email.'
     }
 };
 
 async function sendCodeEmail(env, to, code, kind) {
     const m = MAILS[kind];
-    const sender = { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'Hesper' };
+    const sender = { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'PEK TV' };
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: { 'api-key': env.BREVO_API_KEY, 'accept': 'application/json', 'content-type': 'application/json' },
@@ -278,6 +290,19 @@ async function issueVerification(env, db, userId, email, now) {
         .bind(userId, await sha256Hex('hesper:verify:' + userId + ':' + code), now + VERIFY_TTL).run();
     try { await sendCodeEmail(env, email, code, 'verify'); } catch (e) { console.error('Brevo request error', String(e)); }
     return true;
+}
+
+// Every sign-in of a confirmed account asks for an emailed code too (the password alone is not enough).
+// Same table and check as the sign-up code: the app exchanges it at /v1/auth/verify for the session token.
+// Returns 'sent', 'limited' (too many codes this hour) or 'failed' (the email could not be sent).
+async function issueLoginCode(env, db, userId, email, now) {
+    if (await limited(db, 'login:code:' + email, 6, 3600 * 1000, now)) return 'limited';
+    const code = sixDigits();
+    await db.prepare('INSERT INTO verifs (user_id, code_hash, expires, tries) VALUES (?, ?, ?, 0) ' +
+        'ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires = excluded.expires, tries = 0')
+        .bind(userId, await sha256Hex('hesper:verify:' + userId + ':' + code), now + VERIFY_TTL).run();
+    try { return (await sendCodeEmail(env, email, code, 'login')) ? 'sent' : 'failed'; }
+    catch (e) { console.error('Brevo request error', String(e)); return 'failed'; }
 }
 
 // ---------------------------------------------------------------- auth handlers
@@ -336,7 +361,7 @@ async function handleVerify(request, env) {
     return json({ ok: true, token: await startSession(db, user.id, now), email });
 }
 
-// Sends a new verification code to an unverified account. Always answers ok.
+// Sends a new code: to an unverified account, or to a sign-in that is waiting for its code. Always answers ok.
 async function handleResend(request, env) {
     if (!emailReady(env)) return json({ error: 'email_not_configured' }, 500);
     const { body, err } = await readJson(request); if (err) return err;
@@ -346,6 +371,12 @@ async function handleResend(request, env) {
     if (await limited(db, 'resend:ip:' + clientIp(request), 20, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
     const user = await db.prepare('SELECT id, verified FROM users WHERE email = ?').bind(email).first();
     if (user && !user.verified) await issueVerification(env, db, user.id, email, now);
+    else if (user) {
+        // A confirmed account: only while a sign-in is waiting for its code (the password was right in the last few hours),
+        // so nobody can use this to fill someone else's inbox.
+        const pending = await db.prepare('SELECT expires FROM verifs WHERE user_id = ?').bind(user.id).first();
+        if (pending && pending.expires + 2 * 3600 * 1000 > now) await issueLoginCode(env, db, user.id, email, now);
+    }
     return json({ ok: true });
 }
 
@@ -375,8 +406,12 @@ async function handleLogin(request, env) {
         if (emailReady(env)) await issueVerification(env, db, row.id, email, now);
         return json({ error: 'email_not_verified' }, 403);
     }
-    await db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now, row.id).run();
-    return json({ ok: true, token: await startSession(db, row.id, now), email });
+    // Right password: now prove it is you with a code from the email. No session until the code is entered.
+    if (!emailReady(env)) return json({ error: 'email_not_configured' }, 500);
+    const sent = await issueLoginCode(env, db, row.id, email, now);
+    if (sent === 'limited') return json({ error: 'rate_limited' }, 429);
+    if (sent === 'failed') return json({ error: 'email_failed' }, 502);
+    return json({ ok: true, needsVerify: true, email });
 }
 
 async function handleForgot(request, env) {
@@ -446,7 +481,68 @@ function cleanItem(it, now, kind) {
     return { key: it.key, data, updated: Math.min(Math.floor(updated), now + CLOCK_SLACK), deleted };
 }
 
-async function handleSync(request, env, acct) {
+// ---------------------------------------------------------------- profiles
+// One account (email + password) for the household; each person in it is a profile with their own
+// history, resume points and favorites. A profile's items live in the items table under
+//   acct = <user id>                 for the profile called "p1" (the original one: accounts made before profiles
+//                                    existed keep all of their data there, nothing is migrated)
+//   acct = <user id>:<profile id>    for every other profile
+// so every existing query keeps working, one namespace at a time. Plugin backups stay per account.
+function goodProfileId(id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{1,32}$/.test(id); }
+function itemsAcct(userId, profile) { return (!profile || profile === 'p1') ? userId : userId + ':' + profile; }
+function likeProfiles(userId) { return userId + ':%'; }   // user ids are hex: no wildcard characters
+
+// POST /v1/profiles/sync  { profiles: [{ id, name, color, updated, deleted }] } -> { ok, profiles, rejected }
+// Last writer wins per profile, by its own "updated" time. Removing a profile (deleted: 1) also removes its stored items.
+async function handleProfiles(request, env, userId) {
+    const text = await request.text();
+    if (text.length > 64 * 1024) return json({ error: 'too_large' }, 413);
+    let body;
+    try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad_json' }, 400); }
+    const incoming = body && Array.isArray(body.profiles) ? body.profiles.slice(0, 40) : null;
+    if (!incoming) return json({ error: 'bad_json' }, 400);
+
+    const db = env.DB;
+    const now = Date.now();
+    const rows = (await db.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ?').bind(userId).all()).results || [];
+    const have = {};
+    rows.forEach(r => { have[r.id] = { id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: r.deleted ? 1 : 0 }; });
+    let live = rows.filter(r => !r.deleted).length;
+    let total = rows.length;
+    const stmts = [];
+    const rejected = [];
+
+    for (const raw of incoming) {
+        if (!raw || typeof raw !== 'object' || !goodProfileId(raw.id)) continue;
+        const updated = Math.min(Math.floor(Number(raw.updated) || 0), now + CLOCK_SLACK);
+        if (updated < 0) continue;
+        const deleted = raw.deleted ? 1 : 0;
+        const name = deleted ? '' : String(raw.name == null ? '' : raw.name).replace(/\s+/g, ' ').trim().slice(0, 40);
+        const color = deleted ? '' : (/^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : '#E04A00');
+        if (!deleted && !name) continue;
+        const cur = have[raw.id];
+        if (cur && updated <= cur.updated) continue;                       // the cloud's copy is as new or newer
+        if (!cur && !deleted && live >= MAX_PROFILES) { rejected.push(raw.id); continue; }
+        if (!cur && total >= MAX_PROFILE_ROWS) { rejected.push(raw.id); continue; }
+        if (deleted && cur && !cur.deleted && live <= 1) { rejected.push(raw.id); continue; }   // never remove the last one
+        if (deleted && !cur) continue;                                      // nothing to remove, nothing to remember
+        if (!cur) total++;
+        if (!cur || cur.deleted) { if (!deleted) live++; }
+        else if (deleted) live--;
+        have[raw.id] = { id: raw.id, name, color, updated, deleted };
+        stmts.push(db.prepare(
+            'INSERT INTO profiles (acct, id, name, color, updated, deleted) VALUES (?, ?, ?, ?, ?, ?) ' +
+            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, color = excluded.color, updated = excluded.updated, deleted = excluded.deleted'
+        ).bind(userId, raw.id, name, color, updated, deleted));
+        if (deleted) stmts.push(db.prepare('DELETE FROM items WHERE acct = ?').bind(itemsAcct(userId, raw.id)));
+    }
+    if (stmts.length) await db.batch(stmts);
+    await db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now, userId).run();
+    const out = Object.keys(have).map(k => have[k]).sort((a, b) => a.updated - b.updated || (a.id < b.id ? -1 : 1));
+    return json({ ok: true, profiles: out, rejected });
+}
+
+async function handleSync(request, env, userId) {
     const text = await request.text();
     if (text.length > MAX_BODY) return json({ error: 'too_large' }, 413);
     let body;
@@ -455,7 +551,16 @@ async function handleSync(request, env, acct) {
 
     const db = env.DB;
     const now = Date.now();
-    await db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now, acct).run();
+    await db.prepare('UPDATE users SET last_seen = ? WHERE id = ?').bind(now, userId).run();
+
+    // Which profile's data this is. No profile (an older app) means the original one, "p1".
+    const profile = body.profile == null ? 'p1' : body.profile;
+    if (!goodProfileId(profile)) return json({ error: 'bad_profile' }, 400);
+    if (profile !== 'p1') {   // other profiles must have been announced through /v1/profiles/sync and not removed
+        const pr = await db.prepare('SELECT deleted FROM profiles WHERE acct = ? AND id = ?').bind(userId, profile).first();
+        if (!pr || pr.deleted) return json({ error: 'unknown_profile' }, 404);
+    }
+    const acct = itemsAcct(userId, profile);
 
     // ---- push: last writer wins per item, by the item's own "updated" time
     const pushed = [];
@@ -500,7 +605,7 @@ async function handleSync(request, env, acct) {
         (r.kind === 'h' ? out.history : r.kind === 'f' ? out.favorites : out.progress).push(item);
         if (r.srv > cursor) cursor = r.srv;
     }
-    return json({ ok: true, cursor, more: results.length === PAGE, history: out.history, progress: out.progress, favorites: out.favorites });
+    return json({ ok: true, profile, cursor, more: results.length === PAGE, history: out.history, progress: out.progress, favorites: out.favorites });
 }
 
 // ---------------------------------------------------------------- plugin backup handlers
@@ -589,21 +694,25 @@ async function handlePluginDelete(request, env, acct) {
 async function handleExport(env, acct) {
     const user = await env.DB.prepare('SELECT email, created FROM users WHERE id = ?').bind(acct).first();
     const rows = await env.DB.prepare(
-        'SELECT kind, key, data, updated, deleted FROM items WHERE acct = ? ORDER BY updated'
-    ).bind(acct).all();
+        'SELECT acct AS owner, kind, key, data, updated, deleted FROM items WHERE acct = ? OR acct LIKE ? ORDER BY updated'
+    ).bind(acct, likeProfiles(acct)).all();
     const items = (rows.results || []).map(r => {
         let data = {};
         try { data = JSON.parse(r.data); } catch (e) { /* keep {} */ }
-        return { kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
+        const profile = r.owner === acct ? 'p1' : r.owner.slice(acct.length + 1);
+        return { profile, kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
     });
+    const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
+    const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted }));
     const pl = await env.DB.prepare('SELECT id, name, version, size, updated, deleted FROM plugins WHERE acct = ? ORDER BY id').bind(acct).all();
     const plugins = (pl.results || []).map(r => ({ id: r.id, name: r.name, version: r.version, size: r.size, updated: r.updated, deleted: !!r.deleted }));
-    return json({ exported: Date.now(), email: user ? user.email : '', items, plugins });
+    return json({ exported: Date.now(), email: user ? user.email : '', profiles, items, plugins });
 }
 
 async function handleDelete(env, acct) {
     await env.DB.batch([
-        env.DB.prepare('DELETE FROM items WHERE acct = ?').bind(acct),
+        env.DB.prepare('DELETE FROM items WHERE acct = ? OR acct LIKE ?').bind(acct, likeProfiles(acct)),
+        env.DB.prepare('DELETE FROM profiles WHERE acct = ?').bind(acct),
         env.DB.prepare('DELETE FROM plugins WHERE acct = ?').bind(acct),
         env.DB.prepare('DELETE FROM plugin_chunks WHERE acct = ?').bind(acct),
         env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(acct),
@@ -878,6 +987,7 @@ export default {
             if (!sess) return json({ error: 'bad_session' }, 401);
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
+            if (method === 'POST' && path === '/v1/profiles/sync') return await handleProfiles(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/sync') return await handleSync(request, env, sess.userId);
             if (method === 'GET' && path === '/v1/plugins') return await handlePluginList(env, sess.userId);
             if (method === 'POST' && path === '/v1/plugins/chunk') return await handlePluginChunk(request, env, sess.userId);

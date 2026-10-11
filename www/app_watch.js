@@ -193,10 +193,13 @@ class MainAppWatchMethods {
             bad_code: 'That code is wrong or has expired. Request a new one.',
             email_not_verified: 'Your email is not verified yet.',
             rate_limited: 'Too many attempts. Wait a few minutes and try again.',
-            email_not_configured: 'Password reset email is not set up on the server yet.',
+            email_not_configured: 'Email is not set up on the server yet, so codes cannot be sent.',
+            email_failed: 'The code email could not be sent. Try again in a minute.',
             session_expired: 'You were signed out. Please sign in again.',
             too_large: 'Too much data to sync at once.',
             not_linked: 'Not signed in yet.',
+            cloud_outdated: 'The cloud service has to be updated before profiles can sync (see cloud/DEPLOY.md).',
+            unknown_profile: 'This profile was removed on another device.',
             local: 'Could not read the plugins on this device.',
             plugin_quota: 'Your plugin backup is full (30 plugins or 60 MB). Remove one you no longer use.',
             damaged: 'The plugin from the cloud arrived damaged. Try again.',
@@ -326,7 +329,7 @@ class MainAppWatchMethods {
         this._setSyncUi({ busy: true, msg: '' });
         const res = await S.verifyEmail(f.email, f.code);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
-        await this._afterSignIn('Email verified. Your history is syncing.');
+        await this._afterSignIn('Signed in. Your history is syncing.');
     }
 
     async resendVerifyCode() {
@@ -343,6 +346,11 @@ class MainAppWatchMethods {
         if (!S.validEmail(f.email) || !f.password) { this._setSyncUi({ msg: 'Enter your email and password.' }); return; }
         this._setSyncUi({ busy: true, msg: '' });
         const res = await S.signIn(f.email, f.password);
+        if (res.ok && res.needsVerify) {   // right password: every sign-in also needs the 6-digit code from the email
+            f.code = ''; f.password = '';
+            this._setSyncUi({ busy: false, mode: 'verify', msg: 'We emailed a 6-digit code to ' + f.email.trim() + ' to confirm it is you. Enter it to sign in. It can take a minute. Check spam too.' });
+            return;
+        }
         if (!res.ok && res.error === 'email_not_verified') {
             f.code = ''; f.password = '';
             this._setSyncUi({ busy: false, mode: 'verify', msg: 'Your email is not verified yet. We sent a new code to ' + f.email.trim() + '. Enter it to finish.' });
@@ -373,6 +381,17 @@ class MainAppWatchMethods {
         const res = await S.resetPassword(f.email, f.code, f.password);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
         await this._afterSignIn('Password changed. You are signed in.');
+    }
+
+    // "Sign Out" asks first. Back or Close = stay signed in.
+    _renderSignOutModal() {
+        if (!this.state.signOutAsk) return null;
+        const { createElement, ui } = this.props.engine;
+        const body = createElement('div', {},
+            createElement('p', { className: 'sub' }, 'Syncing stops on this device. Your favorites and watch history stay here. To sign in again you will need your password and a new code from your email.'),
+            createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
+                ui.button('Yes, sign out', () => { this.setState({ signOutAsk: false }); this.signOutDevice(); }, { variant: 'primary' })));
+        return ui.modal('Are you sure you want to sign out?', body, () => this.setState({ signOutAsk: false }));   // the modal's own button is "Close" = stay
     }
 
     async signOutDevice() {
@@ -757,9 +776,9 @@ class MainAppWatchMethods {
                 parts.push(email(), pass('Password', 'password'), pass('Confirm password', 'confirm'));
                 parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
             } else if (u.mode === 'verify') {
-                parts.push(createElement('p', { className: 'sub' }, 'Verify your email to finish creating your account.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }));
-                parts.push(row(go('Verify Email', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
+                parts.push(row(go('Confirm Code', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
             } else if (u.mode === 'forgot') {
                 parts.push(createElement('p', { className: 'sub' }, 'We will email you a 6-digit code to set a new password.'));
                 parts.push(email());
@@ -769,17 +788,19 @@ class MainAppWatchMethods {
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
                 parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
             } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. Keeps your watch history and resume points in step across your devices, and backs up the plugins you install. Nothing is uploaded until you sign in.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in.'));
                 parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
             const last = S.lastSync();
             parts.push(ui.listRow('Signed in', S.getEmail(), null));
+            { const hp = window.HesperProfiles, me = hp && hp.enabled ? hp.current() : null;
+              if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Switch profile (Settings > Profiles) to sync another one.`)); }
             parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
                 last ? 'Last synced ' + new Date(last).toLocaleString() : 'Not synced yet', null, { statusDot: !u.busy && !!last }));
             parts.push(row(
                 ui.button(u.busy ? 'Syncing\u2026' : 'Sync Now', () => { if (!u.busy) this._runSync({ manual: true }); }, { variant: 'primary' }),
-                ui.button('Sign Out', () => { if (!u.busy) this.signOutDevice(); })));
+                ui.button('Sign Out', () => { if (!u.busy) this.setState({ signOutAsk: true }); })));
             parts.push(...this._renderPluginBackup(go, row));
             parts.push(row(ui.button(u.confirmDelete ? 'Tap again to delete your account and cloud data' : 'Delete Account & Cloud Data', () => this.deleteCloudData())));
         }
