@@ -9,23 +9,23 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
 <meta name="theme-color" content="#E9E2DA">
 <style>
-#hesper-splash{position:fixed;inset:0;z-index:2147483647;background:#E04A00;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
-#hesper-splash.out{opacity:0;pointer-events:none}
-#hesper-splash video{width:100%;height:100%;object-fit:cover}
+#pek-splash{position:fixed;inset:0;z-index:2147483647;background:#E04A00;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
+#pek-splash.out{opacity:0;pointer-events:none}
+#pek-splash video{width:100%;height:100%;object-fit:cover}
 </style>
 </head>
 <body>
-<div id="hesper-splash"><video muted playsinline preload="auto"></video></div>
+<div id="pek-splash"><video muted playsinline preload="auto"></video></div>
 <script>
 // Splash: plays once per session and can't be skipped - clicks, taps and keys are blocked until the video
 // ends. The app keeps loading underneath it. Skipped inside the Android app, which plays the same video
 // natively (SplashOverlay.kt) with the same lock.
 (function () {
-  var el = document.getElementById('hesper-splash');
+  var el = document.getElementById('pek-splash');
   var seen = false;
-  try { seen = sessionStorage.getItem('hesperSplash') === '1'; } catch (e) {}
-  if (window.HesperAndroid || seen) { el.remove(); return; }
-  try { sessionStorage.setItem('hesperSplash', '1'); } catch (e) {}
+  try { seen = sessionStorage.getItem('pekSplash') === '1'; } catch (e) {}
+  if (window.PekAndroid || seen) { el.remove(); return; }
+  try { sessionStorage.setItem('pekSplash', '1'); } catch (e) {}
   var v = el.querySelector('video'), gone = false, videoDone = false, net;
   // Portrait screens (phones) get the 9:16 cut; wide screens (TVs, desktops) the 16:9 one.
   v.src = window.matchMedia('(orientation: portrait)').matches ? 'splash_portrait.mp4' : 'splash.mp4';
@@ -67,14 +67,14 @@ window.onerror = function (m, u, l) {
 </script>
 <script>
 // TV / box (Android app, not a phone): lets style.css switch to the lighter look.
-try { var A = window.HesperAndroid; if (A && (typeof A.isPhone !== 'function' || !A.isPhone())) document.documentElement.classList.add('hesper-tv'); } catch (e) {}
+try { var A = window.PekAndroid; if (A && (typeof A.isPhone !== 'function' || !A.isPhone())) document.documentElement.classList.add('pek-tv'); } catch (e) {}
 </script>
 <script src="profiles.js?v=dash1"></script>
 <script src="tv_mode.js?v=1"></script>
 <div id="app"></div>
 <script src="gsap.min.js"></script>
 <script src="plugin_sandbox.js?v=12"></script>
-<script src="hesperframework.js?v=14s"></script>
+<script src="pekframework.js?v=14s"></script>
 <script src="navsound.js?v=3"></script>
 <script src="net.js?v=1"></script>
 <script src="activity.js?v=1"></script>

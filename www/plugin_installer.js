@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper: plugin installer (data side; the screens are in app_plugins.js).
+// PEK TV: plugin installer (data side; the screens are in app_plugins.js).
 //
 //   pickZip()    opens the system file picker for a .zip
 //   prepare(f)   unpacks it in memory, finds plugin.json, works out the plugin id
@@ -12,9 +12,9 @@
 // plugin asks for before saying yes.
 // ============================================================
 
-const HesperPluginInstaller = (() => {
+const PekPluginInstaller = (() => {
 
-    // Official plugins: the ones that ship with Hesper (kept in step with plugin_install.h).
+    // Official plugins: the ones that ship with PEK TV (kept in step with plugin_install.h).
     // Everything else is third party.
     const BUILTIN = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
     const isBuiltin = (folder) => BUILTIN.indexOf(folder) !== -1;
@@ -59,7 +59,7 @@ const HesperPluginInstaller = (() => {
     async function prepare(file) {
         if (!file) throw new Error('no file chosen');
         if (file.size > 10 * 1024 * 1024) throw new Error('that file is too large to be a plugin (limit 8 MB)');
-        let entries = await HesperZip.read(await readFile(file));
+        let entries = await PekZip.read(await readFile(file));
         const before = entries.length;
         entries = entries.filter(e => !isJunk(e.path));
         const skipped = before - entries.length;
@@ -125,8 +125,8 @@ const HesperPluginInstaller = (() => {
         if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('plugin.json must be a JSON object');
 
         // Same reading the sandbox applies at run time, so the screen shows what will really be allowed.
-        const m = (typeof HesperSandbox !== 'undefined' && HesperSandbox.normalizeManifest)
-            ? HesperSandbox.normalizeManifest(raw)
+        const m = (typeof PekSandbox !== 'undefined' && PekSandbox.normalizeManifest)
+            ? PekSandbox.normalizeManifest(raw)
             : { name: typeof raw.name === 'string' ? raw.name : null, version: null,
                 permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false },
                 provides: { stream: false },
@@ -191,7 +191,7 @@ const HesperPluginInstaller = (() => {
         return fd;
     }
 
-    // Reads a .zip chosen in Hesper's own picker (local or network) through the server and
+    // Reads a .zip chosen in PEK TV's own picker (local or network) through the server and
     // hands it back in the shape prepare() expects.
     async function fetchZip(path) {
         let res;
@@ -219,7 +219,7 @@ const HesperPluginInstaller = (() => {
         installedListeners.forEach(fn => { try { fn(prep.id); } catch (e) { /* a listener must never break an install */ } });
         return data;
     };
-    // Other parts of Hesper (the cloud plugin backup) can ask to hear about a removal the user confirmed.
+    // Other parts of PEK TV (the cloud plugin backup) can ask to hear about a removal the user confirmed.
     const removedListeners = [];
     const onRemoved = (fn) => { if (typeof fn === 'function') removedListeners.push(fn); };
     const remove = async (id) => {
@@ -232,5 +232,5 @@ const HesperPluginInstaller = (() => {
     return { pickZip, fetchZip, prepare, prepareFiles, check, install, remove, onInstalled, onRemoved, isBuiltin, isOfficial: isBuiltin, slug };
 })();
 
-if (typeof window !== 'undefined') window.HesperPluginInstaller = HesperPluginInstaller;   // so other scripts can reach it as window.*
-if (typeof module !== 'undefined' && module.exports) module.exports = HesperPluginInstaller;
+if (typeof window !== 'undefined') window.PekPluginInstaller = PekPluginInstaller;   // so other scripts can reach it as window.*
+if (typeof module !== 'undefined' && module.exports) module.exports = PekPluginInstaller;

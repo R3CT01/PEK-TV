@@ -13,7 +13,7 @@
 
 namespace fs = std::filesystem;
 
-class HesperCore {
+class PekCore {
 private:
     std::string version;
     std::vector<std::string> loaded_plugins;
@@ -22,10 +22,10 @@ private:
     bool is_running;
 
     void backgroundPluginScanner(const std::string& path_str) {
-        std::cout << "[Hesper Background Worker] Scanning path: " << path_str << std::endl;
+        std::cout << "[PEK Background Worker] Scanning path: " << path_str << std::endl;
         
         if (!fs::exists(path_str) || !fs::is_directory(path_str)) {
-            std::cout << "[Hesper Background Worker] Directory missing. Creating path..." << std::endl;
+            std::cout << "[PEK Background Worker] Directory missing. Creating path..." << std::endl;
             fs::create_directories(path_str);
             return;
         }
@@ -36,34 +36,34 @@ private:
                     std::string filename = entry.path().stem().string();
                     std::lock_guard<std::mutex> lock(plugin_mutex);
                     loaded_plugins.push_back(filename);
-                    std::cout << "[Hesper Background Worker] Discovered Python Plugin Module: " << filename << std::endl;
+                    std::cout << "[PEK Background Worker] Discovered Python Plugin Module: " << filename << std::endl;
                 }
             }
         } catch (const std::exception& e) {
-            std::cout << "[Hesper Background Worker] Plugin scan aborted: " << e.what() << std::endl;
+            std::cout << "[PEK Background Worker] Plugin scan aborted: " << e.what() << std::endl;
         }
     }
 
 public:
-    HesperCore(std::string v) : version(v), is_running(true) {
-        std::cout << "[Hesper Backend] Initialized v" << version << std::endl;
+    PekCore(std::string v) : version(v), is_running(true) {
+        std::cout << "[PEK Backend] Initialized v" << version << std::endl;
         Py_Initialize();
         if (Py_IsInitialized()) {
-            std::cout << "[Hesper Python Bridge] Embedded Python Interpreter online." << std::endl;
+            std::cout << "[PEK Python Bridge] Embedded Python Interpreter online." << std::endl;
         }
     }
 
-    ~HesperCore() {
+    ~PekCore() {
         is_running = false;
         if (worker_thread.joinable()) {
             worker_thread.join();
         }
         Py_Finalize();
-        std::cout << "[Hesper Backend] Shut down cleanly." << std::endl;
+        std::cout << "[PEK Backend] Shut down cleanly." << std::endl;
     }
 
     void startPluginScanAsync(const std::string& path_str) {
-        worker_thread = std::thread(&HesperCore::backgroundPluginScanner, this, path_str);
+        worker_thread = std::thread(&PekCore::backgroundPluginScanner, this, path_str);
     }
 
     // Thread-safe method for the server to fetch active plugins for the JS frontend
@@ -78,7 +78,7 @@ public:
     // Every plugin backend goes through hesper_guard.py, which decides whether it may
     // run and applies the manifest permissions, static scan and runtime backstop (see
     // that file). If the guard itself cannot be loaded this FAILS CLOSED: only the
-    // plugins that ship with Hesper still run, everything else is refused.
+    // plugins that ship with PEK still run, everything else is refused.
     void executePluginModule(const std::string& module_name, const std::string& plugins_path) {
         std::string safe_guard;
         for (char c : guard_dir) {
@@ -97,11 +97,11 @@ public:
         PyErr_Print();
         std::string id = (module_name == "backend") ? fs::path(plugins_path).filename().string() : module_name;
         if (id != "weather" && id != "sample_scraper") {
-            std::cout << "[Hesper Plugin Guard] hesper_guard.py not found in '" << guard_dir
+            std::cout << "[PEK Plugin Guard] hesper_guard.py not found in '" << guard_dir
                       << "' - REFUSING to run plugin '" << id << "'." << std::endl;
             return;
         }
-        std::cout << "[Hesper Plugin Guard] hesper_guard.py not found; running bundled plugin '" << id << "' only." << std::endl;
+        std::cout << "[PEK Plugin Guard] hesper_guard.py not found; running bundled plugin '" << id << "' only." << std::endl;
         executePluginModuleUnguarded(module_name, plugins_path);
     }
 
@@ -137,12 +137,12 @@ public:
                 }
                 Py_DECREF(pFunc);
             } else {
-                std::cout << "[Hesper Python Bridge] '" << module_name << "' has no callable run()." << std::endl;
+                std::cout << "[PEK Python Bridge] '" << module_name << "' has no callable run()." << std::endl;
                 PyErr_Clear();
             }
             Py_DECREF(pModule);
         } else {
-            std::cout << "[Hesper Python Bridge] Failed to import '" << module_name << "':" << std::endl;
+            std::cout << "[PEK Python Bridge] Failed to import '" << module_name << "':" << std::endl;
             PyErr_Print();
         }
     }
@@ -160,7 +160,7 @@ public:
             fs::path backend_file = entry.path() / "backend.py";
 
             if (fs::exists(backend_file)) {
-                std::cout << "[Hesper Backend] Running plugin backend: " << folder_name << std::endl;
+                std::cout << "[PEK Backend] Running plugin backend: " << folder_name << std::endl;
                 executePluginModule("backend", entry.path().string());
 
                 std::lock_guard<std::mutex> lock(plugin_mutex);
@@ -173,7 +173,7 @@ public:
 
     void status() {
         std::lock_guard<std::mutex> lock(plugin_mutex);
-        std::cout << "[Hesper Backend] Active registered plugins count: " << loaded_plugins.size() << std::endl;
+        std::cout << "[PEK Backend] Active registered plugins count: " << loaded_plugins.size() << std::endl;
     }
 };
 
@@ -187,16 +187,16 @@ int main(int argc, char* argv[]) {
     std::string plugin_dir = "/storage/emulated/0/Documents/media_core/hesper/plugins";
     std::string skins_dir = "/storage/emulated/0/Documents/media_core/hesper/skins";
 
-    HesperCore hesper("0.1.0");
-    hesper.setGuardDir((fs::path(plugin_dir).parent_path() / "backend").string());
+    PekCore pek("0.1.0");
+    pek.setGuardDir((fs::path(plugin_dir).parent_path() / "backend").string());
 
     // Legacy loose-file Python plugins (e.g. plugins/sample_scraper.py)
-    hesper.startPluginScanAsync(plugin_dir);
+    pek.startPluginScanAsync(plugin_dir);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    hesper.executePluginModule("sample_scraper", plugin_dir);
+    pek.executePluginModule("sample_scraper", plugin_dir);
 
     // Folder-based plugins: runs plugins/<name>/backend.py for each one found
-    hesper.runFolderPlugins(plugin_dir);
+    pek.runFolderPlugins(plugin_dir);
 
     // Movie/TV library scanner — classifies from embedded container
     // metadata (ffprobe tags) first, then folder/filename. Source
@@ -206,7 +206,13 @@ int main(int argc, char* argv[]) {
     // storage, where any app could read them).
     {
         const char* home = std::getenv("HOME");
-        std::string dir = home ? std::string(home) + "/.hesper" : "/storage/emulated/0/Documents/media_core";
+        std::string dir = "/storage/emulated/0/Documents/media_core";
+        if (home) {
+            dir = std::string(home) + "/.pek";
+            std::error_code probe;
+            // keep an existing ~/.hesper (saved logins, torrent settings) until the user moves it
+            if (!fs::exists(dir, probe) && fs::exists(std::string(home) + "/.hesper", probe)) dir = std::string(home) + "/.hesper";
+        }
         std::error_code ec;
         fs::create_directories(dir, ec);
         vfs::init(dir + "/net_credentials.tsv");
@@ -220,21 +226,21 @@ int main(int argc, char* argv[]) {
     scanner.loadFromDisk();
     // Confirms show names guessed from filenames against TMDb (needs the
     // TMDB_API_KEY env var; without it the parsed name is used as-is).
-    scanner.setShowResolver(HesperServer::resolveShowName);
+    scanner.setShowResolver(PekServer::resolveShowName);
     std::thread scan_thread([&scanner]() { scanner.scan(); });
     scan_thread.detach();
 
     // Launch HTTP server with a lambda callback to dynamically serve scanned plugins to JS
-    std::thread server_thread([&hesper, www_dir, plugin_dir, skins_dir, &scanner]() {
-        HesperServer::start(8080, www_dir, plugin_dir, skins_dir, [&hesper]() {
-            return hesper.getPlugins();
+    std::thread server_thread([&pek, www_dir, plugin_dir, skins_dir, &scanner]() {
+        PekServer::start(8080, www_dir, plugin_dir, skins_dir, [&pek]() {
+            return pek.getPlugins();
         }, &scanner);
     });
     server_thread.detach();
 
-    hesper.status();
+    pek.status();
 
-    std::cout << "[Hesper Core] System active. Listening for UI connections. Press Ctrl+C to exit." << std::endl;
+    std::cout << "[PEK Core] System active. Listening for UI connections. Press Ctrl+C to exit." << std::endl;
     while (true) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }

@@ -1,5 +1,5 @@
 /* ============================================================
-   Hesper connectivity indicator (is_online)
+   PEK TV connectivity indicator (is_online)
 
    Shows a small dot in the top-right corner: green = online, red = offline.
    "Online" means the internet is really reachable, not just that the device is
@@ -7,9 +7,9 @@
    (and right away when the system reports a change).
 
    Other code can use:
-     HesperNet.isOnline()        true / false (true until the first check finishes)
-     HesperNet.onChange(fn)      fn(online) is called whenever the state flips
-     HesperNet.check()           check now
+     PekNet.isOnline()        true / false (true until the first check finishes)
+     PekNet.onChange(fn)      fn(online) is called whenever the state flips
+     PekNet.check()           check now
 
    Offline mode: the local library keeps working; anything that needs the
    internet (TMDb lookups, cross-device sync) should wait for isOnline().
@@ -56,7 +56,7 @@
         paint();
         if (changed) {
             listeners.slice().forEach(function (fn) {
-                try { fn(online); } catch (e) { console.error('[HesperNet]', e); }
+                try { fn(online); } catch (e) { console.error('[PekNet]', e); }
             });
         }
     }
@@ -121,7 +121,7 @@
         check();
     }
 
-    window.HesperNet = {
+    window.PekNet = {
         isOnline: function () { return online; },
         isKnown: function () { return known; },
         onChange: function (fn) { listeners.push(fn); },

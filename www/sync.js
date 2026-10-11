@@ -1,4 +1,4 @@
-/* Hesper watch history + cloud sync  (window.HesperSync)
+/* PEK TV watch history + cloud sync  (window.PekSync)
  *
  * Local part: a permanent "watched" record (kept after resume points are gone).
  * Cloud part: optional sync of watch history, resume positions AND favorites between devices,
@@ -115,14 +115,14 @@
             if (mx.changed) {
                 map[key] = Object.assign({}, old, mx.fields, { updated: now });
                 writeHistory(map);
-                try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }
+                try { document.dispatchEvent(new CustomEvent('pek-history')); } catch (e) { /* no events */ }
             }
             return false;
         }
         map[key] = Object.assign(identity(meta), mergeExtras(alive ? old : null, info, img).fields,
             { watchedAt: now, count: alive ? (old.count || 1) + 1 : 1, updated: now });
         writeHistory(map);
-        try { document.dispatchEvent(new CustomEvent('hesper-history')); } catch (e) { /* no events */ }   // lets the app sync soon
+        try { document.dispatchEvent(new CustomEvent('pek-history')); } catch (e) { /* no events */ }   // lets the app sync soon
         return true;
     }
 
@@ -155,7 +155,7 @@
 
     // Forget what we know about the cloud (cursor, what was already uploaded). Local history stays.
     function resetSyncState() {
-        var HP = window.HesperProfiles;
+        var HP = window.PekProfiles;
         if (HP && HP.clearSyncState) HP.clearSyncState();   // every profile's sync progress, not only the active one's
         [K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
     }
@@ -248,6 +248,27 @@
         if (!validPassword(password)) return Promise.resolve({ ok: false, error: 'weak_password' });
         return authSession('/v1/auth/reset', { email: cleanEmail(email), code: String(code || '').replace(/\D/g, ''), password: password });
     }
+    // The account's profiles as the cloud has them (sends none of ours). Resolves { ok, profiles } or { ok: false, error }.
+    function peekProfiles() {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        return request('POST', '/v1/profiles/sync', { profiles: [] }, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true, profiles: r.body.profiles || [] };
+            return { ok: false, error: failure(r.status, r.body) };
+        }, function () { return { ok: false, error: 'offline' }; });
+    }
+
+    // Checks the account password against the cloud for the current session (used to reset a forgotten profile passcode).
+    // Resolves { ok } or { ok: false, error }  ('bad_credentials', 'rate_limited', 'offline', 'not_found' on an older cloud service ...).
+    function confirmPassword(password) {
+        if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
+        if (!password) return Promise.resolve({ ok: false, error: 'bad_credentials' });
+        return request('POST', '/v1/auth/confirm', { password: String(password).slice(0, 200) }, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) return { ok: true };
+            if (r.status === 401 && r.body && r.body.error === 'bad_credentials') return { ok: false, error: 'bad_credentials' };
+            if (r.status === 404) return { ok: false, error: 'not_found' };
+            return { ok: false, error: failure(r.status, r.body) };
+        }, function () { return { ok: false, error: 'offline' }; });
+    }
     // Signs out here and (best effort) ends the session on the server.
     function signOut() {
         var had = !!getToken();
@@ -300,7 +321,7 @@
             if (!seen.p[k].d && !local[k]) items.progress.push({ key: k, data: {}, updated: clock.now(), deleted: 1 });
         });
 
-        var FV = window.HesperFavorites;
+        var FV = window.PekFavorites;
         if (FV && FV.snapshot) {
             var snap = FV.snapshot();
             snap.items.forEach(function (f) {
@@ -381,7 +402,7 @@
             });
             writeHistory(hmap);
 
-            var FV = window.HesperFavorites;
+            var FV = window.PekFavorites;
             if (FV && FV.merge && (resp.favorites || []).length) {
                 seen.f = seen.f || {};
                 var fres = FV.merge(resp.favorites.map(function (r) {
@@ -437,16 +458,16 @@
     // The account belongs to the device; each profile (profiles.js) syncs its own favorites, history and resume points.
     // The original profile "p1" lives where an account's data always lived, so existing accounts need no migration.
     function currentProfile() {
-        var HP = window.HesperProfiles, c = HP && HP.enabled && HP.current ? HP.current() : null;
+        var HP = window.PekProfiles, c = HP && HP.enabled && HP.current ? HP.current() : null;
         return c ? c.id : 'p1';
     }
 
     // Tells the cloud about this device's profiles and takes in the household's (names, colours, additions, removals).
     function syncProfiles() {
-        var HP = window.HesperProfiles;
+        var HP = window.PekProfiles;
         if (!HP || !HP.enabled || !HP.snapshot) return Promise.resolve({ ok: true });
         var snap = HP.snapshot();
-        var list = snap.list.map(function (p) { return { id: p.id, name: p.name, color: p.color, updated: p.updated || 0, deleted: 0 }; });
+        var list = snap.list.map(function (p) { return { id: p.id, name: p.name, color: p.color, updated: p.updated || 0, deleted: 0, avatar: p.avatar || '', pin: p.pin || '' }; });
         Object.keys(snap.tombs).forEach(function (id) { list.push({ id: id, name: '', color: '', updated: snap.tombs[id], deleted: 1 }); });
         return request('POST', '/v1/profiles/sync', { profiles: list }, true).then(function (r) {
             if (r.status === 200 && r.body && r.body.ok) { HP.mergeRemote(r.body.profiles || []); return { ok: true }; }
@@ -498,7 +519,7 @@
             }).then(function (res) {
                 if (res && res.error === 'unknown_profile' && !retried) {
                     // Removed on another device, but in use here: keep it (the newer change wins) and try once more.
-                    var HP = window.HesperProfiles;
+                    var HP = window.PekProfiles;
                     if (HP && HP.touch) HP.touch(pid);
                     return attempt(true);
                 }
@@ -515,7 +536,7 @@
         return inflight;
     }
 
-    // Lets other parts of Hesper (the plugin backup) talk to the cloud with this session.
+    // Lets other parts of PEK TV (the plugin backup) talk to the cloud with this session.
     // Resolves { ok, body } or { ok: false, error }, and signs the device out if the session is gone.
     function cloud(method, path, body) {
         if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
@@ -537,13 +558,13 @@
         }).catch(function () { return { ok: false, error: 'offline' }; });
     }
 
-    window.HesperSync = {
+    window.PekSync = {
         histKey: histKey,
         recordWatched: recordWatched,
         listHistory: listHistory,
         clearHistory: clearHistory,
         validEmail: validEmail, validPassword: validPassword,
-        signUp: signUp, signIn: signIn, signOut: signOut,
+        signUp: signUp, signIn: signIn, signOut: signOut, confirmPassword: confirmPassword, peekProfiles: peekProfiles,
         verifyEmail: verifyEmail, resendCode: resendCode,
         forgotPassword: forgotPassword, resetPassword: resetPassword,
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,

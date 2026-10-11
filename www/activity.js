@@ -1,13 +1,13 @@
-/* Hesper background activity  (window.HesperActivity)
+/* PEK TV background activity  (window.PekActivity)
  *
- * A small, quiet status line in the corner that says what Hesper is doing behind the scenes
+ * A small, quiet status line in the corner that says what PEK TV is doing behind the scenes
  * ("Scanning your media folders...", "Fetching poster art (12 left)", "Syncing watch history...").
  *
  * It never gets in the way: it is not focusable (the D-pad skips it), ignores taps and clicks, stays
  * small and half see-through, sits above the phone's tab bar, and is hidden while a video is playing.
  * Settings -> Background activity: Off / Basic / Detailed (Detailed adds plugin network requests etc.).
  *
- * API (used by Hesper's own code):
+ * API (used by PEK TV's own code):
  *   begin(id, text, detail)   something started (counted: every begin needs an end)
  *   update(id, text)          change the text of a running item
  *   end(id, doneText)         finished; doneText (optional) stays a moment as "done"
@@ -28,19 +28,19 @@
     function css() {
         var st = document.createElement('style');
         st.textContent =
-            '#hesper-activity{position:fixed;right:10px;bottom:calc(8px + env(safe-area-inset-bottom,0px));z-index:2900;' +
+            '#pek-activity{position:fixed;right:10px;bottom:calc(8px + env(safe-area-inset-bottom,0px));z-index:2900;' +
             'max-width:min(70vw,420px);pointer-events:none;user-select:none;display:flex;flex-direction:column;align-items:flex-end;gap:3px;' +
             'font:12px/1.3 system-ui,sans-serif;opacity:.85}' +
-            '#hesper-activity .ha-line{display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;' +
+            '#pek-activity .ha-line{display:flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;' +
             'background:rgba(15,18,26,.72);color:#e8edf5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}' +
-            '#hesper-activity .ha-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--sx-accent,#58a6ff);animation:ha-pulse 1s ease-in-out infinite}' +
-            '#hesper-activity .ha-done .ha-dot{animation:none;background:#4cc38a}' +
-            '#hesper-activity .ha-txt{overflow:hidden;text-overflow:ellipsis}' +
+            '#pek-activity .ha-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--sx-accent,#58a6ff);animation:ha-pulse 1s ease-in-out infinite}' +
+            '#pek-activity .ha-done .ha-dot{animation:none;background:#4cc38a}' +
+            '#pek-activity .ha-txt{overflow:hidden;text-overflow:ellipsis}' +
             '@keyframes ha-pulse{0%,100%{opacity:.35}50%{opacity:1}}' +
-            '@media (max-width:720px){#hesper-activity{bottom:calc(66px + env(safe-area-inset-bottom,0px));right:8px;font-size:11px}}' +
-            'html.hp-typing #hesper-activity{display:none}' +
-            'html.hp-mini-on #hesper-activity{bottom:calc(var(--hp-mini-h,68px) + 8px)}' +
-            '@media (prefers-reduced-motion:reduce){#hesper-activity .ha-dot{animation:none}}';
+            '@media (max-width:720px){#pek-activity{bottom:calc(66px + env(safe-area-inset-bottom,0px));right:8px;font-size:11px}}' +
+            'html.hp-typing #pek-activity{display:none}' +
+            'html.hp-mini-on #pek-activity{bottom:calc(var(--hp-mini-h,68px) + 8px)}' +
+            '@media (prefers-reduced-motion:reduce){#pek-activity .ha-dot{animation:none}}';
         document.head.appendChild(st);
     }
 
@@ -48,7 +48,7 @@
         if (el || !document.body) return;
         css();
         el = document.createElement('div');
-        el.id = 'hesper-activity';
+        el.id = 'pek-activity';
         el.setAttribute('aria-hidden', 'true');           // decoration only: not read out, not focusable
         document.body.appendChild(el);
         draw();
@@ -119,15 +119,15 @@
             redraw();
         }
     };
-    window.HesperActivity = A;
+    window.PekActivity = A;
 
     // Watching a video: no text over the picture.
-    document.addEventListener('hesper-player', function (e) { hidden = !!(e && e.detail && e.detail.active); redraw(); });
+    document.addEventListener('pek-player', function (e) { hidden = !!(e && e.detail && e.detail.active); redraw(); });
 
     function start() {
         mount();
         // Things that happen in files loaded before or after this one are hooked here, once everything exists.
-        var S = window.HesperSync, T = window.HesperTorrent, N = window.HesperNet;
+        var S = window.PekSync, T = window.PekTorrent, N = window.PekNet;
         if (S && S.sync) {
             var sync = S.sync;
             S.sync = function () {

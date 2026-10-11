@@ -3,7 +3,7 @@
   "author": "PEK",
   "version": "1.1.0",
   "description": "The standard look: a dim, radiant orange glow.",
-  "hesper_api": 1,
+  "pek_api": 1,
   "tokens": {
     "bg": "#140b07",
     "bgElevated": "#1b0f0a",

@@ -13,7 +13,7 @@
 //      _ftp._tcp, _webdav._tcp ...?". Gives friendly names (e.g. "MY-NAS") and
 //      the only automatic way to find WebDAV. Needs multicast; on Android the
 //      app must hold a WifiManager.MulticastLock while this runs
-//      (see HesperAndroid.setMulticast).
+//      (see PekAndroid.setMulticast).
 //   2. SSDP: the UPnP/DLNA "who is a media server?" broadcast (also multicast).
 //   3. Port scan: tries TCP 445 (SMB), 2049 (NFS) and 21 (FTP) on every address
 //      of the device's own subnet(s). Works without multicast and finds hosts

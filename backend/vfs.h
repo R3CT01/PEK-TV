@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-// Network file access for Hesper. A network location is a URL everywhere
+// Network file access for PEK. A network location is a URL everywhere
 // (sources.tsv, the library cache, the API), so the scanner and the stream
 // route treat it like any other path string:
 //

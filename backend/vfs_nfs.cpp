@@ -1,7 +1,7 @@
 // NFS backend on libnfs (https://github.com/sahlberg/libnfs). Compiled only
-// when HESPER_NFS is defined; vfs.cpp supplies "no NFS support" stand-ins
+// when PEK_NFS is defined; vfs.cpp supplies "no NFS support" stand-ins
 // otherwise. Everything that touches libnfs lives in this file.
-#ifdef HESPER_NFS
+#ifdef PEK_NFS
 
 #include "vfs.h"
 #include "vfs_backends.h"
@@ -121,4 +121,4 @@ bool nfsListShares(const Url& u, std::vector<std::string>& shares, Error& err) {
 
 } // namespace vfs
 
-#endif // HESPER_NFS
+#endif // PEK_NFS

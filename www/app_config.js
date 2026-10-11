@@ -1,8 +1,8 @@
 // ============================================================
-// Hesper App Shell
+// PEK TV App Shell
 // ============================================================
 
-window.HESPER_APP_BUILD = 'v16';
+window.PEK_APP_BUILD = 'v16';
 
 // Phones (narrow screens) get a bottom tab bar with these tabs plus a "More" sheet
 // holding every other tab. Wider screens and TVs keep the left sidebar.
@@ -38,12 +38,12 @@ const LIBRARY_ENDPOINTS = {
 
 // The Weather plugin (plugins/weather/ui.js) writes its formatted reading
 // (e.g. "84°F") here and fires a window 'storage' event whenever it changes.
-const WEATHER_TEMP_KEY = 'hesper_weather_current_temp';
+const WEATHER_TEMP_KEY = 'pek_weather_current_temp';
 
 // Built-in header clock: saved choices and the time zones offered in its settings.
-const CLOCK_12H_KEY  = 'hesper_clock_12h';
-const CLOCK_DATE_KEY = 'hesper_clock_show_date';
-const CLOCK_TZ_KEY   = 'hesper_clock_tz';     // '' = this device's own zone
+const CLOCK_12H_KEY  = 'pek_clock_12h';
+const CLOCK_DATE_KEY = 'pek_clock_show_date';
+const CLOCK_TZ_KEY   = 'pek_clock_tz';     // '' = this device's own zone
 const CLOCK_ZONES = [
     { id: 'UTC', label: 'UTC' },
     { id: 'Pacific/Honolulu', label: 'Honolulu' },
@@ -85,7 +85,7 @@ const CLOCK_ZONES = [
     { id: 'Pacific/Auckland', label: 'Auckland' }
 ];
 
-function hesperFormatBytes(n) {
+function pekFormatBytes(n) {
     if (!n) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
     let i = 0;
@@ -100,19 +100,19 @@ function hesperFormatBytes(n) {
 const SKIN_KEY = 'hesper-skin';
 const SKIN_ID_RE = /^[A-Za-z0-9_-]+$/;
 
-function hesperSetSkinCss(id, bust) {
-    const old = document.getElementById('hesper-skin-css');
+function pekSetSkinCss(id, bust) {
+    const old = document.getElementById('pek-skin-css');
     if (old) old.remove();
     if (!id || id === 'default' || !SKIN_ID_RE.test(id)) return;
     const link = document.createElement('link');
-    link.id = 'hesper-skin-css';
+    link.id = 'pek-skin-css';
     link.rel = 'stylesheet';
     link.href = `/skins/${id}/skin.css` + (bust ? `?t=${Date.now()}` : '');
     link.onerror = () => link.remove();   // a skin without a skin.css is fine
     document.head.appendChild(link);
 }
 
-try { hesperSetSkinCss(localStorage.getItem(SKIN_KEY)); } catch (e) { /* storage unavailable */ }
+try { pekSetSkinCss(localStorage.getItem(SKIN_KEY)); } catch (e) { /* storage unavailable */ }
 
 // ---------------- Layouts ----------------
 // A layout is a built-in preset of structure (where the menu sits, how big the
@@ -132,29 +132,29 @@ const POSTER_SIZES = [
     { id: 'auto', label: 'Auto' }, { id: 's', label: 'Small' }, { id: 'm', label: 'Medium' }, { id: 'l', label: 'Large' }
 ];
 
-function hesperReadPref(key, fallback, allowed) {
+function pekReadPref(key, fallback, allowed) {
     try {
         const v = localStorage.getItem(key);
         return v && allowed.includes(v) ? v : fallback;
     } catch (e) { return fallback; }
 }
 
-function hesperApplyLayout(layoutId, posterSize) {
+function pekApplyLayout(layoutId, posterSize) {
     const layout = LAYOUTS.find(l => l.id === layoutId) || LAYOUTS[0];
     const poster = posterSize && posterSize !== 'auto' ? posterSize : layout.poster;
     document.documentElement.setAttribute('data-layout', layout.id);
     document.documentElement.setAttribute('data-poster', poster);
 }
 
-hesperApplyLayout(
-    hesperReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
-    hesperReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id))
+pekApplyLayout(
+    pekReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
+    pekReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id))
 );
 
 
 // Lets a feature file add methods to a class that is declared in another file.
 // The methods are copied across exactly as written (same names, same `this`).
-function hesperMixin(target, source) {
+function pekMixin(target, source) {
     Object.getOwnPropertyNames(source.prototype).forEach(name => {
         if (name === 'constructor') return;
         Object.defineProperty(target.prototype, name, Object.getOwnPropertyDescriptor(source.prototype, name));

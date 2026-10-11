@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper: skin installer (data side; the screens are in app_skins.js).
+// PEK TV: skin installer (data side; the screens are in app_skins.js).
 //
 // A skin is a .zip with skin.json (name, author, description, version, tokens) and, optionally,
 // skin.css plus images and fonts. It works like a plugin install:
@@ -14,9 +14,9 @@
 // the same thing again, plus the file types and what skin.css may load.
 // ============================================================
 
-const HesperSkinInstaller = (() => {
+const PekSkinInstaller = (() => {
 
-    // Skins that ship with Hesper (kept in step with skin_install.h). They can't be replaced or removed.
+    // Skins that ship with PEK TV (kept in step with skin_install.h). They can't be replaced or removed.
     const BUILTIN = ['default', 'green', 'neon'];
     const isBuiltin = (id) => BUILTIN.indexOf(id) !== -1;
 
@@ -51,7 +51,7 @@ const HesperSkinInstaller = (() => {
             r.onerror = () => reject(new Error('could not read the file'));
             r.readAsArrayBuffer(file);
         });
-        let entries = await HesperZip.read(buf);
+        let entries = await PekZip.read(buf);
         const before = entries.length;
         entries = entries.filter(e => !isJunk(e.path));
         const skipped = before - entries.length;
@@ -149,4 +149,4 @@ const HesperSkinInstaller = (() => {
 
     return { prepare, prepareFiles, check, install, remove, isBuiltin, slug };
 })();
-window.HesperSkinInstaller = HesperSkinInstaller;
+window.PekSkinInstaller = PekSkinInstaller;

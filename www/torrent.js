@@ -1,11 +1,11 @@
 // ============================================================
-// HesperTorrent: the web side of torrent playback.
+// PekTorrent: the web side of torrent playback.
 //
 // The C++ backend does the real work (/api/torrent/*). This file:
 //   - reads/saves the search-provider settings (Settings > Torrents),
 //   - searches for releases of a movie / episode,
 //   - starts a torrent, shows a "Buffering" box with live progress, and hands the stream
-//     URL to Hesper's player once enough is downloaded,
+//     URL to PEK TV's player once enough is downloaded,
 //   - stops the torrent (and deletes its temporary data) when the player closes.
 // Plugins never touch this directly: plugin_sandbox.js calls it for plugins that declare
 // "torrent": true in plugin.json.
@@ -19,7 +19,7 @@
 
     async function call(url, opts) {
         let res;
-        try { res = await fetch(url, opts); } catch (e) { throw new Error("Couldn't reach Hesper's server."); }
+        try { res = await fetch(url, opts); } catch (e) { throw new Error("Couldn't reach PEK TV's server."); }
         let data = {};
         try { data = await res.json(); } catch (e) { /* not JSON */ }
         if (!res.ok || data.error) throw new Error(data.error || ('Request failed (' + res.status + ')'));
@@ -37,7 +37,7 @@
     // box (Cancel) and not on the screen behind it. When the box closes, focus goes back to where it was.
     function refocus(restoreEl) {
         try {
-            const fw = window.hesperFramework;
+            const fw = window.pekFramework;
             if (!fw || typeof fw.refreshFocusList !== 'function') return;
             fw.refreshFocusList();
             if (restoreEl && restoreEl.isConnected) {
@@ -49,7 +49,7 @@
 
     function makeOverlay(title, onCancel) {
         let prevEl = null;       // what had the highlight before the box opened
-        try { const fw = window.hesperFramework; if (fw) prevEl = fw.focusableElements[fw.currentIndex] || null; } catch (e) { /* ignore */ }
+        try { const fw = window.pekFramework; if (fw) prevEl = fw.focusableElements[fw.currentIndex] || null; } catch (e) { /* ignore */ }
         const box = document.createElement('div');
         box.setAttribute('role', 'dialog');
         box.setAttribute('aria-modal', 'true');
@@ -91,7 +91,7 @@
     // What to remember for Resume Watching: an id for the item plus what the Resume card needs to show
     // and to start the same release again. null = do not track (no usable title).
     function makeTrack(opts) {
-        const t = opts && opts.track, S = window.HesperSync;
+        const t = opts && opts.track, S = window.PekSync;
         if (!t || !t.meta || !S || typeof S.histKey !== 'function') return null;
         const m = t.meta;
         let key;
@@ -113,7 +113,7 @@
         return { id: 'tor:' + key, meta, startSec: opts.startSec > 0 ? opts.startSec : 0 };
     }
 
-    window.HesperTorrent = {
+    window.PekTorrent = {
         // True while the "starting stream" box is up. cancelStarting() cancels it and returns true
         // (the app's Back handler uses it, so Back cancels instead of acting on the screen behind).
         isStarting() { return !!cancelActive; },
@@ -142,7 +142,7 @@
         //   opts: { source, title, season, episode, track?: { meta }, startSec? }
         async open(opts) {
             if (busy) throw new Error('Another stream is already starting');
-            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('PEK TV cannot play streams here');
+            if (!window.PekHost || typeof window.PekHost.playStream !== 'function') throw new Error('PEK TV cannot play streams here');
             busy = true;
             let hash = '';
             let cancelled = false;
@@ -187,7 +187,7 @@
                 overlay.done();
                 cancelActive = null;
                 const url = window.location.origin + API + '/' + hash + '/stream';
-                window.HesperHost.playStream(url, opts.title || '', () => {
+                window.PekHost.playStream(url, opts.title || '', () => {
                     post(API + '/' + hash + '/stop').catch(() => {});
                 }, makeTrack(opts));
                 busy = false;

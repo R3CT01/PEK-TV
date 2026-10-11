@@ -14,7 +14,7 @@ class MainAppPlaybackMethods {
     _openWebPlayer(url, title, backend, track, onCloseCb) {
         if (this._player) return;
         this.setState({ detail: null });
-        const player = new window.HesperPlayer({
+        const player = new window.PekPlayer({
             title: title || '',
             backend: backend || new window.HtmlVideoBackend(),
             skipMeta: track ? track.meta : null,
@@ -63,7 +63,7 @@ class MainAppPlaybackMethods {
         return JSON.stringify(out);
     }
 
-    // Hands a library file to the native player on Android (HesperAndroid is
+    // Hands a library file to the native player on Android (PekAndroid is
     // injected by the app). Elsewhere it just opens the stream URL.
     // meta describes what is playing (for Resume Watching); startSec > 0 resumes.
     async playMedia(id, title, meta, startSec) {
@@ -87,17 +87,17 @@ class MainAppPlaybackMethods {
         const track = meta ? { id: id, meta: meta, startSec: startSec } : null;
 
         // Android with libmpv: the shared controls (player.js) drive a native mpv surface.
-        if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
+        if (window.MpvBackend && window.MpvBackend.available() && window.PekPlayer) {
             this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track);
             return;
         }
         try {
-            if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
-                window.HesperAndroid.play(url, title || '', this._themeForNative());
+            if (window.PekAndroid && typeof window.PekAndroid.play === 'function') {
+                window.PekAndroid.play(url, title || '', this._themeForNative());
                 return;
             }
-        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
-        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track); return; }
+        } catch (e) { console.warn('[PEK TV] native play failed, falling back', e); }
+        if (window.PekPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track); return; }
         window.open(url, '_blank');
     }
 
@@ -105,17 +105,17 @@ class MainAppPlaybackMethods {
     // so no library resume position is kept (a torrent can pass `track` to keep its own). onClose runs when the player is closed (the caller cleans up).
     // track (optional) = { id, meta, startSec }: keeps the position for Resume Watching and starts at startSec.
     playStream(url, title, onClose, track) {
-        if (window.MpvBackend && window.MpvBackend.available() && window.HesperPlayer) {
+        if (window.MpvBackend && window.MpvBackend.available() && window.PekPlayer) {
             this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track || null, onClose);
             return;
         }
         try {
-            if (window.HesperAndroid && typeof window.HesperAndroid.play === 'function') {
-                window.HesperAndroid.play(url, title || '', this._themeForNative());
+            if (window.PekAndroid && typeof window.PekAndroid.play === 'function') {
+                window.PekAndroid.play(url, title || '', this._themeForNative());
                 return;
             }
-        } catch (e) { console.warn('[Hesper] native play failed, falling back', e); }
-        if (window.HesperPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose); return; }
+        } catch (e) { console.warn('[PEK TV] native play failed, falling back', e); }
+        if (window.PekPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose); return; }
         window.open(url, '_blank');
     }
 
@@ -162,7 +162,7 @@ class MainAppPlaybackMethods {
             return createElement('div', { style: { margin: '14px 0 6px' } },
                 ui.button('\u25b6  Play', () => this.playMedia(d.playId, d.title, d.meta, 0), { variant: 'primary' }));
         }
-        const at = window.HesperPlayerUtil ? window.HesperPlayerUtil.fmtTime(saved.position) : Math.round(saved.position) + 's';
+        const at = window.PekPlayerUtil ? window.PekPlayerUtil.fmtTime(saved.position) : Math.round(saved.position) + 's';
         return createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
             ui.button('\u25b6  Resume from ' + at, () => this.playMedia(d.playId, d.title, d.meta, saved.position), { variant: 'primary' }),
             ui.button('Start over', () => this.playMedia(d.playId, d.title, d.meta, 0)));
@@ -187,4 +187,4 @@ class MainAppPlaybackMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppPlaybackMethods);
+pekMixin(MainApp, MainAppPlaybackMethods);

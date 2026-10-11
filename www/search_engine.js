@@ -3,7 +3,7 @@
 //
 //  What it does when a plugin (or the Torrents test button) searches for a movie or episode:
 //    1. builds the search words ("dune 2021" or "show name S01E02"),
-//    2. asks Hesper's server to fetch each site you listed (the server does the web request),
+//    2. asks PEK TV's server to fetch each site you listed (the server does the web request),
 //    3. reads the answer: JSON lists, or web pages that show magnet links,
 //    4. throws away wrong titles / wrong episodes, scores the rest (episode, year, quality, seeders),
 //    5. returns the list best-first. The first one is what a plugin plays.
@@ -173,8 +173,8 @@
         return w;
     }
 
-    // ------------------------------------------------------------ talking to Hesper's server
-    const sites = (Array.isArray(window.HESPER_SEARCH_SITES) ? window.HESPER_SEARCH_SITES : [])
+    // ------------------------------------------------------------ talking to PEK TV's server
+    const sites = (Array.isArray(window.PEK_SEARCH_SITES) ? window.PEK_SEARCH_SITES : [])
         .map(s => String(s || '').trim()).filter(Boolean);
     let registered = null;
     function register() {
@@ -221,9 +221,9 @@
         return out.slice(0, 25).map(o => { delete o._score; return o; });
     }
 
-    // ------------------------------------------------------------ hook into HesperTorrent.search
+    // ------------------------------------------------------------ hook into PekTorrent.search
     function install() {
-        const T = window.HesperTorrent;
+        const T = window.PekTorrent;
         if (!T || typeof T.search !== 'function' || T._sitesInstalled) return;
         T._sitesInstalled = true;
         if (!sites.length) return;                                  // nothing pasted: behave exactly as before
@@ -239,6 +239,6 @@
         };
     }
 
-    window.HesperSearchEngine = { parseBody: parseBody, rank: rank, searchWords: searchWords, rate: rate };  // exposed for testing
+    window.PekSearchEngine = { parseBody: parseBody, rank: rank, searchWords: searchWords, rate: rate };  // exposed for testing
     install();
 })();

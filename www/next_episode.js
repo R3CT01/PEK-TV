@@ -11,7 +11,7 @@
 // OK / tap plays it. If the episode ends while the card is up, the next one starts after a
 // 5 second countdown that can be cancelled.
 //
-//   HesperNext.Controller  the card (player.js builds one per player)
+//   PekNext.Controller  the card (player.js builds one per player)
 //   MainApp methods        _nextProvider(track): what to offer and how to play it
 // ============================================================
 
@@ -25,7 +25,7 @@
     const STYLE_ID = 'hp-next-style';
 
     function isTv() {
-        try { const a = window.HesperAndroid; return !(a && typeof a.isPhone === 'function' && a.isPhone()); }
+        try { const a = window.PekAndroid; return !(a && typeof a.isPhone === 'function' && a.isPhone()); }
         catch (e) { return true; }
     }
 
@@ -207,7 +207,7 @@
         }
     }
 
-    window.HesperNext = { Controller };
+    window.PekNext = { Controller };
 })();
 
 
@@ -299,4 +299,4 @@ class MainAppNextMethods {
     }
 }
 
-if (typeof hesperMixin === 'function' && typeof MainApp !== 'undefined') hesperMixin(MainApp, MainAppNextMethods);
+if (typeof pekMixin === 'function' && typeof MainApp !== 'undefined') pekMixin(MainApp, MainAppNextMethods);

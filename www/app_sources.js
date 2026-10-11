@@ -9,7 +9,7 @@ class MainAppSourcesMethods {
     // net.js draws the green/red dot and reports changes. Offline mode: the local
     // library keeps working, internet-only things wait until the network is back.
     _watchNetwork() {
-        const net = window.HesperNet;
+        const net = window.PekNet;
         if (!net) return;
         const { ui } = this.props.engine;
         net.onChange((online) => {
@@ -33,7 +33,7 @@ class MainAppSourcesMethods {
             const data = await res.json();
             this.setState({ sources: data.sources || [] });
         } catch (err) {
-            console.warn('[Hesper] Could not load sources:', err);
+            console.warn('[PEK TV] Could not load sources:', err);
         }
     }
 
@@ -85,7 +85,7 @@ class MainAppSourcesMethods {
     // (the app holds a MulticastLock only while searching).
     _multicast(on) {
         try {
-            if (window.HesperAndroid && typeof window.HesperAndroid.setMulticast === 'function') window.HesperAndroid.setMulticast(!!on);
+            if (window.PekAndroid && typeof window.PekAndroid.setMulticast === 'function') window.PekAndroid.setMulticast(!!on);
         } catch (e) { /* the port scan still finds hosts without it */ }
     }
 
@@ -237,7 +237,7 @@ class MainAppSourcesMethods {
         try {
             await fetch(`/api/sources?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
         } catch (err) {
-            console.warn('[Hesper] Could not remove source:', err);
+            console.warn('[PEK TV] Could not remove source:', err);
         }
         await this.loadSources();
         this.refreshLibrary();
@@ -273,13 +273,13 @@ class MainAppSourcesMethods {
 
     // Waits for the server's background scan to finish (checks once a second).
     async _waitForScan(maxSec) {
-        window.HesperActivity.begin('scan', 'Scanning your media folders\u2026');
+        window.PekActivity.begin('scan', 'Scanning your media folders\u2026');
         for (let i = 0; i < maxSec; i++) {
             await new Promise(r => setTimeout(r, 1000));
             const st = await fetch('/api/scan-status').then(r => r.json()).catch(() => ({ scanning: false }));
             if (!st.scanning) break;
         }
-        window.HesperActivity.end('scan', 'Scan finished');
+        window.PekActivity.end('scan', 'Scan finished');
     }
 
     _renderBusy() {
@@ -316,7 +316,7 @@ class MainAppSourcesMethods {
         if (this.state.refreshCooldown > 0 || this.state.refreshing) return;
         this._startCooldown(10);
         this.setState({ refreshing: true });
-        window.HesperActivity.begin('scan', 'Scanning your media folders\u2026');
+        window.PekActivity.begin('scan', 'Scanning your media folders\u2026');
         try {
             const res = await fetch('/api/rescan', { method: 'POST' });
             if (res.status === 429) {
@@ -331,9 +331,9 @@ class MainAppSourcesMethods {
                 }
             }
         } catch (err) {
-            console.warn('[Hesper] Rescan failed:', err);
+            console.warn('[PEK TV] Rescan failed:', err);
         }
-        window.HesperActivity.end('scan', 'Scan finished');
+        window.PekActivity.end('scan', 'Scan finished');
         this.setState({ refreshing: false });
         this.refreshLibrary();
     }
@@ -453,4 +453,4 @@ class MainAppSourcesMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppSourcesMethods);
+pekMixin(MainApp, MainAppSourcesMethods);

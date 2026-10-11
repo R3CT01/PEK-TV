@@ -14,8 +14,8 @@ class MainAppSkinsMethods {
     async _checkSkinFile(file) {
         this.setState({ skinInstall: { stage: 'checking' } });
         try {
-            const prep = await HesperSkinInstaller.prepare(file);
-            const verdict = await HesperSkinInstaller.check(prep);
+            const prep = await PekSkinInstaller.prepare(file);
+            const verdict = await PekSkinInstaller.check(prep);
             this.setState({ skinInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
         } catch (err) {
             this.setState({ skinInstall: { stage: 'error', error: String((err && err.message) || err) } });
@@ -28,7 +28,7 @@ class MainAppSkinsMethods {
         const { ui } = this.props.engine;
         this.setState({ skinInstall: Object.assign({}, si, { stage: 'installing' }) });
         try {
-            await HesperSkinInstaller.install(si.prep);
+            await PekSkinInstaller.install(si.prep);
             await this.loadSkins();
             // A skin that was updated while it was in use is re-applied so the new look shows at once.
             if (this.state.activeSkin === si.prep.id) this.applySkin(si.prep.id);
@@ -78,7 +78,7 @@ class MainAppSkinsMethods {
     // ---- remove ----
 
     askRemoveSkin(s) {
-        if (HesperSkinInstaller.isBuiltin(s.id)) {
+        if (PekSkinInstaller.isBuiltin(s.id)) {
             this.props.engine.ui.toast(`${s.name} is built in and can't be removed.`);
             return;
         }
@@ -97,7 +97,7 @@ class MainAppSkinsMethods {
         const { ui } = this.props.engine;
         this.setState({ skinRemove: Object.assign({}, sr, { busy: true, error: '' }) });
         try {
-            await HesperSkinInstaller.remove(sr.id);
+            await PekSkinInstaller.remove(sr.id);
             // If it was the skin in use, go back to the default look first.
             if (this.state.activeSkin === sr.id) this.applySkin('default');
             await this.loadSkins();
@@ -124,4 +124,4 @@ class MainAppSkinsMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppSkinsMethods);
+pekMixin(MainApp, MainAppSkinsMethods);

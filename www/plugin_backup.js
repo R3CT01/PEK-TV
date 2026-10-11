@@ -1,14 +1,14 @@
-/* Hesper plugin backup  (window.HesperPluginBackup)
+/* PEK TV plugin backup  (window.PekPluginBackup)
  *
  * Backs up the plugins you installed from a .zip to your Hesper Cloud account, and lets you
- * bring them back on another device (or after reinstalling Hesper).
+ * bring them back on another device (or after reinstalling PEK TV).
  *
- *  - Only third-party plugins are backed up. Built-in ones ship with Hesper.
+ *  - Only third-party plugins are backed up. Built-in ones ship with PEK TV.
  *  - Only the plugin's own files are saved (never its data/ folder, which is private to a device).
  *  - Backing up is automatic once you are signed in (switch it off in Settings > Cloud Sync).
  *  - Getting plugins BACK is never automatic: a cloud copy is only offered, and installing it goes
  *    through the same permission screen and server checks as installing a .zip.
- *  - Removing a plugin in Hesper marks it removed in the cloud so your other devices stop offering it.
+ *  - Removing a plugin in PEK TV marks it removed in the cloud so your other devices stop offering it.
  *    They keep their own copy; nothing is ever deleted on a device because of the cloud.
  */
 (function () {
@@ -28,8 +28,8 @@
     function getJson(k, d) { try { var o = JSON.parse(getRaw(k) || 'null'); return (o && typeof o === 'object') ? o : d; } catch (e) { return d; } }
     function setJson(k, o) { setRaw(k, JSON.stringify(o)); }
 
-    function S() { return window.HesperSync; }
-    function Inst() { return window.HesperPluginInstaller || (typeof HesperPluginInstaller !== 'undefined' ? HesperPluginInstaller : null); }
+    function S() { return window.PekSync; }
+    function Inst() { return window.PekPluginInstaller || (typeof PekPluginInstaller !== 'undefined' ? PekPluginInstaller : null); }
 
     function enabled() { return getRaw(K.on) !== '0'; }
     function setEnabled(v) { setRaw(K.on, v ? '1' : '0'); }
@@ -249,7 +249,7 @@
     function pendingList() { return getJson(K.pending, []); }
     function dropPending(id) { setJson(K.pending, pendingList().filter(function (p) { return p.id !== id; })); }
 
-    // Downloads one cloud plugin and returns the files, ready for HesperPluginInstaller.prepareFiles.
+    // Downloads one cloud plugin and returns the files, ready for PekPluginInstaller.prepareFiles.
     function fetchForRestore(id) {
         return S().cloud('GET', '/v1/plugins').then(function (list) {
             if (!list.ok) throw list;
@@ -284,7 +284,7 @@
         }).catch(function (e) { return { ok: false, error: (e && e.error) || 'server' }; });
     }
 
-    // The user removed this plugin in Hesper: tell the cloud so other devices stop offering it.
+    // The user removed this plugin in PEK TV: tell the cloud so other devices stop offering it.
     function forget(id) {
         if (!enabled() || !S() || !S().isLinked() || !validId(id)) return;
         S().cloud('POST', '/v1/plugins/delete', { id: id, updated: Date.now() }).then(function (r) {
@@ -298,7 +298,7 @@
     var I0 = Inst();
     if (I0 && I0.onRemoved) I0.onRemoved(forget);
 
-    window.HesperPluginBackup = {
+    window.PekPluginBackup = {
         enabled: enabled, setEnabled: setEnabled,
         run: function (o) { return enabled() ? run(o) : Promise.resolve({ ok: true, off: true, uploaded: 0, pending: [] }); },
         pending: function () { return enabled() ? pendingList() : []; },

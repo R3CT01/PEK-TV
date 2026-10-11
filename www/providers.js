@@ -1,9 +1,9 @@
-/* Hesper streaming providers  (window.HesperProviders)
+/* PEK TV streaming providers  (window.PekProviders)
  *
  * Turns a "Watch on Netflix / Hulu / ..." button into an action:
  *   - Android app: opens the provider's app (on its page for the title when the app supports the link),
  *     or the provider's website when the app is not installed.
- *   - Everything else (the main Hesper in a browser): opens the provider's website in a new tab.
+ *   - Everything else (the main PEK TV in a browser): opens the provider's website in a new tab.
  *
  * A plugin only says WHICH provider (TMDb's name) and WHICH title. It never supplies an address or an
  * app name: those come from the table below, so a plugin cannot use a button to open something else.
@@ -90,19 +90,19 @@
             var url = p.search && title ? p.search.replace('{q}', encodeURIComponent(title)) : p.home;
             return { name: p.name, pkgs: p.pkgs.slice(), url: url, known: true };
         }
-        // A service Hesper has no row for: TMDb's own "where to watch" page for the title.
+        // A service PEK TV has no row for: TMDb's own "where to watch" page for the title.
         var tmdb = id ? 'https://www.themoviedb.org/' + type + '/' + id + '/watch?locale=' + region
                       : 'https://www.themoviedb.org/';
         return { name: String(spec.name || 'this service').slice(0, 60), pkgs: [], url: tmdb, known: false };
     }
 
     function toast(text) {
-        try { if (window.hesperFramework) window.hesperFramework.ui.toast(text, 3000); } catch (e) { /* no toast */ }
+        try { if (window.pekFramework) window.pekFramework.ui.toast(text, 3000); } catch (e) { /* no toast */ }
     }
 
     function open(spec) {
         var p = plan(spec || {});
-        var A = window.HesperAndroid;
+        var A = window.PekAndroid;
         try {
             if (A && typeof A.openStreamingApp === 'function' && p.pkgs.length) {
                 A.openStreamingApp(p.pkgs.join(','), p.url);          // app first, website if it is not installed
@@ -117,6 +117,6 @@
         return p;
     }
 
-    window.HesperProviders = { find: find, plan: plan, open: open, table: TABLE };
-    if (typeof module !== 'undefined' && module.exports) module.exports = window.HesperProviders;
+    window.PekProviders = { find: find, plan: plan, open: open, table: TABLE };
+    if (typeof module !== 'undefined' && module.exports) module.exports = window.PekProviders;
 })();

@@ -13,14 +13,14 @@
 // ============================================================
 
 // Shown to users as "want to share one? go to ...". Put your GitHub Pages address here (leave '' to hide the line).
-const HESPER_SUBMIT_SITE = '';
+const PEK_SUBMIT_SITE = '';
 
 // The PEK Store worker (separate from the sync worker). See cloud/STORE-DEPLOY.md.
-const HESPER_STORE_API = 'https://pek-store.aquariusibeats.workers.dev';
+const PEK_STORE_API = 'https://pek-store.aquariusibeats.workers.dev';
 
-const HesperPluginStore = (() => {
-    const I = () => window.HesperPluginInstaller;
-    const base = () => HESPER_STORE_API;
+const PekPluginStore = (() => {
+    const I = () => window.PekPluginInstaller;
+    const base = () => PEK_STORE_API;
 
     function fromB64(b64) {
         const bin = atob(b64), out = new Uint8Array(bin.length);
@@ -63,12 +63,12 @@ const HesperPluginStore = (() => {
         let files;
         try { files = JSON.parse(bundle).files.map(f => ({ path: f.p, data: fromB64(f.d) })); }
         catch (e) { throw new Error('The download was damaged. Try again.'); }
-        return item.kind === 'skin' ? window.HesperSkinInstaller.prepareFiles(item.id, files) : I().prepareFiles(item.id, files);
+        return item.kind === 'skin' ? window.PekSkinInstaller.prepareFiles(item.id, files) : I().prepareFiles(item.id, files);
     }
 
     return { list, download };
 })();
-if (typeof window !== 'undefined') window.HesperPluginStore = HesperPluginStore;
+if (typeof window !== 'undefined') window.PekPluginStore = PekPluginStore;
 
 
 // ============================================================
@@ -105,7 +105,7 @@ class MainAppPluginStoreMethods {
         const ps0 = this.state.pluginStore || {};
         this._ps({ stage: 'list', shelf, busy: true, error: '', items: [], note: '' });
         try {
-            const items = await HesperPluginStore.list(shelf, ps0.kind);
+            const items = await PekPluginStore.list(shelf, ps0.kind);
             const ps = this.state.pluginStore;
             if (ps && ps.shelf === shelf) this._ps({ busy: false, items });
         } catch (err) {
@@ -118,13 +118,13 @@ class MainAppPluginStoreMethods {
         if (!ps || ps.busy) return;
         this._ps({ busy: true, error: '', note: 'Downloading ' + item.name + '\u2026' });
         try {
-            const prep = await HesperPluginStore.download(item);
+            const prep = await PekPluginStore.download(item);
             // Hand over to the normal install screens (warning, permissions, confirm).
             if (item.kind === 'skin') {
-                const verdict = await HesperSkinInstaller.check(prep);
+                const verdict = await PekSkinInstaller.check(prep);
                 this.setState({ pluginStore: null, skinInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
             } else {
-                const verdict = await HesperPluginInstaller.check(prep);
+                const verdict = await PekPluginInstaller.check(prep);
                 this.setState({ pluginStore: null, pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
             }
         } catch (err) {
@@ -182,9 +182,9 @@ class MainAppPluginStoreMethods {
         ];
         return wrap('PEK Store',
             sub((skin ? 'Skins. ' : 'Plugins. ') + 'Tap a shelf, tap ' + (skin ? 'a skin' : 'a plugin') + ', tap Install. No web addresses to type.'),
-            HESPER_SUBMIT_SITE ? sub('Made ' + (skin ? 'a skin' : 'a plugin') + '? Share it at ' + HESPER_SUBMIT_SITE + ' (a GitHub account is needed).') : null,
+            PEK_SUBMIT_SITE ? sub('Made ' + (skin ? 'a skin' : 'a plugin') + '? Share it at ' + PEK_SUBMIT_SITE + ' (a GitHub account is needed).') : null,
             err, note, busy, list(...rows));
     }
 }
 
-hesperMixin(MainApp, MainAppPluginStoreMethods);
+pekMixin(MainApp, MainAppPluginStoreMethods);

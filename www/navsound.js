@@ -1,4 +1,4 @@
-/* PEK navigation sound  (window.HesperNavSound)
+/* PEK navigation sound  (window.PekNavSound)
  * tick():   a soft, short "tick" when the D-pad / arrow keys move the highlight.
  * select(): a different, slightly longer two-note "pop" when OK is pressed.
  * Synthesised with Web Audio (no sound file). Off / Low / Medium / High is saved in Settings.
@@ -21,7 +21,7 @@
     function native() {
         if (nativeOk) return true;
         try {
-            var a = window.HesperAndroid;
+            var a = window.PekAndroid;
             if (a && typeof a.navSound === 'function' && typeof a.navSoundReady === 'function' && a.navSoundReady()) nativeOk = true;
         } catch (e) { /* use Web Audio */ }
         return nativeOk;
@@ -97,7 +97,7 @@
         if (gap && now - last < gap) return;
         last = now;
         if (native()) {
-            try { window.HesperAndroid.navSound(kind, g * gain); return; } catch (e) { nativeOk = false; /* fall back */ }
+            try { window.PekAndroid.navSound(kind, g * gain); return; } catch (e) { nativeOk = false; /* fall back */ }
         }
         try {
             if (!setup()) return;
@@ -116,7 +116,7 @@
     // Build the buffers as soon as the page is up so the first press is instant.
     if (LEVELS[level]) { var early = function () { if (!native()) setup(); }; if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', early); else early(); }
 
-    window.HesperNavSound = {
+    window.PekNavSound = {
         tick: tick,
         select: select,
         levels: ['off', 'low', 'med', 'high'],

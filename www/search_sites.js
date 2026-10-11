@@ -13,7 +13,7 @@
 //  Put as many as you like (up to 20). Lines starting with // are ignored.
 //  Only use sites that are legal for you to use.
 // ============================================================
-window.HESPER_SEARCH_SITES = [
+window.PEK_SEARCH_SITES = [
 
     // 'https://example.org/search?q={q}',
 

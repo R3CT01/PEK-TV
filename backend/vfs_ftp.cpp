@@ -1,4 +1,4 @@
-// FTP client for Hesper's network folders. Plain POSIX sockets, no libraries.
+// FTP client for PEK's network folders. Plain POSIX sockets, no libraries.
 // Lists with MLSD (falls back to LIST), reads with REST + RETR, passive mode only.
 #include "vfs.h"
 #include "vfs_backends.h"
@@ -358,7 +358,7 @@ std::unique_ptr<Share> ftpConnect(const Url& u, Error& err) {
         host = host.substr(0, colon);
     }
     std::string user, pass;
-    if (!getCredentials("ftp", u.host, user, pass) || user.empty()) { user = "anonymous"; pass = "hesper@localhost"; }
+    if (!getCredentials("ftp", u.host, user, pass) || user.empty()) { user = "anonymous"; pass = "pek@localhost"; }
     std::unique_ptr<FtpShare> s(new FtpShare(host, port, user, pass));
     if (!s->login(err)) return nullptr;
     return std::unique_ptr<Share>(s.release());

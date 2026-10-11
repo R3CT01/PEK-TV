@@ -11,7 +11,7 @@ class MainAppLibraryMethods {
         const endpoint = LIBRARY_ENDPOINTS[tab];
         if (!endpoint) return;
         if (!force && this.state.library[tab]) return;
-        window.HesperActivity.begin('lib:' + tab, 'Loading your library\u2026');
+        window.PekActivity.begin('lib:' + tab, 'Loading your library\u2026');
         try {
             const res = await fetch(endpoint);
             const data = await res.json();
@@ -20,7 +20,7 @@ class MainAppLibraryMethods {
         } catch (err) {
             this.setState({ library: { ...this.state.library, [tab]: { error: true } } });
         }
-        window.HesperActivity.end('lib:' + tab);
+        window.PekActivity.end('lib:' + tab);
     }
 
     refreshLibrary() {
@@ -49,7 +49,7 @@ class MainAppLibraryMethods {
     // Fetches posters we don't have yet, 3 at a time, and publishes results in
     // batches so the grid is not rebuilt for every single image.
     _queuePosters(items) {
-        if (window.HesperNet && !window.HesperNet.isOnline()) return;   // offline: poster art waits for the network
+        if (window.PekNet && !window.PekNet.isOnline()) return;   // offline: poster art waits for the network
         if (!this._posterQueue) {
             this._posterQueue = []; this._posterActive = 0; this._posterPending = {}; this._posterSeen = {}; this._posterTimer = null;
         }
@@ -62,7 +62,7 @@ class MainAppLibraryMethods {
     }
 
     _pumpPosters() {
-        const act = window.HesperActivity;
+        const act = window.PekActivity;
         const left = this._posterQueue.length + this._posterActive;
         if (left) act.update('posters', 'Fetching poster art (' + left + ' left)');
         else act.end('posters', 'Poster art up to date');
@@ -245,7 +245,7 @@ class MainAppLibraryMethods {
         } else try {
             node = typeof p.render === 'function' ? p.render(engine) : null;
         } catch (err) {
-            console.error(`[Hesper] Plugin "${p.folder}" render() threw:`, err);
+            console.error(`[PEK TV] Plugin "${p.folder}" render() threw:`, err);
             node = ui.card('Plugin error', String((err && err.message) || err));
         }
         if (!node) {
@@ -255,7 +255,7 @@ class MainAppLibraryMethods {
             );
         }
 
-        const win = engine.windows.create(class extends HesperWindow {
+        const win = engine.windows.create(class extends PekWindow {
             render() {
                 return createElement('div', { className: 'plugin-window' },
                     createElement('div', { className: 'plugin-window-bar' },
@@ -454,13 +454,13 @@ class MainAppLibraryMethods {
         return createElement('div', {},
             ui.card(
                 `${plural(groups.length, 'duplicate group')} found`,
-                `Keeping one copy of each would free up to ${hesperFormatBytes(data.wastedTotal)}. PEK TV only lists duplicates; delete files from your file manager.`
+                `Keeping one copy of each would free up to ${pekFormatBytes(data.wastedTotal)}. PEK TV only lists duplicates; delete files from your file manager.`
             ),
             ...groups.map(g => createElement('div', { className: 'settings-section' },
-                createElement('h2', {}, g.kind === 'size' ? `${g.label}: ${hesperFormatBytes(g.files[0].size)}` : g.label),
-                createElement('p', { className: 'sub' }, `${kindLabel[g.kind] || 'Duplicate'} \u00b7 ${plural(g.files.length, 'copy')} \u00b7 up to ${hesperFormatBytes(g.wasted)} to free`),
+                createElement('h2', {}, g.kind === 'size' ? `${g.label}: ${pekFormatBytes(g.files[0].size)}` : g.label),
+                createElement('p', { className: 'sub' }, `${kindLabel[g.kind] || 'Duplicate'} \u00b7 ${plural(g.files.length, 'copy')} \u00b7 up to ${pekFormatBytes(g.wasted)} to free`),
                 createElement('div', { className: 'plugin-list' },
-                    ...g.files.map(f => ui.listRow(f.filename, `${hesperFormatBytes(f.size)} \u00b7 ${f.path}`))
+                    ...g.files.map(f => ui.listRow(f.filename, `${pekFormatBytes(f.size)} \u00b7 ${f.path}`))
                 )
             ))
         );
@@ -500,4 +500,4 @@ class MainAppLibraryMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppLibraryMethods);
+pekMixin(MainApp, MainAppLibraryMethods);

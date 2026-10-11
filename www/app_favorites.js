@@ -2,7 +2,7 @@
 // MainApp: Favorites tab, and opening a plugin on one particular title
 // Loaded after app.js. These methods are added to MainApp.prototype.
 //
-// The list itself lives in favorites.js (window.HesperFavorites). Plugins with the "favorites"
+// The list itself lives in favorites.js (window.PekFavorites). Plugins with the "favorites"
 // permission add and remove titles; this file shows them and opens them again.
 // ============================================================
 
@@ -46,7 +46,7 @@ class MainAppFavoritesMethods {
     confirmRemoveFavorite() {
         const fr = this.state.favRemove;
         if (!fr) return;
-        window.HesperFavorites.remove(fr.key);          // fires 'hesper-favorites', which refreshes the tab
+        window.PekFavorites.remove(fr.key);          // fires 'pek-favorites', which refreshes the tab
         this.setState({ favRemove: null });
         this.props.engine.ui.toast('Removed from favorites');
     }
@@ -92,7 +92,7 @@ class MainAppFavoritesMethods {
         const cards = list.map(f => ui.posterCard(
             f.title,
             [f.year || '', f.type === 'tv' ? 'TV' : 'Movie'].filter(Boolean).join(' \u00b7 '),
-            window.HesperFavorites.posterUrl(f),
+            window.PekFavorites.posterUrl(f),
             () => this.openFavorite(f),
             { onLongPress: () => this.askRemoveFavorite(f) }
         ));
@@ -106,4 +106,4 @@ class MainAppFavoritesMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppFavoritesMethods);
+pekMixin(MainApp, MainAppFavoritesMethods);

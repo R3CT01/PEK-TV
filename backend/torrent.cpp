@@ -70,7 +70,7 @@ void setDataDir(const std::string& dir) { g_dir = dir.empty() ? "." : dir; }
 
 }  // namespace torrent
 
-#ifndef HESPER_TORRENT
+#ifndef PEK_TORRENT
 // ------------------------------------------------------------------------------------------
 // Built without libtorrent: everything reports "not available".
 // ------------------------------------------------------------------------------------------
@@ -107,10 +107,10 @@ std::string diagnostics() { return "This build has no torrent engine.\n"; }
 #include <libtorrent/magnet_uri.hpp>
 #if __has_include(<libtorrent/pwrite_disk_io.hpp>)
 #include <libtorrent/pwrite_disk_io.hpp>
-#define HESPER_PLAIN_DISK_IO lt::pwrite_disk_io_constructor
+#define PEK_PLAIN_DISK_IO lt::pwrite_disk_io_constructor
 #elif __has_include(<libtorrent/posix_disk_io.hpp>)
 #include <libtorrent/posix_disk_io.hpp>
-#define HESPER_PLAIN_DISK_IO lt::posix_disk_io_constructor
+#define PEK_PLAIN_DISK_IO lt::posix_disk_io_constructor
 #endif
 #include <libtorrent/session_params.hpp>
 #include <libtorrent/session.hpp>
@@ -313,15 +313,15 @@ void alertLoop() {
 }
 
 // The port libtorrent listens on. Some VPNs / networks drop traffic that leaves from the default
-// BitTorrent port 6881, so it is NOT fixed: the HESPER_TORRENT_PORT environment variable wins, else the
+// BitTorrent port 6881, so it is NOT fixed: the PEK_TORRENT_PORT environment variable wins, else the
 // number saved in <data dir>/torrent_port.txt, else a random one is picked once and saved there (so it stays
 // stable, e.g. for a VPN port forward). Edit that file to change it.
 int listenPort(std::string& how) {
     auto valid = [](long v) { return v >= 1024 && v <= 65535; };
-    const char* env = std::getenv("HESPER_TORRENT_PORT");
+    const char* env = std::getenv("PEK_TORRENT_PORT");
     if (env && *env) {
         long v = std::atol(env);
-        if (valid(v)) { how = "HESPER_TORRENT_PORT"; return static_cast<int>(v); }
+        if (valid(v)) { how = "PEK_TORRENT_PORT"; return static_cast<int>(v); }
     }
     fs::path f = fs::path(g_dir) / "torrent_port.txt";
     {
@@ -344,7 +344,7 @@ void ensureSession() {   // g_mx held
     fs::create_directories(fs::path(g_dir) / "torrent_cache", ec);
 
     lt::settings_pack sp;
-    sp.set_str(lt::settings_pack::user_agent, "Hesper/1.0");
+    sp.set_str(lt::settings_pack::user_agent, "PEK/1.0");
     g_listenPort = listenPort(g_listenHow);
     const std::string lp = std::to_string(g_listenPort);
     sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:" + lp + ",[::]:" + lp);
@@ -367,10 +367,10 @@ void ensureSession() {   // g_mx held
     g_diagT0 = Clock::now();
     g_diag.clear(); g_trkReplies = g_trkErrors = g_dhtReplies = g_dhtPeers = 0;
     lt::session_params params(sp);
-#ifdef HESPER_PLAIN_DISK_IO
+#ifdef PEK_PLAIN_DISK_IO
     // libtorrent 2.x memory-maps the files by default. On a 32-bit process (armeabi-v7a TVs / sticks) mapping
     // multi-GB video files runs out of address space; plain pread/pwrite does not have that problem.
-    if (sizeof(void*) == 4) params.disk_io_constructor = HESPER_PLAIN_DISK_IO;
+    if (sizeof(void*) == 4) params.disk_io_constructor = PEK_PLAIN_DISK_IO;
 #endif
     g_ses.reset(new lt::session(std::move(params)));
     g_stop = false;
@@ -494,7 +494,7 @@ std::string addFile(const std::string& bytes, int season, int episode, std::stri
 std::string diagnostics() {
     std::lock_guard<std::mutex> lk(g_mx);
     std::ostringstream o;
-    o << "Hesper torrent diagnostics\n";
+    o << "PEK torrent diagnostics\n";
     if (!g_ses) { o << "Session: not started yet (start a stream first, then reload this page)\n"; return o.str(); }
     o << "Session: running, DHT " << (g_ses->is_dht_running() ? "on" : "off") << "\n";
     o << "Listening port: " << g_listenPort << " (from " << g_listenHow << ")\n";

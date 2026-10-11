@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper plugin installer (header-only, no extra libraries).
+// PEK plugin installer (header-only, no extra libraries).
 //
 // The web UI unpacks a plugin .zip itself and sends the files to
 // POST /api/plugins/install. Everything that decides what ends up on
@@ -12,7 +12,7 @@
 //     A third-party backend.py is not trusted: hesper_guard.py only runs it if plugin.json
 //     declares its permissions and it passes the guard's source scan, and then it can only
 //     use the hosts it declared and its own data/ folder.
-//   - setting HESPER_ALLOW_PLUGIN_BACKEND=0 refuses .py files altogether (for example for a
+//   - setting PEK_ALLOW_PLUGIN_BACKEND=0 refuses .py files altogether (for example for a
 //     store build that must not install code from files)
 //   - size and file-count limits
 //   - plugin.json and ui.js are required
@@ -36,7 +36,7 @@
 #include <system_error>
 #include <vector>
 
-namespace hesper_plugins {
+namespace pek_plugins {
 
 namespace fs = std::filesystem;
 
@@ -62,19 +62,20 @@ constexpr size_t kMaxManifest    = 16u * 1024;
 constexpr size_t kMaxPathLen     = 120;
 constexpr size_t kMaxDepth       = 6;
 
-// Plugins that ship with Hesper. They can't be replaced or removed here (on Android
+// Plugins that ship with PEK. They can't be replaced or removed here (on Android
 // the app also re-copies them from its assets on every launch).
 inline bool isReservedId(const std::string& id) {
     return id == "weather" || id == "sample_scraper" || id == "sample_counter" || id == "tmdb-discover";
 }
 
-// Hesper's built-in TMDb access (a proxy that holds Hesper's key) is for official plugins only.
-// A plugin installed from a .zip can't list it, so it can't borrow Hesper's key.
+// PEK's built-in TMDb access (a proxy that holds PEK's key) is for official plugins only.
+// A plugin installed from a .zip can't list it, so it can't borrow PEK's key.
 inline const char* reservedHost() { return "hesper-tmdb.aquariusibeats.workers.dev"; }
 
-// Python backends are accepted unless HESPER_ALLOW_PLUGIN_BACKEND=0.
+// Python backends are accepted unless PEK_ALLOW_PLUGIN_BACKEND=0.
 inline bool backendAllowed() {
-    const char* v = std::getenv("HESPER_ALLOW_PLUGIN_BACKEND");
+    const char* v = std::getenv("PEK_ALLOW_PLUGIN_BACKEND");
+    if (!v) v = std::getenv("HESPER_ALLOW_PLUGIN_BACKEND");   // old name, still honoured
     return !(v && std::string(v) == "0");
 }
 
@@ -172,7 +173,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             while (a < f.data.size() && std::isspace(static_cast<unsigned char>(f.data[a]))) ++a;
             if (a >= f.data.size() || f.data[a] != '{') return "plugin.json is not a JSON object";
             if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
-                return std::string(reservedHost()) + " is reserved for Hesper's official plugins";
+                return std::string(reservedHost()) + " is reserved for PEK's official plugins";
         }
         if (f.path == "ui.js") hasUi = true;
         if (f.path == "skin.json") hasSkin = true;
@@ -336,4 +337,4 @@ inline bool readFile(const std::string& pluginsDir, const std::string& id, const
     return true;
 }
 
-}  // namespace hesper_plugins
+}  // namespace pek_plugins

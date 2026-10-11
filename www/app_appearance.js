@@ -135,7 +135,7 @@ class MainAppAppearanceMethods {
         const p = this._findWeatherPlugin(plugins);
         if (!p || typeof p.render !== 'function') return;
         try { p.render(this.props.engine); } catch (err) {
-            console.warn('[Hesper] Weather plugin failed to warm up:', err);
+            console.warn('[PEK TV] Weather plugin failed to warm up:', err);
         }
     }
 
@@ -153,13 +153,13 @@ class MainAppAppearanceMethods {
                     const m = await fetch(`/skins/${id}/skin.json`).then(r => r.json());
                     return { ...m, id, name: m.name || id };
                 } catch (err) {
-                    console.warn(`[Hesper] Skipping skin "${id}": bad skin.json`, err);
+                    console.warn(`[PEK TV] Skipping skin "${id}": bad skin.json`, err);
                     return null;
                 }
             }));
             skins = manifests.filter(Boolean);
         } catch (err) {
-            console.warn('[Hesper] Could not load skins:', err);
+            console.warn('[PEK TV] Could not load skins:', err);
         }
         if (!skins.some(s => s.id === 'default')) skins.unshift(builtIn);
         this.setState({ skins });
@@ -175,7 +175,7 @@ class MainAppAppearanceMethods {
             if (this.state.activeSkin !== 'default') return;
             const t = this.props.engine.theme.getAll();
             const untouched = !localStorage.getItem('hesper-theme') ||
-                (!t.bgImage && Object.keys(HESPER_DEFAULT_THEME).every(k => t[k] === HESPER_DEFAULT_THEME[k]));
+                (!t.bgImage && Object.keys(PEK_DEFAULT_THEME).every(k => t[k] === PEK_DEFAULT_THEME[k]));
             if (untouched) this.applySkin('default');
         } catch (e) { /* storage unavailable: nothing to do */ }
     }
@@ -189,12 +189,12 @@ class MainAppAppearanceMethods {
         try {
             theme.reset();
             if (skin.tokens && typeof skin.tokens === 'object') theme.setTokens(skin.tokens);
-            hesperSetSkinCss(id, true);
+            pekSetSkinCss(id, true);
             localStorage.setItem(SKIN_KEY, id);
         } catch (err) {
-            console.warn('[Hesper] Could not apply skin, reverting to default:', err);
+            console.warn('[PEK TV] Could not apply skin, reverting to default:', err);
             theme.reset();
-            hesperSetSkinCss('default');
+            pekSetSkinCss('default');
             id = 'default';
             try { localStorage.setItem(SKIN_KEY, 'default'); } catch (e) { /* ignore */ }
         }
@@ -206,14 +206,14 @@ class MainAppAppearanceMethods {
     setLayout(id) {
         if (!LAYOUTS.some(l => l.id === id)) return;
         try { localStorage.setItem(LAYOUT_KEY, id); } catch (e) { /* lasts until restart */ }
-        hesperApplyLayout(id, this.state.posterSize);
+        pekApplyLayout(id, this.state.posterSize);
         this.setState({ layout: id });
     }
 
     setPosterSize(size) {
         if (!POSTER_SIZES.some(z => z.id === size)) return;
         try { localStorage.setItem(POSTER_SIZE_KEY, size); } catch (e) { /* lasts until restart */ }
-        hesperApplyLayout(this.state.layout, size);
+        pekApplyLayout(this.state.layout, size);
         this.setState({ posterSize: size });
     }
 
@@ -231,4 +231,4 @@ class MainAppAppearanceMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppAppearanceMethods);
+pekMixin(MainApp, MainAppAppearanceMethods);

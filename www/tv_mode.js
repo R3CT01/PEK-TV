@@ -1,5 +1,5 @@
-/* Hesper TV mode (window.HesperTV): the "10-foot" look.
- * - Adds/removes html.hesper-tv (bigger text that scales with the screen, TV-safe margins, bold focus ring; see style.css).
+/* PEK TV mode (window.PekTV): the "10-foot" look.
+ * - Adds/removes html.pek-tv (bigger text that scales with the screen, TV-safe margins, bold focus ring; see style.css).
  * - Mode: 'auto' (on for the Android app on a TV box, off on a phone), 'on', 'off'. Also ?tv=1 / ?tv=0 in the address.
  * - Safe margin: percent of the screen kept clear at the edges (0, 2, 4 or 6) for TVs that crop the picture.
  * - Hides the mouse pointer after a few idle seconds (TV mode only).
@@ -16,14 +16,14 @@
     if (q) put(MODE_KEY, q[1] === '1' ? 'on' : 'off');
 
     function isTvDevice() {
-        try { var A = window.HesperAndroid; return !!(A && (typeof A.isPhone !== 'function' || !A.isPhone())); } catch (e) { return false; }
+        try { var A = window.PekAndroid; return !!(A && (typeof A.isPhone !== 'function' || !A.isPhone())); } catch (e) { return false; }
     }
     function mode() { var m = get(MODE_KEY); return m === 'on' || m === 'off' ? m : 'auto'; }
     function safe() { var s = parseInt(get(SAFE_KEY), 10); return [0, 2, 4, 6].indexOf(s) >= 0 ? s : 2; }
     function isOn() { var m = mode(); return m === 'on' || (m === 'auto' && isTvDevice()); }
 
     function apply() {
-        root.classList.toggle('hesper-tv', isOn());
+        root.classList.toggle('pek-tv', isOn());
         var s = safe();
         root.style.setProperty('--tv-safe-x', s + 'vw');
         root.style.setProperty('--tv-safe-y', s + 'vh');
@@ -32,9 +32,9 @@
     // ---- hide the pointer when idle ----
     var idleT = 0;
     function wake() {
-        root.classList.remove('hesper-idle');
+        root.classList.remove('pek-idle');
         clearTimeout(idleT);
-        if (isOn()) idleT = setTimeout(function () { root.classList.add('hesper-idle'); }, 3000);
+        if (isOn()) idleT = setTimeout(function () { root.classList.add('pek-idle'); }, 3000);
     }
     ['mousemove', 'mousedown', 'touchstart'].forEach(function (n) { window.addEventListener(n, wake, { passive: true }); });
 
@@ -67,7 +67,7 @@
         });
         padRaf = requestAnimationFrame(pollPad);
     }
-    if (!window.HesperAndroid && navigator.getGamepads) {
+    if (!window.PekAndroid && navigator.getGamepads) {
         window.addEventListener('gamepadconnected', function () { if (!padRaf) padRaf = requestAnimationFrame(pollPad); });
         window.addEventListener('gamepaddisconnected', function () {
             var any = false, ps = navigator.getGamepads();
@@ -76,7 +76,7 @@
         });
     }
 
-    window.HesperTV = {
+    window.PekTV = {
         mode: mode, safe: safe, isOn: isOn,
         setMode: function (m) { put(MODE_KEY, m === 'on' || m === 'off' ? m : 'auto'); apply(); wake(); },
         setSafe: function (pct) { put(SAFE_KEY, String(pct)); apply(); }

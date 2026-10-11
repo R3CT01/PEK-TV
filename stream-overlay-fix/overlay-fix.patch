@@ -1,5 +1,5 @@
---- orig/hesperandroid/www/torrent.js	2026-10-08 06:30:46.000000000 +0000
-+++ pa/hesperandroid/www/torrent.js	2026-10-08 14:15:48.227808462 +0000
+--- orig/pekandroid/www/torrent.js	2026-10-08 06:30:46.000000000 +0000
++++ pa/pekandroid/www/torrent.js	2026-10-08 14:15:48.227808462 +0000
 @@ -31,10 +31,19 @@
      const fmtSize = b => b >= 1073741824 ? (b / 1073741824).toFixed(1) + ' GB' : Math.round(b / 1048576) + ' MB';
  
@@ -9,7 +9,7 @@
 +    // Tell the D-pad focus system the overlay appeared / went away, so focus moves onto Cancel
 +    // (and back to the page afterwards) instead of wandering onto the screen behind.
 +    function refocus() {
-+        try { if (window.hesperFramework && window.hesperFramework.refreshFocusList) window.hesperFramework.refreshFocusList(); } catch (e) { /* ignore */ }
++        try { if (window.pekFramework && window.pekFramework.refreshFocusList) window.pekFramework.refreshFocusList(); } catch (e) { /* ignore */ }
 +    }
  
      function makeOverlay(title, onCancel) {
@@ -43,7 +43,7 @@
 @@ -93,6 +104,10 @@
      }
  
-     window.HesperTorrent = {
+     window.PekTorrent = {
 +        // True while the "starting stream" box is up. cancelStarting() cancels it and returns true
 +        // (used by the app's Back handler so Back cancels instead of acting on the screen behind).
 +        isStarting() { return !!cancelActive; },
@@ -65,7 +65,7 @@
                  overlay.done();
 +                cancelActive = null;
                  const url = window.location.origin + API + '/' + hash + '/stream';
-                 window.HesperHost.playStream(url, opts.title || '', () => {
+                 window.PekHost.playStream(url, opts.title || '', () => {
                      post(API + '/' + hash + '/stop').catch(() => {});
 @@ -155,6 +172,7 @@
              } catch (e) {
@@ -75,19 +75,19 @@
                  busy = false;
                  throw e;
              }
---- orig/hesperandroid/www/app.js	2026-10-08 12:12:10.000000000 +0000
-+++ pa/hesperandroid/www/app.js	2026-10-08 14:15:48.228028835 +0000
+--- orig/pekandroid/www/app.js	2026-10-08 12:12:10.000000000 +0000
++++ pa/pekandroid/www/app.js	2026-10-08 14:15:48.228028835 +0000
 @@ -132,6 +132,8 @@
      goBack() {
          const { engine } = this.props;
          if (this.state.appClose) return true;   // the "close PEK" screen cannot be dismissed
 +        // a stream is starting: Back cancels it and nothing behind the box moves
-+        if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
++        if (window.PekTorrent && window.PekTorrent.cancelStarting && window.PekTorrent.cancelStarting()) return true;
          // while minimized the player is just a bar; Back belongs to the app
          if (this._player && !this._player.mini) { this._player.onBack(); return true; }
          if (engine.windows.activeWindow) {
---- orig/hesperandroid/www/hesperframework.js	2026-10-08 06:30:46.000000000 +0000
-+++ pa/hesperandroid/www/hesperframework.js	2026-10-08 14:15:48.226034995 +0000
+--- orig/pekandroid/www/pekframework.js	2026-10-08 06:30:46.000000000 +0000
++++ pa/pekandroid/www/pekframework.js	2026-10-08 14:15:48.226034995 +0000
 @@ -1118,6 +1118,9 @@
      // whole screen, and a modal overlay covers the shell — arrow keys must not
      // wander onto the hidden elements underneath.

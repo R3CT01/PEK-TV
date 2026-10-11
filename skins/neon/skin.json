@@ -3,7 +3,7 @@
   "author": "PEK",
   "version": "1.0.0",
   "description": "Sharp corners and glowing edges.",
-  "hesper_api": 1,
+  "pek_api": 1,
   "tokens": {
     "bg": "#05010d",
     "bgElevated": "#0b0318",

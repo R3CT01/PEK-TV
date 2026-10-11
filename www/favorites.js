@@ -1,11 +1,11 @@
-/* Hesper favorites  (window.HesperFavorites)
+/* PEK TV favorites  (window.PekFavorites)
  *
  * One list for the whole app: TMDb Discover (or any plugin with the "favorites"
  * permission) adds titles here, and the Favorites tab shows them.
  *
  * Plugins never touch this storage directly. plugin_sandbox.js passes their requests through
  * add() / remove() / keys(), and every entry is cleaned here: only a TMDb type + id, a title,
- * a year and a poster *path* are kept. The poster address is built by Hesper (image.tmdb.org),
+ * a year and a poster *path* are kept. The poster address is built by PEK TV (image.tmdb.org),
  * so a plugin cannot make the Favorites tab load a picture from anywhere else.
  */
 (function () {
@@ -47,7 +47,7 @@
     function write(list, remote) {
         cache = list;
         try { localStorage.setItem(KEY, JSON.stringify(list)); } catch (e) { /* storage full or blocked: kept for this session */ }
-        try { document.dispatchEvent(new CustomEvent('hesper-favorites', { detail: { remote: !!remote } })); } catch (e) { /* no events */ }
+        try { document.dispatchEvent(new CustomEvent('pek-favorites', { detail: { remote: !!remote } })); } catch (e) { /* no events */ }
     }
 
     function str(v, max) { return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : ''; }
@@ -71,14 +71,14 @@
         };
     }
 
-    window.HesperFavorites = {
+    window.PekFavorites = {
         /** Newest first. */
         list: function () { return read().slice().sort(function (a, b) { return b.added - a.added; }); },
         keys: function () { return read().map(function (f) { return f.key; }); },
         has: function (key) { return read().some(function (f) { return f.key === key; }); },
         posterUrl: function (f) { return f && f.posterPath ? POSTER_BASE + f.posterPath : ''; },
 
-        /** `source` is the plugin folder that asked (set by Hesper, not by the plugin). */
+        /** `source` is the plugin folder that asked (set by PEK TV, not by the plugin). */
         add: function (raw, source) {
             var e = clean(raw);
             if (!e) throw new Error('not a usable title');

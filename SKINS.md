@@ -1,15 +1,15 @@
-# Hesper skins
+# PEK TV skins
 
-A skin changes how Hesper looks: colours, corner radius and, if you want, extra styling.
+A skin changes how PEK TV looks: colours, corner radius and, if you want, extra styling.
 A skin can't run code and can't reach the network.
 
 ## Installing and removing
 
 - **Install:** Settings → Skins → *Install skin from .zip*, then pick the .zip.
-  Hesper shows the skin's name, author, version and description before it installs anything.
+  PEK TV shows the skin's name, author, version and description before it installs anything.
 - **Use it:** tap the skin in the Skins list.
 - **Remove:** hold the skin's row (OK on a remote, or a long press on a phone), then confirm.
-  The skins that ship with Hesper (PEK Ember, Green, Neon) can't be removed.
+  The skins that ship with PEK TV (PEK Ember, Green, Neon) can't be removed.
 - **A zip is a plugin or a skin, never both.** Installing a skin zip as a plugin, or a plugin
   zip as a skin, fails with a message that says which one it is.
 
@@ -31,7 +31,7 @@ a zip with the same id again updates the skin.
 ```json
 {
   "name": "Sunset",
-  "author": "Hesper",
+  "author": "PEK TV",
   "version": "1.0.0",
   "description": "Warm dusk colours with soft rounded corners.",
   "tokens": {
@@ -54,7 +54,7 @@ a zip with the same id again updates the skin.
 
 ## skin.css (optional)
 
-Normal CSS that is loaded on top of Hesper's own while the skin is in use. To keep skins safe:
+Normal CSS that is loaded on top of PEK TV's own while the skin is in use. To keep skins safe:
 
 - no `@import`, and no `url()` that points to the network (`https://…`, `//…`) or outside the skin folder
 - `url()` may point to a file inside the skin folder, or be a `data:image/…` / `data:font/…` link
