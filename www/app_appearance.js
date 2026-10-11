@@ -83,7 +83,7 @@ class MainAppAppearanceMethods {
     _startClockTicker() {
         if (this._clockTimer) return;
         this._clockTimer = setInterval(() => {
-            const badges = document.querySelectorAll('.clock-badge');
+            const badges = document.querySelectorAll('.clock-badge, .dash-clock');
             if (!badges.length) return;
             const { time, dateLine } = this._clockLines(this.state.clock);
             badges.forEach(b => {

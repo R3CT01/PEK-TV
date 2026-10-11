@@ -692,7 +692,8 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
             const auto& m = movies[i];
             json += "{\"id\": \"" + m.id + "\", \"title\": \"" + jsonEscape(m.title) +
                     "\", \"year\": " + std::to_string(m.year) +
-                    ", \"filename\": \"" + jsonEscape(m.filename) + "\"}";
+                    ", \"filename\": \"" + jsonEscape(m.filename) +
+                    "\", \"added\": " + std::to_string(m.mtime) + "}";
             if (i + 1 < movies.size()) json += ",";
         }
         json += "]}";
