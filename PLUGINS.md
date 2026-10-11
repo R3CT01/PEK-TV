@@ -129,6 +129,8 @@ What the plugin does NOT get: the search provider's address or API key (set by t
 Torrents and kept in PEK TV), the downloaded files, or any other PEK TV API. `source` must be a
 `magnet:?` link or a `source` value returned by `search()`. The install screen lists this permission.
 
+Playing a pasted magnet link is no longer built into the app: install `plugin_packages/magnet-player.zip` for that (it is a normal third-party plugin using this permission).
+
 PEK TV ships with no search provider. The engine (libtorrent) is optional at build time: without it,
 `search` still works and `play` fails with "not built in".
 
