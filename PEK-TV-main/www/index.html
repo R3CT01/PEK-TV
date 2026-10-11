@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>PEK</title>
+<link rel="stylesheet" href="style.css?v=dash1">
+<link rel="icon" type="image/png" href="favicon.png?v=2">
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2">
+<meta name="theme-color" content="#E9E2DA">
+<style>
+#pek-splash{position:fixed;inset:0;z-index:2147483647;background:#E04A00;display:flex;align-items:center;justify-content:center;transition:opacity .5s ease}
+#pek-splash.out{opacity:0;pointer-events:none}
+#pek-splash video{width:100%;height:100%;object-fit:cover}
+</style>
+</head>
+<body>
+<div id="pek-splash"><video muted playsinline preload="auto"></video></div>
+<script>
+// Splash: plays once per session and can't be skipped - clicks, taps and keys are blocked until the video
+// ends. The app keeps loading underneath it. Skipped inside the Android app, which plays the same video
+// natively (SplashOverlay.kt) with the same lock.
+(function () {
+  var el = document.getElementById('pek-splash');
+  var seen = false;
+  try { seen = sessionStorage.getItem('pekSplash') === '1'; } catch (e) {}
+  if (window.PekAndroid || seen) { el.remove(); return; }
+  try { sessionStorage.setItem('pekSplash', '1'); } catch (e) {}
+  var v = el.querySelector('video'), gone = false, videoDone = false, net;
+  // Portrait screens (phones) get the 9:16 cut; wide screens (TVs, desktops) the 16:9 one.
+  v.src = window.matchMedia('(orientation: portrait)').matches ? 'splash_portrait.mp4' : 'splash.mp4';
+
+  // Lock: swallow keys (so nothing behind the splash can be focused or activated) and gestures.
+  function lock(e) { e.preventDefault(); e.stopImmediatePropagation(); }
+  var lockEvents = ['keydown', 'keyup', 'keypress', 'wheel', 'touchmove', 'contextmenu'];
+  lockEvents.forEach(function (n) { window.addEventListener(n, lock, { capture: true, passive: false }); });
+
+  function end() {
+    if (gone) return; gone = true;
+    clearTimeout(net);
+    lockEvents.forEach(function (n) { window.removeEventListener(n, lock, { capture: true }); });
+    el.classList.add('out');
+    setTimeout(function () { el.remove(); }, 600);
+  }
+  // Video finished: leave as soon as the page has loaded too (hold the last frame up to 6 s if it is slow).
+  function videoEnded() {
+    if (videoDone) return; videoDone = true;
+    if (document.readyState === 'complete') { end(); return; }
+    window.addEventListener('load', end, { once: true });
+    clearTimeout(net); net = setTimeout(end, 6000);
+  }
+  v.addEventListener('ended', videoEnded);
+  v.addEventListener('error', videoEnded);   // a broken video must never block the app
+  // Safety nets only: if it never starts, or stalls part-way.
+  net = setTimeout(videoEnded, 15000);
+  v.addEventListener('playing', function () {
+    clearTimeout(net); net = setTimeout(videoEnded, ((v.duration || 5) + 3) * 1000);
+  });
+  var p = v.play(); if (p && p.catch) p.catch(videoEnded);
+})();
+</script>
+<script>
+if (/[?&]reset=1/.test(location.search)) { try { localStorage.clear(); } catch (e) {} location.replace(location.pathname); }
+window.onerror = function (m, u, l) {
+  document.body.insertAdjacentHTML('beforeend', '<pre style="color:#f66;padding:12px;white-space:pre-wrap">' + m + ' @ ' + u + ':' + l + '</pre>');
+};
+</script>
+<script>
+// TV / box (Android app, not a phone): lets style.css switch to the lighter look.
+try { var A = window.PekAndroid; if (A && (typeof A.isPhone !== 'function' || !A.isPhone())) document.documentElement.classList.add('pek-tv'); } catch (e) {}
+</script>
+<script src="profiles.js?v=dash1"></script>
+<script src="tv_mode.js?v=1"></script>
+<div id="app"></div>
+<script src="gsap.min.js"></script>
+<script src="plugin_sandbox.js?v=12"></script>
+<script src="pekframework.js?v=14s"></script>
+<script src="navsound.js?v=3"></script>
+<script src="net.js?v=1"></script>
+<script src="activity.js?v=1"></script>
+<script src="favorites.js?v=2"></script>
+<script src="providers.js?v=1"></script>
+<script src="skip_segments.js?v=1"></script>
+<script src="player.js?v=8"></script>
+<script src="sync.js?v=5"></script>
+<script src="busy.js?v=1"></script>
+<script src="plugin_zip.js?v=1"></script>
+<script src="plugin_installer.js?v=6"></script>
+<script src="skin_installer.js?v=1"></script>
+<script src="plugin_backup.js?v=1"></script>
+<script src="torrent.js?v=4"></script>
+<script src="search_sites.js?v=1"></script>
+<script src="search_engine.js?v=1"></script>
+<script src="app_config.js?v=3"></script>
+<script src="app.js?v=dash1"></script>
+<script src="app_appearance.js?v=dash1"></script>
+<script src="app_sources.js?v=2"></script>
+<script src="app_library.js?v=4"></script>
+<script src="app_watch.js?v=8"></script>
+<script src="app_playback.js?v=4"></script>
+<script src="app_plugins.js?v=6"></script>
+<script src="plugin_store.js?v=1"></script>
+<script src="next_episode.js?v=1"></script>
+<script src="app_skins.js?v=1"></script>
+<script src="app_favorites.js?v=3"></script>
+<script src="app_torrents.js?v=1"></script>
+<script src="app_dashboard.js?v=1"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+/* Neon skin: loaded after style.css, so these rules override the defaults.
+   Colours come from the --sx-* variables set by skin.json. */
+
+.content-title,
+.sidebar-brand {
+    letter-spacing: 0.06em;
+    text-shadow: 0 0 12px var(--sx-accent-glow);
+}
+
+.theme-launch-btn {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-color: var(--sx-accent);
+    box-shadow: 0 0 8px var(--sx-accent-glow);
+}
+
+.theme-launch-btn:hover:not(:disabled) {
+    box-shadow: 0 0 18px var(--sx-accent-glow);
+}
+
+.nav-item.active {
+    border-left: 3px solid var(--sx-accent);
+    box-shadow: inset 0 0 12px var(--sx-accent-glow);
+}
+
+.sx-card,
+.empty-state,
+.plugin-row {
+    border-color: var(--sx-border);
+    box-shadow: 0 0 0 1px transparent;
+    transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.sx-card:hover,
+.empty-state:hover,
+.plugin-row:hover {
+    border-color: var(--sx-accent);
+    box-shadow: 0 0 14px var(--sx-accent-glow);
+}
+
+.weather-badge {
+    border-color: var(--sx-accent);
+    color: var(--sx-accent);
+    text-shadow: 0 0 8px var(--sx-accent-glow);
+}
