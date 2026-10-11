@@ -124,6 +124,7 @@ class MainAppPluginStoreMethods {
                 const verdict = await PekSkinInstaller.check(prep);
                 this.setState({ pluginStore: null, skinInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
             } else {
+                prep.source = { type: 'store', shelf: ps.shelf };
                 const verdict = await PekPluginInstaller.check(prep);
                 this.setState({ pluginStore: null, pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
             }

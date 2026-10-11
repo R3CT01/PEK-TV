@@ -5,6 +5,7 @@
 #include "vfs.h"
 #include "httplib.h"
 #include "plugin_install.h"
+#include "github_install.h"
 #include "skin_install.h"
 #include <iostream>
 #include <fstream>
@@ -639,6 +640,8 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         json += "]}";
         res.set_content(json, "application/json");
     });
+
+    pekgithub::registerGithubRoutes(svr);   // install a plugin from GitHub by name (github_install.h)
 
     svr.Post("/api/plugins/fetch", [isZipName](const httplib::Request& req, httplib::Response& res) {
         auto fail = [&res](const std::string& msg) {

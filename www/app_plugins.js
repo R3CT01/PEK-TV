@@ -213,6 +213,8 @@ class MainAppPluginsMethods {
         window.PekActivity.begin('install', 'Installing ' + pi.prep.name + '\u2026');
         try {
             await PekPluginInstaller.install(pi.prep);
+            // Remember where it came from (GitHub, a store shelf); a plain .zip clears any old label.
+            if (pi.prep.source) PekPluginSources.set(pi.prep.id, pi.prep.source); else PekPluginSources.remove(pi.prep.id);
             window.PekActivity.end('install', 'Installed ' + pi.prep.name);
             await this._reloadPlugins();
             this.setState({ pluginInstall: null });
@@ -305,6 +307,7 @@ class MainAppPluginsMethods {
 
         const net = p.network.length ? `Can connect to: ${p.network.join(', ')}` : 'No network access';
         const lines = [
+            ...this._githubNotice(pi),
             [p.version ? `Version ${p.version}` : null, p.author ? `by ${p.author}` : null].filter(Boolean).join(' \u00b7 '),
             p.description,
             net,

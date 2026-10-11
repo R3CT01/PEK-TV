@@ -44,6 +44,7 @@ class MainApp extends PekComponent {
             dash: this._readDash(),      // dashboard widgets (app_dashboard.js)
             dashEdit: false,             // dashboard is in customize mode
             dashAdd: false,              // the "Add widget" list is open
+            githubFlow: null,            // "Install from GitHub" screens (github_install.js)
             moreOpen: false,      // phone bottom bar: the "More" sheet
             weatherText: this._readWeather(),
             progress: this._readProgress(),  // id -> { id, kind, title, showTitle, season, episode, year, position, duration, updated }
@@ -185,6 +186,7 @@ class MainApp extends PekComponent {
         if (this.state.detail) { this.closeDetail(); return true; }
         if (this.state.skinRemove) { this.cancelRemoveSkin(); return true; }
         if (this.state.skinInstall) { this.cancelSkinInstall(); return true; }
+        if (this.state.githubFlow) { this.githubBack(); return true; }
         if (this.state.pluginPick) { this.pluginPickBack(); return true; }
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
@@ -352,8 +354,11 @@ class MainApp extends PekComponent {
                     createElement('p', { className: 'sub' }, 'Get plugins from the PEK Store, or add one from a .zip file. To remove one, hold its row in the Plugins tab.'),
                     createElement('div', { className: 'section-actions' },
                         ui.button('PEK Store', () => this.openPluginStore(), { variant: 'primary' }),
-                        ui.button('Install plugin from .zip', () => this.startPluginInstall())
-                    )
+                        ui.button('Install plugin from .zip', () => this.startPluginInstall()),
+                        this._githubEnabled() ? ui.button('Install from GitHub', () => this.openGithubInstall()) : null
+                    ),
+                    ui.toggle('Allow installs from GitHub', this._githubEnabled(), (on) => this._setGithubEnabled(on)),
+                    createElement('p', { className: 'sub' }, 'Lets you install a plugin straight from a GitHub repository by typing its name. These plugins are unverified: PEK TV does not review them, and their developers are responsible for them.')
                 )
             );
         } else if (activeTab === 'plugins') {
@@ -365,7 +370,7 @@ class MainApp extends PekComponent {
                 const official = PekPluginInstaller.isOfficial(p.folder);
                 const note = official
                     ? (p.sandboxed ? 'official' : 'official \u00b7 full access')
-                    : 'third party \u00b7 sandboxed \u00b7 hold to remove';
+                    : this._pluginSourceNote(p.folder);
                 const main = ui.listRow(
                     p.app_name,
                     `${p.folder} \u00b7 ${note}`,
@@ -474,6 +479,7 @@ class MainApp extends PekComponent {
             this._renderDetailModal(),
             this._renderClockSettings(),
             this._renderDashAdd(),
+            this._renderGithubModal(),
             this._renderPicker(),
             this._renderNetPicker(),
             this._renderResumeAskModal(),
