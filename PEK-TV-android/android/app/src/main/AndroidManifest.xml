@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Reading the video folders: READ_EXTERNAL_STORAGE up to Android 12, READ_MEDIA_VIDEO from Android 13 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <!-- Network folder discovery: mDNS needs a multicast lock on Wi-Fi -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Lets the app install on TVs/sticks with no touchscreen -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- Lets resolveActivity() see file pickers on Android 11+ -->
+    <queries>
+        <intent><action android:name="android.intent.action.GET_CONTENT" /><data android:mimeType="*/*" /></intent>
+        <intent><action android:name="android.intent.action.OPEN_DOCUMENT" /><data android:mimeType="*/*" /></intent>
+        <!-- Streaming apps the "Watch on ..." buttons can open (generated from www/providers.js: node tools/sync_providers.js) -->
+        <!-- PKGS-START -->
+        <package android:name="air.com.vudu.air.DownloaderTablet" />
+        <package android:name="com.amazon.amazonvideo.livingroom" />
+        <package android:name="com.amazon.avod.thirdpartyclient" />
+        <package android:name="com.amazon.imdb.tv.android.app" />
+        <package android:name="com.apple.atve.androidtv.appletv" />
+        <package android:name="com.bydeluxe.d3.android.program.starz" />
+        <package android:name="com.cbs.app" />
+        <package android:name="com.cbs.ott" />
+        <package android:name="com.criterionchannel" />
+        <package android:name="com.crunchyroll.crunchyroid" />
+        <package android:name="com.disney.disneyplus" />
+        <package android:name="com.google.android.videos" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.google.android.youtube.tv" />
+        <package android:name="com.hbo.hbonow" />
+        <package android:name="com.hoopladigital.android" />
+        <package android:name="com.hulu.livingroomplus" />
+        <package android:name="com.hulu.plus" />
+        <package android:name="com.kanopy" />
+        <package android:name="com.mubi" />
+        <package android:name="com.netflix.mediaclient" />
+        <package android:name="com.netflix.ninja" />
+        <package android:name="com.peacocktv.peacockandroid" />
+        <package android:name="com.plexapp.android" />
+        <package android:name="com.roku.web.trc" />
+        <package android:name="com.showtime.standalone" />
+        <package android:name="com.tubitv" />
+        <package android:name="com.wbd.stream" />
+        <package android:name="tv.pluto.android" />
+        <!-- PKGS-END -->
+    </queries>
+
+    <application
+        android:label="PEK TV"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/tv_banner"
+        android:usesCleartextTraffic="true"
+        android:enableOnBackInvokedCallback="false">
+        <!-- enableOnBackInvokedCallback=false: apps targeting Android 16 otherwise stop getting
+             KEYCODE_BACK / onBackPressed, which the web UI (TV remote Back) and the exit dialog rely on. -->
+
+        <!-- Launcher entry. The PEK splash video plays inside this activity, on top of the app while it loads
+             (see SplashOverlay.kt); controls are locked until the video is done. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
+            android:theme="@style/Theme.PEK.Launch">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Shown the instant the app launches, before the splash video starts. -->
+    <style name="Theme.PEK.Launch" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@color/pek_splash_bg</item>
+    </style>
+</resources>
