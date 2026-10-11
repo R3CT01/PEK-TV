@@ -161,8 +161,8 @@
         const out = [], seen = {};
         function add(kind, o) {
             if (!o || typeof o !== 'object') return;
-            let a = pick(o, ['start_sec', 'startSec', 'start_seconds', 'start', 'from'], false);
-            let b = pick(o, ['end_sec', 'endSec', 'end_seconds', 'end', 'to'], false);
+            let a = pick(o, ['start_sec', 'startSec', 'start_seconds', 'start', 'from', 'start_time', 'startTime'], false);
+            let b = pick(o, ['end_sec', 'endSec', 'end_seconds', 'end', 'to', 'end_time', 'endTime'], false);
             if (isNaN(a)) a = pick(o, ['start_ms', 'startMs', 'start_time_ms'], true);
             if (isNaN(b)) b = pick(o, ['end_ms', 'endMs', 'end_time_ms'], true);
             if (isNaN(a) || isNaN(b)) return;
@@ -238,6 +238,8 @@
             this.spans = [];          // from chapters
             this.remote = [];         // from the database (see fetchRemote)
             this._remoteTried = false;
+            this._dbg = 'not asked yet';
+            this._chapInfo = 'chapters not read yet';
             this.cur = null;          // the span the button offers right now
             this.autoDone = {};       // span id -> already auto-skipped / skipped once
             this.pending = {};        // kind -> start time marked, waiting for the end mark
@@ -264,23 +266,40 @@
         // offline, slow or has nothing, the player simply carries on with chapters and saved marks.
         fetchRemote() {
             const m = this.meta;
-            if (this._remoteTried || !m || !onlineOn() || typeof fetch !== 'function') return;
+            if (this._remoteTried || typeof fetch !== 'function') return;
+            if (!onlineOn()) { this._dbg = 'online lookup is Off'; return; }
+            if (!m) { this._dbg = 'no show info passed to the player (meta missing)'; return; }
             const show = m.kind === 'episode' ? m.showTitle : ((m.kind === 'other' && m.title) ? m.title : '');
             const season = m.season | 0, episode = m.episode | 0;
-            if (!show || episode <= 0) return;                     // movies / unparsed names: nothing to look up
+            if (!show || episode <= 0) { this._dbg = 'no lookup: needs show + episode number (got "' + (show || '') + '" S' + season + 'E' + episode + ')'; return; }
             this._remoteTried = true;
+            this._dbg = 'asking for "' + show + '" S' + season + 'E' + episode + '...';
             const url = '/api/skip-segments?show=' + encodeURIComponent(show) + '&season=' + season + '&episode=' + episode;
-            fetch(url).then(r => r.json()).then(j => {
-                if (!this.el || !j || !j.found || !j.data) return;
+            fetch(url).then(r => { this._http = r.status; return r.json(); }).then(j => {
+                if (!this.el) return;
+                if (!j) { this._dbg = 'empty answer from the app server'; return; }
+                if (j.error) { this._dbg = 'app server error: ' + j.error; return; }
+                if (!j.found || !j.data) {
+                    this._dbg = j.imdb ? 'show found (' + j.imdb + ') but the database has no times for this episode'
+                                       : 'could not look up the show (TMDb/network problem on the app server)';
+                    return;
+                }
                 this.remote = remoteSpans(j.data, this.player.state.duration);
-                if (this.remote.length) this.player._updateButtons();   // the Skip menu entry may now apply
-            }).catch(() => { /* offline: ignore */ });
+                if (this.remote.length) {
+                    this._dbg = 'ok: ' + this.remote.map(x => x.kind + ' ' + fmt(x.start) + '-' + fmt(x.end)).join(', ');
+                    this.player._updateButtons();
+                } else {
+                    let raw = ''; try { raw = JSON.stringify(j.data).slice(0, 120); } catch (e) { /* ignore */ }
+                    this._dbg = 'database answered but no usable times in it: ' + raw;
+                }
+            }).catch((e) => { this._dbg = 'lookup failed: ' + ((e && e.message) || e) + (this._http ? ' (HTTP ' + this._http + ')' : ''); });
         }
 
         destroy() { this.cur = null; if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el); this.el = null; }
 
         setChapters(list) {
             this.spans = chapterSpans(list, this.player.state.duration);
+            this._chapInfo = (list && list.length ? list.length + ' in file (' + list.slice(0, 3).map(c => (c && c.title) || '?').join(', ') + (list.length > 3 ? ', ...' : '') + ')' : 'none in file') + ', ' + this.spans.length + ' look like intro/recap';
             this.autoDone = {};
         }
 
@@ -375,6 +394,7 @@
 
         menuItems() {
             const items = [];
+            items.push({ label: 'Why no skip? Chapters: ' + this._chapInfo + '. Online: ' + this._dbg + '. Saved: ' + (hasAny(this.meta) ? 'yes' : 'none'), action: () => {} });
             if (keysFor(this.meta)) {
                 KINDS.slice().reverse().forEach(kind => items.push(this._markItem(kind)));
                 if (hasAny(this.meta)) items.push({ label: 'Forget saved skips for this show', action: () => { clear(this.meta); this.pending = {}; } });
