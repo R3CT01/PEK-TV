@@ -1,5 +1,5 @@
 // ============================================================
-// HesperTorrent: the web side of torrent playback.
+// PekTorrent: the web side of torrent playback.
 //
 // The C++ backend does the real work (/api/torrent/*). This file:
 //   - reads/saves the search-provider settings (Settings > Torrents),
@@ -36,7 +36,7 @@
     // Tell the D-pad focus system the overlay appeared / went away, so focus moves onto Cancel
     // (and back to the page afterwards) instead of wandering onto the screen behind.
     function refocus() {
-        try { if (window.hesperFramework && window.hesperFramework.refreshFocusList) window.hesperFramework.refreshFocusList(); } catch (e) { /* ignore */ }
+        try { if (window.pekFramework && window.pekFramework.refreshFocusList) window.pekFramework.refreshFocusList(); } catch (e) { /* ignore */ }
     }
 
     function makeOverlay(title, onCancel) {
@@ -81,7 +81,7 @@
     // What to remember for Resume Watching: an id for the item plus what the Resume card needs to show
     // and to start the same release again. null = do not track (no usable title).
     function makeTrack(opts) {
-        const t = opts && opts.track, S = window.HesperSync;
+        const t = opts && opts.track, S = window.PekSync;
         if (!t || !t.meta || !S || typeof S.histKey !== 'function') return null;
         const m = t.meta;
         let key;
@@ -103,7 +103,7 @@
         return { id: 'tor:' + key, meta, startSec: opts.startSec > 0 ? opts.startSec : 0 };
     }
 
-    window.HesperTorrent = {
+    window.PekTorrent = {
         // True while the "starting stream" box is up. cancelStarting() cancels it and returns true
         // (used by the app's Back handler so Back cancels instead of acting on the screen behind).
         isStarting() { return !!cancelActive; },
@@ -132,7 +132,7 @@
         //   opts: { source, title, season, episode, track?: { meta }, startSec? }
         async open(opts) {
             if (busy) throw new Error('Another stream is already starting');
-            if (!window.HesperHost || typeof window.HesperHost.playStream !== 'function') throw new Error('PEK cannot play streams here');
+            if (!window.PekHost || typeof window.PekHost.playStream !== 'function') throw new Error('PEK cannot play streams here');
             busy = true;
             let hash = '';
             let cancelled = false;
@@ -164,7 +164,7 @@
                 overlay.done();
                 cancelActive = null;
                 const url = window.location.origin + API + '/' + hash + '/stream';
-                window.HesperHost.playStream(url, opts.title || '', () => {
+                window.PekHost.playStream(url, opts.title || '', () => {
                     post(API + '/' + hash + '/stop').catch(() => {});
                 }, makeTrack(opts));
                 busy = false;

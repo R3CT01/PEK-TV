@@ -4,9 +4,9 @@
 #include "vfs.h"
 
 namespace vfs {
-std::unique_ptr<Share> smbConnect(const Url& u, Error& err);                 // vfs_smb.cpp   (HESPER_SMB)
+std::unique_ptr<Share> smbConnect(const Url& u, Error& err);                 // vfs_smb.cpp   (PEK_SMB)
 bool smbListShares(const Url& u, std::vector<std::string>& out, Error& err);
-std::unique_ptr<Share> nfsConnect(const Url& u, Error& err);                 // vfs_nfs.cpp   (HESPER_NFS)
+std::unique_ptr<Share> nfsConnect(const Url& u, Error& err);                 // vfs_nfs.cpp   (PEK_NFS)
 bool nfsListShares(const Url& u, std::vector<std::string>& out, Error& err);
 std::unique_ptr<Share> ftpConnect(const Url& u, Error& err);                 // vfs_ftp.cpp
 std::unique_ptr<Share> davConnect(const Url& u, Error& err);                 // vfs_http.cpp

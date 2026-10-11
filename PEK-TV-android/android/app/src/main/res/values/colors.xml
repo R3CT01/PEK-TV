@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="pek_cream">#E9E2DA</color>
-    <!-- PEK splash orange: the first instant of launch, before the video draws -->
-    <color name="pek_splash_bg">#E04A00</color>
-    <color name="ic_launcher_background">#0E0A06</color>
-</resources>

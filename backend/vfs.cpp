@@ -207,7 +207,7 @@ bool getCredentials(const std::string& scheme, const std::string& host, std::str
 
 // ---------------------------------------------------------------- dispatch
 
-#ifndef HESPER_SMB
+#ifndef PEK_SMB
 std::unique_ptr<Share> smbConnect(const Url&, Error& err) {
     err.auth = false;
     err.msg = "This build of PEK TV has no SMB support.";
@@ -220,7 +220,7 @@ bool smbListShares(const Url&, std::vector<std::string>&, Error& err) {
 }
 #endif
 
-#ifndef HESPER_NFS
+#ifndef PEK_NFS
 std::unique_ptr<Share> nfsConnect(const Url&, Error& err) {
     err.auth = false;
     err.msg = "This build of PEK TV has no NFS support.";
@@ -235,14 +235,14 @@ bool nfsListShares(const Url&, std::vector<std::string>&, Error& err) {
 
 bool available(const std::string& scheme) {
     if (scheme == "smb") {
-#ifdef HESPER_SMB
+#ifdef PEK_SMB
         return true;
 #else
         return false;
 #endif
     }
     if (scheme == "nfs") {
-#ifdef HESPER_NFS
+#ifdef PEK_NFS
         return true;
 #else
         return false;

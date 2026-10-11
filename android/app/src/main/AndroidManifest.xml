@@ -68,7 +68,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
-            android:theme="@style/Theme.Hesper.Launch">
+            android:theme="@style/Theme.PEK.Launch">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -13,11 +13,11 @@ kotlin {
 }
 
 android {
-    namespace 'com.hesper.app'
+    namespace 'com.pektv.app'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.hesper.app'
+        applicationId 'com.pektv.app'
         minSdk 26
         // 36 = Android 16, the level Google Play requires for new apps and
         // updates from Aug 31, 2026.
@@ -29,8 +29,8 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags '-std=c++17'
-                // -PhesperTorrent=true (set by the workflow) builds in torrent streaming.
-                arguments "-DHESPER_TORRENT=${project.hasProperty('hesperTorrent') && project.property('hesperTorrent') == 'true' ? 'ON' : 'OFF'}"
+                // -PpekTorrent=true or the older -PhesperTorrent=true (set by the workflow) builds in torrent streaming.
+                arguments "-DPEK_TORRENT=${((project.hasProperty('pekTorrent') && project.property('pekTorrent') == 'true') || (project.hasProperty('hesperTorrent') && project.property('hesperTorrent') == 'true')) ? 'ON' : 'OFF'}"
             }
         }
     }

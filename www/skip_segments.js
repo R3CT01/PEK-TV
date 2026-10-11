@@ -1,7 +1,7 @@
 /* ============================================================
-   Hesper: Skip Intro / Skip Recap  (fully automatic)
-   Loaded before player.js. The player creates one HesperSkip.Controller per playback
-   (library files AND torrent streams: both go through HesperPlayer).
+   PEK TV: Skip Intro / Skip Recap  (fully automatic)
+   Loaded before player.js. The player creates one PekSkip.Controller per playback
+   (library files AND torrent streams: both go through PekPlayer).
 
    Nobody marks anything. Where the skip spans come from:
      1. Chapters inside the file (mpv reports them). A chapter called "Intro", "Opening",
@@ -20,7 +20,7 @@
     const OLD_STORE_KEY = 'hesper_skip_v1';          // manual marks of older versions: wiped, no longer used
     const AUTO_KEY = 'hesper_skip_auto';
     const ONLINE_KEY = 'hesper_skip_online';          // '0' = never ask the database (default: on)
-    const STYLE_ID = 'hesper-skip-style';
+    const STYLE_ID = 'pek-skip-style';
     const KINDS = ['recap', 'intro'];                 // recap first: it comes first in an episode
     const LABEL = { intro: 'Skip Intro', recap: 'Skip Recap' };
     const CHAPTER_LEAD = 1.5;
@@ -33,7 +33,7 @@
 
     // Phone / tablet with a touchscreen = native says so; everything else (Android TV, desktop) gets the TV dialog.
     function isTv() {
-        try { const a = window.HesperAndroid; return !(a && typeof a.isPhone === 'function' && a.isPhone()); }
+        try { const a = window.PekAndroid; return !(a && typeof a.isPhone === 'function' && a.isPhone()); }
         catch (e) { return true; }
     }
 
@@ -325,7 +325,7 @@
         }
     }
 
-    window.HesperSkip = {
+    window.PekSkip = {
         Controller: Controller,
         chapterSpans: chapterSpans,
         remoteSpans: remoteSpans

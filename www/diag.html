@@ -17,14 +17,14 @@ const head = t => { const h = document.createElement('h2'); h.textContent = t; o
   add('', navigator.userAgent);
 
   head('Files served by the server');
-  for (const f of ['index.html', 'hesperframework.js', 'app.js', 'style.css']) {
+  for (const f of ['index.html', 'pekframework.js', 'app.js', 'style.css']) {
     try {
       const r = await fetch('/' + f + '?d=' + Date.now(), { cache: 'no-store' });
       const t = await r.text();
       let extra = '';
       if (f === 'index.html') extra = t.includes('display: none; position: fixed') ? ' [new: overlay hidden]' : ' [OLD index.html]';
-      if (f === 'app.js') extra = t.includes("HESPER_APP_BUILD = 'v5'") ? ' [new: build v5]' : ' [OLD app.js]';
-      if (f === 'hesperframework.js') extra = t.includes('hesperThemeUnreadable') ? ' [new]' : ' [OLD framework]';
+      if (f === 'app.js') extra = t.includes("PEK_APP_BUILD = 'v5'") ? ' [new: build v5]' : ' [OLD app.js]';
+      if (f === 'pekframework.js') extra = t.includes('pekThemeUnreadable') ? ' [new]' : ' [OLD framework]';
       if (f === 'style.css') extra = t.includes('max-width: 720px') ? ' [new: mobile layout]' : ' [OLD style.css]';
       add(r.ok ? 'ok' : 'bad', `${f}: HTTP ${r.status}, ${t.length} bytes${extra}`);
     } catch (e) { add('bad', `${f}: failed (${e.message})`); }
@@ -51,10 +51,10 @@ const head = t => { const h = document.createElement('h2'); h.textContent = t; o
     try {
       const w = fr.contentWindow, d = fr.contentDocument;
       const app = d.getElementById('app');
-      const shell = d.querySelector('.hesper-shell');
+      const shell = d.querySelector('.pek-shell');
       const cs = w.getComputedStyle(d.body);
       add(app && app.children.length ? 'ok' : 'bad', `#app children: ${app ? app.children.length : 'no #app'}`);
-      add('', `HesperEngine: ${w.eval('typeof HesperEngine')}, MainApp: ${w.eval('typeof MainApp')}, build: ${w.HESPER_APP_BUILD}`);
+      add('', `PekEngine: ${w.eval('typeof PekEngine')}, MainApp: ${w.eval('typeof MainApp')}, build: ${w.PEK_APP_BUILD}`);
       add('', `body color: ${cs.color}, background: ${cs.backgroundColor}`);
       if (shell) { const r = shell.getBoundingClientRect(); add('', `shell size: ${Math.round(r.width)}x${Math.round(r.height)}`); }
       const err = d.getElementById('debug-logs');

@@ -32,7 +32,7 @@ class MainAppWatchMethods {
     _saveProgress(id, meta, position, duration) {
         const map = this._readProgress();
         const finished = duration > 0 && position / duration >= RESUME_DONE_RATIO;
-        if (finished && window.HesperSync) window.HesperSync.recordWatched(this._historyMeta(id, meta));
+        if (finished && window.PekSync) window.PekSync.recordWatched(this._historyMeta(id, meta));
         if (finished || !(position >= RESUME_MIN_SEC)) {
             delete map[id];
         } else {
@@ -69,11 +69,11 @@ class MainAppWatchMethods {
     // ---------------- Marking things watched by hand ----------------
     // "Watched" = an entry in Watch History (sync.js). Marking adds one, unmarking removes it (and syncs).
 
-    _isWatched(meta) { const S = window.HesperSync; return !!(S && S.isWatched(meta)); }
+    _isWatched(meta) { const S = window.PekSync; return !!(S && S.isWatched(meta)); }
 
     // One read of the history, then a fast meta -> true/false check (for long lists).
     _watchedLookup() {
-        const S = window.HesperSync;
+        const S = window.PekSync;
         if (!S) return () => false;
         const W = S.watchedMap();
         return (meta) => { const k = S.histKey(meta); return !!(k && W[k]); };
@@ -81,7 +81,7 @@ class MainAppWatchMethods {
 
     // items = [{ meta, id }]  (id = this device's file id when there is one). Returns how many changed.
     _setWatchedMany(items, on) {
-        const S = window.HesperSync;
+        const S = window.PekSync;
         if (!S) return 0;
         let changed = 0, prog = null;
         items.forEach(({ meta, id }) => {
@@ -124,13 +124,13 @@ class MainAppWatchMethods {
 
     // ---------------- Watch history + cloud sync (see sync.js, cloud/worker.js) ----------------
 
-    _readHistory() { return window.HesperSync ? window.HesperSync.listHistory() : []; }
+    _readHistory() { return window.PekSync ? window.PekSync.listHistory() : []; }
 
     _setSyncUi(patch) { this.setState({ syncUi: Object.assign({}, this.state.syncUi, patch) }); }
 
     // Index of what is on THIS device: item key -> local file id (rebuilt at most every 2 min).
     async _ensureLibIndex() {
-        const S = window.HesperSync;
+        const S = window.PekSync;
         if (this._libIndex && Date.now() - this._libIndex.t < 120000) return this._libIndex.map;
         const map = {}, items = {};
         try {
@@ -154,7 +154,7 @@ class MainAppWatchMethods {
     // Looks up this device's own file id for an item synced from another device.
     async _resolveLocalId(meta) {
         const map = await this._ensureLibIndex();
-        const key = window.HesperSync.histKey(meta);
+        const key = window.PekSync.histKey(meta);
         return (map && key && map[key]) || null;
     }
 
@@ -209,7 +209,7 @@ class MainAppWatchMethods {
 
     // opts: { manual }. Updates the screen when something changed.
     async _runSync(opts) {
-        const S = window.HesperSync;
+        const S = window.PekSync;
         if (!S || !S.isLinked()) return { ok: false, error: 'busy' };
         if (this._syncing) { this._syncAgain = true; return { ok: false, error: 'busy' }; }   // something changed mid-sync: go again right after
         opts = opts || {};
@@ -221,7 +221,7 @@ class MainAppWatchMethods {
         } catch (e) { res = { ok: false, error: 'offline' }; }
         // Plugin backup rides along with the sync: back up what changed, and note what the cloud has that this device lacks.
         let pb = null;
-        const PB = window.HesperPluginBackup;
+        const PB = window.PekPluginBackup;
         if (res.ok && PB) {
             try { pb = await PB.run({ force: !!opts.manual }); } catch (e) { pb = null; }
         }
@@ -256,7 +256,7 @@ class MainAppWatchMethods {
     // and soon after a favorite changes, something is watched, a plugin is installed, playback ends, the device
     // comes back online or the app is reopened.
     _autoSync(delayMs) {
-        const S = window.HesperSync;
+        const S = window.PekSync;
         if (!S || !S.isLinked()) return;
         clearTimeout(this._autoSyncTimer);
         this._autoSyncTimer = setTimeout(() => {
@@ -267,17 +267,17 @@ class MainAppWatchMethods {
     }
 
     _startAutoSync() {
-        if (!this._pbHooked && window.HesperPluginInstaller) {
+        if (!this._pbHooked && window.PekPluginInstaller) {
             this._pbHooked = true;     // back a plugin up shortly after it is installed
-            window.HesperPluginInstaller.onInstalled(() => this._autoSync(1500));
+            window.PekPluginInstaller.onInstalled(() => this._autoSync(1500));
         }
         if (!this._autoHooked) {
             // Sync soon after anything worth keeping changes, not only on the timer.
             this._autoHooked = true;
-            const S = window.HesperSync;
-            document.addEventListener('hesper-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000); });   // added or removed a favorite
-            document.addEventListener('hesper-watched', () => this.setState({ history: this._readHistory() }));                         // marked by hand (here or from a plugin)
-            document.addEventListener('hesper-history', () => this._autoSync(2000));                                                   // finished watching something
+            const S = window.PekSync;
+            document.addEventListener('pek-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000); });   // added or removed a favorite
+            document.addEventListener('pek-watched', () => this.setState({ history: this._readHistory() }));                         // marked by hand (here or from a plugin)
+            document.addEventListener('pek-history', () => this._autoSync(2000));                                                   // finished watching something
             window.addEventListener('online', () => this._autoSync(1500));                                                             // back online
             document.addEventListener('visibilitychange', () => {                                                                     // came back to the app
                 if (document.visibilityState === 'visible' && S && Date.now() - (S.lastSync() || 0) > 60000) this._autoSync(1000);
@@ -300,17 +300,28 @@ class MainAppWatchMethods {
     }
 
     // Called after any successful sign up / sign in / reset.
-    async _afterSignIn(toast) {
+    // created: this sign-in finishes a brand-new account (the only time the device's own data is carried into an account).
+    async _afterSignIn(toast, created) {
         const f = this._authForm();
         f.password = ''; f.confirm = ''; f.code = '';
         this._setSyncUi({ mode: '', busy: true, msg: '' });
         this.props.engine.ui.toast(toast);
+        const hp = window.PekProfiles, S = window.PekSync;
+        // An account that already has profiles replaces what is on this device (a brand-new account keeps it). The page
+        // reloads at once and the download of the account's data happens right after the profile is picked.
+        if (hp && hp.enabled && hp.adoptCloudProfiles && S && S.peekProfiles) {
+            const peek = await S.peekProfiles();
+            const replaced = hp.adoptCloudProfiles(peek.ok ? peek.profiles : [], S.getEmail(), !!created);
+            if (replaced && peek.ok) { hp.afterSignIn(); return; }
+        }
         const res = await this._runSync({ manual: true });
         if (!res.ok && res.error !== 'busy') this._setSyncUi({ busy: false });
+        // Profiles belong to the account: go to "Who's watching?" (or the first-time profile setup) now that one is signed in.
+        if (hp && hp.enabled && hp.afterSignIn) hp.afterSignIn();
     }
 
     async signUpAccount() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         if (!S.validEmail(f.email)) { this._setSyncUi({ msg: this._syncMessage('bad_email') }); return; }
         if (!S.validPassword(f.password)) { this._setSyncUi({ msg: this._syncMessage('weak_password') }); return; }
@@ -319,21 +330,24 @@ class MainAppWatchMethods {
         const res = await S.signUp(f.email, f.password);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
         f.code = '';
+        this._createdEmail = f.email.trim().toLowerCase();   // this account is brand new: its first sign-in keeps what is on the device
         this._setSyncUi({ busy: false, mode: 'verify', msg: 'We emailed a 6-digit code to ' + f.email.trim() + '. Enter it to finish. It can take a minute. Check spam too.' });
     }
 
     async verifyAccountEmail() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         if (String(f.code).replace(/\D/g, '').length !== 6) { this._setSyncUi({ msg: 'Enter the 6-digit code from the email.' }); return; }
         this._setSyncUi({ busy: true, msg: '' });
         const res = await S.verifyEmail(f.email, f.code);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
-        await this._afterSignIn('Signed in. Your history is syncing.');
+        const created = !!this._createdEmail && this._createdEmail === f.email.trim().toLowerCase();
+        this._createdEmail = null;
+        await this._afterSignIn('Signed in. Your history is syncing.', created);
     }
 
     async resendVerifyCode() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         this._setSyncUi({ busy: true, msg: '' });
         const res = await S.resendCode(f.email);
@@ -341,7 +355,7 @@ class MainAppWatchMethods {
     }
 
     async signInAccount() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         if (!S.validEmail(f.email) || !f.password) { this._setSyncUi({ msg: 'Enter your email and password.' }); return; }
         this._setSyncUi({ busy: true, msg: '' });
@@ -361,7 +375,7 @@ class MainAppWatchMethods {
     }
 
     async sendResetCode() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         if (!S.validEmail(f.email)) { this._setSyncUi({ msg: this._syncMessage('bad_email') }); return; }
         this._setSyncUi({ busy: true, msg: '' });
@@ -372,7 +386,7 @@ class MainAppWatchMethods {
     }
 
     async resetPasswordAccount() {
-        const S = window.HesperSync, f = this._authForm();
+        const S = window.PekSync, f = this._authForm();
         if (!S) return;
         if (String(f.code).replace(/\D/g, '').length !== 6) { this._setSyncUi({ msg: 'Enter the 6-digit code from the email.' }); return; }
         if (!S.validPassword(f.password)) { this._setSyncUi({ msg: this._syncMessage('weak_password') }); return; }
@@ -388,7 +402,7 @@ class MainAppWatchMethods {
         if (!this.state.signOutAsk) return null;
         const { createElement, ui } = this.props.engine;
         const body = createElement('div', {},
-            createElement('p', { className: 'sub' }, 'Syncing stops on this device. Your favorites and watch history stay here. To sign in again you will need your password and a new code from your email.'),
+            createElement('p', { className: 'sub' }, 'This signs you out of your account and clears its profiles, favorites, watch history and settings from this device, so the app starts fresh. Everything stays safe in your cloud account and comes back when you sign in again. You will need your password and a new code from your email.'),
             createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
                 ui.button('Yes, sign out', () => { this.setState({ signOutAsk: false }); this.signOutDevice(); }, { variant: 'primary' })));
         return ui.modal('Are you sure you want to sign out?', body, () => this.setState({ signOutAsk: false }));   // the modal's own button is "Close" = stay
@@ -396,20 +410,28 @@ class MainAppWatchMethods {
 
     async signOutDevice() {
         this._setSyncUi({ busy: true });
-        await window.HesperSync.signOut();
-        this._setSyncUi({ busy: false, confirmDelete: false, msg: 'Signed out. Your local history is kept on this device.' });
+        // Save the latest changes to the cloud first: they are about to be cleared from this device.
+        const last = await this._runSync({});
+        if (!last.ok && last.error === 'offline') {
+            this._setSyncUi({ busy: false, msg: 'Cannot reach the cloud to save your latest changes. Connect to the internet and try again.' });
+            return;
+        }
+        await window.PekSync.signOut();
+        const hp = window.PekProfiles;
+        if (hp && hp.afterSignOut) { hp.afterSignOut(); return; }   // clears the account's data from the device and restarts clean
+        this._setSyncUi({ busy: false, confirmDelete: false, msg: 'Signed out.' });
     }
 
     async deleteCloudData() {
         if (!this.state.syncUi.confirmDelete) { this._setSyncUi({ confirmDelete: true }); return; }
         this._setSyncUi({ busy: true });
-        const res = await window.HesperSync.deleteAccount();
+        const res = await window.PekSync.deleteAccount();
         this._setSyncUi({ busy: false, confirmDelete: false, msg: res.ok ? 'Your cloud account and its data were deleted.' : this._syncMessage(res.error) });
     }
 
     clearWatchHistory() {
         if (!this.state.syncUi.confirmClear) { this._setSyncUi({ confirmClear: true }); return; }
-        window.HesperSync.clearHistory();
+        window.PekSync.clearHistory();
         this.setState({ history: this._readHistory(), activeTab: 'dashboard', syncUi: Object.assign({}, this.state.syncUi, { confirmClear: false }) });
         this._autoSync(500);
     }
@@ -683,7 +705,7 @@ class MainAppWatchMethods {
     // ---------------- Plugin backup (see plugin_backup.js) ----------------
 
     togglePluginBackup() {
-        const PB = window.HesperPluginBackup;
+        const PB = window.PekPluginBackup;
         if (!PB) return;
         PB.setEnabled(!PB.enabled());
         this._setSyncUi({ msg: PB.enabled() ? 'Plugin backup is on.' : 'Plugin backup is off. Nothing is uploaded or offered. What is already in your cloud stays there.' });
@@ -693,7 +715,7 @@ class MainAppWatchMethods {
     // Downloads a plugin from the cloud backup and shows the normal install screen for it
     // (permissions, safety checks, confirm). Nothing is installed until the user confirms there.
     async restoreCloudPlugin(id) {
-        const PB = window.HesperPluginBackup, I = window.HesperPluginInstaller;
+        const PB = window.PekPluginBackup, I = window.PekPluginInstaller;
         if (!PB || !I || this.state.pluginInstall || this.state.syncUi.busy) return;
         this._setSyncUi({ busy: true, msg: '' });
         try {
@@ -709,14 +731,14 @@ class MainAppWatchMethods {
     }
 
     dismissCloudPlugin(id) {
-        const PB = window.HesperPluginBackup;
+        const PB = window.PekPluginBackup;
         if (!PB) return;
         PB.dismiss(id);
         this._setSyncUi({});
     }
 
     async keepLocalPlugin(id) {
-        const PB = window.HesperPluginBackup;
+        const PB = window.PekPluginBackup;
         if (!PB || this.state.syncUi.busy) return;
         this._setSyncUi({ busy: true, msg: '' });
         const r = await PB.keepLocal(id);
@@ -725,7 +747,7 @@ class MainAppWatchMethods {
 
     _renderPluginBackup(go, row) {
         const { createElement, ui } = this.props.engine;
-        const PB = window.HesperPluginBackup;
+        const PB = window.PekPluginBackup;
         if (!PB) return [];
         const on = PB.enabled();
         const out = [ui.listRow('Back up my plugins',
@@ -755,7 +777,7 @@ class MainAppWatchMethods {
 
     _renderSyncSettings() {
         const { createElement, ui } = this.props.engine;
-        const S = window.HesperSync;
+        const S = window.PekSync;
         const u = this.state.syncUi;
         const f = this._authForm();
         const parts = [createElement('h2', {}, 'Cloud Sync')];
@@ -788,14 +810,14 @@ class MainAppWatchMethods {
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
                 parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
             } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in. Signing in to an account that already has data replaces what is on this device with the account\'s data. Only what you watched before creating an account is carried into it.'));
                 parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
             const last = S.lastSync();
             parts.push(ui.listRow('Signed in', S.getEmail(), null));
-            { const hp = window.HesperProfiles, me = hp && hp.enabled ? hp.current() : null;
-              if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Switch profile (Settings > Profiles) to sync another one.`)); }
+            { const hp = window.PekProfiles, me = hp && hp.enabled ? hp.current() : null;
+              if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Use Sign out of profile (Settings > Profiles) to sync another one.`)); }
             parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
                 last ? 'Last synced ' + new Date(last).toLocaleString() : 'Not synced yet', null, { statusDot: !u.busy && !!last }));
             parts.push(row(
@@ -868,7 +890,7 @@ class MainAppWatchMethods {
         if (!it) return null;
         const { createElement, ui } = this.props.engine;
         const close = () => this.setState({ resumeAsk: null });
-        const at = window.HesperPlayerUtil ? window.HesperPlayerUtil.fmtTime(it.position) : Math.round(it.position) + 's';
+        const at = window.PekPlayerUtil ? window.PekPlayerUtil.fmtTime(it.position) : Math.round(it.position) + 's';
         const from = it.origin && it.origin.name ? 'Started in ' + it.origin.name : (it.torrent ? 'Started in a plugin' : 'From your library');
         const left = this._fmtLeft(it);
         const body = createElement('div', {},
@@ -881,7 +903,7 @@ class MainAppWatchMethods {
 
     _doResume(it, startSec) {
         this.setState({ resumeAsk: null });
-        if (it.torrent && it.torrent.source && window.HesperTorrent) { this._resumeTorrent(it, startSec); return; }
+        if (it.torrent && it.torrent.source && window.PekTorrent) { this._resumeTorrent(it, startSec); return; }
         this.playMedia(it.id, this._resumeTitle(it), it, startSec);
     }
 
@@ -890,8 +912,8 @@ class MainAppWatchMethods {
         const { ui } = this.props.engine;
         const t = it.torrent;
         try {
-            if (/^https:/i.test(t.source)) await window.HesperTorrent.allowLink(t.source);
-            await window.HesperTorrent.open({
+            if (/^https:/i.test(t.source)) await window.PekTorrent.allowLink(t.source);
+            await window.PekTorrent.open({
                 source: t.source, title: t.title || it.title || it.showTitle || '',
                 season: t.season || 0, episode: t.episode || 0, startSec: startSec > 0 ? startSec : 0,
                 track: { meta: { kind: it.kind, title: it.title, year: it.year, showTitle: it.showTitle, season: it.season, episode: it.episode, image: it.image, origin: it.origin } }
@@ -907,4 +929,4 @@ class MainAppWatchMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppWatchMethods);
+pekMixin(MainApp, MainAppWatchMethods);

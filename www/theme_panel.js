@@ -1,4 +1,4 @@
-class ThemePanel extends HesperComponent {
+class ThemePanel extends PekComponent {
     render() {
         const { engine, onClose } = this.props;
         const { createElement, ui } = engine;

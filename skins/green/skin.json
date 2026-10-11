@@ -3,7 +3,7 @@
   "author": "PEK",
   "version": "1.0.0",
   "description": "Soft, rounded and flat.",
-  "hesper_api": 1,
+  "pek_api": 1,
   "tokens": {
     "bg": "#07120b",
     "bgElevated": "#0b1a10",

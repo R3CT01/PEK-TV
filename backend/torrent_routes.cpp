@@ -533,7 +533,7 @@ void registerTorrentRoutes(httplib::Server& svr) {
     });
 
     // Ranked releases for a movie or an episode from the user's own Torznab provider
-    // (Jackett, Prowlarr, ...). Hesper ships with no provider.
+    // (Jackett, Prowlarr, ...). PEK ships with no provider.
     svr.Get("/api/torrent/search", [](const httplib::Request& req, httplib::Response& res) {
         std::string url, key;
         {

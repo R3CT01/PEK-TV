@@ -21,11 +21,11 @@
 
 #include "plugin_install.h"
 
-namespace hesper_skins {
+namespace pek_skins {
 
 namespace fs = std::filesystem;
-using hesper_plugins::InFile;
-using hesper_plugins::Outcome;
+using pek_plugins::InFile;
+using pek_plugins::Outcome;
 
 constexpr size_t kMaxFiles      = 60;
 constexpr size_t kMaxFileBytes  = 2u * 1024 * 1024;
@@ -48,7 +48,7 @@ inline bool allowedExtension(const std::string& ext) {
 
 // Returns "" if the stylesheet is fine, otherwise the reason.
 inline std::string checkCss(const std::string& path, const std::string& css) {
-    const std::string c = hesper_plugins::lowerCopy(css);
+    const std::string c = pek_plugins::lowerCopy(css);
     if (c.find('\\') != std::string::npos)
         return path + " uses a backslash escape, which skins can't use";
     static const char* banned[] = { "@import", "expression(", "javascript:", "-moz-binding", "behavior:", "<script", "</style" };
@@ -84,9 +84,9 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
     std::set<std::string> seen;
     bool hasManifest = false;
     for (const auto& f : files) {
-        std::string why = hesper_plugins::checkRelativePath(f.path);
+        std::string why = pek_plugins::checkRelativePath(f.path);
         if (!why.empty()) return why;
-        if (!seen.insert(hesper_plugins::lowerCopy(f.path)).second) return "the same file appears twice: " + f.path;
+        if (!seen.insert(pek_plugins::lowerCopy(f.path)).second) return "the same file appears twice: " + f.path;
         if (f.data.size() > kMaxFileBytes) return f.path + " is too large (limit 2 MB per file)";
         totalBytes += f.data.size();
         if (totalBytes > kMaxTotalBytes) return "the skin is too large (limit 6 MB in total)";
@@ -95,7 +95,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
         if (f.path == "plugin.json" || f.path == "ui.js" || f.path == "backend.py")
             return "this is a plugin, not a skin. Install it from Settings -> Plugins.";
 
-        const std::string ext = hesper_plugins::extensionOf(f.path);
+        const std::string ext = pek_plugins::extensionOf(f.path);
         if (ext == "js" || ext == "py") return "skins can't contain code: " + f.path;
         if (!allowedExtension(ext)) return "file type not allowed in skins: " + f.path;
 
@@ -107,7 +107,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             while (a < f.data.size() && std::isspace(static_cast<unsigned char>(f.data[a]))) ++a;
             if (a >= f.data.size() || f.data[a] != '{') return "skin.json is not a JSON object";
             if (f.data.find("\"name\"") == std::string::npos) return "skin.json needs a \"name\"";
-            if (hesper_plugins::lowerCopy(f.data).find("url(") != std::string::npos)
+            if (pek_plugins::lowerCopy(f.data).find("url(") != std::string::npos)
                 return "skin.json can't use url(). Put images in skin.css, and use a plain gradient for bgImage.";
         }
         if (ext == "css") {
@@ -124,10 +124,10 @@ inline Outcome install(const std::string& skinsDir, const std::string& id,
                        const std::vector<InFile>& files, bool dryRun) {
     Outcome out;
     out.id = id;
-    if (!hesper_plugins::validId(id)) { out.error = "the skin id must be 1-40 lowercase letters, digits, - or _"; return out; }
+    if (!pek_plugins::validId(id)) { out.error = "the skin id must be 1-40 lowercase letters, digits, - or _"; return out; }
     if (isReservedId(id)) { out.error = "\"" + id + "\" is a built-in skin and can't be replaced"; return out; }
     size_t total = 0;
-    out.error = hesper_skins::checkFiles(files, total);
+    out.error = pek_skins::checkFiles(files, total);
     if (!out.error.empty()) return out;
     out.files = files.size();
     out.bytes = total;
@@ -138,7 +138,7 @@ inline Outcome install(const std::string& skinsDir, const std::string& id,
     out.replaced = fs::is_directory(target, ec);
     if (dryRun) { out.ok = true; return out; }
 
-    std::lock_guard<std::mutex> lock(hesper_plugins::installMutex());
+    std::lock_guard<std::mutex> lock(pek_plugins::installMutex());
     fs::create_directories(root, ec);
     if (ec) { out.error = "could not create the skins folder"; return out; }
 
@@ -192,9 +192,9 @@ inline Outcome install(const std::string& skinsDir, const std::string& id,
 inline Outcome uninstall(const std::string& skinsDir, const std::string& id) {
     Outcome out;
     out.id = id;
-    if (!hesper_plugins::validId(id)) { out.error = "invalid skin id"; return out; }
+    if (!pek_plugins::validId(id)) { out.error = "invalid skin id"; return out; }
     if (isReservedId(id)) { out.error = "\"" + id + "\" is a built-in skin and can't be removed"; return out; }
-    std::lock_guard<std::mutex> lock(hesper_plugins::installMutex());
+    std::lock_guard<std::mutex> lock(pek_plugins::installMutex());
     std::error_code ec;
     const fs::path target = fs::path(skinsDir) / id;
     if (!fs::is_directory(target, ec) || !fs::is_regular_file(target / "skin.json", ec)) {
@@ -207,4 +207,4 @@ inline Outcome uninstall(const std::string& skinsDir, const std::string& id) {
     return out;
 }
 
-} // namespace hesper_skins
+} // namespace pek_skins

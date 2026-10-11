@@ -1,21 +1,21 @@
-"""Hesper plugin guard: decides whether a plugin's Python backend may run, and how.
+"""PEK plugin guard: decides whether a plugin's Python backend may run, and how.
 
 Used by the C++ core (backend/core.cpp) and by the Android runner
 (hesper_runner.py). Both call run_plugin().
 
 Two tiers
 ---------
-1. TRUSTED plugins (bundled ones, or any named in the HESPER_TRUSTED_PLUGINS
+1. TRUSTED plugins (bundled ones, or any named in the PEK_TRUSTED_PLUGINS
    environment variable, comma separated) run exactly as before, with full access.
 2. EVERYTHING ELSE must pass these layers, or it does not run:
    a. plugin.json manifest declaring its permissions (network hosts, storage).
    b. A static allowlist scan of every .py file in the plugin: only a short list
       of imports, no eval/exec/open/getattr/..., no dunder tricks, no native code.
-   c. All real work goes through the host module `hesper_host`, which enforces the
+   c. All real work goes through the host module `pek_host` (also importable as `hesper_host`, the old name), which enforces the
       manifest: https only, allowlisted hosts only, no private/loopback addresses
-      (this also stops a plugin reaching Hesper's own API), size and time limits,
+      (this also stops a plugin reaching PEK's own API), size and time limits,
       files only inside <plugin>/data/. A plugin that declares "library": true may also call
-      hesper_host.library_titles() for the titles and years in the user's library.
+      pek_host.library_titles() for the titles and years in the user's library.
    d. A runtime backstop (audit hook): blocks processes, raw sockets, ctypes and
       file access outside the plugin while its code runs, plus a time limit.
 
@@ -41,7 +41,7 @@ import types
 import urllib.parse
 import importlib.util
 
-# Plugins that ship with Hesper and keep full access (as they always had).
+# Plugins that ship with PEK and keep full access (as they always had).
 BUNDLED_TRUSTED = {"weather", "sample_scraper"}
 
 MANIFEST_NAME = "plugin.json"
@@ -53,7 +53,7 @@ ALLOWED_IMPORTS = {
     "json", "re", "math", "datetime", "time", "collections", "itertools", "functools",
     "string", "textwrap", "html", "urllib.parse", "base64", "hashlib", "random",
     "statistics", "decimal", "fractions", "typing", "dataclasses", "enum", "copy",
-    "operator", "unicodedata", "hesper_host",
+    "operator", "unicodedata", "pek_host", "hesper_host",
 }
 
 FORBIDDEN_CALLS = {
@@ -97,7 +97,7 @@ class PluginTimeout(BaseException):
 
 def trusted_names():
     names = set(BUNDLED_TRUSTED)
-    extra = os.environ.get("HESPER_TRUSTED_PLUGINS", "")
+    extra = os.environ.get("PEK_TRUSTED_PLUGINS") or os.environ.get("HESPER_TRUSTED_PLUGINS", "")   # old name still honoured
     names.update(n.strip() for n in extra.split(",") if n.strip())
     return names
 
@@ -236,7 +236,7 @@ def scan_plugin_folder(folder):
 
 
 # --------------------------------------------------------------------------
-# Host API for plugins (layer c): the module a guarded plugin imports as hesper_host
+# Host API for plugins (layer c): the module a guarded plugin imports as pek_host (or hesper_host)
 # --------------------------------------------------------------------------
 
 _state = threading.local()
@@ -284,7 +284,7 @@ def build_host_module(plugin_id, folder, manifest):
     storage_ok = bool(perms.get("storage", False))
     library_ok = bool(perms.get("library", False))
     data_dir = os.path.join(folder, "data")
-    mod = types.ModuleType("hesper_host")
+    mod = types.ModuleType("pek_host")
 
     def _need_storage():
         if not storage_ok:
@@ -313,7 +313,7 @@ def build_host_module(plugin_id, folder, manifest):
                                     context=ssl.create_default_context())
                 try:
                     path = (u.path or "/") + ("?" + u.query if u.query else "")
-                    hdrs = {"User-Agent": "Hesper-Plugin/" + plugin_id, "Accept-Encoding": "identity"}
+                    hdrs = {"User-Agent": "PEK-Plugin/" + plugin_id, "Accept-Encoding": "identity"}
                     for k, v in (headers or {}).items():
                         if str(k).lower() not in ("host", "cookie", "authorization", "proxy-authorization"):
                             hdrs[str(k)] = str(v)
@@ -365,7 +365,7 @@ def build_host_module(plugin_id, folder, manifest):
         Android keeps it next to the plugins folder, Termux one level further up."""
         plugins_dir = os.path.dirname(os.path.normpath(folder))
         candidates = []
-        env = os.environ.get("HESPER_LIBRARY_CACHE")
+        env = os.environ.get("PEK_LIBRARY_CACHE") or os.environ.get("HESPER_LIBRARY_CACHE")   # old name still honoured
         if env:
             candidates.append(env)
         candidates.append(os.path.join(plugins_dir, "..", "media_cache.tsv"))
@@ -468,11 +468,11 @@ def _hook(event, args):
     if not getattr(_state, "active", False) or getattr(_state, "privileged", 0):
         return
     if event.startswith(_DENY_PREFIXES):
-        raise PermissionError("blocked by Hesper plugin guard: %s" % event)
+        raise PermissionError("blocked by PEK plugin guard: %s" % event)
     if event == "import":
         top = str(args[0]).split(".")[0]
         if top in _DENY_IMPORTS:
-            raise PermissionError("blocked by Hesper plugin guard: import %s" % top)
+            raise PermissionError("blocked by PEK plugin guard: import %s" % top)
     elif event == "open":
         target, mode, flags = args[0], args[1], args[2]
         if isinstance(target, int):
@@ -480,13 +480,13 @@ def _hook(event, args):
         try:
             path = os.path.realpath(os.fsdecode(target))
         except Exception:  # noqa: BLE001
-            raise PermissionError("blocked by Hesper plugin guard: unreadable path")
+            raise PermissionError("blocked by PEK plugin guard: unreadable path")
         writes = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) \
             or (isinstance(mode, str) and any(c in mode for c in "wax+"))
         if writes:
-            raise PermissionError("blocked by Hesper plugin guard: file writes (use hesper_host.write_json)")
+            raise PermissionError("blocked by PEK plugin guard: file writes (use pek_host.write_json)")
         if not _under(path, _state.roots):
-            raise PermissionError("blocked by Hesper plugin guard: reading outside the plugin folder")
+            raise PermissionError("blocked by PEK plugin guard: reading outside the plugin folder")
     elif event in ("os.listdir", "os.scandir", "glob.glob"):
         target = args[0]
         if target is not None and not isinstance(target, int):
@@ -495,7 +495,7 @@ def _hook(event, args):
             except Exception:  # noqa: BLE001
                 return
             if not _under(path, _state.roots):
-                raise PermissionError("blocked by Hesper plugin guard: listing outside the plugin folder")
+                raise PermissionError("blocked by PEK plugin guard: listing outside the plugin folder")
 
 
 def _install_hook():
@@ -528,14 +528,14 @@ def _run_guarded(plugin_id, folder, module_name, manifest):
         sys.settrace(_make_tracer(time.monotonic() + RUN_TIME_LIMIT_SEC))
         try:
             spec = importlib.util.spec_from_file_location(
-                "hesper_plugin_" + re.sub(r"\W", "_", plugin_id), os.path.join(folder, module_name + ".py"))
+                "pek_plugin_" + re.sub(r"\W", "_", plugin_id), os.path.join(folder, module_name + ".py"))
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             fn = getattr(mod, "run", None)
             if callable(fn):
                 fn()
             else:
-                print("[Hesper Plugin Guard] '%s' has no callable run()." % plugin_id)
+                print("[PEK Plugin Guard] '%s' has no callable run()." % plugin_id)
         except PermissionError as e:
             result["error"] = "permission denied: %s" % e
         except PluginTimeout as e:
@@ -546,12 +546,14 @@ def _run_guarded(plugin_id, folder, module_name, manifest):
             sys.settrace(None)
             _state.active = False
 
-    # Siblings in the plugin folder are importable by the plugin; hesper_host is injected.
+    # Siblings in the plugin folder are importable by the plugin; pek_host (and hesper_host) is injected.
     sys.path.insert(0, folder)
-    saved = sys.modules.get("hesper_host")
-    sys.modules["hesper_host"] = host
+    saved = sys.modules.get("pek_host")
+    saved_old = sys.modules.get("hesper_host")
+    sys.modules["pek_host"] = host
+    sys.modules["hesper_host"] = host   # old name, kept so existing plugins keep working
     try:
-        t = threading.Thread(target=worker, name="hesper-plugin-" + plugin_id, daemon=True)
+        t = threading.Thread(target=worker, name="pek-plugin-" + plugin_id, daemon=True)
         t.start()
         t.join(RUN_TIME_LIMIT_SEC + 5)
         if t.is_alive():
@@ -561,10 +563,11 @@ def _run_guarded(plugin_id, folder, module_name, manifest):
             sys.path.remove(folder)
         except ValueError:
             pass
-        if saved is None:
-            sys.modules.pop("hesper_host", None)
-        else:
-            sys.modules["hesper_host"] = saved
+        for name, prev in (("pek_host", saved), ("hesper_host", saved_old)):
+            if prev is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = prev
     return result["error"]
 
 
@@ -583,10 +586,10 @@ def _run_legacy(module_name, path):
         if callable(fn):
             fn()
         else:
-            print("[Hesper Plugin Guard] '%s' has no callable run()." % module_name)
+            print("[PEK Plugin Guard] '%s' has no callable run()." % module_name)
     except Exception:  # noqa: BLE001
         import traceback
-        print("[Hesper Plugin Guard] '%s' in %s failed:" % (module_name, path))
+        print("[PEK Plugin Guard] '%s' in %s failed:" % (module_name, path))
         traceback.print_exc()
     finally:
         try:
@@ -607,22 +610,22 @@ def run_plugin(module_name, path):
         plugin_id = module_name if loose else os.path.basename(os.path.normpath(path))
 
         if plugin_id in trusted_names():
-            print("[Hesper Plugin Guard] '%s' is trusted: running with full access." % plugin_id)
+            print("[PEK Plugin Guard] '%s' is trusted: running with full access." % plugin_id)
             _run_legacy(module_name, path)
             return True
 
         if loose:
-            print("[Hesper Plugin Guard] REFUSED loose plugin '%s.py': move it into its own folder "
-                  "with a plugin.json, or add it to HESPER_TRUSTED_PLUGINS." % module_name)
+            print("[PEK Plugin Guard] REFUSED loose plugin '%s.py': move it into its own folder "
+                  "with a plugin.json, or add it to PEK_TRUSTED_PLUGINS." % module_name)
             return False
 
         manifest, err = load_manifest(path)
         if err:
-            print("[Hesper Plugin Guard] REFUSED '%s': %s" % (plugin_id, err))
+            print("[PEK Plugin Guard] REFUSED '%s': %s" % (plugin_id, err))
             return False
         problems = scan_plugin_folder(path)
         if problems:
-            print("[Hesper Plugin Guard] REFUSED '%s':" % plugin_id)
+            print("[PEK Plugin Guard] REFUSED '%s':" % plugin_id)
             for p in problems[:20]:
                 print("    - " + p)
             if len(problems) > 20:
@@ -630,14 +633,14 @@ def run_plugin(module_name, path):
             return False
 
         _install_hook()
-        print("[Hesper Plugin Guard] running '%s' sandboxed (network: %s, storage: %s)" % (
+        print("[PEK Plugin Guard] running '%s' sandboxed (network: %s, storage: %s)" % (
             plugin_id, ", ".join(manifest["permissions"].get("network", [])) or "none",
             "yes" if manifest["permissions"].get("storage") else "no"))
         err = _run_guarded(plugin_id, path, module_name, manifest)
         if err:
-            print("[Hesper Plugin Guard] '%s' stopped: %s" % (plugin_id, err))
+            print("[PEK Plugin Guard] '%s' stopped: %s" % (plugin_id, err))
             return False
         return True
     except Exception as e:  # noqa: BLE001
-        print("[Hesper Plugin Guard] error while handling '%s': %s: %s" % (module_name, type(e).__name__, e))
+        print("[PEK Plugin Guard] error while handling '%s': %s: %s" % (module_name, type(e).__name__, e))
         return False

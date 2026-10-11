@@ -1,5 +1,5 @@
 /* ============================================================
-   Hesper Theme Tokens
+   PEK TV Theme Tokens
    ============================================================ */
 :root {
     --sx-bg: #E9E2DA;
@@ -46,21 +46,21 @@ html[data-sx-glow] body {
     background-attachment: fixed;
 }
 
-html[data-sx-glow] .hesper-content {
+html[data-sx-glow] .pek-content {
     background: transparent;
 }
 
 /* ============================================================
    App Shell Layout
    ============================================================ */
-.hesper-shell {
+.pek-shell {
     display: flex;
     height: 100vh;
     height: 100dvh;
     width: 100vw;
 }
 
-.hesper-sidebar {
+.pek-sidebar {
     width: 260px;
     background: var(--sx-bg-elevated);
     border-right: 1px solid var(--sx-border);
@@ -134,7 +134,7 @@ html[data-sx-glow] .hesper-content {
     color: var(--sx-text-muted);
 }
 
-.hesper-content {
+.pek-content {
     flex: 1;
     min-height: 0;
     padding: 2.5rem;
@@ -312,10 +312,10 @@ html[data-sx-glow] .hesper-content {
 }
 
 /* ============================================================
-   HesperUIKit — themed components available to plugin ui.js
-   code via hesperFramework.ui.*. Everything here reads the
+   PekUIKit — themed components available to plugin ui.js
+   code via pekFramework.ui.*. Everything here reads the
    same --sx-* tokens as the core app, so plugin UI re-themes
-   live with HesperTheme and never needs its own colors.
+   live with PekTheme and never needs its own colors.
    ============================================================ */
 
 .sx-row {
@@ -545,11 +545,11 @@ html[data-sx-glow] .hesper-content {
    Phone / narrow screens: sidebar becomes a top tab strip
    ============================================================ */
 @media (max-width: 720px) {
-    .hesper-shell {
+    .pek-shell {
         flex-direction: column;
     }
 
-    .hesper-sidebar {
+    .pek-sidebar {
         width: 100%;
         flex-direction: row;
         align-items: center;
@@ -579,13 +579,13 @@ html[data-sx-glow] .hesper-content {
         font-size: 0.95rem;
     }
 
-    .hesper-content {
+    .pek-content {
         padding: 1rem;
     }
 
     /* Bottom tab bar (rendered only on phones, see PHONE_MQ in app.js). It is the last
        child of the shell, so it sits above the docked mini player automatically. */
-    .hesper-bottombar {
+    .pek-bottombar {
         position: relative;
         z-index: 20;
         flex: none;
@@ -595,7 +595,7 @@ html[data-sx-glow] .hesper-content {
         border-top: 1px solid var(--sx-border);
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
-    html.hp-typing .hesper-bottombar { display: none; }
+    html.hp-typing .pek-bottombar { display: none; }
 
     .bb-item {
         position: relative;
@@ -1025,18 +1025,18 @@ html[data-poster="l"] .sx-poster-grid { --sx-grid-min: 280px !important; }
 
 /* Wide screens only: phones always use the bottom tab bar. */
 @media (min-width: 721px) {
-    html[data-layout="wall"] .hesper-sidebar { width: 200px; padding: 1.25rem 0.75rem; }
-    html[data-layout="wall"] .hesper-content,
-    html[data-layout="compact"] .hesper-content { padding: 1.25rem; }
+    html[data-layout="wall"] .pek-sidebar { width: 200px; padding: 1.25rem 0.75rem; }
+    html[data-layout="wall"] .pek-content,
+    html[data-layout="compact"] .pek-content { padding: 1.25rem; }
     html[data-layout="wall"] .sx-poster-grid,
     html[data-layout="compact"] .sx-poster-grid { gap: 0.6rem; }
-    html[data-layout="compact"] .hesper-sidebar { width: 220px; }
+    html[data-layout="compact"] .pek-sidebar { width: 220px; }
 }
 
 /* Top bar: not on short (landscape phone) screens, where height is precious. */
 @media (min-width: 721px) and (min-height: 501px) {
-    html[data-layout="topbar"] .hesper-shell { flex-direction: column; }
-    html[data-layout="topbar"] .hesper-sidebar {
+    html[data-layout="topbar"] .pek-shell { flex-direction: column; }
+    html[data-layout="topbar"] .pek-sidebar {
         width: 100%;
         flex-direction: row;
         align-items: center;
@@ -1214,21 +1214,21 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
 .sx-poster-card { will-change: transform; contain: paint; }
 
 /* ============================================================
-   TV boxes / Fire Stick (html.hesper-tv, set in index.html)
+   TV boxes / Fire Stick (html.pek-tv, set in index.html)
    Cheap GPUs drop frames on live blur, wide soft shadows and on
    hundreds of always-promoted layers. Same look, lighter paint.
    ============================================================ */
 /* A layer per poster is hundreds of GPU textures on a 1-2 GB box: promote only the focused one. */
 .sx-poster-card { will-change: auto; }
 .sx-poster-card.focused { will-change: transform; }
-html.hesper-tv * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
-html.hesper-tv .theme-panel-overlay, html.hesper-tv .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.82); }
-html.hesper-tv .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32;
+html.pek-tv * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.pek-tv .theme-panel-overlay, html.pek-tv .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.82); }
+html.pek-tv .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32;
     -webkit-transform: scale(1.12) translateZ(0); transform: scale(1.12) translateZ(0); }
-html.hesper-tv .focusable { -webkit-transition: border-color 0.08s, background-color 0.08s; transition: border-color 0.08s, background-color 0.08s; }
-html.hesper-tv .focusable.focused { box-shadow: 0 0 0 2px var(--sx-border-focus); }
-html.hesper-tv .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
-html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { animation: none; }
+html.pek-tv .focusable { -webkit-transition: border-color 0.08s, background-color 0.08s; transition: border-color 0.08s, background-color 0.08s; }
+html.pek-tv .focusable.focused { box-shadow: 0 0 0 2px var(--sx-border-focus); }
+html.pek-tv .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
+html.pek-tv .hero, html.pek-tv .glass-panel, html.pek-tv .sx-toast { animation: none; }
 
 /* A plugin row with its "show in the sidebar" switch underneath */
 .plugin-row-group { display: flex; flex-direction: column; gap: 0.35rem; }
@@ -1296,39 +1296,39 @@ html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { an
 }
 
 /* ============================================================
-   10-foot UI (html.hesper-tv; see tv_mode.js). Sizes are in rem and rem
+   10-foot UI (html.pek-tv; see tv_mode.js). Sizes are in rem and rem
    follows the screen width, so the same layout reads from a couch on a
    720p, 1080p or 4K screen. --tv-safe-x/-y keep content off the edges.
    ============================================================ */
-html.hesper-tv {
+html.pek-tv {
     --tv-safe-x: 2vw; --tv-safe-y: 2vh;
     font-size: 16px;                                   /* fallback */
     font-size: clamp(16px, 1.5625vw, 64px);            /* 1920px wide = 30px, 1280 = 20px, 3840 = 60px */
 }
-html.hesper-tv body { line-height: 1.35; }
+html.pek-tv body { line-height: 1.35; }
 
 /* Margins: backgrounds stay full-bleed, only the content moves in. */
-html.hesper-tv .hesper-sidebar { width: 14rem; padding: calc(1.5rem + var(--tv-safe-y)) 1rem calc(1.5rem + var(--tv-safe-y)) calc(1rem + var(--tv-safe-x)); }
-html.hesper-tv .hesper-content { padding: calc(2rem + var(--tv-safe-y)) calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)) 2.5rem; }
-html.hesper-tv .plugin-window-bar { padding: calc(1rem + var(--tv-safe-y)) calc(1.5rem + var(--tv-safe-x)) 1rem; }
-html.hesper-tv .plugin-window-body { padding: 2rem calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)); }
+html.pek-tv .pek-sidebar { width: 14rem; padding: calc(1.5rem + var(--tv-safe-y)) 1rem calc(1.5rem + var(--tv-safe-y)) calc(1rem + var(--tv-safe-x)); }
+html.pek-tv .pek-content { padding: calc(2rem + var(--tv-safe-y)) calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)) 2.5rem; }
+html.pek-tv .plugin-window-bar { padding: calc(1rem + var(--tv-safe-y)) calc(1.5rem + var(--tv-safe-x)) 1rem; }
+html.pek-tv .plugin-window-body { padding: 2rem calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)); }
 
 /* Posters: sized in rem so the grid keeps the same number of columns at any resolution. */
-html.hesper-tv .sx-grid, html.hesper-tv .sx-poster-grid { --sx-grid-min: 9rem; gap: 1.25rem; }
-html.hesper-tv[data-poster="s"] .sx-poster-grid { --sx-grid-min: 7rem !important; }
-html.hesper-tv[data-poster="l"] .sx-poster-grid { --sx-grid-min: 14rem !important; }
+html.pek-tv .sx-grid, html.pek-tv .sx-poster-grid { --sx-grid-min: 9rem; gap: 1.25rem; }
+html.pek-tv[data-poster="s"] .sx-poster-grid { --sx-grid-min: 7rem !important; }
+html.pek-tv[data-poster="l"] .sx-poster-grid { --sx-grid-min: 14rem !important; }
 
 /* Bigger targets: rows and buttons are easy to hit and easy to read. */
-html.hesper-tv .sx-btn, html.hesper-tv .nav-item, html.hesper-tv .sx-list-row, html.hesper-tv .plugin-row, html.hesper-tv .sx-toggle-row { min-height: 3rem; }
-html.hesper-tv .sx-text-input { min-height: 3rem; font-size: 1rem; }
+html.pek-tv .sx-btn, html.pek-tv .nav-item, html.pek-tv .sx-list-row, html.pek-tv .plugin-row, html.pek-tv .sx-toggle-row { min-height: 3rem; }
+html.pek-tv .sx-text-input { min-height: 3rem; font-size: 1rem; }
 
 /* Focus: a solid ring (cheap to paint on a TV box) plus a lift on posters. Nothing is ever "maybe focused". */
-html.hesper-tv .focusable.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
-html.hesper-tv .sx-poster-card.focused { -webkit-transform: scale(1.07); transform: scale(1.07); }
-html.hesper-tv .sx-text-input.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
+html.pek-tv .focusable.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
+html.pek-tv .sx-poster-card.focused { -webkit-transform: scale(1.07); transform: scale(1.07); }
+html.pek-tv .sx-text-input.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
 
 /* No pointer on the couch (it comes back the moment the mouse moves). */
-html.hesper-tv.hesper-idle, html.hesper-tv.hesper-idle * { cursor: none !important; }
+html.pek-tv.pek-idle, html.pek-tv.pek-idle * { cursor: none !important; }
 
 
 /* ============================================================
@@ -1343,7 +1343,7 @@ html.hesper-tv.hesper-idle, html.hesper-tv.hesper-idle * { cursor: none !importa
 .dash-row-title { margin: 0.4rem 0 0.7rem; font-size: 1.2rem; }
 .dash-scroll { display: flex; gap: 1rem; overflow-x: auto; padding: 0.5rem 0.4rem 1rem; -webkit-overflow-scrolling: touch; }
 .dash-cell { flex: 0 0 170px; min-width: 0; }
-html.hesper-tv .dash-cell { flex-basis: 200px; }
+html.pek-tv .dash-cell { flex-basis: 200px; }
 .dash-ctls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
 .dash-ctl { padding: 0.45rem 0.9rem; font-size: 0.95rem; }
 .dash-grid.editing .dash-edit-card { outline: 2px dashed var(--sx-border, rgba(255,255,255,0.25)); outline-offset: -2px; }

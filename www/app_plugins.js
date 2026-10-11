@@ -5,7 +5,7 @@
 
 class MainAppPluginsMethods {
 
-    // "Install plugin from .zip": opens Hesper's own file picker (no system picker needed, so it
+    // "Install plugin from .zip": opens PEK TV's own file picker (no system picker needed, so it
     // also works on TV boxes that have none). Phones and desktops can still reach the system
     // picker from the bottom of the list.
     // kind is 'plugin' (the default) or 'skin': the same picker serves both, and the zip is then
@@ -30,8 +30,8 @@ class MainAppPluginsMethods {
         if (kind === 'skin') { await this._checkSkinFile(file); return; }
         this.setState({ pluginInstall: { stage: 'checking' } });
         try {
-            const prep = await HesperPluginInstaller.prepare(file);
-            const verdict = await HesperPluginInstaller.check(prep);
+            const prep = await PekPluginInstaller.prepare(file);
+            const verdict = await PekPluginInstaller.check(prep);
             this.setState({ pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
         } catch (err) {
             this.setState({ pluginInstall: { stage: 'error', error: String((err && err.message) || err) } });
@@ -39,7 +39,7 @@ class MainAppPluginsMethods {
     }
 
     _pluginPickCanSystem() {
-        const a = window.HesperAndroid;
+        const a = window.PekAndroid;
         if (!a) return true;                                           // desktop browser
         return typeof a.canPickFiles === 'function' ? !!a.canPickFiles() : true;
     }
@@ -50,7 +50,7 @@ class MainAppPluginsMethods {
         this.closePluginPick();
         let file = null;
         try {
-            file = await HesperPluginInstaller.pickZip();
+            file = await PekPluginInstaller.pickZip();
         } catch (err) {
             ui.toast("Couldn't open the system file picker on this device.");
             return;
@@ -92,7 +92,7 @@ class MainAppPluginsMethods {
         this.setState({ pluginPick: Object.assign({}, pp, { loading: true, error: null }) });
         let file;
         try {
-            file = await HesperPluginInstaller.fetchZip(entry.path);
+            file = await PekPluginInstaller.fetchZip(entry.path);
         } catch (err) {
             const cur = this.state.pluginPick;
             if (cur) this.setState({ pluginPick: Object.assign({}, cur, { loading: false, error: String((err && err.message) || err) }) });
@@ -210,14 +210,14 @@ class MainAppPluginsMethods {
         if (!pi || pi.stage !== 'confirm') return;
         const { ui } = this.props.engine;
         this.setState({ pluginInstall: Object.assign({}, pi, { stage: 'installing' }) });
-        window.HesperActivity.begin('install', 'Installing ' + pi.prep.name + '\u2026');
+        window.PekActivity.begin('install', 'Installing ' + pi.prep.name + '\u2026');
         try {
-            await HesperPluginInstaller.install(pi.prep);
-            window.HesperActivity.end('install', 'Installed ' + pi.prep.name);
+            await PekPluginInstaller.install(pi.prep);
+            window.PekActivity.end('install', 'Installed ' + pi.prep.name);
             await this._reloadPlugins();
             this.setState({ pluginInstall: null });
             if (pi.prep.ui && pi.prep.ui.reloadOnInstall) {
-                // This plugin changes Hesper's own layout (it adds a tab), so the whole app reloads.
+                // This plugin changes PEK TV's own layout (it adds a tab), so the whole app reloads.
                 ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}. Reloading PEK TV\u2026`, 2500);
                 setTimeout(() => { try { location.reload(); } catch (e) { /* stay on this screen */ } }, 1200);
                 return;
@@ -225,7 +225,7 @@ class MainAppPluginsMethods {
             ui.toast(`${pi.replaced ? 'Updated' : 'Installed'} ${pi.prep.name}` +
                 (pi.prep.hasBackend ? '. Restart PEK TV to start its Python backend.' : ''), pi.prep.hasBackend ? 7000 : 3500);
         } catch (err) {
-            window.HesperActivity.end('install', 'Plugin install failed');
+            window.PekActivity.end('install', 'Plugin install failed');
             this.setState({ pluginInstall: { stage: 'error', error: String((err && err.message) || err) } });
         }
     }
@@ -237,7 +237,7 @@ class MainAppPluginsMethods {
     }
 
     askRemovePlugin(p) {
-        if (HesperPluginInstaller.isBuiltin(p.folder)) {
+        if (PekPluginInstaller.isBuiltin(p.folder)) {
             this.props.engine.ui.toast(`${p.app_name} is built in and can't be removed.`);
             return;
         }
@@ -257,7 +257,7 @@ class MainAppPluginsMethods {
         const { ui } = this.props.engine;
         this.setState({ pluginRemove: Object.assign({}, pr, { busy: true, error: '' }) });
         try {
-            await HesperPluginInstaller.remove(pr.folder);
+            await PekPluginInstaller.remove(pr.folder);
             await this._reloadPlugins();
             this.setState({ pluginRemove: null });
             if (pr.closeOnRemove) { this._requireAppClose(pr.name); return; }
@@ -335,7 +335,7 @@ class MainAppPluginsMethods {
         return ui.modal(`${pi.replaced ? 'Update' : 'Install'} \u201c${p.name}\u201d?`, body, close);
     }
 
-    // ---- "close Hesper" screen: shown after removing a plugin that changed the layout ----
+    // ---- "close PEK TV" screen: shown after removing a plugin that changed the layout ----
     // Kept in sessionStorage so a page reload does not dismiss it; it only goes away when the
     // app is really closed (the WebView and its sessionStorage are discarded).
     _readCloseFlag() {
@@ -381,4 +381,4 @@ class MainAppPluginsMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppPluginsMethods);
+pekMixin(MainApp, MainAppPluginsMethods);

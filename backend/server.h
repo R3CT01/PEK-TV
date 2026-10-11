@@ -7,7 +7,7 @@
 #include <functional>
 #include "media_scanner.h"
 
-class HesperServer {
+class PekServer {
 public:
     // Declare start with the plugin data provider callback parameter,
     // plus the MediaScanner backing /api/movies, /api/shows, and

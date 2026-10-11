@@ -1,7 +1,7 @@
 // SMB backend, built on libsmb2 (https://github.com/sahlberg/libsmb2).
-// Compiled only when HESPER_SMB is defined; vfs.cpp supplies "no SMB support"
+// Compiled only when PEK_SMB is defined; vfs.cpp supplies "no SMB support"
 // stand-ins otherwise. Everything that touches libsmb2 lives in this one file.
-#ifdef HESPER_SMB
+#ifdef PEK_SMB
 
 #include "vfs.h"
 #include "vfs_backends.h"
@@ -15,7 +15,7 @@
 extern "C" {
 #include <smb2/smb2.h>
 #include <smb2/libsmb2.h>
-#ifdef HESPER_SMB_SHARE_ENUM
+#ifdef PEK_SMB_SHARE_ENUM
 #include <smb2/libsmb2-dcerpc.h>
 #include <smb2/libsmb2-dcerpc-srvsvc.h>
 #endif
@@ -145,7 +145,7 @@ private:
     uint64_t size_ = 0;
 };
 
-#ifdef HESPER_SMB_SHARE_ENUM
+#ifdef PEK_SMB_SHARE_ENUM
 struct EnumState {
     bool done = false;
     int status = 0;
@@ -181,11 +181,11 @@ std::unique_ptr<Share> smbConnect(const Url& u, Error& err) {
 
 bool smbListShares(const Url& u, std::vector<std::string>& shares, Error& err) {
     const std::string& host = u.host;
-#ifdef HESPER_SMB_SHARE_ENUM
+#ifdef PEK_SMB_SHARE_ENUM
     smb2_context* ctx = openContext(host, "IPC$", err);
     if (!ctx) return false;
     EnumState st;
-#ifdef HESPER_SMB_ENUM_OLD_SIGNATURE
+#ifdef PEK_SMB_ENUM_OLD_SIGNATURE
     int rc = smb2_share_enum_async(ctx, shareEnumCb, &st);
 #else
     int rc = smb2_share_enum_async(ctx, SHARE_INFO_1, shareEnumCb, &st);
@@ -228,4 +228,4 @@ bool smbListShares(const Url& u, std::vector<std::string>& shares, Error& err) {
 
 } // namespace vfs
 
-#endif // HESPER_SMB
+#endif // PEK_SMB

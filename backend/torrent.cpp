@@ -70,7 +70,7 @@ void setDataDir(const std::string& dir) { g_dir = dir.empty() ? "." : dir; }
 
 }  // namespace torrent
 
-#ifndef HESPER_TORRENT
+#ifndef PEK_TORRENT
 // ------------------------------------------------------------------------------------------
 // Built without libtorrent: everything reports "not available".
 // ------------------------------------------------------------------------------------------
@@ -103,10 +103,10 @@ void warmUp() {}
 #include <libtorrent/magnet_uri.hpp>
 #if __has_include(<libtorrent/pwrite_disk_io.hpp>)
 #include <libtorrent/pwrite_disk_io.hpp>
-#define HESPER_PLAIN_DISK_IO lt::pwrite_disk_io_constructor
+#define PEK_PLAIN_DISK_IO lt::pwrite_disk_io_constructor
 #elif __has_include(<libtorrent/posix_disk_io.hpp>)
 #include <libtorrent/posix_disk_io.hpp>
-#define HESPER_PLAIN_DISK_IO lt::posix_disk_io_constructor
+#define PEK_PLAIN_DISK_IO lt::posix_disk_io_constructor
 #endif
 #include <libtorrent/session_params.hpp>
 #include <libtorrent/session.hpp>
@@ -286,7 +286,7 @@ void ensureSession() {   // g_mx held
     fs::create_directories(fs::path(g_dir) / "torrent_cache", ec);
 
     lt::settings_pack sp;
-    sp.set_str(lt::settings_pack::user_agent, "Hesper/1.0");
+    sp.set_str(lt::settings_pack::user_agent, "PEK/1.0");
     sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881,[::]:6881");
     // piece_progress: a finished piece wakes the reader at once instead of at its next poll.
     sp.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
@@ -304,10 +304,10 @@ void ensureSession() {   // g_mx held
     sp.set_bool(lt::settings_pack::enable_upnp, true);
     sp.set_bool(lt::settings_pack::enable_natpmp, true);
     lt::session_params params(sp);
-#ifdef HESPER_PLAIN_DISK_IO
+#ifdef PEK_PLAIN_DISK_IO
     // libtorrent 2.x memory-maps the files by default. On a 32-bit process (armeabi-v7a TVs / sticks) mapping
     // multi-GB video files runs out of address space; plain pread/pwrite does not have that problem.
-    if (sizeof(void*) == 4) params.disk_io_constructor = HESPER_PLAIN_DISK_IO;
+    if (sizeof(void*) == 4) params.disk_io_constructor = PEK_PLAIN_DISK_IO;
 #endif
     g_ses.reset(new lt::session(std::move(params)));
     g_stop = false;

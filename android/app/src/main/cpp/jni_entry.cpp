@@ -16,7 +16,7 @@ static MediaScanner* g_scanner = nullptr;
 static std::atomic<bool> g_started{false};
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) {
+Java_com_pektv_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) {
     if (g_started.exchange(true)) return;   // only start once per process
 
     // Tell OpenSSL where Android keeps its trusted HTTPS certificates,
@@ -41,11 +41,11 @@ Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot)
 
     g_scanner = new MediaScanner(root + "/sources.tsv", root + "/media_cache.tsv");
     g_scanner->loadFromDisk();
-    g_scanner->setShowResolver(HesperServer::resolveShowName);
+    g_scanner->setShowResolver(PekServer::resolveShowName);
     std::thread([]() { g_scanner->scan(); }).detach();
 
     std::thread([www, plugins, skins]() {
-        HesperServer::start(8080, www, plugins, skins,
+        PekServer::start(8080, www, plugins, skins,
             []() { return std::vector<std::string>(); },   // Python plugin list: later step
             g_scanner);
     }).detach();
@@ -54,7 +54,7 @@ Java_com_hesper_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot)
 // TEMPORARY DIAGNOSTIC: tries the TMDb proxy three ways and reports what
 // happened, so we can see why HTTPS fails. Remove once TMDb works.
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_hesper_app_NativeBridge_tlsDiag(JNIEnv* env, jclass) {
+Java_com_pektv_app_NativeBridge_tlsDiag(JNIEnv* env, jclass) {
     auto probe = [](int mode) -> std::string {
         httplib::Client cli("https://hesper-tmdb.aquariusibeats.workers.dev");
         cli.set_connection_timeout(8);

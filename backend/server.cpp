@@ -28,9 +28,9 @@ namespace {
 
 // ---- Network exposure ------------------------------------------------------
 // By default the server only answers this device (127.0.0.1). Other devices on the
-// network can use it only if HESPER_BIND is set to an address such as 0.0.0.0, and
+// network can use it only if PEK_BIND is set to an address such as 0.0.0.0, and
 // then every request from another machine must carry a secret token
-// (HESPER_TOKEN, or one generated and printed at startup).
+// (PEK_TOKEN, or one generated and printed at startup).
 
 bool isLoopbackAddr(const std::string& a) {
     return a == "127.0.0.1" || a == "::1" || a == "::ffff:127.0.0.1" || a.rfind("127.", 0) == 0;
@@ -243,7 +243,7 @@ static void applyTls(httplib::Client& c) {
 static void applyTls(httplib::Client&) {}
 #endif
 
-std::string HesperServer::resolveShowName(const std::string& guess) {
+std::string PekServer::resolveShowName(const std::string& guess) {
     if (guess.empty()) return "";
 
     httplib::Client client(tmdbProxyUrl());
@@ -269,21 +269,23 @@ std::string HesperServer::resolveShowName(const std::string& guess) {
     return name;
 }
 
-void HesperServer::start(int port, const std::string& www_dir, const std::string& plugins_dir,
+void PekServer::start(int port, const std::string& www_dir, const std::string& plugins_dir,
                            const std::string& skins_dir,
                            std::function<std::vector<std::string>()> get_plugins,
                            MediaScanner* scanner) {
     httplib::Server svr;
 
     // ---- Who may talk to this server -------------------------------------
-    const char* bindEnv = std::getenv("HESPER_BIND");
+    const char* bindEnv = std::getenv("PEK_BIND");
+    if (!bindEnv || !*bindEnv) bindEnv = std::getenv("HESPER_BIND");   // old name, still honoured
     const std::string bindAddr = (bindEnv && *bindEnv) ? bindEnv : "127.0.0.1";
     const bool remoteOpen = !isLoopbackAddr(bindAddr);
     std::string token;
     if (remoteOpen) {
-        const char* t = std::getenv("HESPER_TOKEN");
+        const char* t = std::getenv("PEK_TOKEN");
+        if (!t || !*t) t = std::getenv("HESPER_TOKEN");   // old name, still honoured
         token = (t && *t) ? t : makeRandomToken();
-        std::cout << "[Hesper Server] REMOTE ACCESS IS ON (" << bindAddr << "). Other devices must open "
+        std::cout << "[PEK Server] REMOTE ACCESS IS ON (" << bindAddr << "). Other devices must open "
                   << "http://<this-device-ip>:" << port << "/?token=" << token << std::endl;
     }
 
@@ -347,7 +349,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     // 1b. Serve your JavaScript UI frontend files from the www folder
     auto ret = svr.set_mount_point("/", www_dir);
     if (!ret) {
-        std::cout << "[Hesper Server Warning] Directory '" << www_dir << "' not found. Running API only." << std::endl;
+        std::cout << "[PEK Server Warning] Directory '" << www_dir << "' not found. Running API only." << std::endl;
     }
 
     // 2. Create the JSON API endpoint that feeds live data to your JS frontend framework
@@ -444,8 +446,8 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
 
     // 3b. Install / remove a plugin. The web UI unpacks the .zip itself and sends each
     //     file as a "path" text field + a "file" part (same order). All checking and
-    //     writing is done by hesper_plugins:: (plugin_install.h). "dry=1" only checks.
-    auto outcomeJson = [](const hesper_plugins::Outcome& o) {
+    //     writing is done by pek_plugins:: (plugin_install.h). "dry=1" only checks.
+    auto outcomeJson = [](const pek_plugins::Outcome& o) {
         std::string err;
         for (unsigned char c : o.error) err += (c < 0x20 ? '?' : static_cast<char>(c));
         return std::string("{\"ok\": ") + (o.ok ? "true" : "false") +
@@ -461,44 +463,44 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         const bool dry = req.form.get_field("dry") == "1";
         const auto paths = req.form.get_fields("path");
         const auto parts = req.form.get_files("file");
-        hesper_plugins::Outcome out;
+        pek_plugins::Outcome out;
         out.id = id;
         if (paths.size() != parts.size()) {
             out.error = "the upload was incomplete";
         } else {
-            std::vector<hesper_plugins::InFile> files;
+            std::vector<pek_plugins::InFile> files;
             files.reserve(parts.size());
             for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
-            out = hesper_plugins::install(plugins_dir, id, files, dry);
+            out = pek_plugins::install(plugins_dir, id, files, dry);
         }
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
     });
 
     // 3b-1. Install / remove a skin. Same upload shape as a plugin; all checking and writing
-    //       is done by hesper_skins:: (skin_install.h). A plugin zip is refused here and a skin
+    //       is done by pek_skins:: (skin_install.h). A plugin zip is refused here and a skin
     //       zip is refused by the plugin installer.
     svr.Post("/api/skins/install", [skins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.form.get_field("id");
         const bool dry = req.form.get_field("dry") == "1";
         const auto paths = req.form.get_fields("path");
         const auto parts = req.form.get_files("file");
-        hesper_plugins::Outcome out;
+        pek_plugins::Outcome out;
         out.id = id;
         if (paths.size() != parts.size()) {
             out.error = "the upload was incomplete";
         } else {
-            std::vector<hesper_plugins::InFile> files;
+            std::vector<pek_plugins::InFile> files;
             files.reserve(parts.size());
             for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
-            out = hesper_skins::install(skins_dir, id, files, dry);
+            out = pek_skins::install(skins_dir, id, files, dry);
         }
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
     });
 
     svr.Post("/api/skins/uninstall", [skins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
-        const hesper_plugins::Outcome out = hesper_skins::uninstall(skins_dir, req.form.get_field("id"));
+        const pek_plugins::Outcome out = pek_skins::uninstall(skins_dir, req.form.get_field("id"));
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
     });
@@ -507,9 +509,9 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     //       back plugins up to Hesper Cloud. plugin_install.h only lets through plain allowed files
     //       (never data/, hidden files or built-in plugins).
     svr.Get("/api/plugins/files", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
-        std::vector<hesper_plugins::ListedFile> files;
+        std::vector<pek_plugins::ListedFile> files;
         const std::string id = req.get_param_value("id");
-        if (!hesper_plugins::listFiles(plugins_dir, id, files)) {
+        if (!pek_plugins::listFiles(plugins_dir, id, files)) {
             res.status = 404;
             res.set_content("{\"ok\": false, \"error\": \"not installed\"}", "application/json");
             return;
@@ -526,7 +528,7 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
 
     svr.Get("/api/plugins/file", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
         std::string data;
-        if (!hesper_plugins::readFile(plugins_dir, req.get_param_value("id"), req.get_param_value("path"), data)) {
+        if (!pek_plugins::readFile(plugins_dir, req.get_param_value("id"), req.get_param_value("path"), data)) {
             res.status = 404;
             res.set_content("{\"ok\": false, \"error\": \"not found\"}", "application/json");
             return;
@@ -535,12 +537,12 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
     });
 
     svr.Post("/api/plugins/uninstall", [plugins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
-        const hesper_plugins::Outcome out = hesper_plugins::uninstall(plugins_dir, req.form.get_field("id"));
+        const pek_plugins::Outcome out = pek_plugins::uninstall(plugins_dir, req.form.get_field("id"));
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");
     });
 
-    // 3c. In-app file picker for plugin .zip files. Hesper draws its own picker because TV
+    // 3c. In-app file picker for plugin .zip files. PEK draws its own picker because TV
     //     boxes have no system one. These two routes can only (1) list folders and .zip files
     //     and (2) read ONE .zip of at most 8 MB, on this device or on a network share
     //     (smb://, nfs://, ftp://, dav://). Nothing else can be read through them.
@@ -1275,6 +1277,6 @@ void HesperServer::start(int port, const std::string& www_dir, const std::string
         res.set_content(json, "application/json");
     });
 
-    std::cout << "[Hesper Server] Web UI & API online at http://" << (remoteOpen ? bindAddr : std::string("127.0.0.1")) << ":" << port << std::endl;
+    std::cout << "[PEK Server] Web UI & API online at http://" << (remoteOpen ? bindAddr : std::string("127.0.0.1")) << ":" << port << std::endl;
     svr.listen(bindAddr, port);
 }

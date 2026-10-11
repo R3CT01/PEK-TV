@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper: tiny .zip reader (used by the plugin installer).
+// PEK TV: tiny .zip reader (used by the plugin installer).
 // Reads stored and deflated files, checks each file's CRC and enforces size limits
 // while unpacking (so a "zip bomb" can't use up memory). Uses the browser's built-in
 // DecompressionStream when it exists, otherwise a small inflate written here, so it
@@ -7,7 +7,7 @@
 // Not supported (and reported as an error): ZIP64, encrypted zips, multi-disk zips.
 // ============================================================
 
-const HesperZip = (() => {
+const PekZip = (() => {
 
     // ---------------- inflate (RFC 1951), after zlib's "puff" ----------------
     const LBASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
@@ -277,4 +277,4 @@ const HesperZip = (() => {
     return { read, inflateRaw, crc32 };
 })();
 
-if (typeof module !== 'undefined' && module.exports) module.exports = HesperZip;
+if (typeof module !== 'undefined' && module.exports) module.exports = PekZip;

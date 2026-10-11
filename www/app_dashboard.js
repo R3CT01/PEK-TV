@@ -114,9 +114,9 @@ class MainAppDashboardMethods {
     _dashWeatherInfo() {
         const get = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
         const parse = (k) => { try { return JSON.parse(get(k) || 'null'); } catch (e) { return null; } };
-        const coords = parse('hesper_weather_coords');
-        const city = (coords && coords.label) || get('hesper_weather_city') || '';
-        const last = parse('hesper_weather_last');
+        const coords = parse('pek_weather_coords');
+        const city = (coords && coords.label) || get('pek_weather_city') || '';
+        const last = parse('pek_weather_last');
         return { city, condition: (last && last.city === city && last.condition) || '', temp: this.state.weatherText };
     }
 
@@ -207,12 +207,12 @@ class MainAppDashboardMethods {
         }
 
         if (w.type === 'favorites') {
-            const favs = (window.HesperFavorites ? window.HesperFavorites.list() : []).slice(0, DASH_ROW_MAX);
+            const favs = (window.PekFavorites ? window.PekFavorites.list() : []).slice(0, DASH_ROW_MAX);
             if (!favs.length) return null;
             return this._dashRow('Favorites', favs.map(f => ui.posterCard(
                 f.title,
                 [f.year || '', f.type === 'tv' ? 'TV' : 'Movie'].filter(Boolean).join(' \u00b7 '),
-                window.HesperFavorites.posterUrl(f),
+                window.PekFavorites.posterUrl(f),
                 () => this.openFavorite(f))));
         }
         return null;
@@ -281,4 +281,4 @@ class MainAppDashboardMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppDashboardMethods);
+pekMixin(MainApp, MainAppDashboardMethods);

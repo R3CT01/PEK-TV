@@ -5,10 +5,10 @@
 #include <string>
 #include <vector>
 
-// Torrent streaming for Hesper.
+// Torrent streaming for PEK.
 //
 // The engine (libtorrent) is OPTIONAL at build time: compile torrent.cpp with
-// -DHESPER_TORRENT and link libtorrent-rasterbar to get it. Without that define every
+// -DPEK_TORRENT and link libtorrent-rasterbar to get it. Without that define every
 // call below still exists and reports "not available", so the rest of the app builds the
 // same either way (same idea as SMB / NFS).
 //

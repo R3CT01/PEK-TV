@@ -2,7 +2,7 @@
 // MainApp: Torrent settings
 // Loaded after app.js. These methods are added to MainApp.prototype.
 //
-// Hesper has no built-in torrent search site. You give it the address of your own Torznab
+// PEK TV has no built-in torrent search site. You give it the address of your own Torznab
 // provider (Jackett, Prowlarr, ...) here; plugins with the "torrent" permission then search
 // and stream through it without ever seeing the address or key.
 // ============================================================
@@ -28,7 +28,7 @@ class MainAppTorrentMethods {
         this._tProvKey = '';
         this.setState({ torrentModal: { stage: 'settings', loading: true, error: '', note: '' } });
         try {
-            const [info, cfg] = await Promise.all([window.HesperTorrent.info(), window.HesperTorrent.getSettings()]);
+            const [info, cfg] = await Promise.all([window.PekTorrent.info(), window.PekTorrent.getSettings()]);
             this._tProvUrl = cfg.url || '';
             this.setState({ torrentModal: { stage: 'settings', loading: false, error: '', note: '', info, hasKey: cfg.hasKey } });
         } catch (e) {
@@ -39,9 +39,9 @@ class MainAppTorrentMethods {
     async saveTorrentSettings() {
         const m = this.state.torrentModal || {};
         try {
-            await window.HesperTorrent.saveSettings((this._tProvUrl || '').trim(), (this._tProvKey || '').trim());
+            await window.PekTorrent.saveSettings((this._tProvUrl || '').trim(), (this._tProvKey || '').trim());
             this._tProvKey = '';
-            const cfg = await window.HesperTorrent.getSettings();
+            const cfg = await window.PekTorrent.getSettings();
             this.setState({ torrentModal: { ...m, error: '', note: cfg.url ? 'Saved.' : 'Provider removed.', hasKey: cfg.hasKey } });
         } catch (e) {
             this.setState({ torrentModal: { ...m, error: e.message, note: '' } });
@@ -52,7 +52,7 @@ class MainAppTorrentMethods {
         const m = this.state.torrentModal || {};
         this.setState({ torrentModal: { ...m, error: '', note: 'Testing\u2026' } });
         try {
-            const r = await window.HesperTorrent.search({ kind: 'movie', title: 'Sintel', year: 2010 });
+            const r = await window.PekTorrent.search({ kind: 'movie', title: 'Sintel', year: 2010 });
             this.setState({ torrentModal: { ...m, error: '', note: `The provider answered (${r.length} matching release${r.length === 1 ? '' : 's'} for a test search).` } });
         } catch (e) {
             this.setState({ torrentModal: { ...m, error: e.message, note: '' } });
@@ -67,7 +67,7 @@ class MainAppTorrentMethods {
         }
         this.setState({ torrentModal: null });
         try {
-            await window.HesperTorrent.open({ source: link, title: 'Magnet link' });
+            await window.PekTorrent.open({ source: link, title: 'Magnet link' });
         } catch (e) {
             if (e.message !== 'Cancelled') this.props.engine.ui.toast(e.message, 6000);
         }
@@ -112,4 +112,4 @@ class MainAppTorrentMethods {
     }
 }
 
-hesperMixin(MainApp, MainAppTorrentMethods);
+pekMixin(MainApp, MainAppTorrentMethods);

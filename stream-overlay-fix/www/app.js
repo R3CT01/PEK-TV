@@ -5,7 +5,7 @@
 // Constants and helpers are in app_config.js; ThemePanel is in theme_panel.js.
 // ============================================================
 
-class MainApp extends HesperComponent {
+class MainApp extends PekComponent {
     constructor(props) {
         super(props);
         this.state = {
@@ -19,7 +19,7 @@ class MainApp extends HesperComponent {
             skinInstall: null,    // skin install screen: null = closed, else { stage: checking|confirm|installing|error, ... }
             skinRemove: null,     // remove-skin confirmation: null = closed, else { id, name, busy, error }
             appClose: this._readCloseFlag(),   // set after removing a plugin that changed the layout; blocks the app until PEK is closed
-            favorites: window.HesperFavorites ? window.HesperFavorites.list() : [],   // the shared Favorites list (favorites.js)
+            favorites: window.PekFavorites ? window.PekFavorites.list() : [],   // the shared Favorites list (favorites.js)
             favFilter: 'all',     // Favorites tab: 'all' | 'movie' | 'tv'
             favRemove: null,      // remove-from-favorites confirmation: null = closed, else { key, title }
             sources: [],
@@ -29,9 +29,9 @@ class MainApp extends HesperComponent {
             showNav: { show: null, season: null },   // TV Shows drill-down: null/null = show folders, show only = seasons, both = episodes
             skins: [],            // [{ id, name, author, version, description, tokens }]
             activeSkin: (() => { try { return localStorage.getItem(SKIN_KEY) || 'default'; } catch (e) { return 'default'; } })(),
-            layout: hesperReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
-            posterSize: hesperReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id)),
-            viewMode: hesperReadPref(VIEW_MODE_KEY, 'grid', ['grid', 'list']),   // Movies / TV Shows: poster grid or text list
+            layout: pekReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id)),
+            posterSize: pekReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id)),
+            viewMode: pekReadPref(VIEW_MODE_KEY, 'grid', ['grid', 'list']),   // Movies / TV Shows: poster grid or text list
             refreshCooldown: 0,   // seconds left before another refresh is allowed
             refreshing: false,    // true while the server is rescanning
             busy: '',             // text for the full-screen loading ring ('' = hidden)
@@ -51,9 +51,9 @@ class MainApp extends HesperComponent {
 
     componentDidMount() {
         const { engine } = this.props;
-        window.HesperActivity.begin('plugins', 'Loading plugins\u2026', true);
+        window.PekActivity.begin('plugins', 'Loading plugins\u2026', true);
         engine.plugins.discover().then(plugins => {
-            window.HesperActivity.end('plugins', 'Loaded ' + plugins.length + ' plugins');
+            window.PekActivity.end('plugins', 'Loaded ' + plugins.length + ' plugins');
             this.setState({ pluginsList: plugins });
             this._warmWeatherPlugin(plugins);
         });
@@ -71,14 +71,14 @@ class MainApp extends HesperComponent {
 
         // A plugin added or removed a favorite. Only repaint when the Favorites tab is showing;
         // otherwise just keep the list current so repainting the shell never disturbs an open plugin.
-        document.addEventListener('hesper-favorites', () => {
-            const list = window.HesperFavorites.list();
+        document.addEventListener('pek-favorites', () => {
+            const list = window.PekFavorites.list();
             if (this.state.activeTab === 'favorites') this.setState({ favorites: list });
             else this.state.favorites = list;
         });
 
         // Android's answer to a storage permission prompt (the one at first start has no one waiting for it).
-        window.__hesperStorageAny = (granted) => this._onStorageAnswer(granted);
+        window.__pekStorageAny = (granted) => this._onStorageAnswer(granted);
 
         this.loadSources();
         this.loadSkins();
@@ -104,7 +104,7 @@ class MainApp extends HesperComponent {
         }
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
-        if (id === 'favorites' && window.HesperFavorites) this.state.favorites = window.HesperFavorites.list();
+        if (id === 'favorites' && window.PekFavorites) this.state.favorites = window.PekFavorites.list();
         this.setState({ activeTab: id, showNav, moreOpen: false });
         this.loadLibrary(id);
         if (id === 'resume') this._queueResumeArt();
@@ -133,7 +133,7 @@ class MainApp extends HesperComponent {
         const { engine } = this.props;
         if (this.state.appClose) return true;   // the "close PEK" screen cannot be dismissed
         // a stream is starting: Back cancels it and nothing behind the box moves
-        if (window.HesperTorrent && window.HesperTorrent.cancelStarting && window.HesperTorrent.cancelStarting()) return true;
+        if (window.PekTorrent && window.PekTorrent.cancelStarting && window.PekTorrent.cancelStarting()) return true;
         // while minimized the player is just a bar; Back belongs to the app
         if (this._player && !this._player.mini) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
@@ -221,8 +221,8 @@ class MainApp extends HesperComponent {
                     createElement('p', { className: 'sub' }, 'A small status line in the corner that says what PEK is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
                     createElement('div', { className: 'section-actions' },
                         ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
-                            this._choiceButton(label, window.HesperActivity.get() === id,
-                                () => { window.HesperActivity.set(id); this.setState({}); }))
+                            this._choiceButton(label, window.PekActivity.get() === id,
+                                () => { window.PekActivity.set(id); this.setState({}); }))
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -230,8 +230,8 @@ class MainApp extends HesperComponent {
                     createElement('p', { className: 'sub' }, 'A soft tick when you move around with the D-pad, remote or arrow keys, and a different chime when you press OK.'),
                     createElement('div', { className: 'section-actions' },
                         ...[['off', 'Off'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']].map(([id, label]) =>
-                            this._choiceButton(label, window.HesperNavSound && window.HesperNavSound.get() === id,
-                                () => { window.HesperNavSound.set(id); this.setState({}); }))
+                            this._choiceButton(label, window.PekNavSound && window.PekNavSound.get() === id,
+                                () => { window.PekNavSound.set(id); this.setState({}); }))
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -243,7 +243,7 @@ class MainApp extends HesperComponent {
                             [s.version ? `v${s.version}` : '', s.author ? `by ${s.author}` : '', s.description || ''].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
                             () => this.applySkin(s.id),
                             Object.assign({ statusDot: s.id === this.state.activeSkin },
-                                HesperSkinInstaller.isBuiltin(s.id) ? {} : { onLongPress: () => this.askRemoveSkin(s) })
+                                PekSkinInstaller.isBuiltin(s.id) ? {} : { onLongPress: () => this.askRemoveSkin(s) })
                         ))
                     ),
                     createElement('div', { className: 'section-actions' },
@@ -260,9 +260,9 @@ class MainApp extends HesperComponent {
             );
         } else if (activeTab === 'plugins') {
             // Built-in plugins can't be removed; installed ones can (hold the row).
-            const removable = (p) => !HesperPluginInstaller.isBuiltin(p.folder);
+            const removable = (p) => !PekPluginInstaller.isBuiltin(p.folder);
             const row = (p) => {
-                const official = HesperPluginInstaller.isOfficial(p.folder);
+                const official = PekPluginInstaller.isOfficial(p.folder);
                 const note = official
                     ? (p.sandboxed ? 'official' : 'official \u00b7 full access')
                     : 'third party \u00b7 sandboxed \u00b7 hold to remove';
@@ -274,8 +274,8 @@ class MainApp extends HesperComponent {
                 );
             };
             // Official plugins first, then a separator, then third-party ones.
-            const officialPlugins = pluginsList.filter(p => HesperPluginInstaller.isOfficial(p.folder));
-            const thirdParty = pluginsList.filter(p => !HesperPluginInstaller.isOfficial(p.folder));
+            const officialPlugins = pluginsList.filter(p => PekPluginInstaller.isOfficial(p.folder));
+            const thirdParty = pluginsList.filter(p => !PekPluginInstaller.isOfficial(p.folder));
             const label = (text, sep) => createElement('div', { className: 'plugin-group-label' + (sep ? ' plugin-group-sep' : '') }, text);
             const pluginRows = [];
             if (officialPlugins.length) {
@@ -325,7 +325,7 @@ class MainApp extends HesperComponent {
         }).render() : null;
 
         const isPhone = window.matchMedia(PHONE_MQ).matches;
-        const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
+        const sidebar = isPhone ? null : createElement('div', { className: 'pek-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'PEK'),
                 createElement('div', { className: 'sidebar-nav' }, ...navElements),
                 createElement('div', { className: 'sidebar-footer' },
@@ -350,7 +350,7 @@ class MainApp extends HesperComponent {
                         onClick: () => this.selectTab(item.id)
                     }, item.label)))
             ] : [null, null];
-            bottomBar = createElement('div', { className: 'hesper-bottombar' },
+            bottomBar = createElement('div', { className: 'pek-bottombar' },
                 ...navItems.filter(i => PHONE_PRIMARY_TABS.includes(i.id)).map(tabBtn),
                 createElement('button', {
                     className: `bb-item focusable ${moreActive || this.state.moreOpen ? 'active' : ''}`,
@@ -360,11 +360,11 @@ class MainApp extends HesperComponent {
             );
         }
 
-        const contentPane = createElement('div', { className: 'hesper-content' }, mainContent);
+        const contentPane = createElement('div', { className: 'pek-content' }, mainContent);
         // New tab or drill-down level => new key => starts at the top; same screen => keeps its place.
         contentPane.dataset.keepScroll = `content:${activeTab}:${this.state.showNav.show}:${this.state.showNav.season}`;
 
-        return createElement('div', { className: 'hesper-shell' },
+        return createElement('div', { className: 'pek-shell' },
             sidebar,
             contentPane,
             bottomBar,
@@ -395,10 +395,10 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    const engine = new HesperEngine(appRoot);
+    const engine = new PekEngine(appRoot);
     const app = new MainApp({ engine });
     // What sandboxed plugins (via plugin_sandbox.js) are allowed to ask the app to do.
-    window.HesperHost = {
+    window.PekHost = {
         playStream: (url, title, onClose, track) => app.playStream(url, title, onClose, track),
         // Plugins that can play titles, and "open this plugin on this title" (plugin_sandbox.js checks permissions and taps first).
         streamers: (exceptFolder) => app._streamPlugins(exceptFolder),
@@ -436,11 +436,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // "Back" fires popstate instead of leaving. If the app has something to close
     // we close it and re-arm the guard; otherwise we let Back leave as normal.
     try {
-        const marker = history.state && history.state.hesper;
-        if (!marker) history.replaceState({ hesper: 'root' }, '');
-        if (marker !== 'guard') history.pushState({ hesper: 'guard' }, '');
+        const marker = history.state && history.state.pek;
+        if (!marker) history.replaceState({ pek: 'root' }, '');
+        if (marker !== 'guard') history.pushState({ pek: 'guard' }, '');
         window.addEventListener('popstate', () => {
-            if (app.goBack()) history.pushState({ hesper: 'guard' }, '');
+            if (app.goBack()) history.pushState({ pek: 'guard' }, '');
             else history.back();
         });
     } catch (err) {

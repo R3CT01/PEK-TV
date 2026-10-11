@@ -1,9 +1,9 @@
 // Tells the rest of the app when a player starts / stops, so a plugin page can stop its trailer.
-function hesperAnnouncePlayer(active) {
+function pekAnnouncePlayer(active) {
     try {
         let ev;
-        if (typeof CustomEvent === 'function') ev = new CustomEvent('hesper-player', { detail: { active: !!active } });
-        else { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('hesper-player', false, false, { active: !!active }); }
+        if (typeof CustomEvent === 'function') ev = new CustomEvent('pek-player', { detail: { active: !!active } });
+        else { ev = document.createEvent('CustomEvent'); ev.initCustomEvent('pek-player', false, false, { active: !!active }); }
         document.dispatchEvent(ev);
     } catch (e) { /* the page just keeps its trailer */ }
 }
@@ -17,7 +17,7 @@ function hesperAnnouncePlayer(active) {
      - HtmlVideoBackend (below)   <video> element, used by the web/dev build
      - an mpv backend             to come: Android (libmpv) and desktop
 
-   Backend contract (extend HesperPlayerBackend):
+   Backend contract (extend PekPlayerBackend):
      load(url, startSec)  play()  pause()  seek(sec)          seek = absolute seconds
      setAudioTrack(id)    setSubtitleTrack(id | null)         null = subtitles off
      destroy()
@@ -40,7 +40,7 @@ function hesperAnnouncePlayer(active) {
 (function () {
     'use strict';
 
-    const STYLE_ID = 'hesper-player-style';
+    const STYLE_ID = 'pek-player-style';
     const CSS = `
 .hp-root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20000; overflow: hidden;
     background: #000; color: #f6f2ec; color: var(--hp-fg, #f6f2ec);
@@ -266,7 +266,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 .hp-mini-btn:active { background: rgba(127, 127, 127, 0.25); background: var(--sx-surface-focused, rgba(127, 127, 127, 0.25)); }
 html.hp-mini-on, html.hp-mini-on body { background: transparent !important; }
 html.hp-mini-on body { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
-html.hp-mini-on .hesper-shell { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
+html.hp-mini-on .pek-shell { height: calc(100vh - var(--hp-mini-h)); height: calc(100dvh - var(--hp-mini-h)); }
 html.hp-mini-on::before { content: ''; position: fixed; left: 0; right: 0; top: 0; bottom: var(--hp-mini-h);
     background: #090d16; background: var(--sx-bg, #090d16); z-index: -1; }
 html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: var(--hp-mini-h); }
@@ -321,7 +321,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
     // TV / box = running inside the Android app but not on a phone. Used to switch to the lighter look.
     function isLiteDevice() {
         try {
-            const a = window.HesperAndroid;
+            const a = window.PekAndroid;
             if (!a) return false;
             if (typeof a.isPhone === 'function') return !a.isPhone();
             return typeof a.mpvLoad === 'function';
@@ -461,13 +461,13 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
 
     // ---------------- backends ----------------
 
-    class HesperPlayerBackend {
+    class PekPlayerBackend {
         constructor() { this._handlers = {}; }
         on(ev, fn) { (this._handlers[ev] = this._handlers[ev] || []).push(fn); return this; }
         emit(ev, data) {
             const list = this._handlers[ev];
             if (!list) return;
-            list.slice().forEach(fn => { try { fn(data); } catch (e) { console.error('[HesperPlayer]', e); } });
+            list.slice().forEach(fn => { try { fn(data); } catch (e) { console.error('[PekPlayer]', e); } });
         }
         get drawsBehindPage() { return false; }
         get supportsMini() { return false; }
@@ -482,7 +482,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
     }
 
     // Plays through a <video> element: the web/dev build, and a stand-in for testing.
-    class HtmlVideoBackend extends HesperPlayerBackend {
+    class HtmlVideoBackend extends PekPlayerBackend {
         constructor() {
             super();
             const v = document.createElement('video');
@@ -537,49 +537,49 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
     }
 
     // Android: libmpv draws on a native surface behind the page (see MpvController.kt).
-    // This class only forwards the controls above to the app's HesperAndroid bridge and
+    // This class only forwards the controls above to the app's PekAndroid bridge and
     // turns the native events back into the contract events.
-    class MpvBackend extends HesperPlayerBackend {
+    class MpvBackend extends PekPlayerBackend {
         constructor(opts) {
             super();
             opts = opts || {};
             this.title = opts.title || '';
             this.theme = opts.theme || '';
             this._cb = (ev, data) => this.emit(ev, data);
-            window.__hesperMpv = this._cb;
+            window.__pekMpv = this._cb;
         }
         // Phone = not a TV / leanback box and has a touchscreen (decided natively).
         static isPhone() {
-            try { return !!(window.HesperAndroid && typeof window.HesperAndroid.isPhone === 'function' && window.HesperAndroid.isPhone()); }
+            try { return !!(window.PekAndroid && typeof window.PekAndroid.isPhone === 'function' && window.PekAndroid.isPhone()); }
             catch (e) { return false; }
         }
         static available() {
-            return !!(window.HesperAndroid && typeof window.HesperAndroid.mpvLoad === 'function');
+            return !!(window.PekAndroid && typeof window.PekAndroid.mpvLoad === 'function');
         }
         get drawsBehindPage() { return true; }
-        get supportsMini() { return MpvBackend.isPhone() && typeof window.HesperAndroid.mpvSetRect === 'function'; }
+        get supportsMini() { return MpvBackend.isPhone() && typeof window.PekAndroid.mpvSetRect === 'function'; }
         setMiniRect(r) {
-            if (r) window.HesperAndroid.mpvSetRect(r.left, r.top, r.width, r.height);
-            else window.HesperAndroid.mpvFullscreen();
+            if (r) window.PekAndroid.mpvSetRect(r.left, r.top, r.width, r.height);
+            else window.PekAndroid.mpvFullscreen();
         }
         attach() { document.documentElement.classList.add('hp-mpv'); }
-        load(url, startSec) { window.HesperAndroid.mpvLoad(url, startSec || 0, this.title, this.theme); }
-        play() { window.HesperAndroid.mpvPlay(); }
-        pause() { window.HesperAndroid.mpvPause(); }
-        seek(sec) { window.HesperAndroid.mpvSeek(sec); }
-        setAudioTrack(id) { window.HesperAndroid.mpvSetAudio(id); }
-        setSubtitleTrack(id) { window.HesperAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
+        load(url, startSec) { window.PekAndroid.mpvLoad(url, startSec || 0, this.title, this.theme); }
+        play() { window.PekAndroid.mpvPlay(); }
+        pause() { window.PekAndroid.mpvPause(); }
+        seek(sec) { window.PekAndroid.mpvSeek(sec); }
+        setAudioTrack(id) { window.PekAndroid.mpvSetAudio(id); }
+        setSubtitleTrack(id) { window.PekAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
         destroy() {
-            try { window.HesperAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
+            try { window.PekAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
             // only clear the hook if it is still ours (a newer player may already own it)
-            if (window.__hesperMpv === this._cb) window.__hesperMpv = null;
+            if (window.__pekMpv === this._cb) window.__pekMpv = null;
             document.documentElement.classList.remove('hp-mpv');
         }
     }
 
     // ---------------- the controls ----------------
 
-    class HesperPlayer {
+    class PekPlayer {
         constructor(opts) {
             this.title = opts.title || '';
             this.backend = opts.backend;
@@ -605,14 +605,14 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this._streamFlight = false;
             this.mini = false;             // true while shrunk into the docked mini player
             // Skip intro / recap (skip_segments.js). opts.skipMeta = what is playing ({kind, showTitle, season, ...}).
-            this.skip = window.HesperSkip ? new window.HesperSkip.Controller(this, opts.skipMeta || null) : null;
+            this.skip = window.PekSkip ? new window.PekSkip.Controller(this, opts.skipMeta || null) : null;
             // Up next (next_episode.js): opts.next = { resolve, start } from the app, or none.
-            this.next = window.HesperNext && opts.next ? new window.HesperNext.Controller(this, opts.next) : null;
+            this.next = window.PekNext && opts.next ? new window.PekNext.Controller(this, opts.next) : null;
             this.miniSupported = opts.allowMini !== false && !!this.backend.supportsMini;
         }
 
         open(url, startSec) {
-            hesperAnnouncePlayer(true);
+            pekAnnouncePlayer(true);
             injectStyle();
             this._build();
             applyPlayerTheme(this.root);
@@ -681,7 +681,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this._leaveMiniLayout();
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
             if (this.root && this.root.parentNode) this.root.parentNode.removeChild(this.root);
-            hesperAnnouncePlayer(false);
+            pekAnnouncePlayer(false);
             this.onClose();
         }
 
@@ -793,7 +793,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (!force && !(this.state.position > 0)) return;
             this._lastProgress = now;
             try { this.onProgress(this.state.position, this.state.duration); }
-            catch (e) { console.error('[HesperPlayer] onProgress', e); }
+            catch (e) { console.error('[PekPlayer] onProgress', e); }
         }
 
         // The app's Back handler calls this while the player is open.
@@ -1305,7 +1305,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (!m) return;
             const item = m.items[m.index];
             if (m.kind === 'skip') {                 // an action: do it, then show the menu again with the new state
-                try { item.action(); } catch (e) { console.error('[HesperPlayer]', e); }
+                try { item.action(); } catch (e) { console.error('[PekPlayer]', e); }
                 m.items = this.skip.menuItems();
                 m.index = Math.min(m.index, m.items.length - 1);
                 this._renderMenu();
@@ -1392,9 +1392,9 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
         }
     }
 
-    window.HesperPlayerBackend = HesperPlayerBackend;
+    window.PekPlayerBackend = PekPlayerBackend;
     window.HtmlVideoBackend = HtmlVideoBackend;
     window.MpvBackend = MpvBackend;
-    window.HesperPlayer = HesperPlayer;
-    window.HesperPlayerUtil = { fmtTime: fmtTime, normKey: normKey };
+    window.PekPlayer = PekPlayer;
+    window.PekPlayerUtil = { fmtTime: fmtTime, normKey: normKey };
 })();
