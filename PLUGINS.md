@@ -170,3 +170,23 @@ pek.onNextEpisode(function (req) {
 
 Needs the `torrent` permission to play anything. A plugin that does not call `onNextEpisode` simply gets no card. Answers are
 size-limited by PEK (name 120 characters) and a plugin that does not answer within a minute counts as "no".
+
+
+## Publishing your plugin on GitHub (for developers)
+
+Users can install a plugin straight from a public GitHub repository: **Settings -> Plugins -> Install from GitHub**,
+then type `owner/repo` (a pasted github.com link works too). PEK TV keeps no list of repositories, so there is
+nothing to submit anywhere. To make yours installable:
+
+1. Put `plugin.json` and `ui.js` at the top of your plugin's zip, or inside one folder (same rules as a .zip install).
+2. Make a **GitHub Release** and attach the zip as a release file (an `.zip` asset up to 8 MB). PEK TV installs the
+   *latest* release. With no .zip file attached it can offer the release's source code instead, but then the
+   plugin files must be at the top of the repository.
+3. Keep your plugin's folder name or `plugin.json` name the same across versions, so an update replaces the old one.
+
+Plugins installed this way show as **unverified** in the Plugins tab and on the install screen, which names the
+repository, the version and its size, and says PEK TV did not review it. They get no extra trust: the same
+sandbox, safety scan and permissions screen apply. The developer of a plugin is responsible for it.
+
+A build that must not install from GitHub can start with `PEK_ALLOW_GITHUB=0`; people can also switch it off
+under Settings -> Plugins -> Allow installs from GitHub.
