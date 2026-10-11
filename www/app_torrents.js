@@ -15,10 +15,9 @@ class MainAppTorrentMethods {
         return createElement('div', { className: 'settings-section' },
             createElement('h2', {}, 'Torrents'),
             createElement('p', { className: 'sub' },
-                'Stream a torrent while it downloads. Add your own search provider (a Torznab address from Jackett or Prowlarr) so plugins can look up releases for a movie or episode.'),
+                'Add your own search provider (a Torznab address from Jackett or Prowlarr) so plugins can look up releases for a movie or episode. Plugins with the torrent permission do the streaming.'),
             createElement('div', { className: 'section-actions' },
-                ui.button('Torrent settings', () => this.openTorrentSettings(), { variant: 'primary' }),
-                ui.button('Play a magnet link', () => this.setState({ torrentModal: { stage: 'magnet', error: '' } }))
+                ui.button('Torrent settings', () => this.openTorrentSettings(), { variant: 'primary' })
             )
         );
     }
@@ -59,36 +58,12 @@ class MainAppTorrentMethods {
         }
     }
 
-    async playMagnetLink() {
-        const link = (this._tMagnet || '').trim();
-        if (!/^magnet:\?/i.test(link)) {
-            this.setState({ torrentModal: { stage: 'magnet', error: 'Paste a link that starts with magnet:?' } });
-            return;
-        }
-        this.setState({ torrentModal: null });
-        try {
-            await window.PekTorrent.open({ source: link, title: 'Magnet link' });
-        } catch (e) {
-            if (e.message !== 'Cancelled') this.props.engine.ui.toast(e.message, 6000);
-        }
-    }
-
     _renderTorrentModal() {
         const m = this.state.torrentModal;
         if (!m) return null;
         const { createElement, ui } = this.props.engine;
         const close = () => this.setState({ torrentModal: null });
         const err = m.error ? createElement('p', { className: 'browse-error' }, m.error) : null;
-
-        if (m.stage === 'magnet') {
-            return ui.modal('Play a magnet link', createElement('div', {},
-                createElement('p', { className: 'sub' }, 'Paste a magnet link. PEK TV downloads the start, then opens the player while the rest arrives.'),
-                err,
-                ui.textInput('Magnet link', this._tMagnet || '', (v) => { this._tMagnet = v; }, { placeholder: 'magnet:?xt=urn:btih:\u2026' }),
-                createElement('div', { className: 'section-actions' },
-                    ui.button('Play', () => this.playMagnetLink(), { variant: 'primary' }))
-            ), close);
-        }
 
         if (m.loading) {
             return ui.modal('Torrent settings', createElement('div', { className: 'glass-panel' }, createElement('p', {}, 'Loading\u2026')), close);
