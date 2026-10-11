@@ -238,6 +238,27 @@ class MainApp extends PekComponent {
         );
     }
 
+    // Settings > Video output (Android app only): refresh-rate matching and HDR. Hidden everywhere else (browser / dev build),
+    // where the page has no native player to control.
+    _renderVideoOutputSettings() {
+        const A = window.PekAndroid;
+        if (!A || typeof A.mpvMatchRate !== 'function' || typeof A.mpvHdr !== 'function') return null;   // an older app build has neither
+        const { createElement, ui } = this.props.engine;
+        let match = true, hdr = true, hdrScreen = false;
+        try { match = !!A.mpvMatchRate(); hdr = !!A.mpvHdr(); hdrScreen = !!(A.mpvDisplayHdr && A.mpvDisplayHdr()); } catch (e) { /* defaults */ }
+        const flip = (fn, on) => () => { try { fn.call(A, !on); } catch (e) { console.warn('[PEK TV] video output setting failed', e); } this.setState({}); };
+        return createElement('div', { className: 'settings-section' },
+            createElement('h2', {}, 'Video output'),
+            createElement('p', { className: 'sub' },
+                'Smoother motion and true HDR. Applies to the next video you start.',
+                createElement('span', { className: 'sub-more' }, ' Matching switches the screen to the video\u2019s frame rate (it may blink for a moment). HDR sends HDR10 / HLG video straight to an HDR screen.')),
+            createElement('div', { className: 'plugin-list' },
+                ui.listRow('Match refresh rate', match ? 'On' : 'Off', flip(A.mpvSetMatchRate, match), { statusDot: match }),
+                ui.listRow('HDR output', (hdr ? 'On' : 'Off') + (hdrScreen ? '' : ' \u2013 screen reports no HDR'), flip(A.mpvSetHdr, hdr), { statusDot: hdr })
+            )
+        );
+    }
+
     _renderExitModal() {
         if (!this.state.exitAsk) return null;
         const { createElement, ui } = this.props.engine;
@@ -272,7 +293,8 @@ class MainApp extends PekComponent {
                 ? sources.map(path => ui.listRow(path, 'Tap to remove this source', () => this.removeSource(path)))
                 : [createElement('p', { className: 'sub' }, 'No media folders added yet.')];
 
-            mainContent = createElement('div', {},
+            const more = (s) => createElement('span', { className: 'sub-more' }, ' ' + s);   // extra detail: hidden on narrow phones
+            mainContent = createElement('div', { className: 'settings-page' },
                 this._renderHeader('Settings'),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Media Sources'),
@@ -285,20 +307,6 @@ class MainApp extends PekComponent {
                 ),
                 this._renderProfileSettings(),
                 this._renderSyncSettings(),
-                this._renderTorrentSettings(),
-                createElement('div', { className: 'settings-section' },
-                    createElement('h2', {}, 'TV mode'),
-                    createElement('p', { className: 'sub' }, 'Bigger text, TV-safe margins and a bolder highlight for viewing from the couch.'),
-                    createElement('div', { className: 'plugin-list' },
-                        ...[['auto', 'Auto', 'On for TV boxes, off on phones'], ['on', 'On', 'Always use the TV look'], ['off', 'Off', 'Never use the TV look']].map(([id, name, desc]) =>
-                            ui.listRow(name, desc, () => { window.PekTV.setMode(id); this.setState({}); }, { statusDot: window.PekTV.mode() === id }))
-                    ),
-                    createElement('p', { className: 'sub' }, 'Screen margins (raise this if your TV cuts off the edges)'),
-                    createElement('div', { className: 'plugin-list' },
-                        ...[[0, 'None'], [2, 'Small'], [4, 'Medium'], [6, 'Large']].map(([pct, name]) =>
-                            ui.listRow(name, null, () => { window.PekTV.setSafe(pct); this.setState({}); }, { statusDot: window.PekTV.safe() === pct }))
-                    )
-                ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Layout'),
                     createElement('div', { className: 'plugin-list layout-cards' },
@@ -315,26 +323,8 @@ class MainApp extends PekComponent {
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
-                    createElement('h2', {}, 'Background activity'),
-                    createElement('p', { className: 'sub' }, 'A small status line in the corner that says what PEK TV is doing (scanning, syncing, fetching posters...). It never takes focus and hides while a video plays. Detailed also shows plugin network requests.'),
-                    createElement('div', { className: 'section-actions' },
-                        ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
-                            this._choiceButton(label, window.PekActivity.get() === id,
-                                () => { window.PekActivity.set(id); this.setState({}); }))
-                    )
-                ),
-                createElement('div', { className: 'settings-section' },
-                    createElement('h2', {}, 'Navigation sound'),
-                    createElement('p', { className: 'sub' }, 'A soft tick when you move around with the D-pad, remote or arrow keys.'),
-                    createElement('div', { className: 'section-actions' },
-                        ...[['off', 'Off'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']].map(([id, label]) =>
-                            this._choiceButton(label, window.PekNavSound && window.PekNavSound.get() === id,
-                                () => { window.PekNavSound.set(id); this.setState({}); }))
-                    )
-                ),
-                createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
-                    createElement('p', { className: 'sub' }, 'Add a skin from a .zip file. To remove one you added, hold its row.'),
+                    createElement('p', { className: 'sub' }, 'Add a skin from a .zip. Hold a row to remove one you added.'),
                     createElement('div', { className: 'plugin-list' },
                         ...this.state.skins.map(s => ui.listRow(
                             s.name,
@@ -351,14 +341,59 @@ class MainApp extends PekComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Plugins'),
-                    createElement('p', { className: 'sub' }, 'Get plugins from the PEK Store, or add one from a .zip file. To remove one, hold its row in the Plugins tab.'),
+                    createElement('p', { className: 'sub' }, 'Get plugins from the PEK Store or a .zip. To remove one, hold its row in the Plugins tab.'),
                     createElement('div', { className: 'section-actions' },
                         ui.button('PEK Store', () => this.openPluginStore(), { variant: 'primary' }),
                         ui.button('Install plugin from .zip', () => this.startPluginInstall()),
                         this._githubEnabled() ? ui.button('Install from GitHub', () => this.openGithubInstall()) : null
+                    )
+                ),
+                createElement('div', { className: 'settings-section adv-section' },
+                    createElement('button', { className: 'adv-toggle focusable', onClick: () => { const open = !this.state.advancedOpen; this.setState({ advancedOpen: open }); if (open) setTimeout(() => { const el = document.querySelector('.adv-section'); if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start' }); }, 60); } },
+                        createElement('span', { className: 'adv-text' },
+                            createElement('span', { className: 'adv-title' }, 'Advanced settings'),
+                            createElement('span', { className: 'adv-hint' }, 'Video output, TV mode, torrents, activity, sounds')),
+                        createElement('span', { className: 'adv-chevron' }, this.state.advancedOpen ? '\u25BE' : '\u25B8')),
+                    this.state.advancedOpen ? createElement('div', { className: 'adv-body' },
+                    this._renderVideoOutputSettings(),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'TV mode'),
+                    createElement('p', { className: 'sub' }, 'Bigger text, safe margins and a bolder highlight for the couch.'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...[['auto', 'Auto', 'On for TV boxes, off on phones'], ['on', 'On', 'Always use the TV look'], ['off', 'Off', 'Never use the TV look']].map(([id, name, desc]) =>
+                            ui.listRow(name, desc, () => { window.PekTV.setMode(id); this.setState({}); }, { statusDot: window.PekTV.mode() === id }))
                     ),
+                    createElement('p', { className: 'sub' }, 'Screen margins (raise if your TV cuts off the edges)'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...[[0, 'None'], [2, 'Small'], [4, 'Medium'], [6, 'Large']].map(([pct, name]) =>
+                            ui.listRow(name, null, () => { window.PekTV.setSafe(pct); this.setState({}); }, { statusDot: window.PekTV.safe() === pct }))
+                    )
+                ),
+                this._renderTorrentSettings(),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Background activity'),
+                    createElement('p', { className: 'sub' }, 'A small status line in the corner showing what PEK TV is doing. Hidden while a video plays.', more('Detailed also lists plugin network requests.')),
+                    createElement('div', { className: 'section-actions' },
+                        ...[['off', 'Off'], ['basic', 'Basic'], ['detailed', 'Detailed']].map(([id, label]) =>
+                            this._choiceButton(label, window.PekActivity.get() === id,
+                                () => { window.PekActivity.set(id); this.setState({}); }))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Navigation sound'),
+                    createElement('p', { className: 'sub' }, 'A soft tick when you move around with the D-pad, remote or arrow keys.'),
+                    createElement('div', { className: 'section-actions' },
+                        ...[['off', 'Off'], ['low', 'Low'], ['med', 'Medium'], ['high', 'High']].map(([id, label]) =>
+                            this._choiceButton(label, window.PekNavSound && window.PekNavSound.get() === id,
+                                () => { window.PekNavSound.set(id); this.setState({}); }))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Plugin installs'),
                     ui.toggle('Allow installs from GitHub', this._githubEnabled(), (on) => this._setGithubEnabled(on)),
-                    createElement('p', { className: 'sub' }, 'Lets you install a plugin straight from a GitHub repository by typing its name. These plugins are unverified: PEK TV does not review them, and their developers are responsible for them.')
+                    createElement('p', { className: 'sub' }, 'Install a plugin straight from a GitHub repository by typing its name. Unverified: PEK TV does not review these plugins and their developers are responsible for them.')
+                )
+                    ) : null
                 )
             );
         } else if (activeTab === 'plugins') {
@@ -433,6 +468,8 @@ class MainApp extends PekComponent {
             );
         }
 
+        // Short tab names for the narrow bottom bar (the full name is used everywhere else).
+        const BB_LABEL = { dashboard: 'Home', shows: 'Shows', resume: 'Resume', history: 'History' };
         const isPhone = window.matchMedia(PHONE_MQ).matches;
         const sidebar = isPhone ? null : createElement('div', { className: 'pek-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'PEK TV'),
@@ -447,7 +484,7 @@ class MainApp extends PekComponent {
             const tabBtn = (item) => createElement('button', {
                 className: `bb-item focusable ${activeTab === item.id ? 'active' : ''}`,
                 onClick: () => this.selectTab(item.id)
-            }, item.label);
+            }, BB_LABEL[item.id] || item.label);
             const moreItems = navItems.filter(i => !PHONE_PRIMARY_TABS.includes(i.id));
             const moreActive = moreItems.some(i => i.id === activeTab);
             const sheet = this.state.moreOpen ? [

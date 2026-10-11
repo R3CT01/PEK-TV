@@ -1,12 +1,19 @@
 package com.pektv.app
 
 import android.app.Activity
+import android.app.UiModeManager
 import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
+import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -17,6 +24,7 @@ import android.widget.Toast
 import dev.jdtech.mpv.MPVLib
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -68,6 +76,21 @@ class MpvController(
     private var watchUntil = 0L
     private val stutterCheck = Runnable { checkStutter() }
 
+    // Refresh-rate matching: the screen is asked to run at the video's frame rate (24 fps film on a 24 / 48 / 120 Hz mode, 25 on
+    // 50 Hz ...), so motion is not judder-y. HDR: HDR10 / HLG video is sent straight from MediaCodec to a screen that can show it,
+    // instead of being tone-mapped to SDR by the OpenGL renderer. Both can be switched off in Settings > Video output.
+    private var matchRate = prefs.getBoolean("match_rate", true)
+    private var hdrOut = prefs.getBoolean("hdr_out", true)
+    private var videoFps = 0f
+    private var appliedFps = 0f
+    private var hdrGamma = ""                    // "pq" / "hlg" for HDR video, else something SDR
+    private var hdrDirect = false                // this video goes MediaCodec -> HDR screen untouched
+    private val isTv: Boolean by lazy {
+        val ui = activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            activity.packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+    }
+
     init {
         surfaceView.holder.addCallback(this)
     }
@@ -84,6 +107,9 @@ class MpvController(
         seekPending = false
         pausedForCache = false
         liteSuspended = false
+        videoFps = 0f
+        hdrGamma = ""
+        hdrDirect = false
         ui.removeCallbacks(stutterCheck)
         buffering = true
         position = 0.0
@@ -117,8 +143,8 @@ class MpvController(
     fun setAudio(id: Int) { mpv?.setPropertyString("aid", id.toString()) }
     fun setSubtitle(id: Int) {
         val m = mpv ?: return
-        // Smooth mode cannot draw subtitles: use the normal renderer while one is chosen.
-        if (lite) {
+        // Smooth mode and direct HDR cannot draw subtitles: use the normal renderer while one is chosen.
+        if (lite || hdrDirect) {
             if (id >= 0 && !liteSuspended) { liteSuspended = true; applyRenderer(m) }
             else if (id < 0 && liteSuspended) { liteSuspended = false; applyRenderer(m) }
         }
@@ -134,7 +160,7 @@ class MpvController(
     }
     fun isLite(): Boolean = lite
 
-    private fun useEmbed() = lite && !liteSuspended
+    private fun useEmbed() = (lite || hdrDirect) && !liteSuspended
 
     private fun applyRenderer(m: MPVLib) {
         try {
@@ -146,6 +172,114 @@ class MpvController(
                 m.setPropertyString("vo", "gpu")
             }
         } catch (t: Throwable) { Log.w("PEK", "could not switch renderer", t) }
+        applyColorMode(useEmbed() && hdrDirect)
+    }
+
+    // ---------------- refresh-rate matching ----------------
+
+    fun setMatchRate(on: Boolean) {
+        matchRate = on
+        prefs.edit().putBoolean("match_rate", on).apply()
+        if (!on) resetFrameRate() else if (videoFps > 0f) applyFrameRate(videoFps)
+    }
+    fun isMatchRate(): Boolean = matchRate
+
+    private fun applyFrameRate(fps: Float) {
+        if (!matchRate || fps <= 0f || fps.isNaN() || abs(fps - appliedFps) < 0.01f) return
+        appliedFps = fps
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val s = surfaceView.holder.surface
+                if (s != null && s.isValid) {
+                    // A TV may blank for a moment while it changes mode; a phone only switches when that is seamless.
+                    s.setFrameRate(fps, Surface.FRAME_RATE_COMPATIBILITY_FIXED_SOURCE,
+                        if (isTv) Surface.CHANGE_FRAME_RATE_ALWAYS else Surface.CHANGE_FRAME_RATE_ONLY_IF_SEAMLESS)
+                }
+            } else {
+                // Android 8 - 11: ask for the display mode whose refresh rate is the video's rate times a whole number.
+                @Suppress("DEPRECATION")
+                val d = activity.windowManager.defaultDisplay
+                val cur = d.mode
+                var best: Display.Mode? = null
+                var bestErr = Float.MAX_VALUE
+                var bestN = Int.MAX_VALUE
+                for (m in d.supportedModes) {
+                    if (m.physicalWidth != cur.physicalWidth || m.physicalHeight != cur.physicalHeight) continue
+                    for (n in 1..5) {
+                        val err = abs(m.refreshRate - fps * n) / (fps * n)
+                        if (err > 0.002f) continue
+                        if (err < bestErr - 0.0005f || (abs(err - bestErr) <= 0.0005f && n < bestN)) { best = m; bestErr = err; bestN = n }
+                    }
+                }
+                val lp = activity.window.attributes
+                lp.preferredDisplayModeId = best?.modeId ?: 0
+                activity.window.attributes = lp
+                Log.i("PEK", "refresh rate: video " + fps + " fps -> " + (best?.refreshRate ?: 0f) + " Hz")
+            }
+        } catch (t: Throwable) { Log.w("PEK", "could not match the refresh rate", t) }
+    }
+
+    // Back to whatever the system would do on its own (the video is over, or matching was switched off).
+    private fun resetFrameRate() {
+        appliedFps = 0f
+        try {
+            if (Build.VERSION.SDK_INT >= 31) {
+                val s = surfaceView.holder.surface
+                if (s != null && s.isValid) s.setFrameRate(0f, Surface.FRAME_RATE_COMPATIBILITY_DEFAULT)
+            } else {
+                val lp = activity.window.attributes
+                if (lp.preferredDisplayModeId != 0) { lp.preferredDisplayModeId = 0; activity.window.attributes = lp }
+            }
+        } catch (t: Throwable) { Log.w("PEK", "could not reset the refresh rate", t) }
+    }
+
+    // ---------------- HDR ----------------
+
+    fun setHdr(on: Boolean) {
+        hdrOut = on
+        prefs.edit().putBoolean("hdr_out", on).apply()
+        refreshHdr()
+    }
+    fun isHdrOut(): Boolean = hdrOut
+
+    // Can the screen show HDR10 / HLG at all? (Shown in Settings so a person knows whether the switch matters.)
+    @Suppress("DEPRECATION")
+    fun displayHdr(): Boolean = try {
+        val types = activity.windowManager.defaultDisplay.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
+        types.any { it == Display.HdrCapabilities.HDR_TYPE_HDR10 || it == Display.HdrCapabilities.HDR_TYPE_HLG ||
+                    it == Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS || it == Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION }
+    } catch (t: Throwable) { false }
+
+    @Suppress("DEPRECATION")
+    private fun screenShows(gamma: String): Boolean = try {
+        val types = activity.windowManager.defaultDisplay.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
+        if (gamma == "hlg") types.contains(Display.HdrCapabilities.HDR_TYPE_HLG) || types.contains(Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION)
+        else types.any { it == Display.HdrCapabilities.HDR_TYPE_HDR10 || it == Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS ||
+                         it == Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION }
+    } catch (t: Throwable) { false }
+
+    // HDR video on an HDR screen: skip mpv's renderer (which can only produce SDR) and let MediaCodec feed the screen directly.
+    // Anything else (an SDR screen, HDR switched off, a subtitle on screen) keeps the normal renderer, which tone-maps to SDR.
+    private fun refreshHdr() {
+        val m = mpv ?: return
+        val want = hdrOut && (hdrGamma == "pq" || hdrGamma == "hlg") && screenShows(hdrGamma)
+        if (want == hdrDirect) return
+        hdrDirect = want
+        if (want && !lite) {
+            val sid = m.getPropertyString("sid")
+            if (sid != null && sid != "no" && sid != "false") liteSuspended = true     // a subtitle is showing: needs the renderer
+        }
+        if (!want) liteSuspended = if (lite) liteSuspended else false
+        applyRenderer(m)
+        Log.i("PEK", "hdr: gamma=" + hdrGamma + " direct=" + hdrDirect)
+    }
+
+    private fun applyColorMode(hdr: Boolean) {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                activity.window.colorMode = if (hdr) ActivityInfo.COLOR_MODE_HDR else ActivityInfo.COLOR_MODE_DEFAULT
+            }
+        } catch (t: Throwable) { Log.w("PEK", "could not set the window colour mode", t) }
     }
 
     // Mini player: shrink the picture into a rectangle given in the page's CSS px.
@@ -205,6 +339,8 @@ class MpvController(
                 "correct-downscaling" to "no", "sigmoid-upscaling" to "no",
                 "deband" to "no", "interpolation" to "no", "dither-depth" to "no",
                 "video-sync" to "audio", "framedrop" to "vo",
+                // HDR video drawn by the OpenGL renderer (SDR screen, or a subtitle on screen): a light tone-map, no compute shaders.
+                "tone-mapping" to "bt.2390", "hdr-compute-peak" to "no",
                 "vd-lavc-fast" to "yes", "vd-lavc-skiploopfilter" to "nonref"
             )) {
                 try { m.setOptionString(key, value) } catch (t: Throwable) { Log.w("PEK", "mpv option $key not set", t) }
@@ -225,6 +361,8 @@ class MpvController(
             m.observeProperty("pause", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             m.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             m.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
+            m.observeProperty("container-fps", MPVLib.MpvFormat.MPV_FORMAT_DOUBLE)
+            m.observeProperty("video-params/gamma", MPVLib.MpvFormat.MPV_FORMAT_STRING)
             m.attachSurface(surfaceView.holder.surface)
             mpv = m
             m.command(arrayOf("loadfile", u))
@@ -240,6 +378,9 @@ class MpvController(
         watchUntil = 0L
         val m = mpv ?: return
         mpv = null
+        resetFrameRate()
+        applyColorMode(false)
+        hdrDirect = false
         try {
             m.removeObserver(this)
             m.detachSurface()
@@ -292,7 +433,13 @@ class MpvController(
 
     override fun eventProperty(property: String) {}
     override fun eventProperty(property: String, value: Long) {}
-    override fun eventProperty(property: String, value: String) {}
+    override fun eventProperty(property: String, value: String) {
+        ui.post {
+            when (property) {
+                "video-params/gamma" -> { hdrGamma = value; refreshHdr() }
+            }
+        }
+    }
 
     override fun eventProperty(property: String, value: Double) {
         ui.post {
@@ -303,6 +450,7 @@ class MpvController(
                     if (now - lastTimeEmit >= 500) { lastTimeEmit = now; emitTime() }
                 }
                 "duration" -> { duration = value; emitTime() }
+                "container-fps" -> { videoFps = value.toFloat(); applyFrameRate(videoFps) }
             }
         }
     }
@@ -344,7 +492,7 @@ class MpvController(
         emit("tracks", readTracks())
         emitState()
         // A file whose subtitles show by default needs the normal renderer.
-        if (lite && !liteSuspended) {
+        if ((lite || hdrDirect) && !liteSuspended) {
             val sid = mpv?.getPropertyString("sid")
             if (sid != null && sid != "no" && sid != "false") { liteSuspended = true; mpv?.let { applyRenderer(it) } }
         }
@@ -373,7 +521,8 @@ class MpvController(
                 " " + m.getPropertyString("width") + "x" + m.getPropertyString("height") +
                 " fps=" + m.getPropertyString("container-fps") +
                 " drops=" + drops + " delayed=" + m.getPropertyString("vo-delayed-frame-count") +
-                " lite=" + lite + (if (liteSuspended) "(subtitle)" else ""))
+                " lite=" + lite + (if (liteSuspended) "(subtitle)" else "") +
+                " hdr=" + hdrGamma + (if (hdrDirect) "(direct)" else "") + " matched=" + appliedFps)
             if (!buffering && !paused && !seeking) {
                 // 15 or more frames lost in 4 seconds of normal playback: the renderer cannot keep up.
                 if (lastDrops >= 0 && drops - lastDrops >= 15 && !lite) {

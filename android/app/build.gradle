@@ -22,8 +22,8 @@ android {
         // 36 = Android 16, the level Google Play requires for new apps and
         // updates from Aug 31, 2026.
         targetSdk 36
-        versionCode 3
-        versionName '0.1.2'
+        versionCode 4
+        versionName '0.1.3'
 
         ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
         externalNativeBuild {

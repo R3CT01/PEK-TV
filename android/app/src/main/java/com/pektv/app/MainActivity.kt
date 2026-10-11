@@ -529,4 +529,10 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun mpvDestroy() { activity.runOnUiThread { mpv.destroy() } }
     @JavascriptInterface fun mpvSetLite(on: Boolean) { activity.runOnUiThread { mpv.setLite(on) } }
     @JavascriptInterface fun mpvIsLite(): Boolean = mpv.isLite()
+    // Video output (Settings > Video output): refresh-rate matching and HDR.
+    @JavascriptInterface fun mpvSetMatchRate(on: Boolean) { activity.runOnUiThread { mpv.setMatchRate(on) } }
+    @JavascriptInterface fun mpvMatchRate(): Boolean = mpv.isMatchRate()
+    @JavascriptInterface fun mpvSetHdr(on: Boolean) { activity.runOnUiThread { mpv.setHdr(on) } }
+    @JavascriptInterface fun mpvHdr(): Boolean = mpv.isHdrOut()
+    @JavascriptInterface fun mpvDisplayHdr(): Boolean = mpv.displayHdr()
 }

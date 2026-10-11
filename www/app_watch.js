@@ -402,7 +402,7 @@ class MainAppWatchMethods {
         if (!this.state.signOutAsk) return null;
         const { createElement, ui } = this.props.engine;
         const body = createElement('div', {},
-            createElement('p', { className: 'sub' }, 'This signs you out of your account and clears its profiles, favorites, watch history and settings from this device, so the app starts fresh. Everything stays safe in your cloud account and comes back when you sign in again. You will need your password and a new code from your email.'),
+            createElement('p', { className: 'sub' }, 'This clears the account\u2019s profiles, favorites, history and settings from this device and the app starts fresh. They stay safe in your cloud account and return when you sign in again (password and a new emailed code needed).'),
             createElement('div', { className: 'section-actions', style: { margin: '14px 0 6px' } },
                 ui.button('Yes, sign out', () => { this.setState({ signOutAsk: false }); this.signOutDevice(); }, { variant: 'primary' })));
         return ui.modal('Are you sure you want to sign out?', body, () => this.setState({ signOutAsk: false }));   // the modal's own button is "Close" = stay
@@ -810,7 +810,8 @@ class MainAppWatchMethods {
                 parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
                 parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
             } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: each profile keeps its own watch history, resume points and favorites in step across your devices, and profiles you make show up on all of them. It also backs up the plugins you install. Nothing is uploaded until you sign in. Signing in to an account that already has data replaces what is on this device with the account\'s data. Only what you watched before creating an account is carried into it.'));
+                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: profiles, watch history, favorites and plugin backup stay in step across your devices. Signing in to an account that already has data replaces what is on this device.',
+                    createElement('span', { className: 'sub-more' }, ' Only what you watched before creating an account is carried into it. Nothing is uploaded until you sign in.')));
                 parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
             }
         } else {
