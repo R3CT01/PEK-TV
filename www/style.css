@@ -1347,3 +1347,76 @@ html.pek-tv .dash-cell { flex-basis: 200px; }
 .dash-ctls { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.8rem; }
 .dash-ctl { padding: 0.45rem 0.9rem; font-size: 0.95rem; }
 .dash-grid.editing .dash-edit-card { outline: 2px dashed var(--sx-border, rgba(255,255,255,0.25)); outline-offset: -2px; }
+
+
+/* ============================================================
+   Settings: glass cards, an Advanced compartment, easier scanning
+   ============================================================ */
+.settings-page { padding: 0.25rem; border-radius: 18px; background: radial-gradient(120% 55% at 0% 0%, var(--sx-accent-glow, rgba(255, 255, 255, 0.07)) 0%, transparent 62%); }
+.settings-page .settings-section {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--sx-border);
+    border-radius: 16px;
+    padding: 1.1rem 1.25rem 1.25rem;
+    margin: 0 0 1rem;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+/* Real frosted glass only where it is cheap: not on TV boxes, and a lighter blur on phones. */
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+    html:not(.pek-tv) .settings-page .settings-section {
+        background: rgba(255, 255, 255, 0.04);
+        -webkit-backdrop-filter: blur(10px) saturate(1.15);
+        backdrop-filter: blur(10px) saturate(1.15);
+    }
+}
+html.pek-tv .settings-page .settings-section { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(255, 255, 255, 0.07); }
+.settings-page .settings-section h2 { display: flex; align-items: center; gap: 0.6rem; margin: 0 0 0.6rem; }
+.settings-page .settings-section h2::before { content: ''; flex: none; width: 4px; height: 1.1em; border-radius: 2px; background: var(--sx-accent); }
+.settings-page .settings-section > .sub:first-of-type, .settings-page .settings-section h2 + .sub { margin-top: 0; }
+
+/* Advanced settings: one tappable header, the rest tucked away until opened */
+.settings-page .adv-section { padding: 0; overflow: hidden; }
+.adv-toggle {
+    display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%;
+    padding: 1rem 1.25rem; background: transparent; border: 1px solid transparent; border-radius: 16px;
+    color: var(--sx-text); font: inherit; text-align: left; cursor: pointer;
+}
+.adv-text { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+.adv-title { font-size: 1.15rem; font-weight: 600; }
+.adv-hint { font-size: 0.85rem; color: var(--sx-text-muted); overflow-wrap: anywhere; }
+.adv-chevron { flex: none; font-size: 1.3rem; color: var(--sx-accent); }
+.adv-body { padding: 0 1rem 1rem; }
+.settings-page .adv-body .settings-section {
+    background: transparent; border: 0; border-top: 1px solid var(--sx-border); border-radius: 0; box-shadow: none;
+    -webkit-backdrop-filter: none; backdrop-filter: none; padding: 1rem 0.25rem 0.25rem; margin: 0.75rem 0 0;
+}
+.settings-page .adv-body .settings-section:first-child { border-top: 0; margin-top: 0; }
+.sub-more { opacity: 0.85; }
+
+@media (max-width: 700px) {
+    .settings-page { padding: 0; }
+    .settings-page .settings-section { padding: 0.9rem; border-radius: 14px; margin-bottom: 0.75rem; }
+    html:not(.pek-tv) .settings-page .settings-section { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+    .settings-page .settings-section h2 { font-size: 1.1rem; }
+    .settings-page .settings-section .sub { font-size: 0.85rem; line-height: 1.35; }
+    .sub-more { display: none; }              /* long explanations are for bigger screens */
+    .adv-toggle { padding: 0.85rem 0.9rem; }
+    .adv-hint { font-size: 0.8rem; }
+    .adv-body { padding: 0 0.7rem 0.8rem; }
+}
+
+/* ============================================================
+   Phones: wrap text instead of cutting it off with "..."
+   ============================================================ */
+@media (max-width: 700px), (max-height: 500px) {
+    .sx-card p { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+    .sx-poster-caption { -webkit-line-clamp: 4; font-size: 0.74rem; }
+    .dash-tile .clock-date, .dash-sub { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+    .sx-chip { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+    .sx-hero-text { -webkit-line-clamp: 4; font-size: 0.85rem; }
+    .bb-item {
+        display: flex; align-items: center; justify-content: center; text-align: center;
+        white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+        font-size: 0.68rem; line-height: 1.15;
+    }
+}

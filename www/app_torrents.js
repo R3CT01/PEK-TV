@@ -15,7 +15,8 @@ class MainAppTorrentMethods {
         return createElement('div', { className: 'settings-section' },
             createElement('h2', {}, 'Torrents'),
             createElement('p', { className: 'sub' },
-                'Add your own search provider (a Torznab address from Jackett or Prowlarr) so plugins can look up releases for a movie or episode. Plugins with the torrent permission do the streaming.'),
+                'Add a Torznab search provider (Jackett or Prowlarr) so plugins can look up releases.',
+                createElement('span', { className: 'sub-more' }, ' Plugins with the torrent permission do the streaming.')),
             createElement('div', { className: 'section-actions' },
                 ui.button('Torrent settings', () => this.openTorrentSettings(), { variant: 'primary' })
             )

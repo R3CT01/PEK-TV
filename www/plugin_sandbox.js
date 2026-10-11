@@ -1067,7 +1067,17 @@ class PekSandbox {
                     return b;
                 }).filter(Boolean);
                 budget.nodes += actions.length + 4;
-                const badge = s(n.badge).slice(0, 30), meta = s(n.meta).slice(0, 160), text = s(n.text).slice(0, 600);
+                const badge = s(n.badge).slice(0, 30), meta = s(n.meta).slice(0, 160);
+                let text = s(n.text).slice(0, 600);
+                // Narrow phone screens: end the description at a sentence (or clause) instead of letting it be cut off with "...".
+                try {
+                    if (window.matchMedia && window.matchMedia('(max-width: 700px), (max-height: 500px)').matches && text.length > 150) {
+                        let cut = -1, m; const re = /[.!?](?=\s|$)/g;
+                        while ((m = re.exec(text)) && m.index < 150) cut = m.index + 1;
+                        if (cut > 40) text = text.slice(0, cut);
+                        else { const c = text.lastIndexOf(', ', 150); if (c > 40) text = text.slice(0, c) + '.'; }
+                    }
+                } catch (e) { /* keep the full text */ }
                 const el = createElement('div', { className: 'sx-hero' + (img ? '' : ' sx-hero-noimg') });
                 if (img) {
                     const im = createElement('img', { className: 'sx-hero-img', src: img, alt: '' });
