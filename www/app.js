@@ -2,7 +2,7 @@
 // Hesper App Shell: MainApp core (state, lifecycle, navigation, render)
 // The rest of MainApp lives in app_appearance.js, app_sources.js,
 // app_library.js, app_watch.js, app_playback.js and app_plugins.js (loaded after this file).
-// Constants and helpers are in app_config.js; ThemePanel is in theme_panel.js.
+// Constants and helpers are in app_config.js.
 // ============================================================
 
 class MainApp extends HesperComponent {
@@ -10,7 +10,6 @@ class MainApp extends HesperComponent {
         super(props);
         this.state = {
             activeTab: 'dashboard',
-            showThemePanel: false,
             pluginsList: [],
             resumeAsk: null,      // a Resume Watching card was tapped: ask Continue / Start over
             pluginPick: null,     // PEK TV's own .zip picker for plugin install (null = closed)
@@ -183,7 +182,6 @@ class MainApp extends HesperComponent {
         if (this.state.pluginInstall) { this.cancelPluginInstall(); return true; }
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
         if (this.state.favRemove) { this.cancelRemoveFavorite(); return true; }
-        if (this.state.showThemePanel) { this.setState({ showThemePanel: false }); return true; }
         if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
         if (this.state.netPicker) { this.netBack(); return true; }
@@ -225,7 +223,7 @@ class MainApp extends HesperComponent {
     render() {
         const { engine } = this.props;
         const { createElement, ui } = engine;
-        const { activeTab, showThemePanel, pluginsList, sources } = this.state;
+        const { activeTab, pluginsList, sources } = this.state;
 
         // Sidebar Navigation
         const navItems = this._navItems();
@@ -259,11 +257,17 @@ class MainApp extends HesperComponent {
                 this._renderSyncSettings(),
                 this._renderTorrentSettings(),
                 createElement('div', { className: 'settings-section' },
-                    createElement('h2', {}, 'Appearance & Themes'),
-                    createElement('button', {
-                        className: 'theme-launch-btn focusable',
-                        onClick: () => this.setState({ showThemePanel: true })
-                    }, 'Customize Colors')
+                    createElement('h2', {}, 'TV mode'),
+                    createElement('p', { className: 'sub' }, 'Bigger text, TV-safe margins and a bolder highlight for viewing from the couch.'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...[['auto', 'Auto', 'On for TV boxes, off on phones'], ['on', 'On', 'Always use the TV look'], ['off', 'Off', 'Never use the TV look']].map(([id, name, desc]) =>
+                            ui.listRow(name, desc, () => { window.HesperTV.setMode(id); this.setState({}); }, { statusDot: window.HesperTV.mode() === id }))
+                    ),
+                    createElement('p', { className: 'sub' }, 'Screen margins (raise this if your TV cuts off the edges)'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...[[0, 'None'], [2, 'Small'], [4, 'Medium'], [6, 'Large']].map(([pct, name]) =>
+                            ui.listRow(name, null, () => { window.HesperTV.setSafe(pct); this.setState({}); }, { statusDot: window.HesperTV.safe() === pct }))
+                    )
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Layout'),
@@ -391,13 +395,6 @@ class MainApp extends HesperComponent {
             );
         }
 
-        // Theme Modal Overlay
-        const themeModal = showThemePanel ? new ThemePanel({
-            engine,
-            onClose: () => this.setState({ showThemePanel: false }),
-            onRefresh: () => this.setState({})
-        }).render() : null;
-
         const isPhone = window.matchMedia(PHONE_MQ).matches;
         const sidebar = isPhone ? null : createElement('div', { className: 'hesper-sidebar' },
                 createElement('div', { className: 'sidebar-brand' }, 'PEK TV'),
@@ -441,7 +438,6 @@ class MainApp extends HesperComponent {
             sidebar,
             contentPane,
             bottomBar,
-            themeModal,
             this._renderDetailModal(),
             this._renderClockSettings(),
             this._renderPicker(),
@@ -510,10 +506,15 @@ document.addEventListener('DOMContentLoaded', () => {
         if (app.goBack()) e.preventDefault();
     });
 
-    // History guard: the page keeps one extra history entry on top, so a browser
-    // "Back" fires popstate instead of leaving. If the app has something to close
-    // we close it and re-arm the guard; otherwise we let Back leave as normal.
-    try {
+    // Android: the native Back handler (MainActivity.onBackPressed) asks the page directly instead of
+    // walking the WebView's history, so Back never depends on a history entry still being there.
+    // Returns true when the app handled it (closed a plugin, a dialog ... or showed the exit question).
+    window.__hesperBack = () => { try { return app.goBack() === true; } catch (err) { console.warn('[Hesper] Back failed:', err); return false; } };
+
+    // History guard (browsers / TV browsers only): the page keeps one extra history entry on top, so a
+    // browser "Back" fires popstate instead of leaving. If the app has something to close we close it
+    // and re-arm the guard; otherwise we let Back leave as normal. Not used inside the Android app.
+    if (!window.HesperAndroid) try {
         const marker = history.state && history.state.hesper;
         if (!marker) history.replaceState({ hesper: 'root' }, '');
         if (marker !== 'guard') history.pushState({ hesper: 'guard' }, '');

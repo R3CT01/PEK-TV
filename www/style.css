@@ -285,121 +285,6 @@ html[data-sx-glow] .hesper-content {
     margin-bottom: 2rem;
 }
 
-/* Scrollable Overlapping Preset Container */
-.preset-container {
-    display: flex;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    margin-bottom: 2.5rem;
-    position: relative;
-    padding: 5px 10px 15px 10px;
-    scrollbar-width: thin;
-    scrollbar-color: var(--sx-accent) var(--sx-surface);
-}
-
-.preset-container::-webkit-scrollbar {
-    height: 6px;
-}
-.preset-container::-webkit-scrollbar-track {
-    background: var(--sx-surface);
-    border-radius: 3px;
-}
-.preset-container::-webkit-scrollbar-thumb {
-    background: var(--sx-accent);
-    border-radius: 3px;
-}
-
-.preset-card {
-    background: var(--sx-surface);
-    border: 2px solid var(--sx-border);
-    border-radius: 14px;
-    padding: 1rem;
-    width: 130px;
-    flex-shrink: 0;
-    cursor: pointer;
-    transition: transform 0.15s ease-out, border-color 0.1s;
-    position: relative;
-    margin-right: -20px;
-    box-shadow: 0 10px 25px var(--sx-shadow);
-}
-
-.preset-card:last-child {
-    margin-right: 0;
-}
-
-.preset-card:hover {
-    transform: translateY(-8px) scale(1.05);
-    z-index: 10;
-    border-color: var(--sx-accent);
-    box-shadow: 0 15px 35px var(--sx-accent-glow);
-}
-
-.preset-card.active-preset {
-    border-color: var(--sx-accent);
-    background: var(--sx-surface-focused);
-    z-index: 5;
-}
-
-.preset-preview-swatch {
-    height: 36px;
-    border-radius: 8px;
-    margin-bottom: 0.75rem;
-    box-shadow: inset 0 2px 4px var(--sx-shadow);
-}
-
-.preset-name {
-    font-size: 0.85rem;
-    font-weight: 600;
-    text-align: center;
-    color: var(--sx-text);
-    text-transform: capitalize;
-}
-
-/* Color Customization Grid */
-.color-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-    margin-bottom: 2rem;
-    background: var(--sx-surface);
-    padding: 1.25rem;
-    border-radius: 12px;
-    border: 1px solid var(--sx-border);
-}
-
-.theme-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-}
-
-.theme-row label {
-    font-size: 0.9rem;
-    color: var(--sx-text-muted);
-}
-
-.theme-row input[type="color"] {
-    -webkit-appearance: none;
-    border: none;
-    width: 44px;
-    height: 28px;
-    border-radius: 6px;
-    cursor: pointer;
-    background: transparent;
-}
-
-.theme-row input[type="color"]::-webkit-color-swatch-wrapper {
-    padding: 0;
-}
-
-.theme-row input[type="color"]::-webkit-color-swatch {
-    border: 1px solid var(--sx-border);
-    border-radius: 6px;
-}
-
 .panel-close-btn {
     width: 100%;
     background: var(--sx-accent);
@@ -1327,8 +1212,6 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
 }
 .hero-backdrop { will-change: transform; -webkit-transform: translateZ(0); transform: translateZ(0); }
 .sx-poster-card { will-change: transform; contain: paint; }
-.preset-card { will-change: transform; }
-
 
 /* ============================================================
    TV boxes / Fire Stick (html.hesper-tv, set in index.html)
@@ -1336,8 +1219,8 @@ input, textarea, [contenteditable], [contenteditable] *, pre {
    hundreds of always-promoted layers. Same look, lighter paint.
    ============================================================ */
 /* A layer per poster is hundreds of GPU textures on a 1-2 GB box: promote only the focused one. */
-.sx-poster-card, .preset-card { will-change: auto; }
-.sx-poster-card.focused, .preset-card:hover { will-change: transform; }
+.sx-poster-card { will-change: auto; }
+.sx-poster-card.focused { will-change: transform; }
 html.hesper-tv * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
 html.hesper-tv .theme-panel-overlay, html.hesper-tv .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.82); }
 html.hesper-tv .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32;
@@ -1411,3 +1294,38 @@ html.hesper-tv .hero, html.hesper-tv .glass-panel, html.hesper-tv .sx-toast { an
     .sx-hist-thumb.sx-hist-still { width: 120px; height: 68px; }
     .sx-hist-card { gap: 0.7rem; }
 }
+
+/* ============================================================
+   10-foot UI (html.hesper-tv; see tv_mode.js). Sizes are in rem and rem
+   follows the screen width, so the same layout reads from a couch on a
+   720p, 1080p or 4K screen. --tv-safe-x/-y keep content off the edges.
+   ============================================================ */
+html.hesper-tv {
+    --tv-safe-x: 2vw; --tv-safe-y: 2vh;
+    font-size: 16px;                                   /* fallback */
+    font-size: clamp(16px, 1.5625vw, 64px);            /* 1920px wide = 30px, 1280 = 20px, 3840 = 60px */
+}
+html.hesper-tv body { line-height: 1.35; }
+
+/* Margins: backgrounds stay full-bleed, only the content moves in. */
+html.hesper-tv .hesper-sidebar { width: 14rem; padding: calc(1.5rem + var(--tv-safe-y)) 1rem calc(1.5rem + var(--tv-safe-y)) calc(1rem + var(--tv-safe-x)); }
+html.hesper-tv .hesper-content { padding: calc(2rem + var(--tv-safe-y)) calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)) 2.5rem; }
+html.hesper-tv .plugin-window-bar { padding: calc(1rem + var(--tv-safe-y)) calc(1.5rem + var(--tv-safe-x)) 1rem; }
+html.hesper-tv .plugin-window-body { padding: 2rem calc(2.5rem + var(--tv-safe-x)) calc(2rem + var(--tv-safe-y)); }
+
+/* Posters: sized in rem so the grid keeps the same number of columns at any resolution. */
+html.hesper-tv .sx-grid, html.hesper-tv .sx-poster-grid { --sx-grid-min: 9rem; gap: 1.25rem; }
+html.hesper-tv[data-poster="s"] .sx-poster-grid { --sx-grid-min: 7rem !important; }
+html.hesper-tv[data-poster="l"] .sx-poster-grid { --sx-grid-min: 14rem !important; }
+
+/* Bigger targets: rows and buttons are easy to hit and easy to read. */
+html.hesper-tv .sx-btn, html.hesper-tv .nav-item, html.hesper-tv .sx-list-row, html.hesper-tv .plugin-row, html.hesper-tv .sx-toggle-row { min-height: 3rem; }
+html.hesper-tv .sx-text-input { min-height: 3rem; font-size: 1rem; }
+
+/* Focus: a solid ring (cheap to paint on a TV box) plus a lift on posters. Nothing is ever "maybe focused". */
+html.hesper-tv .focusable.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
+html.hesper-tv .sx-poster-card.focused { -webkit-transform: scale(1.07); transform: scale(1.07); }
+html.hesper-tv .sx-text-input.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
+
+/* No pointer on the couch (it comes back the moment the mouse moves). */
+html.hesper-tv.hesper-idle, html.hesper-tv.hesper-idle * { cursor: none !important; }

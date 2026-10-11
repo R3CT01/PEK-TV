@@ -404,7 +404,18 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (splash != null) return   // splash can't be skipped
-        if (webView.canGoBack()) { webView.goBack(); return }
+        // Ask the page first (it closes plugin windows, dialogs, detail pages ... and shows its own exit
+        // question). Only if the page is not there (null) do we fall back to history / the native question.
+        webView.evaluateJavascript(
+            "(function(){try{return window.__hesperBack?window.__hesperBack():null}catch(e){return null}})()"
+        ) { result ->
+            if (result == "true") return@evaluateJavascript
+            if (result != "true" && webView.canGoBack()) { webView.goBack(); return@evaluateJavascript }
+            showNativeExitDialog()
+        }
+    }
+
+    private fun showNativeExitDialog() {
         AlertDialog.Builder(this)
             .setTitle("Are you sure you want to exit?")
             .setMessage("PEK TV will stop running and its temporary cache will be cleared.")
