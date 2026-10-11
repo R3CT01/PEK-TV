@@ -1,7 +1,9 @@
 # Deploying Hesper Cloud (accounts + sync). A phone browser is enough.
 
 Accounts are an email and a password. New accounts confirm their email with a 6-digit code, and
-"Forgot password" works the same way. Both codes are sent through Brevo.
+"Forgot password" works the same way. **Every sign-in also needs a fresh 6-digit code from the email**
+(the password alone never signs a device in). All of these codes are sent through Brevo, so if Brevo
+stops working nobody can sign in on a new device (devices that are already signed in keep working).
 
 ## A. Brevo (sends the reset emails)
 
@@ -24,7 +26,7 @@ Accounts are an email and a password. New accounts confirm their email with a 6-
 3. Worker -> **Settings** -> **Variables and Secrets** -> Add:
    - Type **Secret**, name `BREVO_API_KEY`, value = the key from step A2
    - Type **Text**, name `BREVO_SENDER_EMAIL`, value = the sender address verified in step A1
-   - Type **Text**, name `BREVO_SENDER_NAME`, value = `Hesper` (optional)
+   - Type **Text**, name `BREVO_SENDER_NAME`, value = `PEK TV` (optional)
    Then **Deploy** so they take effect.
 4. Visit the worker URL in a browser. It should say: `hesper-sync ok`
    (tables are created automatically on the first request).
@@ -66,4 +68,25 @@ Cloudflare -> Worker -> Logs shows errors (look for "Brevo send failed").
 - Resetting a password also confirms the email, and signs out every device (they just sign in again with the new password).
 - Settings -> Cloud Sync -> Delete Account removes the account and all its synced data, plugin backups included.
 - Old 25-character-key accounts no longer work. Their rows can stay (harmless) or be removed in the
-  D1 console with:  `DELETE FROM items WHERE acct NOT IN (SELECT id FROM users);  DROP TABLE IF EXISTS accounts;`
+  D1 console with:  `DELETE FROM items WHERE substr(acct, 1, instr(acct || ':', ':') - 1) NOT IN (SELECT id FROM users);  DROP TABLE IF EXISTS accounts;`
+  (Profile data is stored as `<user id>:<profile id>`, which is why the id is cut off at the colon.)
+
+## Profiles (one household account, a profile per person)
+
+Redeploy the worker (step B2) **before** people update the app. Nothing else to do: the new `profiles`
+table is created automatically on the first request, and existing accounts need no migration, because
+their data simply becomes the original profile (`p1`).
+
+- Each profile syncs its own history, resume points and favorites; the list of profiles (names and
+  colours) syncs too, up to 5 per account. Plugin backups stay per account.
+- An app that is newer than the worker only syncs the original profile and shows a message for the
+  others (it never mixes anyone's data), so a late deploy is safe.
+- Removing a profile in the app also removes that profile's data from the cloud.
+
+## Sign-in codes (every sign-in needs one)
+
+Deploy the worker (step B2) and update the app together. The new worker answers a correct password
+with "check your email" instead of a session, and only the updated app knows what to do with that;
+an older app would not be able to finish signing in (devices that are already signed in are not
+affected). Codes work once, for 30 minutes, with 5 tries per code and at most 6 code emails per
+address per hour. Brevo must be set up (part A), or sign-in answers "Email is not set up".

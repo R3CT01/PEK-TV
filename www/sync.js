@@ -155,6 +155,8 @@
 
     // Forget what we know about the cloud (cursor, what was already uploaded). Local history stays.
     function resetSyncState() {
+        var HP = window.HesperProfiles;
+        if (HP && HP.clearSyncState) HP.clearSyncState();   // every profile's sync progress, not only the active one's
         [K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
     }
     // Starts a signed-in session. Sync state is reset so this account gets a full two-way merge.
@@ -165,7 +167,8 @@
     }
     // Signs this device out locally. Watch history and resume points on the device are kept.
     function unlink() {
-        [K.token, K.email, K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
+        resetSyncState();
+        [K.token, K.email].forEach(delRaw);
     }
 
     // The old key-based accounts no longer exist; drop the stale key.
@@ -430,22 +433,45 @@
         });
     }
 
+    // ---------------- profiles ----------------
+    // The account belongs to the device; each profile (profiles.js) syncs its own favorites, history and resume points.
+    // The original profile "p1" lives where an account's data always lived, so existing accounts need no migration.
+    function currentProfile() {
+        var HP = window.HesperProfiles, c = HP && HP.enabled && HP.current ? HP.current() : null;
+        return c ? c.id : 'p1';
+    }
+
+    // Tells the cloud about this device's profiles and takes in the household's (names, colours, additions, removals).
+    function syncProfiles() {
+        var HP = window.HesperProfiles;
+        if (!HP || !HP.enabled || !HP.snapshot) return Promise.resolve({ ok: true });
+        var snap = HP.snapshot();
+        var list = snap.list.map(function (p) { return { id: p.id, name: p.name, color: p.color, updated: p.updated || 0, deleted: 0 }; });
+        Object.keys(snap.tombs).forEach(function (id) { list.push({ id: id, name: '', color: '', updated: snap.tombs[id], deleted: 1 }); });
+        return request('POST', '/v1/profiles/sync', { profiles: list }, true).then(function (r) {
+            if (r.status === 200 && r.body && r.body.ok) { HP.mergeRemote(r.body.profiles || []); return { ok: true }; }
+            return { ok: false, status: r.status, error: failure(r.status, r.body) };
+        });
+    }
+
     // opts: { resolve: fn }.  Resolves { ok, error?, pushed, changed }.
     function sync(opts) {
         opts = opts || {};
         if (inflight) return inflight;
         if (!getToken()) return Promise.resolve({ ok: false, error: 'not_linked' });
 
-        var all = collectPush();
-        var pushedCount = all.history.length + all.progress.length + all.favorites.length;
-        var anyChange = false;
+        var pid = currentProfile();
+        var all, pushedCount, anyChange;
 
         function round(n, first) {
             var chunk = takeChunk(all);
             var cursor = parseInt(getRaw(K.cursor), 10) || 0;
-            var body = { since: cursor, history: chunk.history, progress: chunk.progress, favorites: chunk.favorites };
+            var body = { profile: pid, since: cursor, history: chunk.history, progress: chunk.progress, favorites: chunk.favorites };
             return request('POST', '/v1/sync', body, true).then(function (r) {
+                if (r.status === 404 && r.body && r.body.error === 'unknown_profile') return { ok: false, error: 'unknown_profile' };
                 if (r.status !== 200 || !r.body || !r.body.ok) return { ok: false, error: failure(r.status, r.body) };
+                // An older cloud service ignores "profile" and would mix everybody's data into one: only the original profile may talk to it.
+                if (pid !== 'p1' && r.body.profile !== pid) return { ok: false, error: 'cloud_outdated' };
                 markPushed(chunk);
                 return applyRemote(r.body, opts.resolve).then(function (changed) {
                     if (changed) anyChange = true;
@@ -458,7 +484,29 @@
             });
         }
 
-        inflight = round(1, true).catch(function () { return { ok: false, error: 'offline' }; })
+        function attempt(retried) {
+            return syncProfiles().then(function (pr) {
+                if (!pr.ok) {
+                    if (pr.error === 'session_expired' || pr.error === 'rate_limited') return pr;
+                    // No profile support in the cloud yet: the original profile still works, the others must wait.
+                    if (pid !== 'p1') return { ok: false, error: pr.status === 404 ? 'cloud_outdated' : pr.error };
+                }
+                all = collectPush();
+                pushedCount = all.history.length + all.progress.length + all.favorites.length;
+                anyChange = false;
+                return round(1, true);
+            }).then(function (res) {
+                if (res && res.error === 'unknown_profile' && !retried) {
+                    // Removed on another device, but in use here: keep it (the newer change wins) and try once more.
+                    var HP = window.HesperProfiles;
+                    if (HP && HP.touch) HP.touch(pid);
+                    return attempt(true);
+                }
+                return res;
+            });
+        }
+
+        inflight = attempt(false).catch(function () { return { ok: false, error: 'offline' }; })
             .then(function (res) {
                 inflight = null;
                 if (res && res.error === 'session_expired') unlink();   // signed out elsewhere or expired: ask the user to sign in again
