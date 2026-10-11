@@ -7,7 +7,7 @@
 //      similar): PEK asks that plugin to look for the next episode and a stream for it.
 //   3. Nothing. Watching a file from your own drive that has no next episode there: no card.
 //
-// The card sits on the right side of the player. It appears for the last ~75 seconds,
+// The card sits on the right side of the player. It appears for the last ~5 minutes (long credits),
 // OK / tap plays it. If the episode ends while the card is up, the next one starts after a
 // 5 second countdown that can be cancelled.
 //
@@ -18,8 +18,8 @@
 (function () {
     'use strict';
 
-    const SHOW_LEFT = 75;        // show the card when this many seconds are left
-    const LOOK_LEFT = 240;       // start looking for the next episode this many seconds before the end
+    const SHOW_LEFT = 300;       // show the card when this many seconds are left (5 min: some series have 4 min of credits)
+    const LOOK_LEFT = 420;       // start looking for the next episode this many seconds before the end (must be > SHOW_LEFT)
     const COUNTDOWN = 5;         // seconds before the next episode starts on its own once this one ended
     const MIN_LENGTH = 300;      // clips shorter than this never get a card
     const STYLE_ID = 'hp-next-style';
@@ -126,8 +126,9 @@
         _evaluate() {
             if (!this.el) return;
             const left = this._dur - this._pos;
-            const want = !!this.offer && !this._dismissed && !this._dead && (left <= SHOW_LEFT || !!this._cd);
-            if (!want && this._shown && left > SHOW_LEFT + 20 && !this._cd) this._setShown(false);   // wound back: hide again
+            const showLeft = Math.min(SHOW_LEFT, this._dur * 0.35);   // short episodes: never in the first third
+            const want = !!this.offer && !this._dismissed && !this._dead && (left <= showLeft || !!this._cd);
+            if (!want && this._shown && left > showLeft + 20 && !this._cd) this._setShown(false);   // wound back: hide again
             else if (want && !this._shown) this._setShown(true);
         }
 

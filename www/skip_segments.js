@@ -1,38 +1,28 @@
 /* ============================================================
-   Hesper: Skip Intro / Skip Recap
+   Hesper: Skip Intro / Skip Recap  (fully automatic)
    Loaded before player.js. The player creates one HesperSkip.Controller per playback
    (library files AND torrent streams: both go through HesperPlayer).
 
-   Where the skip spans come from
+   Nobody marks anything. Where the skip spans come from:
      1. Chapters inside the file (mpv reports them). A chapter called "Intro", "Opening",
         "OP", "Recap", "Previously on ..." is a skip span. Exact, and works the same for a
         torrent stream, because the chapter list sits in the file header.
      2. Times from a community database (IntroDB), looked up automatically for episodes of
-        a show: nobody has to mark anything. The backend (/api/skip-segments) turns the show
-        name into an IMDb id and asks the database for this season and episode; the answer is
-        cached. Library files and torrent streams are treated the same. Turn it off in the
+        a show. The backend (/api/skip-segments) turns the show name into an IMDb id and asks
+        the database for this season and episode; the answer is cached. Turn it off in the
         Skip menu ("Look up intro/recap online").
-     3. Spans you mark once per show (player menu > Skip). They are saved per show (and per
-        season) and offered on every other episode of that show, library or torrent alike.
-        Episodes start the intro at slightly different times (cold opens), so a saved span
-        shows its button a little early and stays until the saved end.
-
-   Saved spans live in localStorage 'hesper_skip_v1'. Auto-skip ('hesper_skip_auto') acts on
-   chapter spans and database spans (both are exact for this episode): a span you marked on
-   another episode is a good guess, not a fact, so it is never skipped without a tap.
-   Order of trust: chapters, then the database, then your own marks.
+   Order of trust: chapters, then the database. Both are exact for this episode, so
+   auto-skip ('hesper_skip_auto') acts on either.
    ============================================================ */
 (function () {
     'use strict';
 
-    const STORE_KEY = 'hesper_skip_v1';
+    const OLD_STORE_KEY = 'hesper_skip_v1';          // manual marks of older versions: wiped, no longer used
     const AUTO_KEY = 'hesper_skip_auto';
     const ONLINE_KEY = 'hesper_skip_online';          // '0' = never ask the database (default: on)
     const STYLE_ID = 'hesper-skip-style';
-    const MAX_SHOWS = 200;
     const KINDS = ['recap', 'intro'];                 // recap first: it comes first in an episode
     const LABEL = { intro: 'Skip Intro', recap: 'Skip Recap' };
-    const SAVED_LEAD = 12;                            // seconds: a saved span's button appears this early
     const CHAPTER_LEAD = 1.5;
     const END_MARGIN = 2;                             // no button in the last 2 s of a span
 
@@ -53,68 +43,16 @@
         return m + ':' + (s < 10 ? '0' : '') + s;
     }
 
-    // ---------------- storage ----------------
-    function load() {
-        try { const o = JSON.parse(localStorage.getItem(STORE_KEY) || '{}'); return o && typeof o === 'object' ? o : {}; }
-        catch (e) { return {}; }
-    }
-    function save(o) {
-        try {
-            const keys = Object.keys(o);
-            if (keys.length > MAX_SHOWS) {                        // keep the most recently used
-                keys.sort((a, b) => ((o[a] && o[a].u) || 0) - ((o[b] && o[b].u) || 0));
-                keys.slice(0, keys.length - MAX_SHOWS).forEach(k => { delete o[k]; });
-            }
-            localStorage.setItem(STORE_KEY, JSON.stringify(o));
-        } catch (e) { /* storage unavailable: lasts until restart only */ }
+    // Episode identity: only used to decide whether an online lookup makes sense. Movies have none
+    // (chapters still work for them).
+    function isEpisodeMeta(meta) {
+        if (!meta) return false;
+        if (meta.kind === 'episode') return !!String(meta.showTitle || '').trim();
+        return meta.kind === 'other' && !!String(meta.title || '').trim() && !!((meta.season | 0) || (meta.episode | 0));
     }
 
-    // One key per show, one per show+season. Movies have none (chapters still work for them).
-    function keysFor(meta) {
-        if (!meta) return null;
-        let name = '';
-        if (meta.kind === 'episode') name = meta.showTitle;
-        else if (meta.kind === 'other' && ((meta.season | 0) || (meta.episode | 0))) name = meta.title;
-        name = String(name || '').toLowerCase().replace(/\s+/g, ' ').trim();
-        if (!name) return null;
-        const season = meta.season | 0;
-        return { show: name, season: season > 0 ? name + '|s' + season : null };
-    }
-
-    function get(meta, kind) {
-        const k = keysFor(meta);
-        if (!k) return null;
-        const db = load();
-        const a = k.season && db[k.season] && db[k.season][kind];
-        const b = db[k.show] && db[k.show][kind];
-        const r = a || b;
-        return r && r.e > r.s ? { start: r.s, end: r.e } : null;
-    }
-
-    function set(meta, kind, start, end) {
-        const k = keysFor(meta);
-        if (!k || !(end - start >= 3) || end - start > 600) return false;
-        const db = load(), now = Date.now();
-        [k.show, k.season].forEach(key => {
-            if (!key) return;
-            const rec = db[key] || {};
-            rec[kind] = { s: Math.round(start * 10) / 10, e: Math.round(end * 10) / 10 };
-            rec.u = now;
-            db[key] = rec;
-        });
-        save(db);
-        return true;
-    }
-
-    function clear(meta) {
-        const k = keysFor(meta);
-        if (!k) return;
-        const db = load();
-        Object.keys(db).forEach(key => { if (key === k.show || key.indexOf(k.show + '|s') === 0) delete db[key]; });
-        save(db);
-    }
-
-    function hasAny(meta) { return !!(get(meta, 'intro') || get(meta, 'recap')); }
+    // Drop spans people marked by hand in earlier versions.
+    try { localStorage.removeItem(OLD_STORE_KEY); } catch (e) { /* ignore */ }
 
     function autoOn() { try { return localStorage.getItem(AUTO_KEY) === '1'; } catch (e) { return false; } }
     function onlineOn() { try { return localStorage.getItem(ONLINE_KEY) !== '0'; } catch (e) { return true; } }
@@ -161,8 +99,8 @@
         const out = [], seen = {};
         function add(kind, o) {
             if (!o || typeof o !== 'object') return;
-            let a = pick(o, ['start_sec', 'startSec', 'start_seconds', 'start', 'from'], false);
-            let b = pick(o, ['end_sec', 'endSec', 'end_seconds', 'end', 'to'], false);
+            let a = pick(o, ['start_sec', 'startSec', 'start_seconds', 'start', 'from', 'start_time', 'startTime'], false);
+            let b = pick(o, ['end_sec', 'endSec', 'end_seconds', 'end', 'to', 'end_time', 'endTime'], false);
             if (isNaN(a)) a = pick(o, ['start_ms', 'startMs', 'start_time_ms'], true);
             if (isNaN(b)) b = pick(o, ['end_ms', 'endMs', 'end_time_ms'], true);
             if (isNaN(a) || isNaN(b)) return;
@@ -215,6 +153,15 @@
 .hp-show .hp-skip { bottom: 150px; }
 .hp-skip.hp-focused, .hp-skip:active { background-color: #f3eee7; background-color: var(--hp-hi, #f3eee7); color: #1c1815; border-color: transparent;
     -webkit-transform: scale(1.05); transform: scale(1.05); }
+/* Phone: small, see-through and tucked into the corner so it stays out of the picture. Covers landscape phones too. */
+.hp-skip.hp-phone { right: 12px; bottom: 14px; padding: 7px 14px; gap: 6px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.01em;
+    background-color: rgba(28, 24, 21, 0.4); background-color: rgba(var(--hp-base-rgb, 28, 24, 21), 0.4);
+    border: 1px solid rgba(246, 242, 236, 0.22); border: 1px solid rgba(var(--hp-fg-rgb, 246, 242, 236), 0.22);
+    opacity: 0.8; }
+.hp-skip.hp-phone svg { width: 14px; height: 14px; }
+.hp-skip.hp-phone.hp-quiet { opacity: 0.35; }
+.hp-show .hp-skip.hp-phone { bottom: 96px; }
+.hp-skip.hp-phone.hp-focused, .hp-skip.hp-phone:active { opacity: 1; -webkit-transform: none; transform: none; }
 /* TV / remote: a small dialog in the bottom-right corner, Prime-style. Already highlighted, so OK skips. */
 .hp-skip.hp-tv { right: 56px; bottom: 64px; padding: 14px 30px; border-radius: 6px; font-size: 1.2rem; gap: 12px;
     background-color: #f3eee7; background-color: var(--hp-hi, #f3eee7); color: #1c1815; color: var(--hp-ink, #1c1815);
@@ -225,7 +172,6 @@
 .hp-show .hp-skip.hp-tv { bottom: 170px; }
 @-webkit-keyframes hp-skip-in { from { opacity: 0; -webkit-transform: translateX(24px); } to { opacity: 1; -webkit-transform: none; } }
 @keyframes hp-skip-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
-@media (max-width: 700px) { .hp-skip { right: 14px; padding: 10px 16px; font-size: 0.85rem; } .hp-show .hp-skip { bottom: 128px; } }
 `;
         document.head.appendChild(s);
     }
@@ -238,9 +184,10 @@
             this.spans = [];          // from chapters
             this.remote = [];         // from the database (see fetchRemote)
             this._remoteTried = false;
+            this._dbg = 'not asked yet';
+            this._chapInfo = 'chapters not read yet';
             this.cur = null;          // the span the button offers right now
             this.autoDone = {};       // span id -> already auto-skipped / skipped once
-            this.pending = {};        // kind -> start time marked, waiting for the end mark
             this.el = null;
             this._shownAt = 0;
         }
@@ -252,7 +199,7 @@
             b.type = 'button';
             b.className = 'hp-skip';
             b.setAttribute('aria-label', 'Skip');
-            if (isTv()) b.className += ' hp-tv';
+            b.className += isTv() ? ' hp-tv' : ' hp-phone';
             b.addEventListener('click', (ev) => { ev.stopPropagation(); this.skip(); });
             b.addEventListener('pointerdown', (ev) => { ev.stopPropagation(); });   // do not toggle the controls
             root.appendChild(b);
@@ -261,47 +208,54 @@
         }
 
         // Ask the backend for this episode's intro / recap times. Fire and forget: if it is
-        // offline, slow or has nothing, the player simply carries on with chapters and saved marks.
+        // offline, slow or has nothing, the player simply carries on with chapters alone.
         fetchRemote() {
             const m = this.meta;
-            if (this._remoteTried || !m || !onlineOn() || typeof fetch !== 'function') return;
+            if (this._remoteTried || typeof fetch !== 'function') return;
+            if (!onlineOn()) { this._dbg = 'online lookup is Off'; return; }
+            if (!m) { this._dbg = 'no show info passed to the player (meta missing)'; return; }
             const show = m.kind === 'episode' ? m.showTitle : ((m.kind === 'other' && m.title) ? m.title : '');
             const season = m.season | 0, episode = m.episode | 0;
-            if (!show || episode <= 0) return;                     // movies / unparsed names: nothing to look up
+            if (!show || episode <= 0) { this._dbg = 'no lookup: needs show + episode number (got "' + (show || '') + '" S' + season + 'E' + episode + ')'; return; }
             this._remoteTried = true;
+            this._dbg = 'asking for "' + show + '" S' + season + 'E' + episode + '...';
             const url = '/api/skip-segments?show=' + encodeURIComponent(show) + '&season=' + season + '&episode=' + episode;
-            fetch(url).then(r => r.json()).then(j => {
-                if (!this.el || !j || !j.found || !j.data) return;
+            fetch(url).then(r => { this._http = r.status; return r.json(); }).then(j => {
+                if (!this.el) return;
+                if (!j) { this._dbg = 'empty answer from the app server'; return; }
+                if (j.error) { this._dbg = 'app server error: ' + j.error; return; }
+                if (!j.found || !j.data) {
+                    this._dbg = j.imdb ? 'show found (' + j.imdb + ') but the database has no times for this episode'
+                                       : 'could not look up the show (TMDb/network problem on the app server)';
+                    return;
+                }
                 this.remote = remoteSpans(j.data, this.player.state.duration);
-                if (this.remote.length) this.player._updateButtons();   // the Skip menu entry may now apply
-            }).catch(() => { /* offline: ignore */ });
+                if (this.remote.length) {
+                    this._dbg = 'ok: ' + this.remote.map(x => x.kind + ' ' + fmt(x.start) + '-' + fmt(x.end)).join(', ');
+                    this.player._updateButtons();
+                } else {
+                    let raw = ''; try { raw = JSON.stringify(j.data).slice(0, 120); } catch (e) { /* ignore */ }
+                    this._dbg = 'database answered but no usable times in it: ' + raw;
+                }
+            }).catch((e) => { this._dbg = 'lookup failed: ' + ((e && e.message) || e) + (this._http ? ' (HTTP ' + this._http + ')' : ''); });
         }
 
         destroy() { this.cur = null; if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el); this.el = null; }
 
         setChapters(list) {
             this.spans = chapterSpans(list, this.player.state.duration);
+            this._chapInfo = (list && list.length ? list.length + ' in file (' + list.slice(0, 3).map(c => (c && c.title) || '?').join(', ') + (list.length > 3 ? ', ...' : '') + ')' : 'none in file') + ', ' + this.spans.length + ' look like intro/recap';
             this.autoDone = {};
         }
 
         // Is there anything for the Skip menu / button to do for this video?
-        available() { return !!keysFor(this.meta) || this.spans.length > 0 || this.remote.length > 0; }
-
-        _saved() {
-            const out = [];
-            KINDS.forEach(kind => {
-                const r = get(this.meta, kind);
-                if (r) out.push({ id: 's' + kind, kind: kind, start: r.start, end: r.end, src: 'saved' });
-            });
-            return out;
-        }
+        available() { return isEpisodeMeta(this.meta) || this.spans.length > 0 || this.remote.length > 0; }
 
         _find(pos) {
-            const all = this.spans.concat(this.remote, this._saved());   // chapters, then the database, then your marks
+            const all = this.spans.concat(this.remote);   // chapters, then the database
             for (let i = 0; i < all.length; i++) {
                 const s = all[i];
-                const lead = s.src === 'saved' ? SAVED_LEAD : CHAPTER_LEAD;
-                if (pos >= s.start - lead && pos < s.end - END_MARGIN) return s;
+                if (pos >= s.start - CHAPTER_LEAD && pos < s.end - END_MARGIN) return s;
             }
             return null;
         }
@@ -314,8 +268,8 @@
             if (!seg) { if (this.cur) this._setCur(null); return; }
             if (!this.cur || this.cur.id !== seg.id) this._setCur(seg);
             // fade the pill after a few seconds; it stays tappable
-            this.el.classList.toggle('hp-quiet', Date.now() - this._shownAt > 9000 && !p.mode.match(/controls/));
-            if (seg.src !== 'saved' && autoOn() && !this.autoDone[seg.id] && pos >= seg.start - 0.3 && !p._pendingSeek) {
+            this.el.classList.toggle('hp-quiet', Date.now() - this._shownAt > (isTv() ? 9000 : 4000) && !p.mode.match(/controls/));
+            if (autoOn() && !this.autoDone[seg.id] && pos >= seg.start - 0.3 && !p._pendingSeek) {
                 this.autoDone[seg.id] = true;
                 this.skip();
             }
@@ -354,38 +308,16 @@
         }
 
         // ---- the "Skip" menu (player menu kind 'skip') ----
-        _markItem(kind) {
-            const p = this.player, now = p.state.position, word = kind;
-            const saved = get(this.meta, kind);
-            const pend = this.pending[kind];
-            if (pend == null) {
-                return {
-                    label: 'Mark ' + word + ' start here (' + fmt(now) + ')' + (saved ? '   \u00b7   saved ' + fmt(saved.start) + '\u2013' + fmt(saved.end) : ''),
-                    action: () => { this.pending[kind] = now; }
-                };
-            }
-            return {
-                label: 'Mark ' + word + ' end here (' + fmt(now) + ')   \u00b7   started ' + fmt(pend),
-                action: () => {
-                    if (now - pend >= 3) set(this.meta, kind, pend, now);
-                    delete this.pending[kind];
-                }
-            };
-        }
-
         menuItems() {
             const items = [];
-            if (keysFor(this.meta)) {
-                KINDS.slice().reverse().forEach(kind => items.push(this._markItem(kind)));
-                if (hasAny(this.meta)) items.push({ label: 'Forget saved skips for this show', action: () => { clear(this.meta); this.pending = {}; } });
-            }
+            items.push({ label: 'Why no skip? Chapters: ' + this._chapInfo + '. Online: ' + this._dbg + '.', action: () => {} });
             items.push({
                 label: 'Look up intro/recap online: ' + (onlineOn() ? 'On' : 'Off'),
                 selected: onlineOn(),
                 action: () => { setOnline(!onlineOn()); this._remoteTried = false; if (onlineOn()) this.fetchRemote(); else this.remote = []; }
             });
             items.push({
-                label: 'Auto-skip when the time is known: ' + (autoOn() ? 'On' : 'Off'),
+                label: 'Auto-skip intro/recap: ' + (autoOn() ? 'On' : 'Off'),
                 selected: autoOn(),
                 action: () => setAuto(!autoOn())
             });
@@ -396,10 +328,6 @@
     window.HesperSkip = {
         Controller: Controller,
         chapterSpans: chapterSpans,
-        remoteSpans: remoteSpans,
-        keysFor: keysFor,
-        get: get,
-        set: set,
-        clear: clear
+        remoteSpans: remoteSpans
     };
 })();
