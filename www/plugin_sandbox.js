@@ -30,6 +30,11 @@
 //   permissions.plugins  true => pek.plugins.streamers() lists installed plugins that can play titles
 //                        (plugin.json "provides": {"stream": true}); pek.plugins.open(id, title) opens one of
 //                        them on that title. Only from a tap.
+//   permissions.live     true => pek.live.play({url, title}): opens an http(s) video address (live TV) in PEK TV's own
+//                        player. The address must not point at this device (localhost, link-local). Nothing is added to
+//                        Watch History. The stream's server sees the user's IP address; the install screen says so.
+//   (no permission)      pek.readBundled(name): reads playlists/<name>.json from the plugin's OWN folder (files that
+//                        shipped inside the plugin's .zip, JSON only, 1 MB each).
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
 //                        closeOnRemove. They only change how PEK TV's own screens behave.
 //
@@ -209,6 +214,12 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
                     title: str(it.title), year: Number(it.year) || 0 });
             }
         },
+        // Needs permissions.live. play({url, title}) opens an http(s) video address in PEK TV's player.
+        live: {
+            play: function (o) { o = o || {}; return request('livePlay', { url: str(o.url), title: str(o.title) }, 30000); }
+        },
+        // Reads playlists/<name> (a .json file) from this plugin's own folder.
+        readBundled: function (name) { return request('readBundled', { name: str(name) }, 20000); },
         render: function (fn) { renderFn = fn; requestRender(); },
         requestRender: requestRender,
         fetchText: function (url) { return request('fetch', { url: str(url) }); },
@@ -239,7 +250,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
     Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
-    Object.freeze(api.favorites); Object.freeze(api.device); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
+    Object.freeze(api.live); Object.freeze(api.favorites); Object.freeze(api.device); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
     Object.defineProperty(window, 'pek', { value: api, writable: false, configurable: false });
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });   // old name, kept so existing plugins keep working
 
@@ -295,7 +306,7 @@ class PekSandbox {
         const out = {
             name: null, version: null,
             permissions: { network: [], storage: false, library: false, torrent: false,
-                favorites: false, providers: false, plugins: false, watched: false, device: false },
+                favorites: false, providers: false, plugins: false, live: false, watched: false, device: false },
             provides: { stream: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
@@ -313,6 +324,7 @@ class PekSandbox {
         out.permissions.favorites = perms.favorites === true;
         out.permissions.providers = perms.providers === true;
         out.permissions.plugins = perms.plugins === true;
+        out.permissions.live = perms.live === true;
         out.permissions.watched = perms.watched === true;
         out.permissions.device = perms.device === true;
         // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
@@ -523,6 +535,8 @@ class PekSandbox {
                 case 'watchedSet': reply(true, this._watchedSet(a)); break;
                 case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
                 case 'pluginOpen': reply(true, this._pluginOpen(a)); break;
+                case 'livePlay': reply(true, this._livePlay(a)); break;
+                case 'readBundled': reply(true, await this._readBundled(a.name)); break;
                 default: throw new Error('unknown request');
             }
         } catch (err) {
@@ -732,6 +746,45 @@ class PekSandbox {
             if (text.length > L.maxFetchBytes) throw new Error('response too large');
             return text;
         } finally { clearTimeout(timer); if (window.PekActivity) window.PekActivity.end(actId); }
+    }
+
+    // ---------------- live streams (permission "live") ----------------
+    // The plugin only names an address; PEK TV's own player opens it. Nothing is added to Watch History.
+
+    static isLocalHost(host) {
+        const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+        if (!h || h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal')) return true;
+        if (h === '::' || h === '::1' || h.startsWith('fe80:') || h.startsWith('::ffff:')) return true;
+        const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+        if (m) { const a = +m[1], b = +m[2]; return a === 0 || a === 127 || (a === 169 && b === 254); }
+        return false;
+    }
+
+    _livePlay(a) {
+        this._need('live');
+        if (!(window.PekHost && typeof window.PekHost.playStream === 'function')) throw new Error('PEK TV cannot play streams here');
+        const raw = typeof a.url === 'string' ? a.url.trim() : '';
+        if (!raw || raw.length > 2000) throw new Error('invalid stream address');
+        let u;
+        try { u = new URL(raw); } catch (e) { throw new Error('invalid stream address'); }
+        if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password) {
+            throw new Error('only plain http:// or https:// stream addresses are allowed');
+        }
+        if (PekSandbox.isLocalHost(u.hostname)) throw new Error('stream addresses on this device are not allowed');
+        const title = typeof a.title === 'string' ? a.title.trim().slice(0, 120) : '';
+        window.PekHost.playStream(u.href, title, null, null);
+        return true;
+    }
+
+    // ---------------- files shipped inside the plugin (no permission needed) ----------------
+
+    async _readBundled(name) {
+        if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.json$/.test(name)) throw new Error('invalid file name');
+        const res = await fetch(`/plugins/${encodeURIComponent(this.folder)}/playlists/${encodeURIComponent(name)}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error('no such file');
+        const text = await res.text();
+        if (text.length > PEK_SANDBOX_LIMITS.maxFetchBytes) throw new Error('file too large');
+        return text;
     }
 
     async _readData(name) {
