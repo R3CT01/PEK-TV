@@ -862,8 +862,11 @@ function pekScrollIntoView(el, fast) {
         const scrollX = isRoot ? false : /(auto|scroll)/.test(cs.overflowX) && p.scrollWidth > p.clientWidth + 1;
         if (scrollY || scrollX) {
             const c = p.getBoundingClientRect();
-            const dy = scrollY ? pick(c.top, c.bottom, r.top, r.bottom) : 0;
-            const dx = scrollX ? pick(c.left, c.right, r.left, r.right) : 0;
+            // Keep a little air between the highlighted item and the edge of the scroll box (the focus ring is
+            // ~6px and was being cut off; an item sitting exactly on the edge also hides what is just beyond it).
+            const my = Math.min(24, c.height / 4), mx = Math.min(24, c.width / 4);
+            const dy = scrollY ? pick(c.top + my, c.bottom - my, r.top, r.bottom) : 0;
+            const dx = scrollX ? pick(c.left + mx, c.right - mx, r.left, r.right) : 0;
             if (dy || dx) {
                 const ty = dy ? Math.max(0, Math.min(p.scrollHeight - p.clientHeight, p.scrollTop + dy)) : null;
                 const tx = dx ? Math.max(0, Math.min(p.scrollWidth - p.clientWidth, p.scrollLeft + dx)) : null;
@@ -918,7 +921,12 @@ function pekStepScroll(current, target, dir) {
 }
 
 const pekRegionCache = new WeakMap();
-function pekSpatialTarget(from, elements, dir) {
+const pekPartCache = new WeakMap();
+// Picks the element the D-pad should move to. Up/Down: the nearest row wins, then whichever sits closest to
+// the column you are travelling along. Left/Right: only elements on the same row (sideways moves never jump
+// to some other row), except between the sidebar and the content.
+// `ref` (optional) is the x of the column Up/Down started in (see _navRefX in the key handler).
+function pekSpatialTarget(from, elements, dir, ref) {
     const EPS = 4;                                   // tolerate slight overlap between neighbours
     const f = from.getBoundingClientRect();
     const horizontal = dir === 'left' || dir === 'right';
@@ -931,37 +939,53 @@ function pekSpatialTarget(from, elements, dir) {
         if (r === undefined) { r = (el.closest && el.closest('.pek-sidebar, .pek-content')) || null; pekRegionCache.set(el, r); }
         return r;
     };
+    // A plugin window has a fixed header (Back button) above its scrolling body. Up/Down prefer staying in the
+    // same part and only cross over when nothing is left in it. Without this the pinned Back button always
+    // looked "closest" and the D-pad skipped the tab row / buttons that had just scrolled out of view above.
+    const partOf = (el) => {
+        let r = pekPartCache.get(el);
+        if (r === undefined) { r = (el.closest && el.closest('.plugin-window-bar')) ? 'bar' : 'body'; pekPartCache.set(el, r); }
+        return r;
+    };
     const fromRegion = regionOf(from);
-    let best = null;
-    let bestScore = Infinity;
+    const fromPart = partOf(from);
+    // distance from a point to a span (0 when the point is inside it): a wide element, such as a full-width
+    // search box, is "in the column" wherever you cross it. Measuring to its centre made it lose to a small
+    // button further away, so Up/Down skipped right over it.
+    const spanDist = (lo, hi, c) => (c < lo ? lo - c : c > hi ? c - hi : 0);
+    let best = null, bestScore = Infinity;       // same part of the screen
+    let bestAny = null, bestAnyScore = Infinity; // anywhere (used only when the same part has nothing)
 
     for (const el of elements) {
         if (el === from || el.disabled) continue;
-        if (!horizontal && regionOf(el) !== fromRegion) continue;
+        const elRegion = regionOf(el);
+        if (!horizontal && elRegion !== fromRegion) continue;
         const r = el.getBoundingClientRect();
         if (!r.width || !r.height) continue;            // hidden / not rendered
 
-        let primary, gapAcross, centreAcross;
+        let primary, gapAcross, refMiss = 0, cx;
         if (horizontal) {
             // Must sit fully on that side, so a wide card never counts as "to the right" of itself.
             if (dir === 'right' ? r.left < f.right - EPS : r.right > f.left + EPS) continue;
             primary = dir === 'right' ? Math.max(0, r.left - f.right) : Math.max(0, f.left - r.right);
             gapAcross = Math.max(0, r.top - f.bottom, f.top - r.bottom);   // 0 when rows overlap
-            centreAcross = Math.abs((r.top + r.height / 2) - (f.top + f.height / 2));
+            // Same row only. (Used to be allowed with a penalty, so Right at the end of a row jumped to
+            // something unrelated far above or below.) Crossing between sidebar and content is still free.
+            if (gapAcross > 8 && elRegion === fromRegion) continue;
+            cx = Math.abs((r.top + r.height / 2) - (f.top + f.height / 2));
         } else {
             if (dir === 'down' ? r.top < f.bottom - EPS : r.bottom > f.top + EPS) continue;
             primary = dir === 'down' ? Math.max(0, r.top - f.bottom) : Math.max(0, f.top - r.bottom);
             gapAcross = Math.max(0, r.left - f.right, f.left - r.right);   // 0 when columns overlap
-            centreAcross = Math.abs((r.left + r.width / 2) - (f.left + f.width / 2));
+            if (ref != null) refMiss = spanDist(r.left, r.right, ref);
+            cx = Math.abs((r.left + r.width / 2) - (ref != null ? ref : f.left + f.width / 2));
         }
 
-        const score = primary + gapAcross * 3 + centreAcross * 0.5;
-        if (score < bestScore) {
-            bestScore = score;
-            best = el;
-        }
+        const score = primary + gapAcross * 1.5 + refMiss * 2 + cx * 0.02;
+        if (score < bestAnyScore) { bestAnyScore = score; bestAny = el; }
+        if ((horizontal || partOf(el) === fromPart) && score < bestScore) { bestScore = score; best = el; }
     }
-    return best;
+    return best || bestAny;
 }
 
 /* ============================================================
@@ -1195,7 +1219,19 @@ class PekEngine {
                 const beforeIdx = this.currentIndex;
                 if (hasFocus) {
                     const current = this.focusableElements[this.currentIndex];
-                    const target = current ? pekSpatialTarget(current, this.focusableElements, dirs[e.key]) : null;
+                    // Up/Down keep the column you started in (a wide box in between must not drag the highlight sideways).
+                    // Left/Right, a mouse click or anything else that moved focus starts a new column.
+                    let ref = null;
+                    if (dirs[e.key] === 'up' || dirs[e.key] === 'down') {
+                        if (this._navRefEl !== current || this._navRefX == null) {
+                            const cr = current ? current.getBoundingClientRect() : null;
+                            // Only a narrow element marks a column; a wide one is judged by the span it covers.
+                            this._navRefX = (cr && cr.width <= window.innerWidth * 0.5) ? cr.left + cr.width / 2 : null;
+                        }
+                        ref = this._navRefX;
+                    } else { this._navRefX = null; }
+                    const target = current ? pekSpatialTarget(current, this.focusableElements, dirs[e.key], ref) : null;
+                    this._navRefEl = target || current;
                     // Text sits between the two (a description, say): scroll to reveal it first and keep focus
                     // where it is, instead of jumping straight past it.
                     if (target && pekStepScroll(current, target, dirs[e.key])) stepped = true;
