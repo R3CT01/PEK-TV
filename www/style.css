@@ -1420,3 +1420,39 @@ html.pek-tv .settings-page .settings-section { -webkit-backdrop-filter: none; ba
         font-size: 0.68rem; line-height: 1.15;
     }
 }
+
+
+/* ============================================================
+   Spacing / overlap fixes (TV and phone)
+   - Button rows get breathing room above AND below, so the next block never touches them.
+   - Focus rings (0.2rem on TV) stay inside the gap between neighbours and are drawn on top, never cut.
+   - Dashboard tiles use rem sizes on TV, so their text is not squeezed or clipped.
+   ============================================================ */
+.section-actions { margin: 1rem 0 1.25rem; row-gap: 0.9rem; }
+.settings-section > .section-actions { margin: 0.9rem 0 1.1rem; }
+.settings-section > .sx-list-row, .settings-section > .plugin-row, .settings-section > .sx-toggle-row { margin-bottom: 0.9rem; }
+.settings-section > .sub { margin: 0.6rem 0 0.9rem; }
+.content-header { flex-wrap: wrap; row-gap: 0.75rem; }
+.content-header .content-title { min-width: 0; }
+.header-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 0.6rem; }
+.dash-grid { margin-top: 0.5rem; }
+.dash-tile { padding: 1.25rem 1.5rem; }
+.dash-ctls { gap: 0.75rem; }
+.dash-scroll { padding: 1rem 0.8rem 1.4rem; }
+html.pek-tv .section-actions { gap: 1rem 1.25rem; margin: 1.25rem 0 1.75rem; }
+html.pek-tv .settings-section > .section-actions { margin: 1.1rem 0 1.5rem; }
+html.pek-tv .settings-section > .sx-list-row, html.pek-tv .settings-section > .plugin-row, html.pek-tv .settings-section > .sx-toggle-row { margin-bottom: 1.1rem; }
+html.pek-tv .header-actions { gap: 1rem; }
+html.pek-tv .content-header { margin-bottom: 2rem; }
+html.pek-tv .dash-grid { grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 1.4rem; margin-top: 0.75rem; }
+html.pek-tv .dash-big { font-size: 2rem; }
+html.pek-tv .dash-cell { flex-basis: 8.5rem; }
+html.pek-tv .dash-scroll { gap: 1.4rem; padding: 1.1rem 1rem 1.6rem; }
+html.pek-tv .dash-ctls { gap: 1rem; margin-top: 1rem; }
+html.pek-tv .dash-row-title { margin: 0.6rem 0 0.4rem; }
+html.pek-tv .sx-btn.focused, html.pek-tv .sx-list-row.focused, html.pek-tv .plugin-row.focused,
+html.pek-tv .sx-toggle-row.focused, html.pek-tv .dash-tile.focused, html.pek-tv .nav-item.focused,
+html.pek-tv .theme-launch-btn.focused, html.pek-tv .weather-badge.focused, html.pek-tv .clock-badge.focused {
+    position: relative; z-index: 5;
+}
+html.pek-tv .dash-tile .dash-big { font-size: 1.6rem; white-space: nowrap; }

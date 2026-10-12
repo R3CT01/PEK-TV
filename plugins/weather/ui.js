@@ -3,16 +3,30 @@
 // ============================================================
 
 window.app_name = 'Weather Widget';
-window.app_version = '1.0.4';
+window.app_version = '1.1.0';
 
 window.render = function (engine) {
     const { createElement, ui } = engine;
 
-    const CITY_KEY = 'hesper_weather_city';
-    const COORDS_KEY = 'hesper_weather_coords';   // {lat, lon, label} of the city you picked
-    const LAST_KEY = 'hesper_weather_last';       // last good reading, used if the network is down
+    // These names MUST match what the app itself reads (app_config.js WEATHER_TEMP_KEY and the
+    // dashboard in app_dashboard.js): they all start with pek_weather_. The plugin used to write
+    // hesper_weather_*, so the header badge and the dashboard tile never saw a city or a reading.
+    const CITY_KEY = 'pek_weather_city';
+    const COORDS_KEY = 'pek_weather_coords';      // {lat, lon, label} of the city you picked
+    const LAST_KEY = 'pek_weather_last';          // last good reading, used if the network is down
+    const UNIT_KEY = 'pek_weather_unit';
+    const TEMP_KEY = 'pek_weather_current_temp';  // text the header badge and dashboard show, e.g. "65\u00B0F"
 
-    let unit = localStorage.getItem('hesper_weather_unit') || 'F';
+    // One-time move of anything saved under the old hesper_weather_* names.
+    ['city', 'coords', 'last', 'unit', 'current_temp'].forEach((n) => {
+        try {
+            const old = localStorage.getItem('hesper_weather_' + n);
+            if (old !== null && localStorage.getItem('pek_weather_' + n) === null) localStorage.setItem('pek_weather_' + n, old);
+            if (old !== null) localStorage.removeItem('hesper_weather_' + n);
+        } catch (e) { /* storage unavailable */ }
+    });
+
+    let unit = localStorage.getItem(UNIT_KEY) || 'F';
     let currentCity = localStorage.getItem(CITY_KEY) || '';
 
     const readJson = (key) => {
@@ -65,9 +79,9 @@ window.render = function (engine) {
         subText.textContent = `${weatherData.condition} \u2014 ${weatherData.city}`;
 
         // Algorithmic Upgrade: Conditional state check destroys the infinite re-render loop
-        const previousTemp = localStorage.getItem('hesper_weather_current_temp');
+        const previousTemp = localStorage.getItem(TEMP_KEY);
         if (previousTemp !== tempStr) {
-            localStorage.setItem('hesper_weather_current_temp', tempStr);
+            localStorage.setItem(TEMP_KEY, tempStr);
             window.dispatchEvent(new Event('storage'));
         }
     };
@@ -142,8 +156,8 @@ window.render = function (engine) {
     function showNoCity() {
         weatherData = { city: '', condition: 'No city chosen' };
         cityInput.value = '';
-        if (localStorage.getItem('hesper_weather_current_temp') !== null) {
-            localStorage.removeItem('hesper_weather_current_temp');
+        if (localStorage.getItem(TEMP_KEY) !== null) {
+            localStorage.removeItem(TEMP_KEY);
             window.dispatchEvent(new Event('storage'));
         }
         updateUI();
@@ -219,12 +233,21 @@ window.render = function (engine) {
         unit,
         (id) => {
             unit = id;
-            localStorage.setItem('hesper_weather_unit', id);
+            localStorage.setItem(UNIT_KEY, id);
             updateUI();
         }
     );
 
     refreshWeather();
+
+    // Keep the reading fresh while the app stays open (the dashboard and header badge only read what is saved).
+    // One timer for the whole page, however many times this screen is built.
+    if (!window.__pekWeatherTimer) {
+        window.__pekWeatherTimer = setInterval(() => {
+            try { if (typeof window.__pekWeatherRefresh === 'function') window.__pekWeatherRefresh(); } catch (e) { /* try again next time */ }
+        }, 15 * 60 * 1000);
+    }
+    window.__pekWeatherRefresh = refreshWeather;
 
     return createElement('div', {},
         tabRow,
