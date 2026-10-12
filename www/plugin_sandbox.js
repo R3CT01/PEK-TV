@@ -19,6 +19,8 @@
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   permissions.favorites true => pek.favorites.list / add / remove: the shared Favorites list that
 //                        PEK TV's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
+//   permissions.device   true => pek.device.profile(): what this device can decode and show (hardware codecs,
+//                        screen size, HDR), so a plugin can rank releases for it. No identifiers, nothing personal.
 //   permissions.watched  true => pek.watched.check(items) / set(item, on): read and change what PEK TV's
 //                        Watch History says is watched. An item is {kind:'movie', title, year} or
 //                        {kind:'episode', showTitle, season, episode}. Nothing else of the history is visible.
@@ -185,6 +187,11 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             },
             remove: function (key) { return request('favRemove', { key: str(key) }); }
         },
+        // Needs permissions.device. profile() -> {h264, hevc, hevc10, av1 (tallest hardware-decoded picture: 0 / 720 / 1080 / 2160),
+        // tv, screenShort, screenLong (px), hdr, dv, ramMb, lowRam}, or {unknown: true} where the app cannot tell.
+        device: {
+            profile: function () { return request('deviceProfile', {}).then(JSON.parse); }
+        },
         // Needs permissions.watched. check([item, ...]) -> [true, false, ...]; set(item, true | false) marks one
         // watched / unwatched in Watch History (it syncs like anything else the user watches).
         watched: {
@@ -232,7 +239,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
     Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
-    Object.freeze(api.favorites); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
+    Object.freeze(api.favorites); Object.freeze(api.device); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
     Object.defineProperty(window, 'pek', { value: api, writable: false, configurable: false });
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });   // old name, kept so existing plugins keep working
 
@@ -288,7 +295,7 @@ class PekSandbox {
         const out = {
             name: null, version: null,
             permissions: { network: [], storage: false, library: false, torrent: false,
-                favorites: false, providers: false, plugins: false, watched: false },
+                favorites: false, providers: false, plugins: false, watched: false, device: false },
             provides: { stream: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
@@ -307,6 +314,7 @@ class PekSandbox {
         out.permissions.providers = perms.providers === true;
         out.permissions.plugins = perms.plugins === true;
         out.permissions.watched = perms.watched === true;
+        out.permissions.device = perms.device === true;
         // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
         // "plugins" permission are offered it as a "Play with ..." button.
         const pv = raw.provides && typeof raw.provides === 'object' ? raw.provides : {};
@@ -510,6 +518,7 @@ class PekSandbox {
                 case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.PekFavorites.keys())); break;
                 case 'favAdd': reply(true, this._favAdd(a)); break;
                 case 'favRemove': reply(true, this._favRemove(a)); break;
+                case 'deviceProfile': reply(true, this._deviceProfile()); break;
                 case 'watchedCheck': reply(true, this._watchedCheck(a)); break;
                 case 'watchedSet': reply(true, this._watchedSet(a)); break;
                 case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
@@ -540,6 +549,19 @@ class PekSandbox {
         this._need('favorites');
         if (typeof a.key !== 'string' || !/^(movie|tv):\d{1,10}$/.test(a.key)) throw new Error('invalid key');
         return window.PekFavorites.remove(a.key);
+    }
+
+    // ---------------- device capabilities (permission "device") ----------------
+
+    // The Android app answers from MediaCodecList and the display; anywhere else the plugin is told
+    // "unknown" and keeps its normal behaviour.
+    _deviceProfile() {
+        this._need('device');
+        const a = window.PekAndroid;
+        if (a && typeof a.deviceProfile === 'function') {
+            try { return String(a.deviceProfile()); } catch (e) { /* fall through */ }
+        }
+        return JSON.stringify({ v: 1, unknown: true });
     }
 
     // ---------------- watched marks (permission "watched") ----------------

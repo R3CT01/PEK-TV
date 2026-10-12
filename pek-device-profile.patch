@@ -1,0 +1,261 @@
+diff -u a/PLUGINS.md b/PLUGINS.md
+--- a/PLUGINS.md	2026-10-11 20:30:20.000000000 +0000
++++ b/PLUGINS.md	2026-10-12 03:32:43.489181937 +0000
+@@ -137,12 +137,13 @@
+ 
+ ## Favorites, provider buttons and plugin launching
+ 
+-Four optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true, "watched": true}`):
++Five optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true, "watched": true, "device": true}`):
+ 
+ | Call | Needs | What it does |
+ |---|---|---|
+ | `pek.favorites.list()` | `favorites` | Resolves to `['movie:603', 'tv:1396', ...]`: the shared Favorites list shown in PEK TV's Favorites tab. |
+ | `pek.favorites.add({type, id, title, year, posterPath})` / `.remove('movie:603')` | `favorites` | `type` is `'movie'` or `'tv'`, `id` the TMDb id, `posterPath` TMDb's `poster_path` (e.g. `/abc.jpg`). PEK TV builds the poster address itself and records which plugin added the title, so Favorites can open it there. |
++| `pek.device.profile()` | `device` | Resolves to what this device can play: `h264`, `hevc`, `hevc10`, `av1` (tallest picture its hardware decodes at 30 fps: `0` none, `720`, `1080`, `2160`; `hevc10` is 10-bit HEVC, i.e. HDR10), `tv`, `screenShort` / `screenLong` (px), `hdr`, `dv` (screen shows HDR10 / HLG / Dolby Vision), `ramMb`, `lowRam`. `{unknown: true}` where the app cannot tell (not the Android app): keep your normal behaviour then. |
+ | `pek.watched.check(items)` | `watched` | Resolves to `[true, false, ...]`, one per item: is it marked watched in PEK TV's Watch History. An item is `{kind: 'movie', title, year}` or `{kind: 'episode', showTitle, season, episode}` (max 300 per call). |
+ | `pek.watched.set(item, true \| false)` | `watched` | Marks the item watched or unwatched. Same history the user sees (and that syncs), so it also shows in the library. Plugins that stream with `pek.torrent.play({kind, name, season, episode, year})` are marked automatically when playback finishes. |
+ | `ui.providerButton({name, logo, title, type, tmdbId, region})` | `providers` | A "Watch on <service>" button. `name` and `logo` are TMDb's `provider_name` and `logo_path`. PEK TV decides what it opens (the service's app on Android, its website elsewhere; unknown services open the title's TMDb "where to watch" page). The logo loads only if `image.tmdb.org` is in `network`. No callback. |
+diff -u a/android/app/src/main/java/com/pektv/app/DeviceProfile.kt b/android/app/src/main/java/com/pektv/app/DeviceProfile.kt
+--- a/android/app/src/main/java/com/pektv/app/DeviceProfile.kt	1970-01-01 00:00:00.000000000 +0000
++++ b/android/app/src/main/java/com/pektv/app/DeviceProfile.kt	2026-10-12 03:32:31.262933227 +0000
+@@ -0,0 +1,117 @@
++package com.pektv.app
++
++import android.app.Activity
++import android.app.ActivityManager
++import android.app.UiModeManager
++import android.content.Context
++import android.content.pm.PackageManager
++import android.content.res.Configuration
++import android.media.MediaCodecInfo
++import android.media.MediaCodecList
++import android.os.Build
++import android.util.DisplayMetrics
++import android.util.Log
++import android.view.Display
++import org.json.JSONObject
++
++/**
++ * What this device can really play, so a plugin can rank releases for it (a 4K HDR remux on a flagship,
++ * a 720p H.264 file on a budget phone). Read by the plugin sandbox through PekAndroid.deviceProfile().
++ *
++ * Codec numbers are the tallest picture (720 / 1080 / 2160) a HARDWARE decoder handles at 30 fps;
++ * 0 means "no hardware decoder", i.e. it would fall back to software and stutter on a weak chip.
++ */
++object DeviceProfile {
++    private const val AVC = "video/avc"
++    private const val HEVC = "video/hevc"
++    private const val AV1 = "video/av01"
++
++    // Decoder facts never change while the app runs, so they are probed once.
++    private var decoders: IntArray? = null    // [h264, hevc, hevc10, av1]
++
++    fun json(activity: Activity): String {
++        val d = decoders ?: probeDecoders().also { decoders = it }
++        val o = JSONObject()
++        o.put("v", 1)
++        o.put("sdk", Build.VERSION.SDK_INT)
++        o.put("h264", d[0]).put("hevc", d[1]).put("hevc10", d[2]).put("av1", d[3])
++        try {
++            val pm = activity.packageManager
++            val ui = activity.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
++            o.put("tv", ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
++                pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK))
++        } catch (t: Throwable) { o.put("tv", false) }
++        try {
++            @Suppress("DEPRECATION")
++            val disp = activity.windowManager.defaultDisplay
++            val dm = DisplayMetrics()
++            @Suppress("DEPRECATION")
++            disp.getRealMetrics(dm)
++            o.put("screenShort", minOf(dm.widthPixels, dm.heightPixels))
++            o.put("screenLong", maxOf(dm.widthPixels, dm.heightPixels))
++            @Suppress("DEPRECATION")
++            val types = disp.hdrCapabilities?.supportedHdrTypes ?: IntArray(0)
++            val dv = types.contains(Display.HdrCapabilities.HDR_TYPE_DOLBY_VISION)
++            val hlg = types.contains(Display.HdrCapabilities.HDR_TYPE_HLG)
++            val pq = types.contains(Display.HdrCapabilities.HDR_TYPE_HDR10) ||
++                types.contains(Display.HdrCapabilities.HDR_TYPE_HDR10_PLUS) || dv
++            o.put("hdr", pq || hlg).put("dv", dv)
++        } catch (t: Throwable) {
++            o.put("screenShort", 0).put("screenLong", 0).put("hdr", false).put("dv", false)
++        }
++        try {
++            val am = activity.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
++            val mi = ActivityManager.MemoryInfo()
++            am.getMemoryInfo(mi)
++            o.put("ramMb", (mi.totalMem / (1024 * 1024)).toInt()).put("lowRam", am.isLowRamDevice)
++        } catch (t: Throwable) { o.put("ramMb", 0).put("lowRam", false) }
++        return o.toString()
++    }
++
++    private fun isHardware(info: MediaCodecInfo): Boolean {
++        if (info.isEncoder) return false
++        if (Build.VERSION.SDK_INT >= 29) return info.isHardwareAccelerated && !info.isSoftwareOnly
++        val n = info.name.lowercase()
++        return !(n.startsWith("omx.google.") || n.startsWith("c2.android.") || n.startsWith("c2.google."))
++    }
++
++    private fun tallest(caps: MediaCodecInfo.VideoCapabilities): Int = try {
++        when {
++            caps.areSizeAndRateSupported(3840, 2160, 30.0) -> 2160
++            caps.areSizeAndRateSupported(1920, 1080, 30.0) -> 1080
++            caps.areSizeAndRateSupported(1280, 720, 30.0) -> 720
++            else -> 0
++        }
++    } catch (t: Throwable) { 0 }
++
++    private fun probeDecoders(): IntArray {
++        var h264 = 0; var hevc = 0; var hevc10 = 0; var av1 = 0
++        try {
++            for (info in MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos) {
++                if (!isHardware(info)) continue
++                for (type in info.supportedTypes) {
++                    if (type != AVC && type != HEVC && type != AV1) continue
++                    try {
++                        val caps = info.getCapabilitiesForType(type)
++                        val h = tallest(caps.videoCapabilities ?: continue)
++                        when (type) {
++                            AVC -> h264 = maxOf(h264, h)
++                            HEVC -> {
++                                hevc = maxOf(hevc, h)
++                                // 10-bit HEVC (HDR10 / HLG and most 4K) needs the Main10 profile.
++                                val main10 = caps.profileLevels.any {
++                                    it.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10 ||
++                                        it.profile == MediaCodecInfo.CodecProfileLevel.HEVCProfileMain10HDR10
++                                }
++                                if (main10) hevc10 = maxOf(hevc10, h)
++                            }
++                            AV1 -> av1 = maxOf(av1, h)
++                        }
++                    } catch (t: Throwable) { /* one odd decoder must not hide the rest */ }
++                }
++            }
++        } catch (t: Throwable) { Log.w("PEK", "could not list the video decoders", t) }
++        Log.i("PEK", "decoders (hardware, tallest picture): h264=$h264 hevc=$hevc hevc10=$hevc10 av1=$av1")
++        return intArrayOf(h264, hevc, hevc10, av1)
++    }
++}
+diff -u a/android/app/src/main/java/com/pektv/app/MainActivity.kt b/android/app/src/main/java/com/pektv/app/MainActivity.kt
+--- a/android/app/src/main/java/com/pektv/app/MainActivity.kt	2026-10-11 20:31:38.000000000 +0000
++++ b/android/app/src/main/java/com/pektv/app/MainActivity.kt	2026-10-12 03:32:31.339448670 +0000
+@@ -477,6 +477,9 @@
+ 
+     @JavascriptInterface fun isPhone(): Boolean = phone
+ 
++    // What this device can decode / show (JSON), so a plugin can rank releases for it. See DeviceProfile.kt.
++    @JavascriptInterface fun deviceProfile(): String = try { DeviceProfile.json(activity) } catch (t: Throwable) { "{\"v\":1,\"unknown\":true}" }
++
+     // "Yes, exit" in the web UI's exit question: clear cache, stop everything, close (see MainActivity.exitApp).
+     @JavascriptInterface fun exitApp() { activity.exitApp() }
+ 
+diff -u a/www/app_plugins.js b/www/app_plugins.js
+--- a/www/app_plugins.js	2026-10-11 20:30:21.000000000 +0000
++++ b/www/app_plugins.js	2026-10-12 03:32:43.489066707 +0000
+@@ -316,6 +316,7 @@
+             p.torrent ? 'Can search for releases and start torrent streams through PEK TV (it never sees your provider key). Streams download and upload from your connection.' : null,
+             p.favorites ? 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).' : null,
+             p.watched ? 'Can see which movies and episodes you have marked as watched and mark them watched or unwatched (it sees nothing else from your history).' : null,
++            p.device ? 'Can see what this device can play (which video codecs its hardware decodes, screen size, HDR support) so it can pick releases that run smoothly. No identifiers.' : null,
+             p.providers ? 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.' : null,
+             p.plugins ? 'Can list your plugins that play titles and open one of them when you tap a button.' : null,
+             p.stream ? 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with ' + p.name + '\u201d button.' : null,
+diff -u a/www/plugin_installer.js b/www/plugin_installer.js
+--- a/www/plugin_installer.js	2026-10-11 20:30:21.000000000 +0000
++++ b/www/plugin_installer.js	2026-10-12 03:32:43.488978554 +0000
+@@ -128,7 +128,7 @@
+         const m = (typeof PekSandbox !== 'undefined' && PekSandbox.normalizeManifest)
+             ? PekSandbox.normalizeManifest(raw)
+             : { name: typeof raw.name === 'string' ? raw.name : null, version: null,
+-                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false, watched: false },
++                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false, watched: false, device: false },
+                 provides: { stream: false },
+                 ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
+         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+@@ -147,6 +147,7 @@
+             torrent: m.permissions.torrent === true,
+             favorites: m.permissions.favorites === true,
+             watched: m.permissions.watched === true,
++            device: m.permissions.device === true,
+             providers: m.permissions.providers === true,
+             plugins: m.permissions.plugins === true,
+             stream: !!(m.provides && m.provides.stream === true),
+diff -u a/www/plugin_sandbox.js b/www/plugin_sandbox.js
+--- a/www/plugin_sandbox.js	2026-10-11 20:37:18.000000000 +0000
++++ b/www/plugin_sandbox.js	2026-10-12 03:32:43.488793588 +0000
+@@ -19,6 +19,8 @@
+ //                        in the user's library (hesper_host.library_titles); no UI effect here
+ //   permissions.favorites true => pek.favorites.list / add / remove: the shared Favorites list that
+ //                        PEK TV's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
++//   permissions.device   true => pek.device.profile(): what this device can decode and show (hardware codecs,
++//                        screen size, HDR), so a plugin can rank releases for it. No identifiers, nothing personal.
+ //   permissions.watched  true => pek.watched.check(items) / set(item, on): read and change what PEK TV's
+ //                        Watch History says is watched. An item is {kind:'movie', title, year} or
+ //                        {kind:'episode', showTitle, season, episode}. Nothing else of the history is visible.
+@@ -185,6 +187,11 @@
+             },
+             remove: function (key) { return request('favRemove', { key: str(key) }); }
+         },
++        // Needs permissions.device. profile() -> {h264, hevc, hevc10, av1 (tallest hardware-decoded picture: 0 / 720 / 1080 / 2160),
++        // tv, screenShort, screenLong (px), hdr, dv, ramMb, lowRam}, or {unknown: true} where the app cannot tell.
++        device: {
++            profile: function () { return request('deviceProfile', {}).then(JSON.parse); }
++        },
+         // Needs permissions.watched. check([item, ...]) -> [true, false, ...]; set(item, true | false) marks one
+         // watched / unwatched in Watch History (it syncs like anything else the user watches).
+         watched: {
+@@ -232,7 +239,7 @@
+         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
+     };
+     Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
+-    Object.freeze(api.favorites); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
++    Object.freeze(api.favorites); Object.freeze(api.device); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
+     Object.defineProperty(window, 'pek', { value: api, writable: false, configurable: false });
+     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });   // old name, kept so existing plugins keep working
+ 
+@@ -288,7 +295,7 @@
+         const out = {
+             name: null, version: null,
+             permissions: { network: [], storage: false, library: false, torrent: false,
+-                favorites: false, providers: false, plugins: false, watched: false },
++                favorites: false, providers: false, plugins: false, watched: false, device: false },
+             provides: { stream: false },
+             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
+         };
+@@ -307,6 +314,7 @@
+         out.permissions.providers = perms.providers === true;
+         out.permissions.plugins = perms.plugins === true;
+         out.permissions.watched = perms.watched === true;
++        out.permissions.device = perms.device === true;
+         // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
+         // "plugins" permission are offered it as a "Play with ..." button.
+         const pv = raw.provides && typeof raw.provides === 'object' ? raw.provides : {};
+@@ -510,6 +518,7 @@
+                 case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.PekFavorites.keys())); break;
+                 case 'favAdd': reply(true, this._favAdd(a)); break;
+                 case 'favRemove': reply(true, this._favRemove(a)); break;
++                case 'deviceProfile': reply(true, this._deviceProfile()); break;
+                 case 'watchedCheck': reply(true, this._watchedCheck(a)); break;
+                 case 'watchedSet': reply(true, this._watchedSet(a)); break;
+                 case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
+@@ -542,6 +551,19 @@
+         return window.PekFavorites.remove(a.key);
+     }
+ 
++    // ---------------- device capabilities (permission "device") ----------------
++
++    // The Android app answers from MediaCodecList and the display; anywhere else the plugin is told
++    // "unknown" and keeps its normal behaviour.
++    _deviceProfile() {
++        this._need('device');
++        const a = window.PekAndroid;
++        if (a && typeof a.deviceProfile === 'function') {
++            try { return String(a.deviceProfile()); } catch (e) { /* fall through */ }
++        }
++        return JSON.stringify({ v: 1, unknown: true });
++    }
++
+     // ---------------- watched marks (permission "watched") ----------------
+ 
+     _watchedItem(o) {

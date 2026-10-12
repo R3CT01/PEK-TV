@@ -477,6 +477,9 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
 
     @JavascriptInterface fun isPhone(): Boolean = phone
 
+    // What this device can decode / show (JSON), so a plugin can rank releases for it. See DeviceProfile.kt.
+    @JavascriptInterface fun deviceProfile(): String = try { DeviceProfile.json(activity) } catch (t: Throwable) { "{\"v\":1,\"unknown\":true}" }
+
     // "Yes, exit" in the web UI's exit question: clear cache, stop everything, close (see MainActivity.exitApp).
     @JavascriptInterface fun exitApp() { activity.exitApp() }
 

@@ -137,12 +137,13 @@ PEK TV ships with no search provider. The engine (libtorrent) is optional at bui
 
 ## Favorites, provider buttons and plugin launching
 
-Four optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true, "watched": true}`):
+Five optional permissions (`"permissions": {"favorites": true, "providers": true, "plugins": true, "watched": true, "device": true}`):
 
 | Call | Needs | What it does |
 |---|---|---|
 | `pek.favorites.list()` | `favorites` | Resolves to `['movie:603', 'tv:1396', ...]`: the shared Favorites list shown in PEK TV's Favorites tab. |
 | `pek.favorites.add({type, id, title, year, posterPath})` / `.remove('movie:603')` | `favorites` | `type` is `'movie'` or `'tv'`, `id` the TMDb id, `posterPath` TMDb's `poster_path` (e.g. `/abc.jpg`). PEK TV builds the poster address itself and records which plugin added the title, so Favorites can open it there. |
+| `pek.device.profile()` | `device` | Resolves to what this device can play: `h264`, `hevc`, `hevc10`, `av1` (tallest picture its hardware decodes at 30 fps: `0` none, `720`, `1080`, `2160`; `hevc10` is 10-bit HEVC, i.e. HDR10), `tv`, `screenShort` / `screenLong` (px), `hdr`, `dv` (screen shows HDR10 / HLG / Dolby Vision), `ramMb`, `lowRam`. `{unknown: true}` where the app cannot tell (not the Android app): keep your normal behaviour then. |
 | `pek.watched.check(items)` | `watched` | Resolves to `[true, false, ...]`, one per item: is it marked watched in PEK TV's Watch History. An item is `{kind: 'movie', title, year}` or `{kind: 'episode', showTitle, season, episode}` (max 300 per call). |
 | `pek.watched.set(item, true \| false)` | `watched` | Marks the item watched or unwatched. Same history the user sees (and that syncs), so it also shows in the library. Plugins that stream with `pek.torrent.play({kind, name, season, episode, year})` are marked automatically when playback finishes. |
 | `ui.providerButton({name, logo, title, type, tmdbId, region})` | `providers` | A "Watch on <service>" button. `name` and `logo` are TMDb's `provider_name` and `logo_path`. PEK TV decides what it opens (the service's app on Android, its website elsewhere; unknown services open the title's TMDb "where to watch" page). The logo loads only if `image.tmdb.org` is in `network`. No callback. |

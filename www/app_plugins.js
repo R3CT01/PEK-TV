@@ -316,6 +316,7 @@ class MainAppPluginsMethods {
             p.torrent ? 'Can search for releases and start torrent streams through PEK TV (it never sees your provider key). Streams download and upload from your connection.' : null,
             p.favorites ? 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).' : null,
             p.watched ? 'Can see which movies and episodes you have marked as watched and mark them watched or unwatched (it sees nothing else from your history).' : null,
+            p.device ? 'Can see what this device can play (which video codecs its hardware decodes, screen size, HDR support) so it can pick releases that run smoothly. No identifiers.' : null,
             p.providers ? 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.' : null,
             p.plugins ? 'Can list your plugins that play titles and open one of them when you tap a button.' : null,
             p.stream ? 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with ' + p.name + '\u201d button.' : null,
