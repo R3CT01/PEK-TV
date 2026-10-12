@@ -1,0 +1,186 @@
+--- a/pekandroid/backend/torrent.cpp
++++ b/pekandroid/backend/torrent.cpp
+@@ -150,6 +150,9 @@
+     std::map<int, Clock::time_point> reading;                   // read_piece() issued (when), answer pending
+     std::deque<uint64_t> recent_ends;                           // where the last few reads ended (mpv reads from 2+ places)
+     int dl_p0 = -1;                                             // piece the lookahead deadlines were last set from
++    Clock::time_point last_peer = Clock::now();                 // last time at least one peer was connected
++    Clock::time_point last_kick{};                              // last forced re-announce (watchdog)
++    int kicks = 0;
+ };
+ 
+ std::mutex g_mx;
+@@ -234,9 +237,42 @@
+     g_entries.erase(it);
+ }
+ 
++// Public trackers added to every torrent on top of the ones in the link (search results usually carry 3).
++// More trackers = more chances to get peers back once the first ones have gone quiet.
++const char* const kFallbackTrackers[] = {
++    "udp://tracker.opentrackr.org:1337/announce", "udp://open.tracker.cl:1337/announce",
++    "udp://tracker.torrent.eu.org:451/announce",  "udp://open.stealth.si:80/announce",
++    "udp://exodus.desync.com:6969/announce",      "udp://tracker.tiny-vps.com:6969/announce",
++    "udp://explodie.org:6969/announce",           "udp://tracker.dler.org:6969/announce",
++    "udp://opentracker.io:6969/announce",         "udp://tracker.moeking.me:6969/announce",
++};
++
++// Peer watchdog (g_mx held). libtorrent only re-announces on its own every 30+ minutes and its peer list
++// shrinks as peers drop; once it reaches 0 nothing brings peers back. So: when a running torrent has had no
++// peers for a while, ask the trackers and the DHT again (every 20 s, and re-add the fallback trackers).
++void peerWatchdog(Entry& e, Clock::time_point now) {
++    if (!e.h.is_valid()) return;
++    lt::torrent_status st = e.h.status();
++    if (st.is_finished) return;
++    if (st.num_peers > 0) { e.last_peer = now; e.kicks = 0; return; }
++    if (now - e.last_peer < std::chrono::seconds(10)) return;
++    if (e.last_kick != Clock::time_point{} && now - e.last_kick < std::chrono::seconds(20)) return;
++    e.last_kick = now;
++    e.kicks++;
++    try {
++        if (e.kicks % 3 == 1) {
++            for (const char* t : kFallbackTrackers) e.h.add_tracker(lt::announce_entry(t));
++        }
++        e.h.force_reannounce();
++        e.h.force_dht_announce();
++        e.h.resume();   // no-op unless something paused it
++    } catch (const std::exception&) {}
++}
++
+ void alertLoop() {
+     std::vector<lt::alert*> alerts;
+     auto lastSweep = Clock::now();
++    auto lastWatch = Clock::now();
+     for (;;) {
+         {
+             std::lock_guard<std::mutex> lk(g_mx);
+@@ -269,6 +305,10 @@
+         }
+         // Drop torrents nobody has touched for a long time.
+         auto now = Clock::now();
++        if (now - lastWatch > std::chrono::seconds(5)) {
++            lastWatch = now;
++            for (auto& kv : g_entries) peerWatchdog(*kv.second, now);
++        }
+         if (now - lastSweep > std::chrono::seconds(30)) {
+             lastSweep = now;
+             std::vector<std::string> old;
+@@ -298,9 +338,13 @@
+     // Find peers sooner and give up on dead / silent ones sooner: all of it is time spent staring at "Buffering".
+     sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+     sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
+-    sp.set_int(lt::settings_pack::peer_connect_timeout, 8);
+-    sp.set_int(lt::settings_pack::request_timeout, 15);
+-    sp.set_int(lt::settings_pack::piece_timeout, 8);
++    // Not too aggressive: a TV on Wi-Fi often answers slowly for a moment, and every timeout counts as a failure
++    // against that peer. Peers that fail max_failcount times are forgotten for good, so the list slowly empties.
++    sp.set_int(lt::settings_pack::peer_connect_timeout, 15);
++    sp.set_int(lt::settings_pack::request_timeout, 30);
++    sp.set_int(lt::settings_pack::piece_timeout, 20);
++    sp.set_int(lt::settings_pack::max_failcount, 8);
++    sp.set_int(lt::settings_pack::min_reconnect_time, 20);
+     sp.set_bool(lt::settings_pack::enable_upnp, true);
+     sp.set_bool(lt::settings_pack::enable_natpmp, true);
+     lt::session_params params(sp);
+@@ -341,6 +385,8 @@
+         dropLocked(oldest->first);
+     }
+ 
++    for (const char* t : kFallbackTrackers)
++        if (std::find(p.trackers.begin(), p.trackers.end(), std::string(t)) == p.trackers.end()) p.trackers.push_back(t);
+     p.save_path = (fs::path(g_dir) / "torrent_cache" / hash).string();
+     p.flags |= lt::torrent_flags::sequential_download;
+     p.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
+--- a/pekmain/backend/torrent.cpp
++++ b/pekmain/backend/torrent.cpp
+@@ -154,6 +154,9 @@
+     std::map<int, Clock::time_point> reading;                   // read_piece() issued (when), answer pending
+     std::deque<uint64_t> recent_ends;                           // where the last few reads ended (mpv reads from 2+ places)
+     int dl_p0 = -1;                                             // piece the lookahead deadlines were last set from
++    Clock::time_point last_peer = Clock::now();                 // last time at least one peer was connected
++    Clock::time_point last_kick{};                              // last forced re-announce (watchdog)
++    int kicks = 0;
+ };
+ 
+ std::mutex g_mx;
+@@ -253,9 +256,44 @@
+     g_entries.erase(it);
+ }
+ 
++// Public trackers added to every torrent on top of the ones in the link (search results usually carry 3).
++// More trackers = more chances to get peers back once the first ones have gone quiet.
++const char* const kFallbackTrackers[] = {
++    "udp://tracker.opentrackr.org:1337/announce", "udp://open.tracker.cl:1337/announce",
++    "udp://tracker.torrent.eu.org:451/announce",  "udp://open.stealth.si:80/announce",
++    "udp://exodus.desync.com:6969/announce",      "udp://tracker.tiny-vps.com:6969/announce",
++    "udp://explodie.org:6969/announce",           "udp://tracker.dler.org:6969/announce",
++    "udp://opentracker.io:6969/announce",         "udp://tracker.moeking.me:6969/announce",
++};
++
++// Peer watchdog (g_mx held). libtorrent only re-announces on its own every 30+ minutes and its peer list
++// shrinks as peers drop; once it reaches 0 nothing brings peers back. So: when a running torrent has had no
++// peers for a while, ask the trackers and the DHT again (every 20 s, and re-add the fallback trackers).
++void peerWatchdog(Entry& e, Clock::time_point now) {
++    if (!e.h.is_valid()) return;
++    lt::torrent_status st = e.h.status();
++    if (st.is_finished) return;
++    if (st.num_peers > 0) { e.last_peer = now; e.kicks = 0; return; }
++    if (now - e.last_peer < std::chrono::seconds(10)) return;
++    if (e.last_kick != Clock::time_point{} && now - e.last_kick < std::chrono::seconds(20)) return;
++    e.last_kick = now;
++    e.kicks++;
++    try {
++        if (e.kicks % 3 == 1) {
++            for (const char* t : kFallbackTrackers) e.h.add_tracker(lt::announce_entry(t));
++        }
++        e.h.force_reannounce();
++        e.h.force_dht_announce();
++        e.h.resume();   // no-op unless something paused it
++        diagLocked("watchdog: 0 peers for " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(now - e.last_peer).count()) +
++                   "s, forced tracker + DHT re-announce #" + std::to_string(e.kicks) + " on " + e.hash.substr(0, 8));
++    } catch (const std::exception&) {}
++}
++
+ void alertLoop() {
+     std::vector<lt::alert*> alerts;
+     auto lastSweep = Clock::now();
++    auto lastWatch = Clock::now();
+     for (;;) {
+         {
+             std::lock_guard<std::mutex> lk(g_mx);
+@@ -302,6 +340,10 @@
+         }
+         // Drop torrents nobody has touched for a long time.
+         auto now = Clock::now();
++        if (now - lastWatch > std::chrono::seconds(5)) {
++            lastWatch = now;
++            for (auto& kv : g_entries) peerWatchdog(*kv.second, now);
++        }
+         if (now - lastSweep > std::chrono::seconds(30)) {
+             lastSweep = now;
+             std::vector<std::string> old;
+@@ -359,9 +401,13 @@
+     // Find peers sooner and give up on dead / silent ones sooner: all of it is time spent staring at "Buffering".
+     sp.set_bool(lt::settings_pack::announce_to_all_trackers, true);
+     sp.set_bool(lt::settings_pack::announce_to_all_tiers, true);
+-    sp.set_int(lt::settings_pack::peer_connect_timeout, 8);
+-    sp.set_int(lt::settings_pack::request_timeout, 15);
+-    sp.set_int(lt::settings_pack::piece_timeout, 8);
++    // Not too aggressive: a TV on Wi-Fi often answers slowly for a moment, and every timeout counts as a failure
++    // against that peer. Peers that fail max_failcount times are forgotten for good, so the list slowly empties.
++    sp.set_int(lt::settings_pack::peer_connect_timeout, 15);
++    sp.set_int(lt::settings_pack::request_timeout, 30);
++    sp.set_int(lt::settings_pack::piece_timeout, 20);
++    sp.set_int(lt::settings_pack::max_failcount, 8);
++    sp.set_int(lt::settings_pack::min_reconnect_time, 20);
+     sp.set_bool(lt::settings_pack::enable_upnp, true);
+     sp.set_bool(lt::settings_pack::enable_natpmp, true);
+     g_diagT0 = Clock::now();
+@@ -406,6 +452,8 @@
+ 
+     diagLocked("added torrent " + hash.substr(0, 8) + ": " + std::to_string(p.trackers.size()) +
+                " tracker(s) in the link, DHT " + (g_ses->is_dht_running() ? "on" : "off"));
++    for (const char* t : kFallbackTrackers)
++        if (std::find(p.trackers.begin(), p.trackers.end(), std::string(t)) == p.trackers.end()) p.trackers.push_back(t);
+     p.save_path = (fs::path(g_dir) / "torrent_cache" / hash).string();
+     p.flags |= lt::torrent_flags::sequential_download;
+     p.flags &= ~(lt::torrent_flags::auto_managed | lt::torrent_flags::paused);
