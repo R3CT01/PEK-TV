@@ -316,6 +316,7 @@ class MainAppPluginsMethods {
             p.favorites ? 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).' : null,
             p.providers ? 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.' : null,
             p.plugins ? 'Can list your plugins that play titles and open one of them when you tap a button.' : null,
+            p.live ? 'Can play live TV streams from web addresses in PEK TV\u2019s player. The stream\u2019s server sees your internet address.' : null,
             p.stream ? 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with ' + p.name + '\u201d button.' : null,
             p.ui && p.ui.navTab ? `Adds a \u201c${p.ui.navTab}\u201d tab to PEK TV.` : null,
             p.ui && p.ui.reloadOnInstall ? 'PEK TV reloads right after installing. Then close and reopen PEK TV once so the plugin\u2019s Python part starts.' : null,

@@ -128,7 +128,7 @@ const PekPluginInstaller = (() => {
         const m = (typeof PekSandbox !== 'undefined' && PekSandbox.normalizeManifest)
             ? PekSandbox.normalizeManifest(raw)
             : { name: typeof raw.name === 'string' ? raw.name : null, version: null,
-                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false },
+                permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false, live: false },
                 provides: { stream: false },
                 ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
@@ -148,6 +148,7 @@ const PekPluginInstaller = (() => {
             favorites: m.permissions.favorites === true,
             providers: m.permissions.providers === true,
             plugins: m.permissions.plugins === true,
+            live: m.permissions.live === true,
             stream: !!(m.provides && m.provides.stream === true),
             ui: m.ui,
             files,

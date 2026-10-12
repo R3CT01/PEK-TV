@@ -190,3 +190,30 @@ sandbox, safety scan and permissions screen apply. The developer of a plugin is 
 
 A build that must not install from GitHub can start with `PEK_ALLOW_GITHUB=0`; people can also switch it off
 under Settings -> Plugins -> Allow installs from GitHub.
+
+
+## Live streams: the `live` permission, and files shipped inside a plugin
+
+```json
+"permissions": { "storage": true, "live": true }
+```
+
+A plugin with `"live": true` may call, from its UI code:
+
+- `pek.live.play({url, title})` -> resolves once PEK TV's player is open on that address. `url` must be plain `http://` or
+  `https://` (no user name or password in it) and must not point at the device itself (`localhost`, `127.x`, link-local).
+  Nothing is added to Watch History or Resume Watching. HLS (`.m3u8`) plays through the Android player (libmpv) or the
+  browser's own player, so what a browser build can play depends on the browser. The stream's server sees the user's IP
+  address, and the install screen says so.
+
+Any plugin (no permission needed) can also read JSON files that shipped inside its own zip:
+
+- `pek.readBundled('index.json')` -> text of `playlists/index.json` in the plugin's own folder (1 MB per file).
+
+Two packages use both, as a TV directory (now playing, up next, time left) over `playlists/*.json`:
+
+- `plugin_packages/live-tv/` - **Live TV Guide**, PEK's official plugin. Not built in: the owner publishes `live-tv.zip` on the
+  PEK Store's Official shelf and users install it if they want it. It ships without channels.
+- `plugin_packages/cable-shot/` - **Cable Shot**, a third-party copy with a warning screen. This is where channel lists go:
+  the developer adds `.m3u` / `.m3u8` files with `plugin_packages/add_m3u.py` (it fills Cable Shot by default;
+  `--plugin live-tv` picks the other one) and the tool rebuilds the zip.
