@@ -235,10 +235,7 @@ Any plugin (no permission needed) can also read JSON files that shipped inside i
 
 - `pek.readBundled('index.json')` -> text of `playlists/index.json` in the plugin's own folder (1 MB per file).
 
-Two packages use both, as a TV directory (now playing, up next, time left) over `playlists/*.json`:
+One package uses both, as a TV directory (now playing, up next, time left) over `playlists/*.json`:
 
 - `plugin_packages/live-tv/` - **Live TV Guide**, PEK's official plugin. Not built in: the owner publishes `live-tv.zip` on the
   PEK Store's Official shelf and users install it if they want it. It ships without channels.
-- `plugin_packages/cable-shot/` - **Cable Shot**, a third-party copy with a warning screen. This is where channel lists go:
-  the developer adds `.m3u` / `.m3u8` files with `plugin_packages/add_m3u.py` (it fills Cable Shot by default;
-  `--plugin live-tv` picks the other one) and the tool rebuilds the zip.
