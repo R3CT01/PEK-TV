@@ -218,26 +218,43 @@
             const season = m.season | 0, episode = m.episode | 0;
             if (!show || episode <= 0) { this._dbg = 'no lookup: needs show + episode number (got "' + (show || '') + '" S' + season + 'E' + episode + ')'; return; }
             this._remoteTried = true;
-            this._dbg = 'asking for "' + show + '" S' + season + 'E' + episode + '...';
             const url = '/api/skip-segments?show=' + encodeURIComponent(show) + '&season=' + season + '&episode=' + episode;
-            fetch(url).then(r => { this._http = r.status; return r.json(); }).then(j => {
+            // A torrent that is just starting keeps the box busy, so the first lookup can time out. Try again a
+            // few times (the server remembers real answers, so a repeat costs nothing) instead of giving up for the whole episode.
+            const DELAYS = [0, 8000, 25000, 60000];
+            const attempt = (n) => {
                 if (!this.el) return;
-                if (!j) { this._dbg = 'empty answer from the app server'; return; }
-                if (j.error) { this._dbg = 'app server error: ' + j.error; return; }
-                if (!j.found || !j.data) {
-                    this._dbg = j.imdb ? 'show found (' + j.imdb + ') but the database has no times for this episode'
-                                       : 'could not look up the show (TMDb/network problem on the app server)';
-                    return;
-                }
-                this.remote = remoteSpans(j.data, this.player.state.duration);
-                if (this.remote.length) {
-                    this._dbg = 'ok: ' + this.remote.map(x => x.kind + ' ' + fmt(x.start) + '-' + fmt(x.end)).join(', ');
-                    this.player._updateButtons();
-                } else {
-                    let raw = ''; try { raw = JSON.stringify(j.data).slice(0, 120); } catch (e) { /* ignore */ }
-                    this._dbg = 'database answered but no usable times in it: ' + raw;
-                }
-            }).catch((e) => { this._dbg = 'lookup failed: ' + ((e && e.message) || e) + (this._http ? ' (HTTP ' + this._http + ')' : ''); });
+                this._dbg = 'asking for "' + show + '" S' + season + 'E' + episode + '...' + (n ? ' (try ' + (n + 1) + ')' : '');
+                this._http = 0;
+                let again = false;
+                fetch(url).then(r => { this._http = r.status; return r.json(); }).then(j => {
+                    if (!this.el) return;
+                    if (!j) { this._dbg = 'empty answer from the app server'; again = true; return; }
+                    if (j.error) { this._dbg = 'app server error: ' + j.error; again = true; return; }
+                    if (!j.found || !j.data) {
+                        this._dbg = j.imdb ? 'show found (' + j.imdb + ') but the database has no times for this episode'
+                                           : 'could not look up the show (TMDb/network problem on the app server)';
+                        again = true;
+                        return;
+                    }
+                    this.remote = remoteSpans(j.data, this.player.state.duration);
+                    if (this.remote.length) {
+                        this._dbg = 'ok: ' + this.remote.map(x => x.kind + ' ' + fmt(x.start) + '-' + fmt(x.end)).join(', ');
+                        this.player._updateButtons();
+                    } else {
+                        let raw = ''; try { raw = JSON.stringify(j.data).slice(0, 120); } catch (e) { /* ignore */ }
+                        this._dbg = 'database answered but no usable times in it: ' + raw;
+                    }
+                }).catch((e) => {
+                    this._dbg = 'lookup failed: ' + ((e && e.message) || e) + (this._http ? ' (HTTP ' + this._http + ')' : '');
+                    again = true;
+                }).then(() => {
+                    if (again && this.el && !this.remote.length && n + 1 < DELAYS.length && onlineOn()) {
+                        setTimeout(() => attempt(n + 1), DELAYS[n + 1]);
+                    }
+                });
+            };
+            attempt(0);
         }
 
         destroy() { this.cur = null; if (this.el && this.el.parentNode) this.el.parentNode.removeChild(this.el); this.el = null; }
