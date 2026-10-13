@@ -249,14 +249,14 @@ const char* const kFallbackTrackers[] = {
 
 // Peer watchdog (g_mx held). libtorrent only re-announces on its own every 30+ minutes and its peer list
 // shrinks as peers drop; once it reaches 0 nothing brings peers back. So: when a running torrent has had no
-// peers for a while, ask the trackers and the DHT again (every 20 s, and re-add the fallback trackers).
+// peers for a while, ask the trackers and the DHT again (after 6 s, then every 12 s, and re-add the fallback trackers).
 void peerWatchdog(Entry& e, Clock::time_point now) {
     if (!e.h.is_valid()) return;
     lt::torrent_status st = e.h.status();
     if (st.is_finished) return;
     if (st.num_peers > 0) { e.last_peer = now; e.kicks = 0; return; }
-    if (now - e.last_peer < std::chrono::seconds(10)) return;
-    if (e.last_kick != Clock::time_point{} && now - e.last_kick < std::chrono::seconds(20)) return;
+    if (now - e.last_peer < std::chrono::seconds(6)) return;
+    if (e.last_kick != Clock::time_point{} && now - e.last_kick < std::chrono::seconds(12)) return;
     e.last_kick = now;
     e.kicks++;
     try {

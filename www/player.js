@@ -926,7 +926,11 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             root.appendChild(this.menuEl);
             root.appendChild(this.confirmEl);
             if (this.skip) { this.skip.mount(root); this.btns.skipnow = this.skip.el; }
-            if (this.next) { this.next.mount(root); if (this.next.playBtn) this.btns.nextnow = this.next.playBtn; }   // the "Skip Intro" pill takes focus like a button
+            if (this.next) {
+                this.next.mount(root);
+                if (this.next.playBtn) this.btns.nextnow = this.next.playBtn;
+                if (this.next.noBtn) this.btns.nextno = this.next.noBtn;      // "Not now" / "Cancel": reachable with the D-pad
+            }   // the "Skip Intro" pill takes focus like a button
 
             // tap the picture to show / hide the controls
             root.addEventListener('pointerdown', (ev) => {
@@ -1116,7 +1120,11 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             const waiting = !!this.state.buffering && this.errorBox.style.display !== 'block';
 
             if (s) {                                   // live numbers in the corner + the map on the seek bar
-                this.chipText.textContent = s.peers + ' peers \u00b7 ' + fmtSpeed(s.kbps);
+                // A swarm often shows 0 for a second or two while connections are swapped. Keep the last real
+                // number for 12 s so the chip does not flicker; after that say what is going on.
+                if (s.peers > 0) { this._peersSeen = s.peers; this._peersAt = now; }
+                const shown = (s.peers === 0 && this._peersSeen && now - this._peersAt < 12000) ? this._peersSeen : s.peers;
+                this.chipText.textContent = shown > 0 ? shown + ' peers \u00b7 ' + fmtSpeed(s.kbps) : 'Finding peers\u2026 \u00b7 ' + fmtSpeed(s.kbps);
                 this.chip.classList.add('hp-on');
                 this._drawHave(s.have);
             }
@@ -1188,7 +1196,7 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
         _focusOrder() {
             const order = ['seek', 'rew', 'play', 'fwd'];
             if (this.skip && this.skip.cur) order.push('skipnow');
-            if (this.next && this.next.visible()) order.push('nextnow');
+            if (this.next && this.next.visible()) { order.push('nextnow'); order.push('nextno'); }
             if (this.state.audio.length > 1) order.push('audio');
             if (this.state.subtitles.length > 0) order.push('subs');
             if (this.skip && this.skip.available()) order.push('skip');
@@ -1360,7 +1368,8 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             if (key === 'rew') { this._seekBy(-10); this._show(); return; }
 
             if (this.mode === 'hidden') {
-                // controls are hidden: arrows skip, OK pauses
+                // controls are hidden: arrows skip, OK pauses. Down goes to the Up next card when it is showing.
+                if (key === 'down' && this.next && this.next.visible()) { this.focus = 'nextnow'; this._show(); return; }
                 if (key === 'left') this._seekBy(-10);
                 else if (key === 'right') this._seekBy(10);
                 else if (key === 'ok') {
@@ -1382,7 +1391,9 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             } else if (key === 'up') {
                 this.focus = 'seek';
             } else if (key === 'down') {
-                if (this.focus === 'seek') this.focus = 'play'; else this._hide();
+                if (this.focus === 'seek') this.focus = 'play';
+                else if (this.next && this.next.visible() && this.focus !== 'nextnow' && this.focus !== 'nextno') this.focus = 'nextnow';
+                else this._hide();
             } else if (key === 'ok') {
                 const btn = this.btns[this.focus];
                 if (this.focus === 'seek') this._toggle();
