@@ -11,7 +11,7 @@ class MainAppPlaybackMethods {
 
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
-    _openWebPlayer(url, title, backend, track, onCloseCb) {
+    _openWebPlayer(url, title, backend, track, onCloseCb, live) {
         if (this._player) {
             if (this._player.mini) this._player.close();   // starting something new replaces the mini player
             else return;
@@ -21,6 +21,7 @@ class MainAppPlaybackMethods {
             title: title || '',
             backend: backend || new window.HtmlVideoBackend(),
             skipMeta: track ? track.meta : null,
+            live: live || null,
             next: this._nextProvider ? this._nextProvider(track) : null,   // lets the player offer Skip Intro / Skip Recap (library files and torrents)
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
@@ -116,9 +117,9 @@ class MainAppPlaybackMethods {
     // Plays any stream URL that is not a library file (torrent streams). There is no library id,
     // so no library resume position is kept (a torrent can pass `track` to keep its own). onClose runs when the player is closed (the caller cleans up).
     // track (optional) = { id, meta, startSec }: keeps the position for Resume Watching and starts at startSec.
-    playStream(url, title, onClose, track) {
+    playStream(url, title, onClose, track, live) {
         if (window.MpvBackend && window.MpvBackend.available() && window.PekPlayer) {
-            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track || null, onClose);
+            this._openWebPlayer(url, title, new window.MpvBackend({ title: title || '', theme: this._themeForNative() }), track || null, onClose, live);
             return;
         }
         try {
@@ -127,7 +128,7 @@ class MainAppPlaybackMethods {
                 return;
             }
         } catch (e) { console.warn('[PEK TV] native play failed, falling back', e); }
-        if (window.PekPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose); return; }
+        if (window.PekPlayer && window.HtmlVideoBackend) { this._openWebPlayer(url, title, null, track || null, onClose, live); return; }
         window.open(url, '_blank');
     }
 

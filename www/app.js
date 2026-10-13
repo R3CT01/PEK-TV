@@ -553,7 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const app = new MainApp({ engine });
     // What sandboxed plugins (via plugin_sandbox.js) are allowed to ask the app to do.
     window.PekHost = {
-        playStream: (url, title, onClose, track) => app.playStream(url, title, onClose, track),
+        playStream: (url, title, onClose, track, live) => app.playStream(url, title, onClose, track, live),
         // Plugins that can play titles, and "open this plugin on this title" (plugin_sandbox.js checks permissions and taps first).
         streamers: (exceptFolder) => app._streamPlugins(exceptFolder),
         openPlugin: (folder, intent) => app.openPluginOnTitle(folder, intent)
