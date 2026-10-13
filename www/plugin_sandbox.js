@@ -119,6 +119,12 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
                 type: o.type === 'tv' ? 'tv' : 'movie', tmdbId: Number(o.tmdbId) || 0, region: str(o.region) };
         },
         listRow: function (title, sub, fn) { return { t: 'listRow', title: str(title), subtitle: str(sub), on: on(fn) }; },
+        // One episode of a show: a still picture on the left (https, from a host the plugin listed under network), then the title,
+        // one line of facts and the description. Same image rules as posterCard. dim: true greys it out (not aired yet).
+        episodeRow: function (o) {
+            o = o || {};
+            return { t: 'episodeRow', title: str(o.title), meta: str(o.meta), text: str(o.text), image: str(o.image), dim: !!o.dim, autofocus: str(o.autofocus), on: on(o.on) };
+        },
         column:  function () { return { t: 'column', children: flat(arguments) }; },
         row:     function () { return { t: 'row', children: flat(arguments) }; },
         posterCard: function (title, sub, posterUrl, fn, opts) {
@@ -1166,6 +1172,29 @@ class PekSandbox {
             case 'heading': return createElement('h3', {}, s(n.text));
             case 'card': return ui.card(s(n.title), s(n.subtitle), click(n.on));
             case 'listRow': return ui.listRow(s(n.title), s(n.subtitle), click(n.on));
+            case 'episodeRow': {
+                const img = this._imageUrl(n.image);
+                const title = s(n.title).slice(0, 160), meta = s(n.meta).slice(0, 160), text = s(n.text).slice(0, 700);
+                budget.nodes += 4;
+                const thumb = createElement('div', { className: 'sx-ep-thumb' });
+                if (img) {
+                    const im = createElement('img', { className: 'sx-ep-img', src: img, alt: '' });
+                    im.setAttribute('referrerpolicy', 'no-referrer');
+                    im.setAttribute('loading', 'lazy');
+                    im.setAttribute('decoding', 'async');
+                    im.setAttribute('draggable', 'false');
+                    im.addEventListener('error', () => { if (im.parentNode) im.parentNode.removeChild(im); });
+                    thumb.appendChild(im);
+                }
+                const el = createElement('div', { className: 'plugin-row focusable sx-list-row sx-ep-row' + (n.dim === true ? ' sx-ep-dim' : ''), onClick: click(n.on) || (() => {}) },
+                    thumb,
+                    createElement('div', { className: 'sx-ep-body' },
+                        createElement('h3', {}, title),
+                        meta ? createElement('p', { className: 'sx-ep-meta' }, meta) : null,
+                        text ? createElement('p', { className: 'sx-ep-text' }, text) : null));
+                if (n.autofocus && typeof n.autofocus === 'string' && !budget.af) budget.af = { key: n.autofocus.slice(0, 60), el };
+                return el;
+            }
             case 'button': {
                 const b = ui.button(s(n.label), click(n.on) || (() => {}), { variant: n.primary === true ? 'primary' : 'secondary' });
                 if (n.selected === true) b.classList.add('sx-selected');

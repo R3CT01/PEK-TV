@@ -47,6 +47,7 @@ You get one global, `pek`:
 | `pek.storage.get/set/remove` | `storage` | Private store (256 KB total). |
 | `pek.readData(name)` / `readJSON(name)` | `storage` | Read `data/<name>` written by the backend. |
 | `ui.card / listRow / button / text / heading / column / row` | | Building blocks. Text only, no HTML. `ui.button(label, fn, {primary, selected})`. |
+| `ui.episodeRow({title, meta, text, image, dim, autofocus, on})` | | One episode of a show: a 16:9 still on the left (`image`: https, from a host listed under `network`), then `title`, one line of facts (`meta`) and the description (`text`, a few lines). `dim: true` greys it out. Older PEK TV versions do not have it: check `if (ui.episodeRow)` and fall back to `ui.listRow`. |
 | `ui.posterCard(title, sub, posterUrl, fn, {badge})` | `network` for the poster's host | Poster tile like the library grid. The image loads only from an https host listed in `network`; otherwise a plain card is shown. `badge` is a short label drawn on the poster. |
 | `ui.grid(children, {minColWidth, scroll})` | | Responsive poster grid. `scroll: true` makes one sideways-scrolling row. `minColWidth` like `'150px'`. |
 | `ui.tabs([{id, label}], activeId, id => ...)` | | Tab strip; the callback gets the tapped id. |
