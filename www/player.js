@@ -326,6 +326,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 
     // ---- icons: one clean glyph per button (drawn with currentColor, so the theme colours them) ----
     const ICONS = {
+        guide: '<path fill="currentColor" d="M4 5h16v3H4zM4 10.5h9v3H4zM15 10.5h5v3h-5zM4 16h5v3H4zM11 16h9v3h-9z"/>',
+        list: '<path fill="currentColor" d="M4 6h3v3H4zM9.5 6.5H20v2H9.5zM4 10.5h3v3H4zM9.5 11H20v2H9.5zM4 15h3v3H4zM9.5 15.5H20v2H9.5z"/>',
         play: '<path fill="currentColor" d="M8.2 5.3v13.4c0 .8.9 1.3 1.6.9l10.4-6.7c.6-.4.6-1.3 0-1.7L9.8 4.4c-.7-.4-1.6.1-1.6.9z"/>',
         pause: '<rect x="6.2" y="5" width="4" height="14" rx="1.3" fill="currentColor"/><rect x="13.8" y="5" width="4" height="14" rx="1.3" fill="currentColor"/>',
         rew: '<path fill="currentColor" d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/>' +
@@ -551,6 +553,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.skip = window.PekSkip ? new window.PekSkip.Controller(this, opts.skipMeta || null) : null;
             // Up next (next_episode.js): opts.next = { resolve, start } from the app, or none.
             this.next = window.PekNext && opts.next ? new window.PekNext.Controller(this, opts.next) : null;
+            // Live channel overlay (live_overlay.js): opts.live = { channel, query, check } from a plugin's live session.
+            this.live = window.PekLive && opts.live ? new window.PekLive.Controller(this, opts.live) : null;
             this._streamFlight = false;
         }
 
@@ -562,6 +566,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             document.body.appendChild(this.root);
             this._startStreamWatch(url);
             if (this.backend.attach) this.backend.attach(this.videoLayer);
+            if (this.live) this.live.attach();
 
             this._onKey = (e) => this._handleKey(e);
             this._onKeyUp = (e) => {
@@ -619,6 +624,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._reportProgress(true);
             if (this.skip) this.skip.destroy();
             if (this.next) this.next.destroy();
+            if (this.live) this.live.destroy();
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
@@ -641,6 +647,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 
         // The app's Back handler calls this while the player is open.
         onBack() {
+            if (this.live && this.live.onBack()) return;
             if (this.mode === 'confirm') this._keepWatching();
             else if (this.mode === 'menu') this._closeMenu();
             else this._askExit();
@@ -655,7 +662,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.errorBox = el('div', 'hp-error');
 
             const top = el('div', 'hp-top');
-            top.appendChild(el('div', 'hp-top-title', this.title));
+            this.topTitle = el('div', 'hp-top-title', this.title);
+            top.appendChild(this.topTitle);
             this.chip = el('div', 'hp-chip');
             this.chip.appendChild(el('i'));
             this.chipText = el('span');
@@ -709,6 +717,12 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             end.appendChild(mk('audio', 'Audio', 'audio', () => this._openMenu('audio'), 'hp-sm'));
             end.appendChild(mk('subs', 'Subtitles', 'subs', () => this._openMenu('subs'), 'hp-sm'));
             end.appendChild(mk('skip', 'Skip intro / recap', 'skip', () => this._openMenu('skip'), 'hp-sm'));
+            if (this.live) {      // channel guide + channel list (shown once the plugin has answered)
+                end.appendChild(mk('lguide', 'Guide', 'guide', () => this.live.open('guide'), 'hp-sm'));
+                end.appendChild(mk('lchan', 'Channels', 'list', () => this.live.open('channels'), 'hp-sm'));
+                this.btns.lguide.style.display = 'none';
+                this.btns.lchan.style.display = 'none';
+            }
             end.appendChild(mk('exit', 'Exit', 'close', () => this._askExit(), 'hp-sm'));
             const row = el('div', 'hp-row');
             row.appendChild(left);
@@ -760,6 +774,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             // tap the picture to show / hide the controls
             root.addEventListener('pointerdown', (ev) => {
                 root.classList.remove('hp-keys');
+                if (this.mode === 'live') { if (this.live) this.live.close(); return; }
                 if (this.mode === 'confirm' || this.mode === 'menu') return;
                 if (ev.target === root || ev.target === this.videoLayer || ev.target === this.backend.video) {
                     if (this.mode === 'hidden') this._show(); else this._hide();
@@ -823,6 +838,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
 
         // ---- showing and hiding ----
         _show() {
+            if (this.live) this.live.onShown();
             this.root.classList.add('hp-show');
             this.root.classList.remove('hp-idle');
             if (this.mode === 'hidden') this.mode = 'controls';
@@ -835,6 +851,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.root.classList.remove('hp-show');
             this.root.classList.add('hp-idle');
             this.mode = 'hidden';
+            if (this.live) this.live.onHidden();
         }
 
         _scheduleHide() {
@@ -1024,6 +1041,11 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             if (this.state.audio.length > 1) order.push('audio');
             if (this.state.subtitles.length > 0) order.push('subs');
             if (this.skip && this.skip.available()) order.push('skip');
+            if (this.live) {
+                const ls = this.live.buttonsShown();
+                if (ls.guide) order.push('lguide');
+                if (ls.channels) order.push('lchan');
+            }
             order.push('exit');
             return order;
         }
@@ -1185,6 +1207,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 return;
             }
 
+            if (this.live && this.live.handleKey(key)) return;
             if (key === 'back') { this._askExit(); return; }
             if (key === 'playpause') { this._toggle(); this._show(); return; }
             if (key === 'ff') { this._seekBy(30); this._show(); return; }

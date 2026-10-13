@@ -206,6 +206,27 @@ A plugin with `"live": true` may call, from its UI code:
   browser's own player, so what a browser build can play depends on the browser. The stream's server sees the user's IP
   address, and the install screen says so.
 
+### Live sessions: channel switcher, guide and now/next banner (`channel` + `pek.live.onQuery`)
+
+Give `pek.live.play` a `channel` (an id of your own, up to 200 characters) and PEK TV opens a *live session*: while the stream plays,
+the player shows a glass **now / next banner** whenever the controls have hidden themselves (nobody is pressing keys or touching the screen),
+a **channel switcher** on the right (Right arrow, or the Channels button) and a full **guide** on the left (Left arrow, or the Guide button;
+only when your plugin says it has guide data). Without `channel` nothing changes.
+
+The plugin keeps all the data. Register one function and the player asks it questions (it may return a value or a promise):
+
+```js
+pek.live.onQuery(function (req) {
+  // req.op === 'list'  -> { guide: true|false, channels: [[id, name, group, hasGuide(0|1)], ...] }
+  // req.op === 'now'   -> req.ids = [id, ...] (max 40)  ->  { id: [nowOrZero, nextOrZero], ... }   each = [start, stop, title] (unix seconds)
+  // req.op === 'guide' -> req.ids, req.from, req.to      ->  { id: [[start, stop, title, desc], ...], ... }
+  // req.op === 'url'   -> req.id                          ->  { url, title }   (the player switches to it)
+});
+```
+
+Everything you return is shown as plain text. A `url` is checked with the same rules as `pek.live.play` (plain http/https, no user name or
+password, not this device) before the player loads it. If the function is missing or fails, the player works exactly as before.
+
 Any plugin (no permission needed) can also read JSON files that shipped inside its own zip:
 
 - `pek.readBundled('index.json')` -> text of `playlists/index.json` in the plugin's own folder (1 MB per file).

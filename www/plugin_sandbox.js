@@ -72,7 +72,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
     var pending = new Map(), nextReq = 1;
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
-    var launchFn = null, pendingLaunch = null, nextFn = null;
+    var launchFn = null, pendingLaunch = null, nextFn = null, liveFn = null;
 
     function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
@@ -192,8 +192,11 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             }
         },
         // Needs permissions.live. play({url, title}) opens an http(s) video address in PEK TV's player.
+        // Optional channel: an id of your own. With it PEK TV opens a live session: the player shows a now/next banner, a channel
+        // switcher and a guide, and asks the function you gave to onQuery for the data ({op:'list'|'now'|'guide'|'url', ...}).
         live: {
-            play: function (o) { o = o || {}; return request('livePlay', { url: str(o.url), title: str(o.title) }, 30000); }
+            play: function (o) { o = o || {}; return request('livePlay', { url: str(o.url), title: str(o.title), channel: str(o.channel) }, 30000); },
+            onQuery: function (fn) { liveFn = typeof fn === 'function' ? fn : null; }
         },
         // Reads playlists/<name> (a .json file) from this plugin's own folder.
         readBundled: function (name) { return request('readBundled', { name: str(name) }, 20000); },
@@ -249,6 +252,13 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             try {
                 Promise.resolve(nextFn(nreq)).then(function (v) { nreply(true, v); }, function (e) { nreply(false, String((e && e.message) || e)); });
             } catch (e) { nreply(false, String(e)); }
+        } else if (m.t === 'liveq') {
+            var lrid = m.rid, lreq = m.req;
+            var lreply = function (ok, v) { post({ t: 'liveqRes', rid: lrid, ok: ok, value: v }); };
+            if (!liveFn || !lreq || typeof lreq !== 'object') { lreply(false, 'no handler'); return; }
+            try {
+                Promise.resolve(liveFn(lreq)).then(function (v) { lreply(true, v); }, function (e) { lreply(false, String((e && e.message) || e)); });
+            } catch (e) { lreply(false, String(e)); }
         } else if (m.t === 'launch') {
             if (m.intent && typeof m.intent === 'object') { pendingLaunch = m.intent; flushLaunch(); }
         } else if (m.t === 'back') {
@@ -339,6 +349,8 @@ class PekSandbox {
         this._pendingLaunch = null;  // a title to open as soon as the plugin has started
         this._nextPending = new Map(); // next-episode questions waiting for the plugin's answer
         this._nextId = 0;
+        this._liveQ = new Map();       // live-session questions waiting for the plugin's answer
+        this._liveQId = 0;
         this._focusMemo = {};        // screen key -> element that had focus when we left it
         this._onMessage = this._onMessage.bind(this);
         PekSandbox._initNav();
@@ -436,6 +448,31 @@ class PekSandbox {
         if (cb) { this._nextPending.delete(m.rid); cb(m); }
     }
 
+    /** Live session: ask the plugin a question for the player's channel list / guide. Resolves with the plugin's answer. */
+    liveQuery(req) {
+        return new Promise((resolve, reject) => {
+            if (!this.started || !this.frame) { reject(new Error('plugin not running')); return; }
+            const op = req && req.op;
+            if (['list', 'now', 'guide', 'url'].indexOf(op) < 0) { reject(new Error('bad request')); return; }
+            const s = (v) => String(v == null ? '' : v).slice(0, 200);
+            const clean = { op: op, from: Math.floor(Number(req.from)) || 0, to: Math.floor(Number(req.to)) || 0 };
+            if (Array.isArray(req.ids)) clean.ids = req.ids.slice(0, 40).map(s);
+            if (req.id != null) clean.id = s(req.id);
+            const rid = ++this._liveQId;
+            const timer = setTimeout(() => { this._liveQ.delete(rid); reject(new Error('timeout')); }, 15000);
+            this._liveQ.set(rid, (m) => {
+                clearTimeout(timer);
+                if (m.ok) resolve(m.value); else reject(new Error(String(m.value || 'failed').slice(0, 200)));
+            });
+            this._send({ t: 'liveq', rid, req: clean });
+        });
+    }
+
+    _onLiveRes(m) {
+        const cb = typeof m.rid === 'number' ? this._liveQ.get(m.rid) : null;
+        if (cb) { this._liveQ.delete(m.rid); cb(m); }
+    }
+
     /** Ask the plugin to open a title ({type, id, title, year}). Held until the plugin has started. */
     launch(intent) {
         this._pendingLaunch = intent;
@@ -483,6 +520,7 @@ class PekSandbox {
             case 'log': this._log(m.text); break;
             case 'req': this._handleRequest(m); break;
             case 'nextRes': this._onNextRes(m); break;
+            case 'liveqRes': this._onLiveRes(m); break;
         }
     }
 
@@ -702,8 +740,26 @@ class PekSandbox {
         }
         if (PekSandbox.isLocalHost(u.hostname)) throw new Error('stream addresses on this device are not allowed');
         const title = typeof a.title === 'string' ? a.title.trim().slice(0, 120) : '';
-        window.PekHost.playStream(u.href, title, null, null);
+        window.PekHost.playStream(u.href, title, null, null, this._liveCtl(a, title));
         return true;
+    }
+
+    // The same address rules as pek.live.play, for a channel the player switches to later. Returns the checked address.
+    _checkStreamUrl(raw) {
+        raw = typeof raw === 'string' ? raw.trim() : '';
+        if (!raw || raw.length > 2000) throw new Error('invalid stream address');
+        let u;
+        try { u = new URL(raw); } catch (e) { throw new Error('invalid stream address'); }
+        if ((u.protocol !== 'http:' && u.protocol !== 'https:') || u.username || u.password) throw new Error('only plain http:// or https:// stream addresses are allowed');
+        if (PekSandbox.isLocalHost(u.hostname)) throw new Error('stream addresses on this device are not allowed');
+        return u.href;
+    }
+
+    // A live session exists only when the plugin named a channel. The player never sees the plugin itself, only these three things.
+    _liveCtl(a, title) {
+        const ch = typeof a.channel === 'string' ? a.channel.slice(0, 200) : '';
+        if (!ch) return null;
+        return { channel: ch, title: title, query: (req) => this.liveQuery(req), check: (u) => this._checkStreamUrl(u) };
     }
 
     // ---------------- files shipped inside the plugin (no permission needed) ----------------
