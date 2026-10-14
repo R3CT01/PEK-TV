@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <functional>
 #include <map>
-#include <unordered_map>
 #include "vfs.h"
 
 enum class MediaKind {
@@ -39,31 +38,6 @@ struct MediaEntry {
     // the filename/folder fallback rather than embedded tags. Used to
     // decide which entries are worth confirming against TMDb.
     bool guessed = false;
-
-    // Local metadata: "sidecar" files that sit next to the video (see LOCAL_METADATA.md).
-    // NFO files (Kodi / Radarr / Sonarr style XML) give the exact title, year, plot, show name,
-    // season and episode; image files give posters, backgrounds and episode stills.
-    // Images are full paths (or network URLs) and are served through /api/artwork, never directly.
-    std::string overview;        // plot from the movie / episode NFO
-    std::string ep_title;        // episode title from the episode NFO
-    std::string show_overview;   // plot from the show's tvshow.nfo (episodes)
-    std::string poster;          // movie poster ("" = none)
-    std::string fanart;          // movie background
-    std::string thumb;           // episode still
-    std::string show_poster;     // show poster (episodes)
-    std::string show_fanart;     // show background (episodes)
-    int64_t art_v = 0;           // newest image modification time: makes the browser reload replaced art
-    int64_t nfo_sig = 0;         // signature of the NFO files read (0 = none, -1 = one could not be read yet)
-
-    // Runtime only (not persisted): kept from the previous scan because its source was unreachable.
-    bool carried = false;
-};
-
-// A non-video file found during a scan that may matter as metadata (.nfo or an image).
-struct SideFile {
-    std::string name;            // the real spelling
-    int64_t mtime = 0;
-    uint64_t size = 0;
 };
 
 // Classifies video files in layers, cheapest and most reliable first:
@@ -121,11 +95,6 @@ public:
     std::vector<MediaEntry> getEpisodes();          // flat
     std::vector<MediaEntry> getUnclassified();      // the "Unknown" category
     bool findById(const std::string& id, MediaEntry& out);
-    // A show by its title (case-insensitive): the first of its episodes that carries local show metadata,
-    // else just the first. Used for the show's poster and plot.
-    bool findShow(const std::string& title, MediaEntry& out);
-    // One episode of a show (title case-insensitive).
-    bool findEpisode(const std::string& title, int season, int episode, MediaEntry& out);
 
 private:
     std::string sources_file_path_;
@@ -135,10 +104,6 @@ private:
     std::mutex mutex_;
     ShowResolver show_resolver_;
     std::map<std::string, std::string> resolved_names_;   // lowercase guess -> official name ("" = no match); only touched under scan_mutex_
-    // Sidecar files seen by the running scan: folder -> (lowercase file name -> file). Only touched under scan_mutex_.
-    std::unordered_map<std::string, std::unordered_map<std::string, SideFile>> sides_;
-    std::unordered_map<std::string, int> video_counts_;   // folder -> number of video files in it
-    void noteSidecar(const std::string& file_path, const std::string& name, int64_t mtime, uint64_t size);
     std::mutex scan_mutex_;   // serializes scan() so overlapping scans (startup + POST /api/sources + /api/rescan) can't race on the cache file
 
     bool dirHasNomedia(const std::string& dir_path);

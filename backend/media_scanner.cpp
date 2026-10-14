@@ -1,9 +1,9 @@
 #include "media_scanner.h"
 #include "vfs.h"
 #include "nfo.h"
-#include <map>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <iostream>
 #include <algorithm>
@@ -30,8 +30,7 @@ const std::string kFfprobeBinary = "ffprobe";
 
 // First line of the cache file. Bump when classification logic changes
 // enough that old cached results should be recomputed.
-const std::string kCacheHeader = "#hesper-cache-v3";
-const std::string kCacheHeaderV2 = "#hesper-cache-v2";   // still readable: it just has no metadata columns
+const std::string kCacheHeader = "#hesper-cache-v2";
 
 std::string toLower(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -272,219 +271,83 @@ bool isUsableShowFolder(const fs::path& dir, const std::vector<std::string>& roo
 }
 
 
-// ---------------------------------------------------------------------------------------------
-// Local metadata (NFO + artwork). Works on plain strings so a local path and a network URL are
-// handled the same way: "a/b/c.mkv" -> folder "a/b", leaf "c.mkv".
-// ---------------------------------------------------------------------------------------------
-using SideMap = std::unordered_map<std::string, std::unordered_map<std::string, SideFile>>;
-
-constexpr uint64_t kNfoMaxBytes = 256 * 1024;
-
-bool isSidecarExt(const std::string& lowerExt) {
-    return lowerExt == ".nfo" || lowerExt == ".jpg" || lowerExt == ".jpeg" || lowerExt == ".png" ||
-           lowerExt == ".webp" || lowerExt == ".tbn";
+// ---- NFO files (Kodi, Radarr, Sonarr, tinyMediaManager...): see nfo.h ----
+// An NFO next to a video is the user's own word on what it is, so it wins over ffprobe tags and filename guesses.
+// Looked for, in this order: "<video name>.nfo" (movie or episode), "movie.nfo" (only when the folder holds a single
+// video), and "tvshow.nfo" (the show's title, in the show folder or above a "Season N" folder).
+bool readNfo(const fs::path& p, nfo::Info& out) {
+    std::error_code ec;
+    if (!fs::is_regular_file(p, ec) || ec) return false;
+    const auto size = fs::file_size(p, ec);
+    if (ec || size == 0 || size > 256 * 1024) return false;       // not a real NFO: do not let a huge file slow a scan
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return false;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    out = nfo::parse(text);
+    return out.ok;
 }
 
-std::string dirOf(const std::string& p) {
-    size_t k = p.find_last_of('/');
-    return k == std::string::npos ? std::string() : p.substr(0, k);
-}
-std::string leafOf(const std::string& p) {
-    size_t k = p.find_last_of('/');
-    return k == std::string::npos ? p : p.substr(k + 1);
-}
-std::string stemOf(const std::string& filename) {
-    size_t d = filename.find_last_of('.');
-    return d == std::string::npos || d == 0 ? filename : filename.substr(0, d);
-}
-
-const SideFile* findSide(const SideMap& sides, const std::string& dir, const std::string& lowerName) {
-    auto d = sides.find(dir);
-    if (d == sides.end()) return nullptr;
-    auto f = d->second.find(lowerName);
-    return f == d->second.end() ? nullptr : &f->second;
-}
-
-// First image called <base>.<ext> in the folder (jpg, jpeg, png, webp, tbn), or null.
-const SideFile* findImage(const SideMap& sides, const std::string& dir, const std::string& lowerBase) {
-    static const char* const exts[] = {".jpg", ".jpeg", ".png", ".webp", ".tbn"};
-    for (const char* ext : exts) {
-        if (const SideFile* f = findSide(sides, dir, lowerBase + ext)) return f;
+int videosIn(const fs::path& dir) {                                // counts up to 2: enough to tell "one" from "several"
+    int n = 0;
+    std::error_code ec;
+    fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return 2;
+    for (fs::directory_iterator end; it != end && n < 2; it.increment(ec)) {
+        if (ec) break;
+        std::error_code e2;
+        if (!it->is_regular_file(e2) || e2) continue;
+        const std::string ext = toLower(it->path().extension().string());
+        if (std::find(kVideoExtensions.begin(), kVideoExtensions.end(), ext) != kVideoExtensions.end()) ++n;
     }
-    return nullptr;
+    return n;
 }
 
-// The folder that holds the whole show: the parent of a "Season N" folder, otherwise the folder itself.
-std::string showDirOf(const std::string& dir) {
-    int season = 0;
-    if (parseSeasonFolder(leafOf(dir), season)) {
-        std::string up = dirOf(dir);
-        if (!up.empty()) return up;
-    }
-    return dir;
-}
+// Fills kind / title / year / show / season / episode from the NFO. False = no usable NFO (nothing was changed).
+bool applyNfo(MediaEntry& entry) {
+    if (vfs::isRemote(entry.path)) return false;
+    const fs::path video(entry.path), dir = video.parent_path();
+    nfo::Info own;
+    const bool haveOwn = readNfo(fs::path(video).replace_extension(".nfo"), own);
 
-int videosIn(const std::unordered_map<std::string, int>& counts, const std::string& dir) {
-    auto it = counts.find(dir);
-    return it == counts.end() ? 0 : it->second;
-}
-
-// Reads small text files (NFO) from disk or from a network share. One connection per share is kept for
-// the whole scan, so a library with hundreds of NFO files does not log in hundreds of times.
-class SideReader {
-public:
-    bool read(const std::string& path, std::string& out) {
-        out.clear();
-        if (!vfs::isRemote(path)) {
-            std::ifstream in(path, std::ios::binary);
-            if (!in.is_open()) return false;
-            std::string buf(kNfoMaxBytes, '\0');
-            in.read(&buf[0], static_cast<std::streamsize>(buf.size()));
-            buf.resize(static_cast<size_t>(in.gcount()));
-            out = std::move(buf);
-            return true;
+    if (haveOwn && own.root == "episodedetails" && own.episode > 0) {
+        int folder_season = 0;
+        fs::path show_dir = dir;
+        if (parseSeasonFolder(dir.filename().string(), folder_season)) show_dir = dir.parent_path();
+        std::string show = own.showtitle;
+        if (show.empty()) {
+            nfo::Info ts;
+            if (readNfo(show_dir / "tvshow.nfo", ts) && ts.root == "tvshow") show = ts.title;
         }
-        vfs::Url u;
-        if (!vfs::parseUrl(path, u)) return false;
-        const std::string key = vfs::buildUrl({u.scheme, u.host, u.share, ""});
-        auto it = conns_.find(key);
-        if (it == conns_.end()) {
-            vfs::Error err;
-            it = conns_.emplace(key, vfs::connect(u, err)).first;     // a failed connect is remembered (null)
+        int season = own.season > 0 ? own.season : folder_season;
+        if (season == 0) {
+            size_t st; int se, ep;
+            if (matchEpisodePattern(cleanSeparators(video.stem().string()), st, se, ep)) season = se;
         }
-        if (!it->second) return false;
-        vfs::Error err;
-        if (!it->second->open(u.path, err)) return false;
-        uint64_t size = it->second->fileSize();
-        if (size > kNfoMaxBytes) size = kNfoMaxBytes;
-        std::string buf(static_cast<size_t>(size), '\0');
-        uint64_t got = 0;
-        while (got < size) {
-            int64_t n = it->second->read(got, &buf[got], static_cast<size_t>(size - got));
-            if (n <= 0) break;
-            got += static_cast<uint64_t>(n);
-        }
-        buf.resize(static_cast<size_t>(got));
-        out = std::move(buf);
-        return got > 0 || size == 0;
-    }
-private:
-    std::map<std::string, std::unique_ptr<vfs::Share>> conns_;
-};
-
-// Which NFO files apply to a video, and what they look like on disk right now.
-struct NfoSet {
-    const SideFile* own = nullptr;        // <video name>.nfo
-    const SideFile* movie = nullptr;      // movie.nfo (only when the folder holds just this one video)
-    const SideFile* show = nullptr;       // tvshow.nfo in the show folder
-    std::string ownPath, moviePath, showPath;
-};
-
-NfoSet nfoFilesFor(const MediaEntry& e, const SideMap& sides, const std::unordered_map<std::string, int>& counts) {
-    NfoSet s;
-    const std::string dir = dirOf(e.path);
-    const std::string base = toLower(stemOf(e.filename));
-    if ((s.own = findSide(sides, dir, base + ".nfo"))) s.ownPath = dir + "/" + s.own->name;
-    if (videosIn(counts, dir) == 1 && (s.movie = findSide(sides, dir, "movie.nfo"))) s.moviePath = dir + "/" + s.movie->name;
-    const std::string sdir = showDirOf(dir);
-    if ((s.show = findSide(sides, sdir, "tvshow.nfo"))) s.showPath = sdir + "/" + s.show->name;
-    return s;
-}
-
-int64_t nfoSignature(const NfoSet& s) {
-    int64_t sig = 0;
-    auto mix = [&sig](const SideFile* f, int64_t salt) {
-        if (f) sig += (f->mtime * 1000003 + static_cast<int64_t>(f->size)) * salt + salt;
-    };
-    mix(s.own, 1); mix(s.movie, 3); mix(s.show, 7);
-    return sig;
-}
-
-// Applies the NFO files to a freshly classified entry. Returns false when a file exists but could not be read
-// (the entry is then looked at again on the next scan instead of being trusted as "no metadata").
-bool applyNfo(MediaEntry& e, const NfoSet& s, SideReader& reader) {
-    bool complete = true;
-    auto load = [&](const SideFile* f, const std::string& path, nfo::Info& out) {
-        if (!f) return;
-        std::string text;
-        if (!reader.read(path, text)) { complete = false; return; }
-        out = nfo::parse(text);
-    };
-
-    nfo::Info own, movie, show;
-    load(s.own, s.ownPath, own);
-    if (!own.ok) load(s.movie, s.moviePath, movie);
-    load(s.show, s.showPath, show);
-    if (show.ok && show.root != "tvshow") show = nfo::Info();
-
-    const nfo::Info& item = own.ok ? own : movie;
-    if (item.ok && item.root == "movie" && !item.title.empty()) {
-        e.kind = MediaKind::Movie;
-        e.title = sanitizeField(item.title);
-        if (item.year > 0) e.year = item.year;
-        e.overview = sanitizeField(item.plot);
-        e.show_title.clear(); e.season = 0; e.episode = 0;
-        e.guessed = false;
-    } else if (item.ok && item.root == "episodedetails") {
-        const int season = item.season > 0 ? item.season : (e.kind == MediaKind::Episode ? e.season : 0);
-        const int episode = item.episode > 0 ? item.episode : (e.kind == MediaKind::Episode ? e.episode : 0);
-        std::string showName = !item.showtitle.empty() ? item.showtitle : (show.ok ? show.title : std::string());
-        if (showName.empty() && e.kind == MediaKind::Episode) showName = e.show_title;
-        if (!showName.empty() && season > 0 && episode > 0) {
-            const bool nameFromNfo = !item.showtitle.empty() || (show.ok && !show.title.empty());
-            e.kind = MediaKind::Episode;
-            e.show_title = sanitizeField(showName);
-            e.season = season;
-            e.episode = episode;
-            e.ep_title = sanitizeField(item.title);
-            e.overview = sanitizeField(item.plot);
-            e.title.clear(); e.year = 0;
-            if (nameFromNfo) e.guessed = false;
-        }
+        if (show.empty() || season <= 0) return false;              // the old rules decide
+        entry.kind = MediaKind::Episode;
+        entry.show_title = sanitizeField(show);
+        entry.season = season;
+        entry.episode = own.episode;
+        entry.title.clear(); entry.year = 0;
+        entry.guessed = false;                                      // the NFO is authoritative: no TMDb name check
+        return true;
     }
 
-    if (e.kind == MediaKind::Episode && show.ok) {
-        if (!show.title.empty()) { e.show_title = sanitizeField(show.title); e.guessed = false; }
-        e.show_overview = sanitizeField(show.plot);
+    nfo::Info mv;
+    bool haveMovie = false;
+    if (haveOwn && own.root == "movie") { mv = own; haveMovie = true; }
+    else if (!haveOwn && videosIn(dir) <= 1 && readNfo(dir / "movie.nfo", mv) && mv.root == "movie") haveMovie = true;
+    if (haveMovie && !mv.title.empty()) {
+        entry.kind = MediaKind::Movie;
+        entry.title = sanitizeField(mv.title);
+        entry.year = mv.year;
+        entry.show_title.clear(); entry.season = 0; entry.episode = 0;
+        entry.guessed = false;
+        return true;
     }
-    return complete;
+    return false;
 }
 
-// Picks the artwork files for an entry from the sidecar files seen in this scan. No file reads, so it
-// runs for every entry on every scan and a poster dropped into a folder shows up after the next rescan.
-void resolveArt(MediaEntry& e, const SideMap& sides, const std::unordered_map<std::string, int>& counts) {
-    e.poster.clear(); e.fanart.clear(); e.thumb.clear(); e.show_poster.clear(); e.show_fanart.clear();
-    int64_t newest = 0;
-    const std::string dir = dirOf(e.path);
-    const std::string base = toLower(stemOf(e.filename));
-    auto pick = [&](std::string& dest, const std::string& folder, const std::vector<std::string>& names) {
-        for (const auto& n : names) {
-            if (const SideFile* f = findImage(sides, folder, n)) {
-                dest = folder + "/" + f->name;
-                newest = std::max(newest, f->mtime);
-                return;
-            }
-        }
-    };
-    const bool alone = videosIn(counts, dir) == 1;    // folder-wide names ("poster.jpg") only mean something for a lone video
-
-    if (e.kind == MediaKind::Movie || e.kind == MediaKind::Unclassified) {
-        std::vector<std::string> poster = {base + "-poster", base};
-        std::vector<std::string> fanart = {base + "-fanart", base + "-backdrop", base + "-background"};
-        if (alone) {
-            for (const char* n : {"poster", "folder", "cover", "movie"}) poster.push_back(n);
-            for (const char* n : {"fanart", "backdrop", "background"}) fanart.push_back(n);
-        }
-        pick(e.poster, dir, poster);
-        pick(e.fanart, dir, fanart);
-    } else if (e.kind == MediaKind::Episode) {
-        pick(e.thumb, dir, {base + "-thumb", base});
-        const std::string sdir = showDirOf(dir);
-        pick(e.show_poster, sdir, {"poster", "folder", "cover", "show"});
-        pick(e.show_fanart, sdir, {"fanart", "backdrop", "background"});
-    }
-    e.art_v = newest;
-}
 
 } // namespace
 
@@ -700,26 +563,12 @@ void MediaScanner::scanDirectory(const std::string& dir_path, std::vector<MediaE
             continue;
         }
 
-        {
-            const std::string ext = toLower(e.path().extension().string());
-            if (isSidecarExt(ext)) {
-                std::error_code sec;
-                if (e.is_regular_file(sec) && !sec) {
-                    const uint64_t sz = fs::file_size(e.path(), sec);
-                    auto ft = fs::last_write_time(e.path(), sec);
-                    const int64_t mt = sec ? 0 : std::chrono::duration_cast<std::chrono::seconds>(ft.time_since_epoch()).count();
-                    noteSidecar(e.path().string(), e.path().filename().string(), mt, sec ? 0 : sz);
-                }
-                continue;
-            }
-        }
         if (!isVideoFile(e.path().extension().string())) continue;
 
         MediaEntry entry;
         entry.path = e.path().string();
         entry.filename = e.path().filename().string();
         entry.id = makeId(entry.path);
-        video_counts_[dirOf(entry.path)]++;
         entry.size_bytes = fs::file_size(e.path(), entry_ec);
         if (entry_ec) continue;
         auto ftime = fs::last_write_time(e.path(), entry_ec);
@@ -767,19 +616,11 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
             scanRemoteDir(share, base, child, found, depth + 1);
             continue;
         }
-        {
-            const std::string ext = toLower(fs::path(e.name).extension().string());
-            if (isSidecarExt(ext)) {
-                noteSidecar(vfs::buildUrl({base.scheme, base.host, base.share, child}), e.name, e.mtime, e.size);
-                continue;
-            }
-        }
         if (!isVideoFile(fs::path(e.name).extension().string())) continue;
         MediaEntry entry;
         entry.path = vfs::buildUrl({base.scheme, base.host, base.share, child});
         entry.filename = e.name;
         entry.id = makeId(entry.path);
-        video_counts_[dirOf(entry.path)]++;
         entry.size_bytes = e.size;
         entry.mtime = e.mtime;
         found.push_back(std::move(entry));
@@ -787,16 +628,8 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
     return true;
 }
 
-void MediaScanner::noteSidecar(const std::string& file_path, const std::string& name, int64_t mtime, uint64_t size) {
-    SideFile f;
-    f.name = name; f.mtime = mtime; f.size = size;
-    sides_[dirOf(file_path)][toLower(name)] = std::move(f);
-}
-
 void MediaScanner::scan() {
     std::lock_guard<std::mutex> scan_lock(scan_mutex_);
-    sides_.clear();
-    video_counts_.clear();
     std::vector<std::string> dirs_snapshot;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -820,24 +653,16 @@ void MediaScanner::scan() {
         prefix += "/";
         size_t kept = 0;
         for (const auto& kv : previous) {
-            if (kv.first.compare(0, prefix.size(), prefix) == 0) { fresh.push_back(kv.second); fresh.back().carried = true; ++kept; }
+            if (kv.first.compare(0, prefix.size(), prefix) == 0) { fresh.push_back(kv.second); ++kept; }
         }
         std::cout << "[MediaScanner] Keeping " << kept << " earlier file(s) from unreachable " << dir << std::endl;
     }
 
-    SideReader reader;   // network connections for reading NFO files, shared by the whole loop
     for (auto& entry : fresh) {
-        if (entry.carried) continue;   // its source is offline: keep exactly what we knew
-
-        // NFO files that apply to this video. When one is added, edited or removed the entry is classified again.
-        const NfoSet nfos = nfoFilesFor(entry, sides_, video_counts_);
-        const int64_t curNfoSig = nfoSignature(nfos);
-
         auto it = previous.find(entry.path);
         if (it != previous.end() &&
             it->second.size_bytes == entry.size_bytes &&
-            it->second.mtime == entry.mtime &&
-            it->second.nfo_sig == curNfoSig) {
+            it->second.mtime == entry.mtime) {
             // Unchanged on disk — reuse the prior classification
             // rather than re-invoking ffprobe (the expensive step).
             entry.kind = it->second.kind;
@@ -846,11 +671,12 @@ void MediaScanner::scan() {
             entry.show_title = it->second.show_title;
             entry.season = it->second.season;
             entry.episode = it->second.episode;
-            entry.overview = it->second.overview;
-            entry.ep_title = it->second.ep_title;
-            entry.show_overview = it->second.show_overview;
-            entry.nfo_sig = it->second.nfo_sig;
+            applyNfo(entry);          // cheap (a few small files), so an edited NFO is picked up on the next scan
         } else {
+            if (applyNfo(entry)) {    // described by an NFO: no ffprobe, no filename guessing
+                std::cout << "[MediaScanner] From NFO: " << entry.filename << std::endl;
+                continue;
+            }
             std::cout << "[MediaScanner] Probing: " << entry.filename << std::endl;
             probeAndClassify(entry);
 
@@ -869,22 +695,6 @@ void MediaScanner::scan() {
                 if (guess.kind == MediaKind::Episode ||
                     (guess.kind == MediaKind::Movie && entry.kind == MediaKind::Unclassified)) {
                     entry = std::move(guess);
-                }
-            }
-
-            // NFO files beat tags and guesses: they are the exact title / show / season / episode the person
-            // (or Radarr, Sonarr, Kodi ...) wrote down. Done before the TMDb name check below, which then
-            // skips anything the NFO already named.
-            entry.nfo_sig = 0;
-            if (curNfoSig != 0) {
-                const bool complete = applyNfo(entry, nfos, reader);
-                entry.nfo_sig = complete ? curNfoSig : -1;       // -1: try again on the next scan
-                if (entry.kind != MediaKind::Unclassified && !entry.guessed) {
-                    std::cout << "[MediaScanner]   -> from NFO: "
-                              << (entry.kind == MediaKind::Episode
-                                      ? entry.show_title + " S" + std::to_string(entry.season) + "E" + std::to_string(entry.episode)
-                                      : entry.title + " (" + std::to_string(entry.year) + ")")
-                              << std::endl;
                 }
             }
 
@@ -911,14 +721,6 @@ void MediaScanner::scan() {
             }
         }
     }
-
-    // Artwork: cheap, no file reads, so every entry is looked at on every scan.
-    for (auto& entry : fresh) {
-        if (entry.carried) { entry.carried = false; continue; }   // offline source: its artwork paths stay as they were
-        resolveArt(entry, sides_, video_counts_);
-    }
-    sides_.clear();
-    video_counts_.clear();
 
     size_t indexed = fresh.size();
     {
@@ -959,36 +761,9 @@ bool MediaScanner::findById(const std::string& id, MediaEntry& out) {
     return false;
 }
 
-bool MediaScanner::findShow(const std::string& title, MediaEntry& out) {
-    const std::string key = toLower(title);
-    std::lock_guard<std::mutex> lock(mutex_);
-    const MediaEntry* first = nullptr;
-    for (const auto& e : entries_) {
-        if (e.kind != MediaKind::Episode || toLower(e.show_title) != key) continue;
-        if (!e.show_poster.empty() || !e.show_overview.empty() || !e.show_fanart.empty()) { out = e; return true; }
-        if (!first) first = &e;
-    }
-    if (!first) return false;
-    out = *first;
-    return true;
-}
-
-bool MediaScanner::findEpisode(const std::string& title, int season, int episode, MediaEntry& out) {
-    const std::string key = toLower(title);
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& e : entries_) {
-        if (e.kind == MediaKind::Episode && e.season == season && e.episode == episode && toLower(e.show_title) == key) {
-            out = e;
-            return true;
-        }
-    }
-    return false;
-}
-
 // Tab-delimited cache — internal only, never served directly.
 // First line is kCacheHeader. Columns: id, path, filename, size, mtime, kind(0=Movie/1=Episode/2=Unclassified),
-// title, year, show_title, season, episode, then (v3) overview, ep_title, show_overview, poster, fanart, thumb,
-// show_poster, show_fanart, art_v, nfo_sig
+// title, year, show_title, season, episode
 void MediaScanner::persistCacheToDisk() {
     std::ofstream out(cache_file_path_, std::ios::trunc);
     if (!out.is_open()) {
@@ -1002,11 +777,7 @@ void MediaScanner::persistCacheToDisk() {
             << e.size_bytes << '\t' << e.mtime << '\t'
             << static_cast<int>(e.kind) << '\t'
             << sanitizeField(e.title) << '\t' << e.year << '\t'
-            << sanitizeField(e.show_title) << '\t' << e.season << '\t' << e.episode << '\t'
-            << sanitizeField(e.overview) << '\t' << sanitizeField(e.ep_title) << '\t' << sanitizeField(e.show_overview) << '\t'
-            << sanitizeField(e.poster) << '\t' << sanitizeField(e.fanart) << '\t' << sanitizeField(e.thumb) << '\t'
-            << sanitizeField(e.show_poster) << '\t' << sanitizeField(e.show_fanart) << '\t'
-            << e.art_v << '\t' << e.nfo_sig << '\n';
+            << sanitizeField(e.show_title) << '\t' << e.season << '\t' << e.episode << '\n';
     }
 }
 
@@ -1047,44 +818,38 @@ void MediaScanner::loadFromDisk() {
     // version header) holds every untagged file as Unclassified. Drop it
     // so the next scan re-identifies those files instead of reusing the
     // stale "Unknown" result.
-    // v2 caches (no metadata columns) are still read: nothing is lost, the metadata is simply filled in by the next scan.
-    if (!std::getline(in, line) || (line != kCacheHeader && line != kCacheHeaderV2)) {
+    if (!std::getline(in, line) || line != kCacheHeader) {
         std::cout << "[MediaScanner] Cache is from an older version; re-scanning all files." << std::endl;
         return;
     }
 
     while (std::getline(in, line)) {
-        // Split on tabs, keeping empty fields.
-        std::vector<std::string> f;
-        size_t start = 0;
-        for (;;) {
-            size_t tab = line.find('\t', start);
-            if (tab == std::string::npos) { f.push_back(line.substr(start)); break; }
-            f.push_back(line.substr(start, tab - start));
-            start = tab + 1;
-        }
-        if (f.size() < 11) continue;
+        std::istringstream iss(line);
         MediaEntry e;
-        try {
-            e.id = f[0]; e.path = f[1]; e.filename = f[2];
-            e.size_bytes = std::stoull(f[3]);
-            e.mtime = std::stoll(f[4]);
-            int k = std::stoi(f[5]);
-            e.kind = (k == 0) ? MediaKind::Movie : (k == 1) ? MediaKind::Episode : MediaKind::Unclassified;
-            e.title = f[6];
-            e.year = std::stoi(f[7]);
-            e.show_title = f[8];
-            e.season = std::stoi(f[9]);
-            e.episode = std::stoi(f[10]);
-            if (f.size() >= 21) {
-                e.overview = f[11]; e.ep_title = f[12]; e.show_overview = f[13];
-                e.poster = f[14]; e.fanart = f[15]; e.thumb = f[16];
-                e.show_poster = f[17]; e.show_fanart = f[18];
-                e.art_v = std::stoll(f[19]);
-                e.nfo_sig = std::stoll(f[20]);
-            }
-        } catch (...) { continue; }
-        loaded.push_back(std::move(e));
+        std::string size_str, mtime_str, kind_str, year_str, season_str, episode_str;
+
+        if (std::getline(iss, e.id, '\t') &&
+            std::getline(iss, e.path, '\t') &&
+            std::getline(iss, e.filename, '\t') &&
+            std::getline(iss, size_str, '\t') &&
+            std::getline(iss, mtime_str, '\t') &&
+            std::getline(iss, kind_str, '\t') &&
+            std::getline(iss, e.title, '\t') &&
+            std::getline(iss, year_str, '\t') &&
+            std::getline(iss, e.show_title, '\t') &&
+            std::getline(iss, season_str, '\t') &&
+            std::getline(iss, episode_str)) {
+            try {
+                e.size_bytes = std::stoull(size_str);
+                e.mtime = std::stoll(mtime_str);
+                int k = std::stoi(kind_str);
+                e.kind = (k == 0) ? MediaKind::Movie : (k == 1) ? MediaKind::Episode : MediaKind::Unclassified;
+                e.year = std::stoi(year_str);
+                e.season = std::stoi(season_str);
+                e.episode = std::stoi(episode_str);
+            } catch (...) { continue; }
+            loaded.push_back(std::move(e));
+        }
     }
 
     std::lock_guard<std::mutex> lock(mutex_);
