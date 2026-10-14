@@ -33,6 +33,10 @@
 //   ui                   optional shell hints: navTab (a sidebar entry), reloadOnInstall,
 //                        closeOnRemove. They only change how PEK TV's own screens behave.
 //
+// billboard / navbar / block / posterCard {wide, onFocus}: the Netflix-style screen pieces (see the NF section below). A
+//                        billboard may carry trailer {id}: PEK TV plays it muted behind the text (its own /api/trailer stream when
+//                        available, the YouTube frame otherwise; needs www.youtube-nocookie.com under network). onFocus fires once the
+//                        D-pad highlight has rested on a tile for a moment (a passive 'input' message: no redraw by itself).
 // hero: a wide backdrop billboard (picture + title + blurb + buttons). Same image rules as posterCard.
 // Images: posterCard art is loaded by PEK TV's page (not by the frame), and only from https
 // hosts the plugin listed under permissions.network.
@@ -123,7 +127,8 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         column:  function () { return { t: 'column', children: flat(arguments) }; },
         row:     function () { return { t: 'row', children: flat(arguments) }; },
         posterCard: function (title, sub, posterUrl, fn, opts) {
-            return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), autofocus: str(opts && opts.autofocus), on: on(fn) };
+            return { t: 'posterCard', title: str(title), subtitle: str(sub), poster: str(posterUrl), badge: str(opts && opts.badge), autofocus: str(opts && opts.autofocus), on: on(fn),
+                wide: !!(opts && opts.wide), focus: on(opts && opts.onFocus) };
         },
         // A wide billboard: backdrop picture, title, one line of facts, a short blurb and up to 3 buttons.
         // image must be an https picture from a host the plugin listed under network (same rule as posterCard).
@@ -134,6 +139,34 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
                     a = a || {};
                     return { label: str(a.label), on: on(a.on), primary: !!a.primary, autofocus: str(a.autofocus) };
                 }) };
+        },
+        // Netflix-style screen pieces. A PEK TV that does not know them draws nothing for them, so a plugin
+        // checks that ui.billboard exists first and falls back to ui.hero.
+        // billboard: the big title area (backdrop, title, facts, blurb, up to 3 buttons). With trailer {id} PEK TV plays that
+        // YouTube trailer muted behind the text after a moment (direct stream when PEK TV can get one, YouTube frame otherwise).
+        billboard: function (o) {
+            o = o || {};
+            var tr = o.trailer && o.trailer.id ? { id: str(o.trailer.id), title: str(o.trailer.title) } : null;
+            return { t: 'billboard', title: str(o.title), meta: str(o.meta), text: str(o.text), image: str(o.image), badge: str(o.badge),
+                chip: str(o.chip), key: str(o.key), trailer: tr, muted: o.muted !== false,
+                actions: (Array.isArray(o.actions) ? o.actions : []).slice(0, 3).map(function (a) {
+                    a = a || {};
+                    return { label: str(a.label), on: on(a.on), primary: !!a.primary, autofocus: str(a.autofocus) };
+                }) };
+        },
+        // navbar: brand + tabs (on(id) when one is chosen) + a few round action buttons on the right.
+        navbar: function (o) {
+            o = o || {};
+            return { t: 'navbar', brand: str(o.brand), active: str(o.active), on: on(o.on),
+                items: (Array.isArray(o.items) ? o.items : []).slice(0, 8).map(function (i) { return { id: str(i && i.id), label: str(i && i.label) }; }),
+                actions: (Array.isArray(o.actions) ? o.actions : []).slice(0, 4).map(function (a) {
+                    a = a || {};
+                    return { label: str(a.label), icon: str(a.icon), on: on(a.on), selected: !!a.selected, autofocus: str(a.autofocus) };
+                }) };
+        },
+        // block: a plain wrapper the page styles by name (stage | rows | detail | pad | strip).
+        block: function (kind) {
+            return { t: 'block', kind: str(kind), children: flat([].slice.call(arguments, 1)) };
         },
         grid:    function (children, opts) {
             return { t: 'grid', children: flat([children]), minColWidth: str(opts && opts.minColWidth), scroll: !!(opts && opts.scroll) };
@@ -293,6 +326,14 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
 })();
 <\/script></body></html>`;
 
+// Small inline pictures for the Netflix-style top bar and billboard (written here, never taken from a plugin).
+const PEK_NF_ICONS = {
+    search: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>',
+    gear: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+    sound: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" fill="currentColor"/><g class="nf-ic-on"><path d="M15.5 9a4.5 4.5 0 0 1 0 6"/><path d="M18.3 6.5a8 8 0 0 1 0 11"/></g><g class="nf-ic-off"><path d="M16 9.5l5 5M21 9.5l-5 5"/></g></svg>',
+    back: '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>'
+};
+
 class PekSandbox {
     /** Validates a plugin.json object; anything unexpected simply means "no permission". */
     static normalizeManifest(raw) {
@@ -382,6 +423,7 @@ class PekSandbox {
         this._dropVideo(); this._videoKey = ''; this._afKey = null;
         this._bindTrailerKeys();
         this._bindPlayerEvents();
+        this._bindNfFocus();
         if (!this.frame) this._start();
         this._renderTree();
         return this.container;
@@ -410,6 +452,8 @@ class PekSandbox {
         if (this.frame) this.frame.remove();
         this.frame = null;
         this.stopped = reason;
+        this._trStop();
+        document.documentElement.classList.remove('nf-on');
         this.tree = null;
         this.canBack = false;
         if (this.container && this.engine) {
@@ -1002,6 +1046,262 @@ class PekSandbox {
         } catch (e) { this._vio = null; }
     }
 
+    // ---------------- Netflix-style pieces: billboard, trailer preview, focus preview ----------------
+    // The billboard's picture + trailer layer is ONE element that survives redraws (moved into each new billboard), so a
+    // trailer keeps playing while the text / buttons around it are rebuilt. A trailer plays muted behind the text unless the
+    // viewer unmuted it (the speaker button). Source order: (1) PEK TV's own /api/trailer (a direct video stream, played in a
+    // plain <video>: no player chrome, no embed errors), (2) the YouTube frame, only if (1) is not available here.
+
+    static _trailerInfo(id) {
+        const cache = PekSandbox._trCache || (PekSandbox._trCache = new Map());
+        const hit = cache.get(id);
+        if (hit && Date.now() - hit.t < (hit.ok ? 900000 : 120000)) return hit.p;
+        const p = (async () => {
+            if (PekSandbox._noTrailerApi) return null;
+            let r;
+            try { r = await fetch('/api/trailer?id=' + encodeURIComponent(id), { cache: 'no-store' }); } catch (e) { return null; }
+            if (r.status === 404) { PekSandbox._noTrailerApi = true; return null; }     // an older PEK TV backend: use the YouTube frame
+            if (!r.ok) return null;
+            let j; try { j = await r.json(); } catch (e) { return null; }
+            const okUrl = (u) => typeof u === 'string' && /^\/api\/trailer\/stream\?/.test(u);
+            if (!j || j.ok !== true || !okUrl(j.video)) return null;
+            return { video: j.video, audio: okUrl(j.audio) ? j.audio : '', hasAudio: j.hasAudio === true, height: Number(j.height) || 0 };
+        })();
+        const rec = { t: Date.now(), p, ok: false };
+        cache.set(id, rec);
+        p.then(v => { rec.ok = !!v; });
+        if (cache.size > 60) cache.delete(cache.keys().next().value);
+        return p;
+    }
+
+    _trailerAllowed() {
+        return PekSandbox.hostAllowed('www.youtube-nocookie.com', this.manifest.permissions.network);
+    }
+
+    // The persistent picture + trailer layer. url = the artwork to show (crossfades from the previous one).
+    _bbMedia(url) {
+        const { createElement } = this.engine;
+        let m = this._bbEl;
+        if (!m) {
+            const mk = (cls) => {
+                const im = createElement('img', { className: 'nf-bb-img ' + cls, alt: '' });
+                im.setAttribute('referrerpolicy', 'no-referrer'); im.setAttribute('decoding', 'async'); im.setAttribute('draggable', 'false');
+                return im;
+            };
+            m = this._bbEl = createElement('div', { className: 'nf-bb-media' }, mk('nf-prev'), mk('nf-cur'), createElement('div', { className: 'nf-bb-trailer' }));
+            if (typeof IntersectionObserver === 'function') {
+                try {
+                    new IntersectionObserver((es) => {
+                        const seen = es[es.length - 1].intersectionRatio >= 0.2;
+                        if (seen === this._bbSeen) return;
+                        this._bbSeen = seen;
+                        this._trVisible(seen);
+                    }, { threshold: [0, 0.2, 1] }).observe(m);
+                } catch (e) { /* no observer: the trailer just keeps playing */ }
+            }
+            if (!this._bbDocBound) {
+                this._bbDocBound = true;
+                document.addEventListener('visibilitychange', () => this._trVisible(!document.hidden && this._bbSeen !== false));
+            }
+        }
+        const cur = m.querySelector('.nf-cur'), prev = m.querySelector('.nf-prev');
+        if (url && cur.getAttribute('data-src') !== url) {
+            if (cur.getAttribute('src')) { prev.src = cur.getAttribute('src'); prev.classList.add('nf-in'); }
+            cur.setAttribute('data-src', url);
+            cur.classList.remove('nf-in');
+            cur.onload = () => { cur.classList.add('nf-in'); prev.classList.remove('nf-in'); };
+            cur.onerror = () => { prev.classList.remove('nf-in'); };
+            cur.src = url;
+        } else if (!url) {
+            cur.removeAttribute('src'); cur.removeAttribute('data-src'); cur.classList.remove('nf-in'); prev.classList.remove('nf-in');
+        }
+        return m;
+    }
+
+    _bbSync(bb) {
+        if (!bb || this._playerActive || !this._trailerAllowed()) { this._trStop(); return; }
+        const cur = this._tr;
+        if (cur && cur.id === bb.id) {            // same trailer, the billboard around it was rebuilt: keep it going
+            if (cur.v && cur.v.paused && !cur.v.ended && this._bbSeen !== false && !document.hidden) {
+                const p = cur.v.play(); if (p && p.catch) p.catch(() => {});
+            }
+            return;
+        }
+        this._trStop();
+        const tr = { id: bb.id, v: null, a: null, f: null, info: null, kind: '', timer: 0, tmo: 0 };
+        tr.sound = typeof this._bbSoundPref === 'boolean' ? this._bbSoundPref : bb.muted === false;
+        this._tr = tr;
+        if (this._bbEl) this._bbEl.classList.toggle('nf-snd', tr.sound);
+        tr.timer = setTimeout(() => { tr.timer = 0; this._trResolve(tr); }, 250);
+    }
+
+    _trLive(tr) { return this._tr === tr && !!this.container && this.container.isConnected && !this._playerActive; }
+
+    _trResolve(tr) {
+        if (!this._trLive(tr)) return;
+        PekSandbox._trailerInfo(tr.id).then((info) => {
+            if (!this._trLive(tr)) return;
+            if (info) this._trVideo(tr, info); else this._trEmbed(tr);
+        }, () => { if (this._trLive(tr)) this._trEmbed(tr); });
+    }
+
+    _trVideo(tr, info) {
+        const layer = this._bbEl && this._bbEl.querySelector('.nf-bb-trailer');
+        if (!layer) return;
+        tr.kind = 'video'; tr.info = info;
+        const v = document.createElement('video');
+        v.className = 'nf-bb-video';
+        v.muted = !(tr.sound && info.hasAudio); v.defaultMuted = v.muted;
+        v.playsInline = true; v.preload = 'auto'; v.tabIndex = -1;
+        v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.setAttribute('disablepictureinpicture', '');
+        v.setAttribute('aria-hidden', 'true');
+        tr.v = v;
+        const bad = () => { if (this._trLive(tr) && tr.kind === 'video') this._trEmbed(tr); };
+        v.addEventListener('error', bad);
+        v.addEventListener('playing', () => {
+            if (tr.tmo) { clearTimeout(tr.tmo); tr.tmo = 0; }
+            if (this._trLive(tr) && this._bbEl) this._bbEl.classList.add('nf-playing');
+        });
+        v.addEventListener('ended', () => {            // like Netflix: the trailer ends and the artwork comes back
+            if (this._bbEl && this._tr === tr) { this._bbEl.classList.remove('nf-playing'); this._bbEl.classList.add('nf-ended'); }
+        });
+        tr.tmo = setTimeout(bad, 12000);               // nothing playing after 12 s: use the YouTube frame instead
+        layer.appendChild(v);
+        v.src = info.video;
+        const go = v.play();
+        if (go && go.catch) go.catch(() => {            // sound not allowed to start by itself: play muted
+            tr.sound = false; v.muted = true;
+            if (this._bbEl) this._bbEl.classList.remove('nf-snd');
+            const g2 = v.play(); if (g2 && g2.catch) g2.catch(bad);
+        });
+        if (tr.sound && !info.hasAudio && info.audio) this._trAudio(tr, true);
+    }
+
+    // Trailers whose picture and sound come as two streams: a hidden <audio> kept in step with the <video>.
+    _trAudio(tr, on) {
+        if (!tr.v || !tr.info || !tr.info.audio) return;
+        if (!on) { if (tr.a) { try { tr.a.pause(); } catch (e) { /* ignore */ } } return; }
+        if (!tr.a) {
+            const a = new Audio();
+            a.preload = 'auto'; a.src = tr.info.audio; tr.a = a;
+            const v = tr.v;
+            v.addEventListener('play', () => { if (tr.sound && tr.a) { try { tr.a.currentTime = v.currentTime; } catch (e) { /* not ready */ } const p = tr.a.play(); if (p && p.catch) p.catch(() => {}); } });
+            v.addEventListener('pause', () => { if (tr.a) tr.a.pause(); });
+            v.addEventListener('seeking', () => { if (tr.a) { try { tr.a.currentTime = v.currentTime; } catch (e) { /* not ready */ } } });
+        }
+        try { tr.a.currentTime = tr.v.currentTime || 0; } catch (e) { /* not ready */ }
+        const p = tr.a.play(); if (p && p.catch) p.catch(() => {});
+    }
+
+    _trEmbed(tr) {
+        if (!this._trLive(tr) || tr.kind === 'embed' || !this._trailerAllowed()) return;
+        const layer = this._bbEl && this._bbEl.querySelector('.nf-bb-trailer');
+        if (!layer) return;
+        this._trClear(tr);
+        tr.kind = 'embed';
+        const f = document.createElement('iframe');
+        f.className = 'nf-bb-embed';
+        f.src = 'https://www.youtube-nocookie.com/embed/' + tr.id + '?autoplay=1&mute=1&controls=0&disablekb=1&fs=0&iv_load_policy=3' +
+            '&modestbranding=1&playsinline=1&rel=0&showinfo=0&enablejsapi=1&loop=1&playlist=' + tr.id;
+        f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+        f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');   // YouTube refuses an embed that sends no referrer
+        f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+        f.setAttribute('title', 'Trailer'); f.setAttribute('aria-hidden', 'true');
+        f.tabIndex = -1;
+        f.addEventListener('load', () => {
+            setTimeout(() => {
+                if (!this._trLive(tr) || tr.f !== f) return;
+                if (this._bbEl) this._bbEl.classList.add('nf-playing');
+                if (tr.sound) this._trSound(tr, true);
+            }, 1500);
+        });
+        tr.f = f;
+        layer.appendChild(f);
+    }
+
+    _trCmd(tr, func) {
+        try { if (tr.f && tr.f.contentWindow) tr.f.contentWindow.postMessage(JSON.stringify({ event: 'command', func, args: [] }), '*'); } catch (e) { /* frame gone */ }
+    }
+
+    _trSound(tr, on) {
+        tr.sound = on;
+        if (this._bbEl) this._bbEl.classList.toggle('nf-snd', on);
+        if (tr.kind === 'video' && tr.v) {
+            if (tr.info && tr.info.hasAudio) tr.v.muted = !on; else this._trAudio(tr, on);
+        } else if (tr.kind === 'embed') this._trCmd(tr, on ? 'unMute' : 'mute');
+    }
+
+    _bbToggleSound() {
+        const tr = this._tr; if (!tr) return;
+        this._bbSoundPref = !tr.sound;
+        this._trSound(tr, this._bbSoundPref);
+    }
+
+    _trVisible(seen) {
+        const tr = this._tr; if (!tr) return;
+        if (tr.v) {
+            if (seen) { if (!tr.v.ended) { const p = tr.v.play(); if (p && p.catch) p.catch(() => {}); } } else tr.v.pause();
+        } else if (tr.f) this._trCmd(tr, seen ? 'playVideo' : 'pauseVideo');
+    }
+
+    _trClear(tr) {
+        [tr.v, tr.a].forEach((m) => {
+            if (!m) return;
+            try { m.pause(); m.removeAttribute('src'); m.load(); } catch (e) { /* ignore */ }
+            if (m.remove) m.remove();
+        });
+        if (tr.f) { try { tr.f.src = 'about:blank'; } catch (e) { /* ignore */ } tr.f.remove(); }
+        tr.v = tr.a = tr.f = null;
+    }
+
+    _trStop() {
+        const tr = this._tr; this._tr = null;
+        if (this._bbEl) this._bbEl.classList.remove('nf-playing', 'nf-ended');
+        if (!tr) return;
+        if (tr.timer) clearTimeout(tr.timer);
+        if (tr.tmo) clearTimeout(tr.tmo);
+        this._trClear(tr);
+    }
+
+    // The dark Netflix look is switched on for the whole page while one of these screens is showing, and off again
+    // when the plugin window is closed (checked on a short timer, because closing removes the screen without telling us).
+    _nfSync(budget) {
+        const on = budget.nf === true;
+        if (this.container) this.container.classList.toggle('nf-root', on);
+        document.documentElement.classList.toggle('nf-on', on);
+        if (on && !this._nfTimer) {
+            this._nfTimer = setInterval(() => {
+                if (this.container && this.container.isConnected) return;
+                clearInterval(this._nfTimer); this._nfTimer = 0;
+                document.documentElement.classList.remove('nf-on');
+                this._trStop();
+            }, 700);
+        }
+        this._bbSync(budget.bb);
+    }
+
+    // Holding the D-pad on a tile (one with a focus handler) tells the plugin which title is highlighted, once the
+    // highlight has settled for a moment, so it can show that title in the billboard and start its trailer.
+    _bindNfFocus() {
+        if (this._nfFocusBound || typeof MutationObserver !== 'function' || !this.container) return;
+        this._nfFocusBound = true;
+        const fire = () => {
+            this._nfFocusTimer = 0;
+            if (!this.container || !this.container.isConnected) return;
+            const el = this.container.querySelector('.focused');
+            const id = el && el.dataset ? Number(el.dataset.nfFocus) : 0;
+            if (id > 0) this._send({ t: 'input', id });
+        };
+        new MutationObserver(() => {
+            const el = this.container.querySelector('.focused');
+            const key = el && el.dataset && el.dataset.nfFocus ? (el.dataset.sxFocus || el.dataset.nfFocus) : '';
+            if (key === this._nfFocusKey) return;
+            this._nfFocusKey = key;
+            if (this._nfFocusTimer) clearTimeout(this._nfFocusTimer);
+            this._nfFocusTimer = key ? setTimeout(fire, 260) : 0;
+        }).observe(this.container, { subtree: true, attributes: true, attributeFilter: ['class'] });
+    }
+
     // The element that actually scrolls this plugin's page: the plugin window's body, or the
     // main content area when the plugin is shown as a tab.
     _scroller() {
@@ -1040,6 +1340,7 @@ class PekSandbox {
             if (!this.container || !this.container.isConnected) return;
             if (active) {
                 this._syncVideo(null);
+                this._trStop();
             } else {
                 this._keepScroll = true;              // coming back from a movie: do not jump the page to the top
                 this._renderTree();
@@ -1073,7 +1374,7 @@ class PekSandbox {
         const { ui } = this.engine;
         let content;
         const keep = this._captureView();
-        const budget = { nodes: 0, inputs: 0, scrolls: 0, video: null, af: null };
+        const budget = { nodes: 0, inputs: 0, scrolls: 0, video: null, af: null, nf: false, bb: null };
         if (this.tree) {
             content = this._build(this.tree, 0, budget) || ui.card(this.manifest.name || this.folder, 'Nothing to show.');
         } else if (this.started) {
@@ -1083,6 +1384,7 @@ class PekSandbox {
             content = ui.card(this.manifest.name || this.folder, 'Starting\u2026');
         }
         this.body.replaceChildren(content);
+        this._nfSync(budget);
         this._syncVideo(budget.video);
         this._restoreView(keep);
         this._tagFocus();
@@ -1183,6 +1485,8 @@ class PekSandbox {
                     img.setAttribute('draggable', 'false');
                 }
                 if (n.autofocus && typeof n.autofocus === 'string' && !budget.af) budget.af = { key: n.autofocus.slice(0, 60), el };
+                if (n.wide === true) el.classList.add('nf-wide');
+                if (typeof n.focus === 'number' && n.focus > 0) el.dataset.nfFocus = String(n.focus);
                 const badge = s(n.badge).slice(0, 24);
                 if (badge) {
                     if (!img) el.style.position = 'relative';
@@ -1233,6 +1537,69 @@ class PekSandbox {
                     text ? createElement('p', { className: 'sx-hero-text' }, text) : null,
                     actions.length ? createElement('div', { className: 'sx-hero-actions' }, ...actions) : null));
                 return el;
+            }
+            case 'block': {
+                const kind = /^(stage|rows|detail|pad|strip|top)$/.test(n.kind) ? n.kind : 'pad';
+                const kids = (Array.isArray(n.children) ? n.children : []).slice(0, 200).map(c => this._build(c, depth + 1, budget)).filter(Boolean);
+                return createElement('div', { className: 'nf-' + kind + (kind === 'top' ? ' nf-pad' : '') }, ...kids);
+            }
+            case 'navbar': {
+                budget.nf = true;
+                const on = n.on;
+                const items = (Array.isArray(n.items) ? n.items : []).slice(0, 8).filter(i => i && typeof i.id === 'string');
+                const tabs = items.map(i => {
+                    const b = createElement('div', {
+                        className: 'focusable nf-nav-item' + (i.id === n.active ? ' nf-active' : ''), role: 'tab', title: s(i.label).slice(0, 30),
+                        onClick: () => { if (typeof on === 'number' && on > 0) this._send({ t: 'event', id: on, value: i.id.slice(0, 40) }); }
+                    }, s(i.label).slice(0, 30));
+                    return b;
+                });
+                const acts = (Array.isArray(n.actions) ? n.actions : []).slice(0, 4).map(a => {
+                    if (!a || typeof a !== 'object') return null;
+                    const label = s(a.label).slice(0, 30);
+                    const b = createElement('div', {
+                        className: 'focusable nf-nav-act' + (a.selected === true ? ' nf-active' : ''), role: 'button', title: label,
+                        onClick: click(a.on) || (() => {})
+                    });
+                    const ic = PEK_NF_ICONS[typeof a.icon === 'string' ? a.icon : ''];
+                    if (ic) b.innerHTML = ic; else b.textContent = label;
+                    if (a.autofocus && typeof a.autofocus === 'string' && !budget.af) budget.af = { key: a.autofocus.slice(0, 60), el: b };
+                    return b;
+                }).filter(Boolean);
+                budget.nodes += tabs.length + acts.length + 3;
+                const brand = s(n.brand).slice(0, 24);
+                return createElement('div', { className: 'nf-nav' },
+                    brand ? createElement('div', { className: 'nf-brand' }, brand) : null,
+                    createElement('div', { className: 'nf-nav-items', role: 'tablist' }, ...tabs),
+                    createElement('div', { className: 'nf-nav-acts' }, ...acts));
+            }
+            case 'billboard': {
+                const img = this._imageUrl(n.image);
+                const actions = (Array.isArray(n.actions) ? n.actions : []).slice(0, 3).map(a => {
+                    if (!a || typeof a !== 'object') return null;
+                    const b = ui.button(s(a.label).slice(0, 40), click(a.on) || (() => {}), { variant: a.primary === true ? 'primary' : 'secondary' });
+                    b.classList.add('nf-btn', a.primary === true ? 'nf-btn-play' : 'nf-btn-more');
+                    if (a.autofocus && typeof a.autofocus === 'string' && !budget.af) budget.af = { key: a.autofocus.slice(0, 60), el: b };
+                    return b;
+                }).filter(Boolean);
+                budget.nodes += actions.length + 8; budget.nf = true;
+                const tid = n.trailer && typeof n.trailer.id === 'string' && /^[A-Za-z0-9_-]{11}$/.test(n.trailer.id) ? n.trailer.id : '';
+                if (tid && !budget.bb) budget.bb = { id: tid, title: s(n.trailer.title).slice(0, 100), muted: n.muted !== false };
+                const media = this._bbMedia(img);
+                const badge = s(n.badge).slice(0, 30), meta = s(n.meta).slice(0, 160), text = s(n.text).slice(0, 600), chip = s(n.chip).slice(0, 12);
+                const mute = createElement('div', { className: 'focusable nf-bb-mute', role: 'button', title: 'Sound', onClick: () => this._bbToggleSound() });
+                mute.innerHTML = PEK_NF_ICONS.sound;
+                return createElement('div', { className: 'nf-bb' + (tid ? ' nf-has-trailer' : '') },
+                    media,
+                    createElement('div', { className: 'nf-bb-shade' }),
+                    createElement('div', { className: 'nf-bb-body' },
+                        badge ? createElement('span', { className: 'nf-bb-badge' }, badge) : null,
+                        createElement('h2', { className: 'nf-bb-title' }, s(n.title).slice(0, 120)),
+                        meta ? createElement('p', { className: 'nf-bb-meta' }, meta) : null,
+                        text ? createElement('p', { className: 'nf-bb-text' }, text) : null,
+                        actions.length ? createElement('div', { className: 'nf-bb-actions' }, ...actions) : null),
+                    tid ? mute : null,
+                    chip ? createElement('div', { className: 'nf-bb-chip' }, chip) : null);
             }
             case 'grid': {
                 const list = Array.isArray(n.children) ? n.children : [];

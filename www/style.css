@@ -1477,3 +1477,238 @@ html.pek-tv .dash-tile .dash-big { font-size: 1.6rem; white-space: nowrap; }
 }
 html.pek-tv .sx-ep-thumb { width: 15rem; height: 8.45rem; }
 html.pek-tv .plugin-row .sx-ep-text { font-size: 1rem; -webkit-line-clamp: 3; }
+
+/* ============================================================
+   Netflix-style look (billboard / navbar / rows). Switched on by plugin_sandbox.js
+   (html.nf-on) while a plugin shows one of these screens; nothing here applies otherwise.
+   Sizes are in rem so they scale with the TV layout (html.pek-tv); phones get their own block at the end.
+   ============================================================ */
+html.nf-on {
+    --sx-bg: #141414; --sx-bg-elevated: #141414; --sx-surface: #1f1f1f; --sx-surface-focused: rgba(255, 255, 255, 0.14);
+    --sx-border: #333; --sx-border-focus: #fff; --sx-text: #fff; --sx-text-muted: #b3b3b3;
+    --sx-accent: #e50914; --sx-accent-glow: rgba(0, 0, 0, 0); --sx-radius: 4px;
+    --sx-overlay: rgba(0, 0, 0, 0.75); --sx-shadow: rgba(0, 0, 0, 0.6);
+    --sx-glass: rgba(20, 20, 20, 0.7); --sx-glass-strong: #181818; --sx-glass-fill: rgba(40, 40, 40, 0.7); --sx-glass-edge: #333;
+    --sx-font: "Netflix Sans", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    background: #141414;
+}
+html.nf-on body { background: #141414 !important; background-image: none !important; font-family: var(--sx-font); }
+html.nf-on .plugin-window { background: #141414; }
+html.nf-on .plugin-window-body { padding: 0 !important; overflow-x: hidden; }
+/* The window bar becomes one small round back button floating over the picture. */
+html.nf-on .plugin-window-bar {
+    position: absolute; top: 0; left: 0; z-index: 60; background: transparent; border: 0; padding: 0.9rem 1rem; gap: 0;
+    pointer-events: none;
+}
+html.nf-on .plugin-window-bar h2 { display: none; }
+html.nf-on .plugin-window-bar .sx-btn {
+    pointer-events: auto; width: 2.4rem; height: 2.4rem; min-height: 0; padding: 0; border-radius: 50%; border: 0;
+    background: rgba(0, 0, 0, 0.55); color: #fff; font-size: 0; display: flex; align-items: center; justify-content: center;
+}
+html.nf-on .plugin-window-bar .sx-btn::before { content: "\2039"; font-size: 1.7rem; line-height: 1; margin-top: -0.15rem; }
+html.nf-on .plugin-window-bar .sx-btn.focused { background: #fff; color: #000; box-shadow: none; }
+
+.nf-root { position: relative; background: #141414; color: #fff; min-height: 100%; font-family: var(--sx-font); }
+.nf-root h3 { color: #e5e5e5; }
+.nf-root .sx-column, .nf-root .sx-row { min-width: 0; }
+
+/* ---- top bar ---- */
+.nf-nav {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 1.6rem;
+    padding: 0.9rem 4% 2.2rem 4.2rem; box-sizing: border-box;
+    background: -webkit-linear-gradient(top, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0)); background: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0));
+}
+.nf-brand { color: #e50914; font-weight: 900; font-size: 1.7rem; letter-spacing: 0.06em; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.5); margin-right: 0.4rem; }
+.nf-nav-items { display: flex; gap: 0.3rem; flex: 1; min-width: 0; align-items: center; }
+.nf-nav-item {
+    color: #e5e5e5; font-size: 1rem; font-weight: 500; padding: 0.35rem 0.8rem; border-radius: 4px; cursor: pointer; white-space: nowrap;
+    -webkit-transition: color 0.15s, background-color 0.15s; transition: color 0.15s, background-color 0.15s;
+}
+.nf-nav-item.nf-active { color: #fff; font-weight: 700; }
+.nf-nav-item:hover { color: #b3b3b3; }
+.nf-nav-item.focused, html.pek-tv .nf-nav-item.focused { background: #fff; color: #000; box-shadow: none; }
+.nf-nav-acts { display: flex; gap: 0.5rem; align-items: center; }
+.nf-nav-act {
+    width: 2.3rem; height: 2.3rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.35rem;
+    color: #fff; cursor: pointer; background: transparent;
+}
+.nf-nav-act.nf-active { background: rgba(255, 255, 255, 0.18); }
+.nf-nav-act.focused, html.pek-tv .nf-nav-act.focused { background: #fff; color: #000; box-shadow: none; }
+
+/* ---- billboard ---- */
+.nf-bb { position: relative; width: 100%; box-sizing: border-box; overflow: hidden; min-height: 56vh; background: #000; display: flex; align-items: flex-end; }
+.nf-bb-media { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #0b0b0b; }
+.nf-bb-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 22%; opacity: 0; -webkit-transition: opacity 0.7s ease; transition: opacity 0.7s ease; display: block; }
+.nf-bb-img.nf-in { opacity: 1; }
+.nf-bb-img.nf-cur { z-index: 1; }
+.nf-bb-trailer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; opacity: 0; -webkit-transition: opacity 0.9s ease; transition: opacity 0.9s ease; pointer-events: none; overflow: hidden; }
+.nf-bb-media.nf-playing .nf-bb-trailer { opacity: 1; }
+.nf-bb-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; background: #000; display: block; }
+.nf-bb-embed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; pointer-events: none; -webkit-transform: scale(1.75); transform: scale(1.75); }
+.nf-bb-shade {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0; z-index: 3; pointer-events: none;
+    background: -webkit-linear-gradient(left, rgba(20, 20, 20, 0.88) 0%, rgba(20, 20, 20, 0.5) 32%, rgba(20, 20, 20, 0) 62%),
+                -webkit-linear-gradient(bottom, #141414 0%, rgba(20, 20, 20, 0) 34%);
+    background: linear-gradient(to right, rgba(20, 20, 20, 0.88) 0%, rgba(20, 20, 20, 0.5) 32%, rgba(20, 20, 20, 0) 62%),
+                linear-gradient(to top, #141414 0%, rgba(20, 20, 20, 0) 34%);
+}
+.nf-bb-body {
+    position: relative; z-index: 4; box-sizing: border-box; display: flex; flex-direction: column; align-items: flex-start; gap: 0.55rem;
+    width: 100%; max-width: 40%; padding: 0 0 3.2rem 4%; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.65);
+}
+.nf-bb-badge { color: #e5e5e5; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; text-shadow: none; }
+.nf-bb-badge::before { content: "S"; display: inline-block; color: #e50914; font-weight: 900; margin-right: 0.45rem; letter-spacing: 0; font-size: 1.1em; }
+.nf-bb-title { margin: 0; font-size: 3.1rem; line-height: 1.04; font-weight: 800; color: #fff; letter-spacing: -0.01em; }
+.nf-bb-meta { margin: 0; font-size: 1rem; font-weight: 600; color: #d2d2d2; }
+.nf-bb-meta b, .nf-bb-meta .nf-green { color: #46d369; font-weight: 800; }
+.nf-bb-text {
+    margin: 0; font-size: 1.05rem; line-height: 1.4; color: #fff; font-weight: 400; max-width: 34rem;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.nf-bb-actions { display: flex; flex-wrap: wrap; gap: 0.7rem; margin-top: 0.5rem; text-shadow: none; }
+.nf-btn, html.pek-tv .nf-btn {
+    min-height: 0; height: 2.7rem; padding: 0 1.5rem; border-radius: 4px; border: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: 0;
+    background: rgba(109, 109, 110, 0.72); color: #fff; box-shadow: none;
+    -webkit-transition: -webkit-transform 0.12s, background-color 0.12s; transition: transform 0.12s, background-color 0.12s;
+}
+.nf-btn-play, html.pek-tv .nf-btn-play { background: #fff; color: #000; }
+.nf-btn.focused, html.pek-tv .nf-btn.focused { background: #fff; color: #000; box-shadow: 0 0 0 0.16rem #fff, 0 0 0 0.3rem rgba(255, 255, 255, 0.35); -webkit-transform: scale(1.06); transform: scale(1.06); }
+.nf-bb-chip {
+    position: absolute; z-index: 4; right: 0; bottom: 3.6rem; padding: 0.3rem 3.5% 0.3rem 0.9rem; font-size: 1rem; font-weight: 600; color: #fff;
+    background: rgba(51, 51, 51, 0.6); border-left: 3px solid #dcdcdc;
+}
+.nf-bb-mute {
+    position: absolute; z-index: 5; right: calc(3.5% + 5.5rem); bottom: 3.5rem; width: 2.4rem; height: 2.4rem; border-radius: 50%; box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.7); background: rgba(0, 0, 0, 0.35); color: #fff; font-size: 1.2rem; cursor: pointer;
+    display: none; align-items: center; justify-content: center; opacity: 0; -webkit-transition: opacity 0.4s; transition: opacity 0.4s;
+}
+.nf-bb-media.nf-playing ~ .nf-bb-mute { display: flex; opacity: 1; }
+.nf-bb-mute .nf-ic-off { display: inline; } .nf-bb-mute .nf-ic-on { display: none; }
+.nf-bb-media.nf-snd ~ .nf-bb-mute .nf-ic-on { display: inline; } .nf-bb-media.nf-snd ~ .nf-bb-mute .nf-ic-off { display: none; }
+.nf-bb-mute.focused, html.pek-tv .nf-bb-mute.focused { background: #fff; color: #000; box-shadow: none; }
+
+/* ---- rows ---- */
+.nf-rows { position: relative; z-index: 6; padding-bottom: 3rem; }
+.nf-rows h3, .nf-pad h3, .nf-detail h3 { margin: 1.5rem 4% 0.15rem; font-size: 1.3rem; font-weight: 700; color: #e5e5e5; }
+.nf-rows > .sx-column, .nf-rows > div { min-width: 0; }
+.nf-root .sx-poster-grid { --sx-grid-min: 12rem; gap: 0.5rem !important; padding: 0.9rem 4% 1.3rem !important; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+.nf-root .sx-poster-grid::-webkit-scrollbar { display: none; }
+.nf-root .sx-poster-card, .nf-root .sx-card { border-radius: 4px; background: #2a2a2a; border: 0; }
+.nf-root .sx-poster-card { -webkit-transition: -webkit-transform 0.14s ease-out, box-shadow 0.14s; transition: transform 0.14s ease-out, box-shadow 0.14s; }
+.nf-root .sx-poster-card.focused, html.pek-tv .nf-root .sx-poster-card.focused {
+    -webkit-transform: scale(1.1); transform: scale(1.1); z-index: 8; box-shadow: 0 0 0 0.18rem #fff, 0 0.6rem 1.6rem rgba(0, 0, 0, 0.7); border-color: transparent;
+}
+.nf-root .sx-card.focused, html.pek-tv .nf-root .sx-card.focused { box-shadow: 0 0 0 0.18rem #fff; background: #3a3a3a; }
+.nf-root .sx-poster-card.nf-wide { padding: 56.25% 0 0 0; }
+.nf-root .sx-poster-caption { display: none; }
+.nf-root .sx-poster-card.nf-wide .sx-poster-caption {
+    display: block; position: absolute; left: 0; right: 0; bottom: 0; padding: 1.6rem 0.7rem 0.5rem; font-size: 0.85rem; font-weight: 700; color: #fff; text-align: left;
+    background: -webkit-linear-gradient(bottom, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0)); background: linear-gradient(to top, rgba(0, 0, 0, 0.85), rgba(0, 0, 0, 0));
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box;
+}
+/* The little label on a tile ("Not out yet", "In library") sits at the bottom like Netflix's "Recently added". */
+.nf-root .sx-poster-card > div[style*="absolute"] {
+    top: auto !important; bottom: 0 !important; left: 50% !important; -webkit-transform: translateX(-50%); transform: translateX(-50%);
+    border-radius: 3px 3px 0 0 !important; background: #e50914 !important; font-size: 0.62rem !important; padding: 2px 7px !important; white-space: nowrap;
+}
+.nf-root .sx-poster-card.nf-wide > div[style*="absolute"] { left: 0 !important; -webkit-transform: none; transform: none; border-radius: 0 3px 0 0 !important; }
+
+/* ---- generic widgets inside the dark page ---- */
+.nf-root .sx-btn { border-radius: 4px; }
+.nf-root .sx-btn.focused { background: #fff; color: #000; box-shadow: 0 0 0 0.14rem #fff; }
+.nf-root .theme-launch-btn { background: #fff; color: #000; border: 0; font-weight: 700; }
+.nf-root .sx-btn.sx-selected { background: #fff; color: #000; }
+.nf-root .sx-tabs { border-bottom: 1px solid #333; margin: 0 4% 1rem; }
+.nf-root .sx-tab { color: #b3b3b3; font-weight: 700; } .nf-root .sx-tab.active { color: #fff; border-bottom-color: #e50914; }
+.nf-root .plugin-row, .nf-root .sx-list-row { background: #1f1f1f; border: 0; border-bottom: 1px solid #2e2e2e; border-radius: 4px; }
+.nf-root .plugin-row.focused, .nf-root .sx-list-row.focused { background: #333; box-shadow: 0 0 0 0.14rem #fff; }
+.nf-root .sx-text-input { background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; }
+.nf-root p { color: #d2d2d2; }
+.nf-pad, .nf-detail { padding: 0 4% 2rem; }
+.nf-pad > *, .nf-detail > .nf-info > * { max-width: 62rem; }
+.nf-detail h3 { margin-left: 0; margin-right: 0; }
+.nf-detail .sx-poster-grid, .nf-detail .sx-grid { margin-left: -4%; margin-right: -4%; }
+.nf-strip { display: flex; flex-wrap: wrap; gap: 0.5rem; padding: 0.2rem 4% 0.2rem; }
+.nf-sec-top { padding-top: 5.5rem; }
+.nf-pad.nf-top, .nf-top { padding-top: 5.2rem; }
+
+/* ---- TV: the billboard stays put and only the rows scroll beneath it, like the real thing ---- */
+.nf-stage { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; position: relative; }
+.nf-stage > .nf-bb { flex: 0 0 auto; min-height: 0; height: 54vh; }
+.nf-stage > .nf-rows { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: -3.2rem; padding-top: 0.2rem; scrollbar-width: none; }
+.nf-stage > .nf-rows::-webkit-scrollbar { display: none; }
+.nf-detail .nf-bb { min-height: 70vh; }
+.nf-info { padding-top: 0.4rem; }
+
+/* ---- tablet (touch, bigger than a phone) ---- */
+@media (pointer: coarse) and (min-width: 701px) {
+    .nf-stage { height: auto; overflow: visible; display: block; }
+    .nf-stage > .nf-bb { height: auto; min-height: 50vh; }
+    .nf-stage > .nf-rows { overflow: visible; margin-top: -2rem; }
+    .nf-bb-body { max-width: 52%; }
+}
+
+/* ---- phone ---- */
+@media (max-width: 700px), (max-height: 500px) {
+    html.nf-on .plugin-window-bar { padding: 0.6rem 0.7rem; }
+    .nf-nav { flex-wrap: wrap; gap: 0.3rem 0.8rem; padding: 0.6rem 0.7rem 0.4rem 3.4rem; position: relative; background: linear-gradient(to bottom, #000, rgba(20, 20, 20, 0.0)); }
+    .nf-brand { font-size: 1.35rem; flex: 1; }
+    .nf-nav-acts { order: 2; }
+    .nf-nav-items { order: 3; flex: 0 0 100%; gap: 0.45rem; overflow-x: auto; padding: 0.2rem 0 0.3rem; margin-left: -2.7rem; padding-left: 0.7rem; scrollbar-width: none; }
+    .nf-nav-items::-webkit-scrollbar { display: none; }
+    .nf-nav-item { border: 1px solid #777; border-radius: 999px; padding: 0.28rem 0.85rem; font-size: 0.88rem; font-weight: 500; color: #fff; }
+    .nf-nav-item.nf-active { background: #fff; color: #000; border-color: #fff; }
+    .nf-nav-act { width: 2rem; height: 2rem; font-size: 1.2rem; }
+    .nf-stage { height: auto; overflow: visible; display: block; }
+    .nf-stage > .nf-bb { height: auto; min-height: 0; padding-top: 118%; margin: 0.2rem 0.6rem 0; width: auto; border-radius: 8px; }
+    .nf-bb-media { border-radius: 8px; }
+    .nf-bb-img { object-position: center top; }
+    .nf-bb-shade { background: linear-gradient(to top, rgba(20, 20, 20, 0.97) 0%, rgba(20, 20, 20, 0.55) 30%, rgba(20, 20, 20, 0) 58%); }
+    .nf-bb-body { position: absolute; left: 0; right: 0; bottom: 0; max-width: none; padding: 0 0.9rem 0.9rem; align-items: center; text-align: center; gap: 0.4rem; }
+    .nf-bb-title { font-size: 1.7rem; }
+    .nf-bb-meta { font-size: 0.82rem; }
+    .nf-bb-text { font-size: 0.82rem; -webkit-line-clamp: 2; text-align: center; }
+    .nf-bb-actions { width: 100%; flex-wrap: nowrap; gap: 0.5rem; margin-top: 0.3rem; }
+    .nf-bb-actions .nf-btn { flex: 1; height: 2.4rem; padding: 0 0.6rem; font-size: 0.95rem; }
+    .nf-bb-chip, .nf-bb-mute { display: none !important; }
+    .nf-stage > .nf-rows { overflow: visible; margin-top: 0; padding-top: 0; }
+    .nf-rows h3, .nf-pad h3, .nf-detail h3 { margin: 1.1rem 0.7rem 0; font-size: 1.05rem; }
+    .nf-root .sx-poster-grid { --sx-grid-min: 6.6rem; gap: 0.3rem !important; padding: 0.5rem 0.7rem 0.6rem !important; }
+    .nf-root .sx-poster-card.focused { -webkit-transform: none; transform: none; box-shadow: none; }
+    .nf-pad, .nf-detail { padding: 0 0.7rem 1.5rem; }
+    .nf-strip { padding: 0.2rem 0.7rem; }
+    .nf-detail .nf-bb { min-height: 0; padding-top: 56.25%; margin: 0; border-radius: 0; }
+    .nf-detail .nf-bb .nf-bb-media { border-radius: 0; }
+    .nf-detail .sx-poster-grid, .nf-detail .sx-grid { margin-left: -0.7rem; margin-right: -0.7rem; }
+    .nf-nav { position: relative; }
+}
+.nf-top { padding-top: 5.2rem; }
+.nf-bb-title:empty { display: none; }
+@media (max-width: 700px), (max-height: 500px) {
+    .nf-top { padding-top: 0.6rem; }
+    .nf-detail .nf-bb-mute { display: flex !important; right: 0.7rem; bottom: 0.7rem; }
+}
+.nf-root .nf-btn { background: rgba(109, 109, 110, 0.72); color: #fff; border: 0; }
+.nf-root .nf-btn-play { background: #fff; color: #000; }
+.nf-root .nf-btn.focused { background: #fff; color: #000; }
+.nf-nav { padding-left: 5.4rem; }
+.nf-stage > .nf-bb { height: 60vh; }
+.nf-bb-body { padding-bottom: 4.2rem; gap: 0.45rem; }
+.nf-bb-title { font-size: 2.5rem; }
+.nf-bb-text { -webkit-line-clamp: 2; }
+.nf-bb-chip { bottom: 4.6rem; } .nf-bb-mute { bottom: 4.5rem; }
+.nf-stage > .nf-rows { margin-top: -2.4rem; }
+.nf-rows h3 { margin-bottom: 0; }
+.nf-root .sx-poster-grid { padding-top: 0.5rem !important; }
+@media (max-width: 700px), (max-height: 500px) {
+    html.nf-on .plugin-window-bar .sx-btn.focused { background: rgba(0, 0, 0, 0.55); color: #fff; }
+    .nf-nav { padding-left: 3.4rem; }
+    .nf-bb-body { padding-bottom: 0.9rem; }
+    .nf-bb-title { font-size: 1.7rem; }
+    .nf-bb-text { -webkit-line-clamp: 2; }
+}
+.nf-detail { padding: 0 !important; }
+.nf-detail > .nf-pad { padding: 0.5rem 4% 1rem; }
+.nf-root .sx-btn.nav-item:not(.nf-btn):not(.theme-launch-btn) { background: #333; color: #fff; border: 0; }
+.nf-root .sx-btn.nav-item:not(.nf-btn).focused { background: #fff; color: #000; }
+.nf-root .sx-btn.nav-item.sx-selected { background: #fff; color: #000; }

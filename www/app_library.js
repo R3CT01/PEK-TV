@@ -35,30 +35,6 @@ class MainAppLibraryMethods {
     }
 
     _queuePostersFor(tab, data) {
-        // Posters that sit next to the files (poster.jpg, <name>-poster.jpg ...) arrive with the library list itself:
-        // no TMDb request, they work offline, and they win over a TMDb poster remembered from an earlier visit.
-        const items = tab === 'movies' ? (data.movies || []).map(m => ({ key: 'm:' + m.id, local: m.poster || '' }))
-                    : tab === 'shows' ? (data.shows || []).map(s => ({ key: 's:' + s.showTitle, local: s.poster || '' })) : [];
-        if (items.length) {
-            const posters = { ...this.state.posters };
-            let changed = false;
-            items.forEach(it => {
-                const have = posters[it.key];
-                if (it.local) {
-                    if (have !== it.local) { posters[it.key] = it.local; changed = true; }
-                } else if (typeof have === 'string' && have.indexOf('/api/artwork') === 0) {
-                    delete posters[it.key]; changed = true;        // the local image was removed: fall back to TMDb below
-                }
-            });
-            if (changed) {
-                this.setState({ posters });
-                try {
-                    const keep = {};
-                    Object.keys(posters).forEach(k => { if (posters[k]) keep[k] = posters[k]; });
-                    localStorage.setItem('hesper_posters_v1', JSON.stringify(keep));
-                } catch (e) { /* storage unavailable: posters just reload next time */ }
-            }
-        }
         if (tab === 'movies') {
             this._queuePosters((data.movies || []).map(m => ({
                 key: 'm:' + m.id, url: '/api/movie-details?id=' + encodeURIComponent(m.id)
@@ -130,7 +106,7 @@ class MainAppLibraryMethods {
         this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { loading: true } } });
         try {
             const d = await this._fetchJson(`/api/show-details?title=${encodeURIComponent(showTitle)}`);
-            this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { overview: d.overview || '', poster: d.poster || '', fanart: d.fanart || '' } } });
+            this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { overview: d.overview || '', poster: d.poster || '' } } });
         } catch (err) {
             this.setState({ showInfo: { ...this.state.showInfo, [showTitle]: { error: true } } });
         }
@@ -179,7 +155,7 @@ class MainAppLibraryMethods {
             );
         }
         return createElement('div', { className: 'hero' },
-            (info.fanart || info.poster) ? createElement('div', { className: 'hero-backdrop', style: { backgroundImage: 'url("' + (info.fanart || info.poster) + '")' } }) : null,
+            info.poster ? createElement('div', { className: 'hero-backdrop', style: { backgroundImage: 'url("' + info.poster + '")' } }) : null,
             createElement('div', { className: 'hero-glass' },
                 info.poster ? createElement('img', { className: 'hero-poster', src: info.poster, alt: '' }) : null,
                 createElement('div', { className: 'hero-text' },
