@@ -161,12 +161,12 @@ class MainAppWatchMethods {
         if (opts.manual) this._setSyncUi({ busy: true, msg: '' });
         let res;
         try {
-            res = await S.sync({ resolve: (m) => this._resolveLocalId(m) });
+            res = await S.sync({ resolve: (m) => this._resolveLocalId(m), light: !!opts.light });
         } catch (e) { res = { ok: false, error: 'offline' }; }
         // Plugin backup rides along with the sync: back up what changed, and note what the cloud has that this device lacks.
         let pb = null;
         const PB = window.PekPluginBackup;
-        if (res.ok && PB) {
+        if (res.ok && PB && !opts.light) {   // a light sync (playback stop, favorite) skips the plugin backup pass
             try { pb = await PB.run({ force: !!opts.manual }); } catch (e) { pb = null; }
         }
         this._syncing = false;
@@ -196,17 +196,26 @@ class MainAppWatchMethods {
         return res;
     }
 
-    // Quiet background sync (history, resume points, favorites and the plugin backup): on start, every 10 minutes,
+    // Quiet background sync (history, resume points, favorites and the plugin backup): on start, every 30 minutes (only while the app is visible),
     // and soon after a favorite changes, something is watched, a plugin is installed, playback ends, the device
     // comes back online or the app is reopened.
-    _autoSync(delayMs) {
+    // opts.light: only push what changed (one request, no profile or plugin-backup pass). Used after playback and favorites.
+    // opts.onlyIfChanged: skip the request completely when this device has nothing new for the cloud.
+    // Calls made close together are merged into one sync, and the merged sync is only light / skippable when every call was.
+    _autoSync(delayMs, opts) {
         const S = window.PekSync;
         if (!S || !S.isLinked()) return;
+        opts = opts || {};
         clearTimeout(this._autoSyncTimer);
+        this._asLight = (this._asLight === undefined ? true : this._asLight) && !!opts.light;
+        this._asSkip = (this._asSkip === undefined ? true : this._asSkip) && !!opts.onlyIfChanged;
         this._autoSyncTimer = setTimeout(() => {
             // Don't rebuild the screen under a text box or a video: try again shortly instead of dropping the sync.
-            if (this.state.syncUi.mode || this._player || this.state.searchOpen) { this._autoSync(20000); return; }
-            this._runSync({});
+            if (this.state.syncUi.mode || this._player || this.state.searchOpen) { this._autoSync(20000, { light: this._asLight, onlyIfChanged: this._asSkip }); return; }
+            const light = this._asLight, skip = this._asSkip;
+            this._asLight = undefined; this._asSkip = undefined;
+            if (skip && !(S.hasLocalChanges && S.hasLocalChanges())) return;
+            this._runSync({ light: light });
         }, delayMs || 0);
     }
 
@@ -219,15 +228,16 @@ class MainAppWatchMethods {
             // Sync soon after anything worth keeping changes, not only on the timer.
             this._autoHooked = true;
             const S = window.PekSync;
-            document.addEventListener('pek-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000); });   // added or removed a favorite
-            document.addEventListener('pek-history', () => this._autoSync(2000));                                                   // finished watching something
+            document.addEventListener('pek-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000, { light: true }); });   // added or removed a favorite
+            document.addEventListener('pek-history', () => this._autoSync(2000, { light: true }));                                                   // finished watching something
             window.addEventListener('online', () => this._autoSync(1500));                                                             // back online
             document.addEventListener('visibilitychange', () => {                                                                     // came back to the app
-                if (document.visibilityState === 'visible' && S && Date.now() - (S.lastSync() || 0) > 60000) this._autoSync(1000);
+                if (document.visibilityState === 'visible' && S && Date.now() - (S.lastSync() || 0) > 120000) this._autoSync(1000);
             });
         }
         this._autoSync(2500);
-        if (!this._syncTimer) this._syncTimer = setInterval(() => this._autoSync(0), 10 * 60 * 1000);
+        // Background poll: every 30 minutes, and not at all while the app is hidden (coming back to it syncs anyway).
+        if (!this._syncTimer) this._syncTimer = setInterval(() => { if (document.visibilityState !== 'hidden') this._autoSync(0); }, 30 * 60 * 1000);
     }
 
     // What is typed in the sign-in boxes lives here (not in state), so typing never redraws the screen.
