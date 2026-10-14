@@ -76,7 +76,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
     var pending = new Map(), nextReq = 1;
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
-    var launchFn = null, pendingLaunch = null, nextFn = null, liveFn = null;
+    var launchFn = null, pendingLaunch = null, nextFn = null, liveFn = null, tvFlag = false;
 
     function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
@@ -203,6 +203,8 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             if (backSet !== !!backFn) { backSet = !!backFn; post({ t: 'canBack', v: backSet }); }
         },
         scrollTop: function () { post({ t: 'scrollTop' }); },
+        // True while PEK TV is in its TV / D-pad mode (Settings), even on a touch device. A plugin can use it to pick its TV layout.
+        isTv: function () { return tvFlag; },
         // Called when PEK TV opens this plugin on a particular title (the Favorites tab, or another plugin):
         // fn({type: 'movie' | 'tv', id: <TMDb id>, title, year}).
         onLaunch: function (fn) { launchFn = typeof fn === 'function' ? fn : null; flushLaunch(); },
@@ -278,12 +280,16 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         var m = ev.data;
         if (!m || typeof m !== 'object') return;
         if (m.t === 'init') {
+            tvFlag = m.tv === true;
             try {
                 var s = document.createElement('script');
                 s.textContent = String(m.code);
                 document.body.appendChild(s);
             } catch (e) { post({ t: 'log', text: 'plugin failed to start: ' + e }); }
             post({ t: 'started', hasRender: !!renderFn });
+        } else if (m.t === 'env') {
+            var tvNow = m.tv === true;
+            if (tvNow !== tvFlag) { tvFlag = tvNow; requestRender(); }
         } else if (m.t === 'next') {
             var nrid = m.rid, nreq = m.req;
             var nreply = function (ok, v) { post({ t: 'nextRes', rid: nrid, ok: ok, value: v }); };
@@ -367,6 +373,15 @@ class PekSandbox {
         if (typeof u.navTab === 'string') out.ui.navTab = u.navTab.replace(/[^A-Za-z0-9 &+'.-]/g, '').trim().slice(0, 20);
         out.ui.reloadOnInstall = u.reloadOnInstall === true;
         out.ui.closeOnRemove = u.closeOnRemove === true;
+        return out;
+    }
+
+    // A short fingerprint of a Netflix-style rows list (its first headings), so a saved scroll position is only reused for the
+    // same list and not for another tab or screen.
+    static _rowsSig(rows) {
+        const hs = rows.querySelectorAll('h3');
+        let out = '';
+        for (let i = 0; i < hs.length && i < 2; i++) out += (hs[i].textContent || '').slice(0, 30) + '|';
         return out;
     }
 
@@ -554,9 +569,10 @@ class PekSandbox {
         const m = ev.data;
         if (!m || typeof m !== 'object') return;
         switch (m.t) {
-            case 'ready': this._send({ t: 'init', code: this.source }); break;
+            case 'ready': this._send({ t: 'init', code: this.source, tv: PekSandbox._tvOn() }); break;
             case 'started':
                 this.started = true;
+                this._bindEnv();
                 if (window.PekActivity) window.PekActivity.note((this.manifest.name || this.folder) + ' started', true);
                 if (!m.hasRender) this._log('this plugin never called pek.render(); nothing to show');
                 this._renderTree();
@@ -870,6 +886,10 @@ class PekSandbox {
         const fo = c.querySelector('.focused');
         if (fo && fo.dataset) keep.focusKey = fo.dataset.sxFocus || '';
         c.querySelectorAll('[data-sx-scroll]').forEach(el => { keep.scroll[el.dataset.sxScroll] = el.scrollLeft; });
+        // The Netflix-style TV screen scrolls inside .nf-rows (not the page). A redraw builds a new one, which starts at the
+        // top, so remember how far it was scrolled (and which list it was) or the rows jump back up after every redraw.
+        const nfRows = c.querySelector('.nf-stage > .nf-rows');
+        if (nfRows) { keep.rowsTop = nfRows.scrollTop; keep.rowsSig = PekSandbox._rowsSig(nfRows); }
         const a = document.activeElement;
         if (a && a.dataset && a.dataset.sxKey && c.contains(a)) {
             keep.input = { key: a.dataset.sxKey, value: a.value, start: a.selectionStart, end: a.selectionEnd };
@@ -887,6 +907,10 @@ class PekSandbox {
             const x = keep.scroll[el.dataset.sxScroll];
             if (x) el.scrollLeft = x;
         });
+        if (keep.rowsTop > 0) {
+            const nr = c.querySelector('.nf-stage > .nf-rows');
+            if (nr && PekSandbox._rowsSig(nr) === keep.rowsSig) nr.scrollTop = keep.rowsTop;   // same list: stay where we were
+        }
         if (keep.input) {
             const inp = c.querySelector('input[data-sx-key="' + keep.input.key + '"]');
             if (inp) {
@@ -1282,6 +1306,21 @@ class PekSandbox {
 
     // Holding the D-pad on a tile (one with a focus handler) tells the plugin which title is highlighted, once the
     // highlight has settled for a moment, so it can show that title in the billboard and start its trailer.
+    static _tvOn() { return !!(document.documentElement && document.documentElement.classList.contains('pek-tv')); }
+
+    // Tells the plugin when TV / D-pad mode is switched on or off while it is open.
+    _bindEnv() {
+        if (this._envBound || typeof MutationObserver !== 'function') return;
+        this._envBound = true;
+        let last = PekSandbox._tvOn();
+        new MutationObserver(() => {
+            const now = PekSandbox._tvOn();
+            if (now === last) return;
+            last = now;
+            this._send({ t: 'env', tv: now });
+        }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    }
+
     _bindNfFocus() {
         if (this._nfFocusBound || typeof MutationObserver !== 'function' || !this.container) return;
         this._nfFocusBound = true;
