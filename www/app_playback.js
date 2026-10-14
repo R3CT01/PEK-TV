@@ -12,31 +12,27 @@ class MainAppPlaybackMethods {
     // The shared player (player.js) with a <video> backend: used where there is
     // no native player, such as the web/dev build.
     _openWebPlayer(url, title, backend, track, onCloseCb, live) {
-        if (this._player) {
-            if (this._player.mini) this._player.close();   // starting something new replaces the mini player
-            else return;
-        }
+        if (this._player) return;
         this.setState({ detail: null });
         const player = new window.PekPlayer({
             title: title || '',
             backend: backend || new window.HtmlVideoBackend(),
             skipMeta: track ? track.meta : null,
             live: live || null,
-            next: this._nextProvider ? this._nextProvider(track) : null,   // lets the player offer Skip Intro / Skip Recap (library files and torrents)
+            next: this._nextProvider ? this._nextProvider(track) : null,
             onProgress: track ? (pos, dur) => this._saveProgress(track.id, track.meta, pos, dur) : null,
             onClose: () => {
                 if (typeof onCloseCb === 'function') { try { onCloseCb(); } catch (e) { /* ignore */ } }
                 this._player = null;
-                this._playingId = null;
                 const prog = this._readProgress();
                 const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
                 this.setState({ progress: prog, history: this._readHistory(), activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
+                if (this._settingsPending) this._applySyncedSettings();
                 this._autoSync(1500, { light: true, onlyIfChanged: true });   // one small push, and none at all if nothing changed
                 this._queueResumeArt();
             }
         });
         this._player = player;
-        this._playingId = track ? track.id : null;
         player.open(url, (track && track.startSec) || 0);
     }
 
@@ -76,13 +72,6 @@ class MainAppPlaybackMethods {
         const url = window.location.origin + '/api/stream/' + encodeURIComponent(id);
         const { ui } = this.props.engine;
         startSec = startSec > 0 ? startSec : 0;
-
-        // Already playing this exact file in the mini player: just bring it back up.
-        if (this._player && this._player.mini && this._playingId === id) {
-            this.setState({ detail: null });
-            this._player.expand();
-            return;
-        }
 
         // Make sure the file is still there before opening the player.
         let missing = false;
@@ -193,7 +182,8 @@ class MainAppPlaybackMethods {
             d.subtitle ? createElement('p', { className: 'sub' }, d.subtitle) : null,
             d.image ? createElement('img', { className: 'detail-image', src: d.image, alt: '' }) : null,
             createElement('div', { className: 'glass-panel' }, createElement('p', {}, text)),
-            d.playId ? this._renderPlayButtons(d) : null
+            d.playId ? this._renderPlayButtons(d) : null,
+            d.meta ? this._renderWatchedButton(d) : null
         );
         return ui.modal(d.title, body, () => this.closeDetail());
     }

@@ -124,6 +124,7 @@ window.render = function (engine) {
     // Uses the city you picked (if any). The weather.json cache from backend.py is only
     // the default for when no city has been chosen, so it can no longer overwrite your pick.
     async function refreshWeather() {
+        unit = localStorage.getItem(UNIT_KEY) || 'F';   // may have come from the cloud (Cloud Sync)
         const saved = readJson(COORDS_KEY);
         if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lon) && saved.label) {
             currentCity = saved.label;
@@ -182,6 +183,7 @@ window.render = function (engine) {
                             currentCity = label;
                             localStorage.setItem(CITY_KEY, label);
                             localStorage.setItem(COORDS_KEY, JSON.stringify({ lat: loc.latitude, lon: loc.longitude, label }));
+                            try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }   // lets Cloud Sync save the city
                             suggestionBox.style.display = 'none';
                             fetchLiveWeatherForCoords(loc.latitude, loc.longitude, label);
                         }
@@ -234,6 +236,7 @@ window.render = function (engine) {
         (id) => {
             unit = id;
             localStorage.setItem(UNIT_KEY, id);
+            try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }
             updateUI();
         }
     );

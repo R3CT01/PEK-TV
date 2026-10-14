@@ -21,7 +21,8 @@
         seen: 'hesper_sync_seen_v1',       // what the cloud already has: { h:{key:updated}, p:{key:{u,d}}, f:{key:updated} }
         pending: 'hesper_sync_pending_v1', // remote resume points whose file isn't on this device (yet)
         history: 'hesper_history_v1',
-        progress: 'hesper_progress_v1'
+        progress: 'hesper_progress_v1',
+        setmeta: 'hesper-settings-meta'    // per profile: what each synced setting looked like at its last change { name: { v, u } }
     };
     var REWATCH_WINDOW = 12 * 60 * 60 * 1000;   // finishing the same thing again within 12h is one watch
     var CHUNK = 800;                            // items per sync request
@@ -67,6 +68,31 @@
     //   plug  = [{ id, name }] plugins that streamed it (max 4)
     //   image = artwork URL (poster or still) when one was known
     function cleanUrl(u) { u = String(u == null ? '' : u); return /^https?:\/\//i.test(u) && u.length <= 400 ? u : ''; }
+
+    // ---------------- resume points from plugin streams ----------------
+    // A plugin stream has no file in the library, so the other device needs the stream's source (magnet / https link)
+    // to start it again. Kept small: the cloud caps each item at 2000 characters, so long magnet links lose their
+    // tracker list (the hash is what matters) and anything still too big is simply not synced.
+    var TOR_MAX_SOURCE = 900;
+    var DATA_BUDGET = 1900;
+    function shrinkSource(src) {
+        src = String(src == null ? '' : src).trim();
+        if (src.length > TOR_MAX_SOURCE && /^magnet:/i.test(src)) {
+            src = src.split('&').filter(function (p, i) { return i === 0 || !/^tr=/i.test(p); }).join('&');
+        }
+        if (!src || src.length > TOR_MAX_SOURCE) return '';
+        return (/^magnet:\?/i.test(src) || /^https:\/\//i.test(src)) ? src : '';
+    }
+    function cleanTorrent(t) {
+        if (!t || typeof t !== 'object') return null;
+        var source = shrinkSource(t.source);
+        if (!source) return null;
+        return { source: source, title: String(t.title || '').slice(0, 200), season: parseInt(t.season, 10) || 0, episode: parseInt(t.episode, 10) || 0 };
+    }
+    function cleanOrigin(o) {
+        if (!o || typeof o !== 'object' || !o.name) return null;
+        return { id: String(o.id || '').slice(0, 80), name: String(o.name).slice(0, 60) };
+    }
 
     function sourceInfo(meta) {
         var out = { lib: 0, plug: [] };
@@ -142,43 +168,6 @@
             if (!map[k].deleted) map[k] = { deleted: 1, updated: now };
         });
         writeHistory(map);
-    }
-
-    // ---------------- marking things watched by hand ----------------
-    // "Watched" means: there is a live entry in the watch history. Finishing something adds one by itself;
-    // these let the user (or a plugin with the "watched" permission) add or remove one manually.
-    function isWatched(meta) {
-        var key = histKey(meta);
-        if (!key) return false;
-        var e = readHistory()[key];
-        return !!(e && !e.deleted);
-    }
-
-    // { historyKey: 1, ... } for everything watched: one read, for lists that check many items.
-    function watchedMap() {
-        var map = readHistory(), out = {};
-        Object.keys(map).forEach(function (k) { if (!map[k].deleted) out[k] = 1; });
-        return out;
-    }
-
-    // Returns true if something changed. Unwatching keeps a "deleted" marker so the removal syncs too.
-    function setWatched(meta, on) {
-        var key = histKey(meta);
-        if (!key) return false;
-        var changed = false;
-        if (on) {
-            if (isWatched(meta)) return false;
-            changed = recordWatched(meta);
-        } else {
-            var map = readHistory();
-            if (!map[key] || map[key].deleted) return false;
-            map[key] = { deleted: 1, updated: clock.now() };
-            writeHistory(map);
-            changed = true;
-            try { document.dispatchEvent(new CustomEvent('pek-history')); } catch (e) { /* no events */ }
-        }
-        if (changed) { try { document.dispatchEvent(new CustomEvent('pek-watched')); } catch (e) { /* no events */ } }
-        return changed;
     }
 
     // ---------------- account (email + password) ----------------
@@ -315,6 +304,108 @@
     }
 
     // ---------------- sync ----------------
+    // ---------------- settings (dashboard layout, look, weather city) ----------------
+    // Small saved choices that follow the profile to other devices. Each one is a single synced item (s|dashboard, s|look,
+    // s|weather), last writer wins. localStorage has no change times, so a change is noticed by comparing the stored value
+    // with what it was at the last sync and stamped with the time it was noticed. A value that was already on the device
+    // before it ever synced gets the oldest possible stamp (BASE_TS): it is uploaded when the cloud has nothing, and it
+    // loses to anything already in the cloud (signing in to an existing account brings that account's choices).
+    // Not synced: skins and colours (theme), and defaults that were never changed.
+    var BASE_TS = 1;
+    var SKEYS = ['dashboard', 'look', 'weather'];
+    var settingsApplied = false;
+
+    function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+    function parseStored(k) { try { return JSON.parse(getRaw(k) || 'null'); } catch (e) { return null; } }
+
+    var DASH_TYPES = { clock: 1, weather: 1, 'continue': 1, recent: 1, favorites: 1, plugin: 1 };
+    function cleanDash(o) {
+        var raw = o && Array.isArray(o.list) ? o.list : null;
+        if (!raw) return null;
+        var seen = {}, out = [];
+        raw.forEach(function (w) {
+            if (!w || typeof w.type !== 'string' || !has(DASH_TYPES, w.type) || out.length >= 40) return;
+            var folder = w.type === 'plugin' ? String(w.folder || '') : '';
+            if (w.type === 'plugin' && !/^[A-Za-z0-9_-]{1,80}$/.test(folder)) return;
+            var id = w.type === 'plugin' ? 'plugin:' + folder : w.type;
+            if (seen[id]) return;
+            seen[id] = 1;
+            var e = { id: id, type: w.type, size: w.size === 'm' ? 'm' : 's' };
+            if (folder) e.folder = folder;
+            out.push(e);
+        });
+        while (out.length && JSON.stringify({ list: out }).length > DATA_BUDGET) out.pop();
+        return { list: out };
+    }
+    function cleanLook(o) {
+        if (!o || typeof o !== 'object') return null;
+        var out = {};
+        if (['classic', 'topbar', 'wall', 'compact'].indexOf(o.layout) >= 0) out.layout = o.layout;
+        if (['auto', 's', 'm', 'l'].indexOf(o.poster) >= 0) out.poster = o.poster;
+        if (['grid', 'list'].indexOf(o.view) >= 0) out.view = o.view;
+        return Object.keys(out).length ? out : null;
+    }
+    function cleanWeather(o) {
+        if (!o || typeof o !== 'object') return null;
+        var out = {}, c = o.coords;
+        if (c && typeof c === 'object' && typeof c.lat === 'number' && typeof c.lon === 'number' && isFinite(c.lat) && isFinite(c.lon) &&
+            Math.abs(c.lat) <= 90 && Math.abs(c.lon) <= 180 && typeof c.label === 'string' && c.label && c.label.length <= 120) {
+            out.coords = { lat: c.lat, lon: c.lon, label: c.label };
+        }
+        if (typeof o.city === 'string' && o.city && o.city.length <= 120) out.city = o.city;
+        if (o.unit === 'F' || o.unit === 'C') out.unit = o.unit;
+        return (out.coords || out.city || out.unit) ? out : null;
+    }
+
+    // read() = what this device has now (null when nothing was ever chosen); write() puts a cleaned value on this device.
+    var SETTINGS = {
+        dashboard: {
+            clean: cleanDash,
+            read: function () {
+                var raw = parseStored('hesper-dashboard');
+                return Array.isArray(raw) ? cleanDash({ list: raw }) : null;
+            },
+            write: function (o) { setRaw('hesper-dashboard', JSON.stringify(o.list)); }
+        },
+        look: {
+            clean: cleanLook,
+            read: function () { return cleanLook({ layout: getRaw('hesper-layout'), poster: getRaw('hesper-poster-size'), view: getRaw('hesper-view') }); },
+            write: function (o) {
+                if (o.layout) setRaw('hesper-layout', o.layout);
+                if (o.poster) setRaw('hesper-poster-size', o.poster);
+                if (o.view) setRaw('hesper-view', o.view);
+            }
+        },
+        weather: {
+            clean: cleanWeather,
+            read: function () { return cleanWeather({ coords: parseStored('pek_weather_coords'), city: getRaw('pek_weather_city'), unit: getRaw('pek_weather_unit') }); },
+            write: function (o) {
+                var before = getRaw('pek_weather_city');
+                if (o.coords) setRaw('pek_weather_coords', JSON.stringify(o.coords));
+                var city = o.city || (o.coords && o.coords.label) || '';
+                if (city) setRaw('pek_weather_city', city);
+                if (o.unit) setRaw('pek_weather_unit', o.unit);
+                // A different city: drop the old city's reading so the header badge doesn't show it until the new one loads.
+                if (city && city !== before) delRaw('pek_weather_current_temp');
+            }
+        }
+    };
+
+    // Notices changes made on this device since the last look and stamps them. Returns { name: { v, u } }.
+    function trackSettings() {
+        var meta = getJson(K.setmeta, {}), changed = false, now = clock.now();
+        SKEYS.forEach(function (n) {
+            var o = SETTINGS[n].read();
+            var cur = o ? JSON.stringify(o) : '';
+            if (!cur) return;                                   // nothing chosen on this device: nothing to sync
+            var m = meta[n];
+            if (!m || typeof m.v !== 'string') { meta[n] = { v: cur, u: BASE_TS }; changed = true; }
+            else if (m.v !== cur) { meta[n] = { v: cur, u: now }; changed = true; }
+        });
+        if (changed) setJson(K.setmeta, meta);
+        return meta;
+    }
+
     var inflight = null;
 
     function progressByKey(pmap) {
@@ -331,7 +422,7 @@
     function collectPush() {
         var seen = getJson(K.seen, { h: {}, p: {} });
         seen.h = seen.h || {}; seen.p = seen.p || {};
-        var items = { history: [], progress: [], favorites: [] };
+        var items = { history: [], progress: [], favorites: [], settings: [] };
         seen.f = seen.f || {};
 
         var hmap = readHistory();
@@ -352,6 +443,15 @@
             var s = seen.p[k];
             if (s && !s.d && s.u === e.updated) return;
             var d = Object.assign(identity(e), { position: e.position || 0, duration: e.duration || 0 });
+            var tor = cleanTorrent(e.torrent);
+            if (tor) {   // a plugin stream: send what another device needs to start it again
+                d.torrent = tor;
+                var og = cleanOrigin(e.origin); if (og) d.origin = og;
+                var im = cleanUrl(e.image); if (im) d.image = im;
+                if (JSON.stringify(d).length > DATA_BUDGET) delete d.image;
+                if (JSON.stringify(d).length > DATA_BUDGET) d.torrent.title = '';
+                if (JSON.stringify(d).length > DATA_BUDGET) { delete d.torrent; delete d.origin; }
+            }
             items.progress.push({ key: k, data: d, updated: e.updated || clock.now(), deleted: 0 });
         });
         Object.keys(seen.p).forEach(function (k) {   // finished or removed here: tell the cloud
@@ -371,13 +471,21 @@
                 items.favorites.push({ key: 'f|' + k, data: {}, updated: snap.tombs[k], deleted: 1 });
             });
         }
+        seen.s = seen.s || {};
+        var smeta = trackSettings();
+        SKEYS.forEach(function (n) {
+            var m = smeta[n];
+            if (!m || seen.s[n] === m.u) return;
+            var o = SETTINGS[n].read();
+            if (o) items.settings.push({ key: 's|' + n, data: o, updated: m.u, deleted: 0 });
+        });
         return items;
     }
 
     function takeChunk(all) {
-        var chunk = { history: [], progress: [], favorites: [] };
+        var chunk = { history: [], progress: [], favorites: [], settings: [] };
         var room = CHUNK;
-        ['history', 'progress', 'favorites'].forEach(function (kind) {
+        ['history', 'progress', 'favorites', 'settings'].forEach(function (kind) {
             var n = Math.min(room, all[kind].length);
             chunk[kind] = all[kind].splice(0, n);
             room -= n;
@@ -385,12 +493,14 @@
         return chunk;
     }
 
-    function markPushed(chunk) {
+    // settingsStored: the cloud answered with a settings list, so it is new enough to have kept them (an older one ignores them).
+    function markPushed(chunk, settingsStored) {
         var seen = getJson(K.seen, { h: {}, p: {} });
         seen.h = seen.h || {}; seen.p = seen.p || {}; seen.f = seen.f || {};
         chunk.favorites.forEach(function (it) { seen.f[it.key.slice(2)] = it.updated; });
         chunk.history.forEach(function (it) { seen.h[it.key] = it.updated; });
         chunk.progress.forEach(function (it) { seen.p[it.key] = { u: it.updated, d: it.deleted ? 1 : 0 }; });
+        if (settingsStored) { seen.s = seen.s || {}; chunk.settings.forEach(function (it) { seen.s[it.key.slice(2)] = it.updated; }); }
         setJson(K.seen, seen);
     }
 
@@ -451,6 +561,29 @@
                 if (fres.changed) changed = true;
             }
 
+            if (Array.isArray(resp.settings)) {
+                seen.s = seen.s || {};
+                var smeta = trackSettings();     // a change made while the request was in flight counts as newer than the cloud's copy
+                resp.settings.forEach(function (r) {
+                    var key = String(r.key || '');
+                    var name = key.slice(2);
+                    if (key.slice(0, 2) !== 's|' || !has(SETTINGS, name) || r.deleted) return;
+                    var mine = smeta[name] ? smeta[name].u : 0;
+                    if (r.updated < mine) return;                       // ours is newer; it gets pushed
+                    if (r.updated === mine) { seen.s[name] = r.updated; return; }
+                    var clean = SETTINGS[name].clean(r.data);
+                    if (!clean) return;
+                    SETTINGS[name].write(clean);
+                    var now2 = SETTINGS[name].read();
+                    if (!now2) return;
+                    smeta[name] = { v: JSON.stringify(now2), u: r.updated };
+                    seen.s[name] = r.updated;
+                    settingsApplied = true;
+                    changed = true;
+                });
+                setJson(K.setmeta, smeta);
+            }
+
             var pmap = getJson(K.progress, {});
             var local = progressByKey(pmap);
             var newPending = {};
@@ -478,6 +611,16 @@
                 var id = resolved[r.key];
                 if (id) {
                     pmap[id] = Object.assign(identity(data), { id: id, position: data.position || 0, duration: data.duration || 0, updated: r.updated });
+                    seen.p[r.key] = { u: r.updated, d: 0 };
+                    changed = true;
+                } else if (cleanTorrent(data.torrent)) {
+                    // Not in this device's library, but it was a plugin stream: keep it as a plugin resume point
+                    // (same id the player uses for plugin streams, see torrent.js).
+                    var tid = 'tor:' + r.key;
+                    var entry = Object.assign(identity(data), { id: tid, position: data.position || 0, duration: data.duration || 0, updated: r.updated, torrent: cleanTorrent(data.torrent) });
+                    var tog = cleanOrigin(data.origin); if (tog) entry.origin = tog;
+                    var tim = cleanUrl(data.image); if (tim) entry.image = tim;
+                    pmap[tid] = entry;
                     seen.p[r.key] = { u: r.updated, d: 0 };
                     changed = true;
                 } else {
@@ -516,7 +659,7 @@
     function hasLocalChanges() {
         if (!getToken()) return false;
         var a = collectPush();
-        return a.history.length + a.progress.length + a.favorites.length > 0;
+        return a.history.length + a.progress.length + a.favorites.length + a.settings.length > 0;
     }
 
     // opts: { resolve: fn, light: bool }.  Resolves { ok, error?, pushed, changed }.
@@ -531,20 +674,20 @@
         function round(n, first) {
             var chunk = takeChunk(all);
             var cursor = parseInt(getRaw(K.cursor), 10) || 0;
-            var body = { profile: pid, since: cursor, history: chunk.history, progress: chunk.progress, favorites: chunk.favorites };
+            var body = { profile: pid, since: cursor, history: chunk.history, progress: chunk.progress, favorites: chunk.favorites, settings: chunk.settings };
             return request('POST', '/v1/sync', body, true).then(function (r) {
                 if (r.status === 404 && r.body && r.body.error === 'unknown_profile') return { ok: false, error: 'unknown_profile' };
                 if (r.status !== 200 || !r.body || !r.body.ok) return { ok: false, error: failure(r.status, r.body) };
                 // An older cloud service ignores "profile" and would mix everybody's data into one: only the original profile may talk to it.
                 if (pid !== 'p1' && r.body.profile !== pid) return { ok: false, error: 'cloud_outdated' };
-                markPushed(chunk);
+                markPushed(chunk, Array.isArray(r.body.settings));
                 return applyRemote(r.body, opts.resolve).then(function (changed) {
                     if (changed) anyChange = true;
                     setRaw(K.cursor, String(r.body.cursor || cursor));
-                    var morePush = all.history.length + all.progress.length + all.favorites.length > 0;
+                    var morePush = all.history.length + all.progress.length + all.favorites.length + all.settings.length > 0;
                     if ((r.body.more || morePush) && n < MAX_ROUNDS) return round(n + 1, false);
                     setRaw(K.last, String(clock.now()));
-                    return { ok: true, pushed: pushedCount, changed: anyChange };
+                    return { ok: true, pushed: pushedCount, changed: anyChange, settings: settingsApplied };
                 });
             });
         }
@@ -558,8 +701,9 @@
                     if (pid !== 'p1') return { ok: false, error: pr.status === 404 ? 'cloud_outdated' : pr.error };
                 }
                 all = collectPush();
-                pushedCount = all.history.length + all.progress.length + all.favorites.length;
+                pushedCount = all.history.length + all.progress.length + all.favorites.length + all.settings.length;
                 anyChange = false;
+                settingsApplied = false;
                 return round(1, true);
             }).then(function (res) {
                 if (res && res.error === 'unknown_profile' && !retried) {
@@ -608,7 +752,6 @@
         recordWatched: recordWatched,
         listHistory: listHistory,
         clearHistory: clearHistory,
-        isWatched: isWatched, watchedMap: watchedMap, setWatched: setWatched,
         validEmail: validEmail, validPassword: validPassword,
         signUp: signUp, signIn: signIn, signOut: signOut, confirmPassword: confirmPassword, peekProfiles: peekProfiles,
         verifyEmail: verifyEmail, resendCode: resendCode,

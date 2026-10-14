@@ -42,7 +42,7 @@
     var COLORS = ['#E04A00', '#C2185B', '#7B1FA2', '#3949AB', '#0277BD', '#00897B', '#689F38', '#F9A825'];
 
     // Personal data: stored per profile.
-    var SCOPED = /^(hesper_(favorites|progress|history|skip)|hesper_sync_(cursor|last|seen|pending)|hesper-(theme|skin|layout|poster-size|view|ember-seen|dashboard))/;
+    var SCOPED = /^(hesper_(favorites|progress|history|skip)|hesper_sync_(cursor|last|seen|pending)|hesper-(theme|skin|layout|poster-size|view|ember-seen|dashboard|settings))/;
     // Device level (shared by all profiles): the cloud sign-in and the plugin backup, which belongs to the account.
     var ACCOUNT_KEYS = ['hesper_sync_token', 'hesper_sync_email', 'hesper_plugin_backup_on', 'hesper_plugin_backup_seen_v1', 'hesper_plugin_backup_pending_v1', 'hesper_plugin_backup_skip_v1'];
     var SYNC_STATE_KEYS = ['hesper_sync_cursor_v1', 'hesper_sync_last_v1', 'hesper_sync_seen_v1', 'hesper_sync_pending_v1'];

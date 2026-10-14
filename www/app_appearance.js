@@ -206,6 +206,7 @@ class MainAppAppearanceMethods {
     setLayout(id) {
         if (!LAYOUTS.some(l => l.id === id)) return;
         try { localStorage.setItem(LAYOUT_KEY, id); } catch (e) { /* lasts until restart */ }
+        try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }
         pekApplyLayout(id, this.state.posterSize);
         this.setState({ layout: id });
     }
@@ -213,6 +214,7 @@ class MainAppAppearanceMethods {
     setPosterSize(size) {
         if (!POSTER_SIZES.some(z => z.id === size)) return;
         try { localStorage.setItem(POSTER_SIZE_KEY, size); } catch (e) { /* lasts until restart */ }
+        try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }
         pekApplyLayout(this.state.layout, size);
         this.setState({ posterSize: size });
     }
@@ -220,6 +222,7 @@ class MainAppAppearanceMethods {
     setViewMode(mode) {
         if (mode !== 'grid' && mode !== 'list') return;
         try { localStorage.setItem(VIEW_MODE_KEY, mode); } catch (e) { /* lasts until restart */ }
+        try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }
         this.setState({ viewMode: mode });
     }
 
