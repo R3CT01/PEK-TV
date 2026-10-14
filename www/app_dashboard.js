@@ -59,6 +59,7 @@ class MainAppDashboardMethods {
     _dashSave(list, extra) {
         try { localStorage.setItem(DASH_KEY, JSON.stringify(list)); }
         catch (e) { /* storage unavailable: the layout lasts until restart */ }
+        try { document.dispatchEvent(new CustomEvent('pek-settings')); } catch (e) { /* no events */ }
         this.setState(Object.assign({ dash: list }, extra || {}));
     }
 

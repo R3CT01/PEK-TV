@@ -70,6 +70,17 @@ class MainAppWatchMethods {
 
     _readHistory() { return window.PekSync ? window.PekSync.listHistory() : []; }
 
+    // The cloud brought a new layout, dashboard or weather city (see sync.js): show them without a restart.
+    _applySyncedSettings() {
+        this._settingsPending = false;
+        const layout = pekReadPref(LAYOUT_KEY, 'classic', LAYOUTS.map(l => l.id));
+        const posterSize = pekReadPref(POSTER_SIZE_KEY, 'auto', POSTER_SIZES.map(z => z.id));
+        const viewMode = pekReadPref(VIEW_MODE_KEY, 'grid', ['grid', 'list']);
+        pekApplyLayout(layout, posterSize);
+        this.setState({ layout, posterSize, viewMode, dash: this._readDash(), weatherText: this._readWeather() });
+        try { if (typeof window.__pekWeatherRefresh === 'function') window.__pekWeatherRefresh(); } catch (e) { /* the badge catches up later */ }
+    }
+
     _setSyncUi(patch) { this.setState({ syncUi: Object.assign({}, this.state.syncUi, patch) }); }
 
     // Index of what is on THIS device: item key -> local file id (rebuilt at most every 2 min).
@@ -170,6 +181,7 @@ class MainAppWatchMethods {
             try { pb = await PB.run({ force: !!opts.manual }); } catch (e) { pb = null; }
         }
         this._syncing = false;
+        if (res.ok && res.settings) { if (this._player) this._settingsPending = true; else this._applySyncedSettings(); }   // layout / dashboard / weather came from the cloud
         if (this._syncAgain) { this._syncAgain = false; this._autoSync(1000); }
         const pbCount = pb && pb.pending ? pb.pending.length : 0;
         const pbChanged = pbCount !== (this._pbPrev || 0);
@@ -229,6 +241,7 @@ class MainAppWatchMethods {
             this._autoHooked = true;
             const S = window.PekSync;
             document.addEventListener('pek-favorites', (e) => { if (!(e && e.detail && e.detail.remote)) this._autoSync(2000, { light: true }); });   // added or removed a favorite
+            document.addEventListener('pek-settings', () => this._autoSync(2000, { light: true }));                                                  // layout, dashboard or weather city changed
             document.addEventListener('pek-history', () => this._autoSync(2000, { light: true }));                                                   // finished watching something
             window.addEventListener('online', () => this._autoSync(1500));                                                             // back online
             document.addEventListener('visibilitychange', () => {                                                                     // came back to the app
