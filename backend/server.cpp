@@ -102,6 +102,12 @@ bool validNetHost(const std::string& h) {
     return true;
 }
 
+// URL of a local artwork image served by /api/artwork. The id is the library entry's hex id; "v" is the image's
+// modification time so a replaced poster is fetched again instead of coming from the browser cache.
+std::string artworkUrl(const std::string& id, const char* kind, long long v) {
+    return "/api/artwork?id=" + id + "&k=" + kind + "&v=" + std::to_string(v);
+}
+
 std::string jsonEscape(const std::string& s) {
     std::string out;
     out.reserve(s.size());
@@ -690,8 +696,90 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         res.set_content(data, "application/zip");
     });
 
+    // 3b. Local artwork: the poster / background / still image that sits next to a video (poster.jpg,
+    //     <name>-poster.jpg, fanart.jpg ...). The scanner found the files; this only serves the ones it
+    //     recorded for a library entry (never an arbitrary path), from disk or from a network share.
+    //     Recently used images are kept in memory so a grid of posters does not log in to the NAS once each.
+    svr.Get("/api/artwork", [scanner](const httplib::Request& req, httplib::Response& res) {
+        static std::mutex artMutex;
+        static std::map<std::string, std::pair<std::string, std::string>> artCache;   // path|v -> (bytes, content type)
+        static std::vector<std::string> artOrder;                                     // oldest first
+        static size_t artBytes = 0;
+        constexpr uint64_t kArtMax = 12u * 1024 * 1024;
+        constexpr size_t kArtCacheMax = 48u * 1024 * 1024;
+
+        auto notFound = [&res]() { res.status = 404; res.set_content("{\"error\": \"No artwork\"}", "application/json"); };
+        MediaEntry e;
+        if (!scanner->findById(req.get_param_value("id"), e)) { notFound(); return; }
+        const std::string k = req.get_param_value("k");
+        std::string path;
+        if (k == "poster") path = e.poster;
+        else if (k == "fanart") path = e.fanart;
+        else if (k == "thumb") path = e.thumb;
+        else if (k == "sposter") path = e.show_poster;
+        else if (k == "sfanart") path = e.show_fanart;
+        if (path.empty()) { notFound(); return; }
+
+        const std::string cacheKey = path + "|" + std::to_string(e.art_v);
+        std::string data, type;
+        {
+            std::lock_guard<std::mutex> lock(artMutex);
+            auto hit = artCache.find(cacheKey);
+            if (hit != artCache.end()) { data = hit->second.first; type = hit->second.second; }
+        }
+        if (data.empty()) {
+            if (vfs::isRemote(path)) {
+                vfs::Url u;
+                vfs::Error err;
+                if (!vfs::parseUrl(path, u) || (vfs::hasShares(u.scheme) && u.share.empty())) { notFound(); return; }
+                auto conn = vfs::connect(u, err);
+                if (!conn || !conn->open(u.path, err)) { notFound(); return; }
+                const uint64_t size = conn->fileSize();
+                if (size == 0 || size > kArtMax) { notFound(); return; }
+                data.resize(static_cast<size_t>(size));
+                uint64_t off = 0;
+                while (off < size) {
+                    const int64_t n = conn->read(off, &data[static_cast<size_t>(off)], static_cast<size_t>(std::min<uint64_t>(size - off, 64 * 1024)));
+                    if (n <= 0) break;
+                    off += static_cast<uint64_t>(n);
+                }
+                if (off != size) { notFound(); return; }
+            } else {
+                std::error_code ec;
+                const fs::path p(path);
+                const uint64_t size = fs::is_regular_file(p, ec) ? fs::file_size(p, ec) : 0;
+                if (ec || size == 0 || size > kArtMax) { notFound(); return; }
+                std::ifstream in(p, std::ios::binary);
+                if (!in) { notFound(); return; }
+                data.resize(static_cast<size_t>(size));
+                in.read(&data[0], static_cast<std::streamsize>(size));
+                if (static_cast<uint64_t>(in.gcount()) != size) { notFound(); return; }
+            }
+            // The type comes from the file's first bytes: a ".tbn" or a mislabelled ".jpg" is often really a PNG.
+            auto b = [&data](size_t i) { return static_cast<unsigned char>(i < data.size() ? data[i] : 0); };
+            if (b(0) == 0xFF && b(1) == 0xD8) type = "image/jpeg";
+            else if (b(0) == 0x89 && b(1) == 'P' && b(2) == 'N' && b(3) == 'G') type = "image/png";
+            else if (data.size() > 12 && data.compare(0, 4, "RIFF") == 0 && data.compare(8, 4, "WEBP") == 0) type = "image/webp";
+            else { notFound(); return; }                       // not an image we can show
+            std::lock_guard<std::mutex> lock(artMutex);
+            if (artCache.find(cacheKey) == artCache.end()) {
+                artCache[cacheKey] = {data, type};
+                artOrder.push_back(cacheKey);
+                artBytes += data.size();
+                while (artBytes > kArtCacheMax && !artOrder.empty()) {
+                    auto old = artCache.find(artOrder.front());
+                    if (old != artCache.end()) { artBytes -= old->second.first.size(); artCache.erase(old); }
+                    artOrder.erase(artOrder.begin());
+                }
+            }
+        }
+        res.set_header("Cache-Control", "private, max-age=86400");
+        res.set_content(data, type);
+    });
+
     // 4. Movies — flat list, classified from embedded container tags
     //    first, then the filename/folder fallback (see MediaScanner).
+    //    "poster" is only present when the movie has a local poster image next to it.
     svr.Get("/api/movies", [scanner](const httplib::Request& req, httplib::Response& res) {
         auto movies = scanner->getMovies();
         std::string json = "{\"movies\": [";
@@ -700,7 +788,8 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             json += "{\"id\": \"" + m.id + "\", \"title\": \"" + jsonEscape(m.title) +
                     "\", \"year\": " + std::to_string(m.year) +
                     ", \"filename\": \"" + jsonEscape(m.filename) +
-                    "\", \"added\": " + std::to_string(m.mtime) + "}";
+                    "\", \"added\": " + std::to_string(m.mtime) +
+                    (m.poster.empty() ? "" : ", \"poster\": \"" + artworkUrl(m.id, "poster", m.art_v) + "\"") + "}";
             if (i + 1 < movies.size()) json += ",";
         }
         json += "]}";
@@ -718,6 +807,8 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             std::string title;                                   // display spelling (first one seen)
             std::map<int, std::vector<MediaEntry>> seasons;      // season -> episodes
             size_t total = 0;
+            std::string posterId;                                // an episode whose show folder has a poster image
+            long long posterV = 0;
         };
         std::map<std::string, ShowGroup> grouped;                // lowercase title -> group
         for (const auto& e : episodes) {
@@ -727,6 +818,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             if (g.title.empty()) g.title = e.show_title;
             g.seasons[e.season].push_back(e);
             g.total++;
+            if (g.posterId.empty() && !e.show_poster.empty()) { g.posterId = e.id; g.posterV = e.art_v; }
         }
 
         std::string json = "{\"shows\": [";
@@ -735,7 +827,9 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             if (!first_show) json += ",";
             first_show = false;
             json += "{\"showTitle\": \"" + jsonEscape(g.title) + "\", \"episodeCount\": " +
-                    std::to_string(g.total) + ", \"seasons\": [";
+                    std::to_string(g.total) +
+                    (g.posterId.empty() ? "" : ", \"poster\": \"" + artworkUrl(g.posterId, "sposter", g.posterV) + "\"") +
+                    ", \"seasons\": [";
             bool first_season = true;
             for (auto& [season, eps] : g.seasons) {
                 std::sort(eps.begin(), eps.end(), [](const MediaEntry& a, const MediaEntry& b) {
@@ -886,6 +980,20 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             return;
         }
 
+        // Local metadata first: the plot from the movie's NFO and the poster / background image next to the
+        // file. TMDb is only asked for what is still missing, and not at all when nothing is.
+        const std::string localPoster = entry.poster.empty() ? "" : artworkUrl(entry.id, "poster", entry.art_v);
+        const std::string localFanart = entry.fanart.empty() ? "" : artworkUrl(entry.id, "fanart", entry.art_v);
+        auto reply = [&](const std::string& overview, const std::string& poster) {
+            std::string out = "{\"id\": \"" + entry.id + "\", \"title\": \"" + jsonEscape(entry.title) +
+                              "\", \"year\": " + std::to_string(entry.year) +
+                              ", \"overview\": \"" + jsonEscape(overview) +
+                              "\", \"poster\": \"" + jsonEscape(poster) + "\"" +
+                              (localFanart.empty() ? "" : ", \"fanart\": \"" + localFanart + "\"") + "}";
+            res.set_content(out, "application/json");
+        };
+        if (!entry.overview.empty() && !localPoster.empty()) { reply(entry.overview, localPoster); return; }
+
         httplib::Client client(tmdbProxyUrl());
 
         applyTls(client);
@@ -897,6 +1005,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
 
         auto tmdb_res = client.Get(query.c_str());
         if (!tmdb_res || tmdb_res->status != 200) {
+            if (!entry.overview.empty() || !localPoster.empty()) { reply(entry.overview, localPoster); return; }   // offline: show what the folder has
             res.status = 502;
             res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
             return;
@@ -913,27 +1022,39 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         std::string poster_path = extractJsonString(first_result, "poster_path");
         std::string poster_url = poster_path.empty() ? "" : ("https://image.tmdb.org/t/p/w342" + poster_path);
 
-        std::string json = "{\"id\": \"" + entry.id + "\", \"title\": \"" + jsonEscape(entry.title) +
-                            "\", \"year\": " + std::to_string(entry.year) +
-                            ", \"overview\": \"" + jsonEscape(overview) +
-                            "\", \"poster\": \"" + jsonEscape(poster_url) + "\"}";
-        res.set_content(json, "application/json");
+        reply(entry.overview.empty() ? overview : entry.overview, localPoster.empty() ? poster_url : localPoster);
     });
 
     // 6b. TV show bio (poster + synopsis) — fires only when the user opens a show.
-    svr.Get("/api/show-details", [](const httplib::Request& req, httplib::Response& res) {
+    svr.Get("/api/show-details", [scanner](const httplib::Request& req, httplib::Response& res) {
         std::string title = req.get_param_value("title");
         if (title.empty()) {
             res.status = 400;
             res.set_content("{\"error\": \"Missing title\"}", "application/json");
             return;
         }
+        // Local metadata first (tvshow.nfo plot, poster / fanart in the show's folder); TMDb fills the gaps.
+        MediaEntry local;
+        const bool haveLocal = scanner->findShow(title, local);
+        const std::string localPoster = haveLocal && !local.show_poster.empty() ? artworkUrl(local.id, "sposter", local.art_v) : "";
+        const std::string localFanart = haveLocal && !local.show_fanart.empty() ? artworkUrl(local.id, "sfanart", local.art_v) : "";
+        const std::string localOverview = haveLocal ? local.show_overview : "";
+        auto reply = [&](const std::string& overview, const std::string& poster) {
+            std::string out = "{\"title\": \"" + jsonEscape(title) +
+                              "\", \"overview\": \"" + jsonEscape(overview) +
+                              "\", \"poster\": \"" + jsonEscape(poster) + "\"" +
+                              (localFanart.empty() ? "" : ", \"fanart\": \"" + localFanart + "\"") + "}";
+            res.set_content(out, "application/json");
+        };
+        if (!localOverview.empty() && !localPoster.empty()) { reply(localOverview, localPoster); return; }
+
         httplib::Client client(tmdbProxyUrl());
         applyTls(client);
         client.set_connection_timeout(5);
         client.set_read_timeout(5);
         auto tmdb_res = client.Get(("/search/tv?query=" + httplib::encode_uri(title)).c_str());
         if (!tmdb_res || tmdb_res->status != 200) {
+            if (!localOverview.empty() || !localPoster.empty()) { reply(localOverview, localPoster); return; }   // offline
             res.status = 502;
             res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
             return;
@@ -944,15 +1065,12 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         std::string overview = extractJsonString(first_result, "overview");
         std::string poster_path = extractJsonString(first_result, "poster_path");
         std::string poster_url = poster_path.empty() ? "" : ("https://image.tmdb.org/t/p/w342" + poster_path);
-        std::string json = "{\"title\": \"" + jsonEscape(title) +
-                            "\", \"overview\": \"" + jsonEscape(overview) +
-                            "\", \"poster\": \"" + jsonEscape(poster_url) + "\"}";
-        res.set_content(json, "application/json");
+        reply(localOverview.empty() ? overview : localOverview, localPoster.empty() ? poster_url : localPoster);
     });
 
     // 6c. Episode bio (title + synopsis + still image). The Worker does the
     //     show lookup and episode fetch and returns a trimmed object.
-    svr.Get("/api/episode-details", [](const httplib::Request& req, httplib::Response& res) {
+    svr.Get("/api/episode-details", [scanner](const httplib::Request& req, httplib::Response& res) {
         std::string show = req.get_param_value("show");
         std::string season = req.get_param_value("season");
         std::string episode = req.get_param_value("episode");
@@ -961,6 +1079,19 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             res.set_content("{\"error\": \"Missing show, season or episode\"}", "application/json");
             return;
         }
+        // Local metadata first: the episode's NFO (title, plot) and its still image (<name>-thumb.jpg).
+        MediaEntry local;
+        bool haveLocal = false;
+        try { haveLocal = scanner->findEpisode(show, std::stoi(season), std::stoi(episode), local); } catch (...) { haveLocal = false; }
+        const std::string localName = haveLocal ? local.ep_title : "";
+        const std::string localOverview = haveLocal ? local.overview : "";
+        const std::string localStill = haveLocal && !local.thumb.empty() ? artworkUrl(local.id, "thumb", local.art_v) : "";
+        auto reply = [&](const std::string& name, const std::string& overview, const std::string& still) {
+            res.set_content("{\"name\": \"" + jsonEscape(name) + "\", \"overview\": \"" + jsonEscape(overview) +
+                            "\", \"still\": \"" + jsonEscape(still) + "\"}", "application/json");
+        };
+        if (!localName.empty() && !localOverview.empty() && !localStill.empty()) { reply(localName, localOverview, localStill); return; }
+
         httplib::Client client(tmdbProxyUrl());
         applyTls(client);
         client.set_connection_timeout(5);
@@ -970,6 +1101,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
                         "&episode=" + httplib::encode_uri(episode);
         auto tmdb_res = client.Get(q.c_str());
         if (!tmdb_res || tmdb_res->status != 200) {
+            if (!localName.empty() || !localOverview.empty() || !localStill.empty()) { reply(localName, localOverview, localStill); return; }   // offline
             res.status = 502;
             res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
             return;
@@ -979,10 +1111,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         std::string overview = extractJsonString(body, "overview");
         std::string still = extractJsonString(body, "still_path");
         std::string still_url = still.empty() ? "" : ("https://image.tmdb.org/t/p/w300" + still);
-        std::string json = "{\"name\": \"" + jsonEscape(name) +
-                            "\", \"overview\": \"" + jsonEscape(overview) +
-                            "\", \"still\": \"" + jsonEscape(still_url) + "\"}";
-        res.set_content(json, "application/json");
+        reply(localName.empty() ? name : localName, localOverview.empty() ? overview : localOverview, localStill.empty() ? still_url : localStill);
     });
 
     // 6d. Intro / recap times for one episode, so the player can offer Skip Intro / Skip Recap
