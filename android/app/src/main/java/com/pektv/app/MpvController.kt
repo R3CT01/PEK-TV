@@ -151,6 +151,23 @@ class MpvController(
         m.setPropertyString("sid", if (id < 0) "no" else id.toString())
     }
 
+    // An extra subtitle file (SubRip at a URL the page got from the backend: www/subtitles.js). It is loaded and
+    // switched on at once. Like picking a subtitle in the menu, it needs the normal renderer.
+    fun addSubtitle(url: String, label: String) {
+        val m = mpv ?: return
+        if ((lite || hdrDirect) && !liteSuspended) { liteSuspended = true; applyRenderer(m) }
+        try {
+            m.command(arrayOf("sub-add", url, "select", label))
+        } catch (t: Throwable) {
+            Log.w("PEK", "sub-add failed", t)
+            return
+        }
+        // mpv fetches the file in the background: tell the page about the new track once it has appeared.
+        val refresh = Runnable { if (mpv != null) emit("tracks", readTracks()) }
+        ui.postDelayed(refresh, 700L)
+        ui.postDelayed(refresh, 2500L)
+    }
+
     // Turn smooth mode on / off (also reachable from the page: mpvSetLite).
     fun setLite(on: Boolean) {
         lite = on

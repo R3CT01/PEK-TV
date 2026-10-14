@@ -307,6 +307,7 @@ class MainApp extends PekComponent {
                 ),
                 this._renderProfileSettings(),
                 this._renderSyncSettings(),
+                this._renderSubtitleSettings(),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Layout'),
                     createElement('div', { className: 'plugin-list layout-cards' },

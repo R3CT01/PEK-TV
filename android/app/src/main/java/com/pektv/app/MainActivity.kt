@@ -529,6 +529,7 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun mpvSeek(sec: Double) { activity.runOnUiThread { mpv.seek(sec) } }
     @JavascriptInterface fun mpvSetAudio(id: Int) { activity.runOnUiThread { mpv.setAudio(id) } }
     @JavascriptInterface fun mpvSetSubtitle(id: Int) { activity.runOnUiThread { mpv.setSubtitle(id) } }
+    @JavascriptInterface fun mpvAddSubtitle(url: String, label: String) { activity.runOnUiThread { mpv.addSubtitle(url, label) } }
     @JavascriptInterface fun mpvDestroy() { activity.runOnUiThread { mpv.destroy() } }
     @JavascriptInterface fun mpvSetLite(on: Boolean) { activity.runOnUiThread { mpv.setLite(on) } }
     @JavascriptInterface fun mpvIsLite(): Boolean = mpv.isLite()
