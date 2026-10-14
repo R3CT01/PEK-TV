@@ -260,6 +260,54 @@ class MainApp extends PekComponent {
         );
     }
 
+    // Settings > Audio output (Android app only): send Dolby / DTS sound untouched to a TV, soundbar or receiver.
+    // Hidden where the page has no native player (browser / dev build) and on older app builds.
+    _renderAudioOutputSettings() {
+        const A = window.PekAndroid;
+        if (!A || typeof A.mpvPassthrough !== 'function' || typeof A.mpvSetPassthrough !== 'function') return null;
+        const { createElement, ui } = this.props.engine;
+        let on = [], known = false, formats = [];
+        try {
+            on = JSON.parse(A.mpvPassthrough() || '[]');
+            if (typeof A.mpvPassthroughSupport === 'function') {
+                const s = JSON.parse(A.mpvPassthroughSupport() || '{}');
+                known = !!s.known; formats = s.formats || [];
+            }
+        } catch (e) { /* defaults: nothing on, support unknown */ }
+        const list = [
+            ['ac3', 'Dolby Digital (AC-3)', '5.1 sound from DVDs, broadcasts and most streams'],
+            ['eac3', 'Dolby Digital Plus (E-AC-3)', 'Also carries Dolby Atmos from streaming services'],
+            ['truehd', 'Dolby TrueHD (Atmos)', 'Lossless sound from Blu-ray rips; needs HDMI eARC or a direct HDMI receiver'],
+            ['dts', 'DTS', '5.1 sound from DVDs and Blu-ray'],
+            ['dts-hd', 'DTS-HD', 'Lossless DTS from Blu-ray rips']
+        ];
+        const toggle = (codec, now) => () => {
+            try { A.mpvSetPassthrough(codec, !now); } catch (e) { console.warn('[PEK TV] audio passthrough setting failed', e); }
+            this.setState({});
+        };
+        const rows = list.map(([codec, label, hint]) => {
+            const enabled = on.indexOf(codec) >= 0;
+            const ok = formats.indexOf(codec) >= 0;
+            let status = enabled ? 'On' : 'Off';
+            if (known) status += ok ? ' \u2013 your TV / receiver supports this' : ' \u2013 your TV / receiver does not report this';
+            return ui.listRow(label, status + '  \u00b7  ' + hint, toggle(codec, enabled), { statusDot: enabled });
+        });
+        const missing = formats.filter(f => on.indexOf(f) < 0);
+        if (known && missing.length) {
+            rows.push(ui.listRow('Turn on everything my device supports', formats.length + ' format' + (formats.length === 1 ? '' : 's') + ' reported', () => {
+                try { formats.forEach(f => A.mpvSetPassthrough(f, true)); } catch (e) { console.warn('[PEK TV] audio passthrough setting failed', e); }
+                this.setState({});
+            }));
+        }
+        return createElement('div', { className: 'settings-section' },
+            createElement('h2', {}, 'Audio output'),
+            createElement('p', { className: 'sub' },
+                'Passthrough sends the sound untouched to your TV, soundbar or receiver so it can play Dolby or DTS itself. Applies to the next video you start.',
+                createElement('span', { className: 'sub-more' }, ' Leave a format off if your receiver cannot play it. While passthrough is in use, set the volume on the receiver or TV. If a format is not accepted, PEK TV plays it as normal sound instead.')),
+            createElement('div', { className: 'plugin-list' }, ...rows)
+        );
+    }
+
     _renderExitModal() {
         if (!this.state.exitAsk) return null;
         const { createElement, ui } = this.props.engine;
@@ -358,6 +406,7 @@ class MainApp extends PekComponent {
                         createElement('span', { className: 'adv-chevron' }, this.state.advancedOpen ? '\u25BE' : '\u25B8')),
                     this.state.advancedOpen ? createElement('div', { className: 'adv-body' },
                     this._renderVideoOutputSettings(),
+                    this._renderAudioOutputSettings(),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'TV mode'),
                     createElement('p', { className: 'sub' }, 'Bigger text, safe margins and a bolder highlight for the couch.'),

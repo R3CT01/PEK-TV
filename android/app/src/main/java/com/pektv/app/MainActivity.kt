@@ -580,4 +580,8 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun mpvSetHdr(on: Boolean) { activity.runOnUiThread { mpv.setHdr(on) } }
     @JavascriptInterface fun mpvHdr(): Boolean = mpv.isHdrOut()
     @JavascriptInterface fun mpvDisplayHdr(): Boolean = mpv.displayHdr()
+    // Audio output (Settings > Audio output): passthrough of Dolby / DTS to a TV, soundbar or receiver.
+    @JavascriptInterface fun mpvSetPassthrough(codec: String, on: Boolean) { activity.runOnUiThread { mpv.setPassthrough(codec, on) } }
+    @JavascriptInterface fun mpvPassthrough(): String = mpv.passthroughJson()
+    @JavascriptInterface fun mpvPassthroughSupport(): String = mpv.passthroughSupportJson()
 }

@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -250,6 +254,62 @@ class MpvController(
         } catch (t: Throwable) { Log.w("PEK", "could not reset the refresh rate", t) }
     }
 
+    // ---------------- audio passthrough ----------------
+    // Dolby Digital (AC-3), Dolby Digital Plus (E-AC-3, which also carries Atmos), Dolby TrueHD (Atmos), DTS and DTS-HD can be
+    // sent untouched to a TV, soundbar or receiver instead of being decoded here (Settings > Audio output). The name is the
+    // one mpv's audio-spdif option uses; the number is the matching android.media.AudioFormat ENCODING_* constant.
+    // Off by default: only a person who has a receiver that understands the format should switch one on.
+    private val passthroughFormats = linkedMapOf("ac3" to 5, "eac3" to 6, "dts" to 7, "dts-hd" to 8, "truehd" to 14)
+    private var passthrough: Set<String> =
+        HashSet<String>(prefs.getStringSet("passthrough", emptySet()) ?: emptySet()).filter { passthroughFormats.containsKey(it) }.toSet()
+
+    fun setPassthrough(codec: String, on: Boolean) {
+        if (!passthroughFormats.containsKey(codec)) return
+        passthrough = if (on) passthrough + codec else passthrough - codec
+        prefs.edit().putStringSet("passthrough", HashSet(passthrough)).apply()   // takes effect on the next video (mpv reads it at start)
+    }
+
+    /** The codecs switched on, as a JSON array like ["ac3","truehd"]. */
+    fun passthroughJson(): String = JSONArray(passthrough.toList()).toString()
+
+    /**
+     * What the connected TV / receiver says it can take untouched: {"known": true, "formats": ["ac3", ...]}.
+     * Android 10+ is asked directly (AudioTrack.isDirectPlaybackSupported); older versions read the HDMI output's
+     * encoding list. "known": false means the device did not say, so Settings shows no claim either way.
+     */
+    fun passthroughSupportJson(): String {
+        val found = HashSet<Int>()
+        var known = false
+        try {
+            val am = activity.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            for (d in am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
+                val t = d.type
+                // 9 = HDMI, 10 = HDMI ARC, 29 = HDMI eARC, 5 = digital line
+                if (t == 9 || t == 10 || t == 29 || t == 5) {
+                    val enc = d.encodings
+                    if (enc.isNotEmpty()) known = true
+                    for (e in enc) found.add(if (e == 18) 6 else e)   // 18 = E-AC-3 with Atmos (JOC): same switch as E-AC-3
+                }
+            }
+        } catch (t: Throwable) { Log.w("PEK", "could not read HDMI audio encodings", t) }
+        if (Build.VERSION.SDK_INT >= 29) {
+            known = true
+            try {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()
+                for ((_, enc) in passthroughFormats) {
+                    for (mask in intArrayOf(AudioFormat.CHANNEL_OUT_5POINT1, AudioFormat.CHANNEL_OUT_7POINT1_SURROUND)) {
+                        val f = AudioFormat.Builder().setEncoding(enc).setSampleRate(48000).setChannelMask(mask).build()
+                        if (AudioTrack.isDirectPlaybackSupported(f, attrs)) { found.add(enc); break }
+                    }
+                }
+            } catch (t: Throwable) { Log.w("PEK", "isDirectPlaybackSupported failed", t) }
+        }
+        val names = JSONArray()
+        for ((name, enc) in passthroughFormats) if (found.contains(enc)) names.put(name)
+        return JSONObject().put("known", known).put("formats", names).toString()
+    }
+
     // ---------------- HDR ----------------
 
     fun setHdr(on: Boolean) {
@@ -361,6 +421,11 @@ class MpvController(
                 "vd-lavc-fast" to "yes", "vd-lavc-skiploopfilter" to "nonref"
             )) {
                 try { m.setOptionString(key, value) } catch (t: Throwable) { Log.w("PEK", "mpv option $key not set", t) }
+            }
+            // Audio passthrough (Settings > Audio output). If the TV / receiver refuses a format, mpv falls back to decoding it.
+            if (passthrough.isNotEmpty()) {
+                val spdif = passthroughFormats.keys.filter { passthrough.contains(it) }.joinToString(",")
+                try { m.setOptionString("audio-spdif", spdif) } catch (t: Throwable) { Log.w("PEK", "mpv option audio-spdif not set", t) }
             }
             // Streaming from a torrent: keep a good stretch decoded-ahead AND behind, so scrubbing back and
             // forth inside it needs no new download, and wait for a few seconds after a stall before resuming
