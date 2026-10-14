@@ -512,7 +512,14 @@
         });
     }
 
-    // opts: { resolve: fn }.  Resolves { ok, error?, pushed, changed }.
+    // True when this device has something the cloud has not seen yet (cheap, local only, no network).
+    function hasLocalChanges() {
+        if (!getToken()) return false;
+        var a = collectPush();
+        return a.history.length + a.progress.length + a.favorites.length > 0;
+    }
+
+    // opts: { resolve: fn, light: bool }.  Resolves { ok, error?, pushed, changed }.
     function sync(opts) {
         opts = opts || {};
         if (inflight) return inflight;
@@ -543,7 +550,8 @@
         }
 
         function attempt(retried) {
-            return syncProfiles().then(function (pr) {
+            // light: skip the profile round trip (a stop-of-playback or favorite sync only needs to push what changed).
+            return (opts.light ? Promise.resolve({ ok: true }) : syncProfiles()).then(function (pr) {
                 if (!pr.ok) {
                     if (pr.error === 'session_expired' || pr.error === 'rate_limited') return pr;
                     // No profile support in the cloud yet: the original profile still works, the others must wait.
@@ -606,7 +614,7 @@
         verifyEmail: verifyEmail, resendCode: resendCode,
         forgotPassword: forgotPassword, resetPassword: resetPassword,
         getEmail: getEmail, lastSync: lastSync, unlink: unlink,
-        sync: sync, deleteAccount: deleteAccount, cloud: cloud,
+        sync: sync, hasLocalChanges: hasLocalChanges, deleteAccount: deleteAccount, cloud: cloud,
         isLinked: function () { return !!getToken(); },
         _setApi: function (u) { API = u; },
         _setClock: function (fn) { clock.now = fn; }

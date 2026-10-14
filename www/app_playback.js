@@ -31,7 +31,7 @@ class MainAppPlaybackMethods {
                 const prog = this._readProgress();
                 const left = Object.keys(prog).some(k => prog[k] && prog[k].position >= RESUME_MIN_SEC);
                 this.setState({ progress: prog, history: this._readHistory(), activeTab: (!left && this.state.activeTab === 'resume') ? 'dashboard' : this.state.activeTab });
-                this._autoSync(1500);
+                this._autoSync(1500, { light: true, onlyIfChanged: true });   // one small push, and none at all if nothing changed
                 this._queueResumeArt();
             }
         });
