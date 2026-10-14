@@ -19,11 +19,6 @@
 //                        in the user's library (hesper_host.library_titles); no UI effect here
 //   permissions.favorites true => pek.favorites.list / add / remove: the shared Favorites list that
 //                        PEK TV's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
-//   permissions.device   true => pek.device.profile(): what this device can decode and show (hardware codecs,
-//                        screen size, HDR), so a plugin can rank releases for it. No identifiers, nothing personal.
-//   permissions.watched  true => pek.watched.check(items) / set(item, on): read and change what PEK TV's
-//                        Watch History says is watched. An item is {kind:'movie', title, year} or
-//                        {kind:'episode', showTitle, season, episode}. Nothing else of the history is visible.
 //   permissions.providers true => ui.providerButton: a "Watch on <service>" button. PEK TV decides what it
 //                        opens (the service's app on Android, its website elsewhere); the plugin only names the
 //                        service and the title.
@@ -81,7 +76,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
     var pending = new Map(), nextReq = 1;
     var handlers = new Map(), nextHandler = 1;
     var renderFn = null, drawQueued = false;
-    var launchFn = null, pendingLaunch = null, nextFn = null, liveFn = null;
+    var launchFn = null, pendingLaunch = null, nextFn = null, liveFn = null, tvFlag = false;
 
     function request(op, args, timeoutMs) {
         return new Promise(function (resolve, reject) {
@@ -198,11 +193,6 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         drawQueued = true; setTimeout(draw, 0);
     }
 
-    function wItem(it) {
-        it = it || {};
-        return { kind: str(it.kind), title: str(it.title), year: Number(it.year) || 0,
-            showTitle: str(it.showTitle), season: Number(it.season) || 0, episode: Number(it.episode) || 0 };
-    }
     var backFn = null, backSet = false;
     var api = {
         ui: ui,
@@ -213,6 +203,8 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             if (backSet !== !!backFn) { backSet = !!backFn; post({ t: 'canBack', v: backSet }); }
         },
         scrollTop: function () { post({ t: 'scrollTop' }); },
+        // True while PEK TV is in its TV / D-pad mode (Settings), even on a touch device. A plugin can use it to pick its TV layout.
+        isTv: function () { return tvFlag; },
         // Called when PEK TV opens this plugin on a particular title (the Favorites tab, or another plugin):
         // fn({type: 'movie' | 'tv', id: <TMDb id>, title, year}).
         onLaunch: function (fn) { launchFn = typeof fn === 'function' ? fn : null; flushLaunch(); },
@@ -230,19 +222,6 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
                     year: Number(it.year) || 0, posterPath: str(it.posterPath) });
             },
             remove: function (key) { return request('favRemove', { key: str(key) }); }
-        },
-        // Needs permissions.device. profile() -> {h264, hevc, hevc10, av1 (tallest hardware-decoded picture: 0 / 720 / 1080 / 2160),
-        // tv, screenShort, screenLong (px), hdr, dv, ramMb, lowRam}, or {unknown: true} where the app cannot tell.
-        device: {
-            profile: function () { return request('deviceProfile', {}).then(JSON.parse); }
-        },
-        // Needs permissions.watched. check([item, ...]) -> [true, false, ...]; set(item, true | false) marks one
-        // watched / unwatched in Watch History (it syncs like anything else the user watches).
-        watched: {
-            check: function (items) {
-                return request('watchedCheck', { items: (Array.isArray(items) ? items : []).slice(0, 300).map(wItem) }).then(JSON.parse);
-            },
-            set: function (item, on) { return request('watchedSet', { item: wItem(item), on: on === true }); }
         },
         // Needs permissions.plugins. streamers() -> [{id, name}]; open(id, {type, id, title, year}) must come from a tap.
         plugins: {
@@ -292,7 +271,7 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         log: function () { post({ t: 'log', text: [].map.call(arguments, str).join(' ') }); }
     };
     Object.freeze(ui); Object.freeze(api.storage); Object.freeze(api.torrent);
-    Object.freeze(api.live); Object.freeze(api.favorites); Object.freeze(api.device); Object.freeze(api.watched); Object.freeze(api.plugins); Object.freeze(api);
+    Object.freeze(api.live); Object.freeze(api.favorites); Object.freeze(api.plugins); Object.freeze(api);
     Object.defineProperty(window, 'pek', { value: api, writable: false, configurable: false });
     Object.defineProperty(window, 'hesper', { value: api, writable: false, configurable: false });   // old name, kept so existing plugins keep working
 
@@ -301,12 +280,16 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         var m = ev.data;
         if (!m || typeof m !== 'object') return;
         if (m.t === 'init') {
+            tvFlag = m.tv === true;
             try {
                 var s = document.createElement('script');
                 s.textContent = String(m.code);
                 document.body.appendChild(s);
             } catch (e) { post({ t: 'log', text: 'plugin failed to start: ' + e }); }
             post({ t: 'started', hasRender: !!renderFn });
+        } else if (m.t === 'env') {
+            var tvNow = m.tv === true;
+            if (tvNow !== tvFlag) { tvFlag = tvNow; requestRender(); }
         } else if (m.t === 'next') {
             var nrid = m.rid, nreq = m.req;
             var nreply = function (ok, v) { post({ t: 'nextRes', rid: nrid, ok: ok, value: v }); };
@@ -363,7 +346,7 @@ class PekSandbox {
         const out = {
             name: null, version: null,
             permissions: { network: [], storage: false, library: false, torrent: false,
-                favorites: false, providers: false, plugins: false, live: false, watched: false, device: false },
+                favorites: false, providers: false, plugins: false, live: false },
             provides: { stream: false },
             ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false }
         };
@@ -382,8 +365,6 @@ class PekSandbox {
         out.permissions.providers = perms.providers === true;
         out.permissions.plugins = perms.plugins === true;
         out.permissions.live = perms.live === true;
-        out.permissions.watched = perms.watched === true;
-        out.permissions.device = perms.device === true;
         // "provides": {"stream": true} = this plugin can play movies / shows. Other plugins with the
         // "plugins" permission are offered it as a "Play with ..." button.
         const pv = raw.provides && typeof raw.provides === 'object' ? raw.provides : {};
@@ -392,6 +373,15 @@ class PekSandbox {
         if (typeof u.navTab === 'string') out.ui.navTab = u.navTab.replace(/[^A-Za-z0-9 &+'.-]/g, '').trim().slice(0, 20);
         out.ui.reloadOnInstall = u.reloadOnInstall === true;
         out.ui.closeOnRemove = u.closeOnRemove === true;
+        return out;
+    }
+
+    // A short fingerprint of a Netflix-style rows list (its first headings), so a saved scroll position is only reused for the
+    // same list and not for another tab or screen.
+    static _rowsSig(rows) {
+        const hs = rows.querySelectorAll('h3');
+        let out = '';
+        for (let i = 0; i < hs.length && i < 2; i++) out += (hs[i].textContent || '').slice(0, 30) + '|';
         return out;
     }
 
@@ -579,9 +569,10 @@ class PekSandbox {
         const m = ev.data;
         if (!m || typeof m !== 'object') return;
         switch (m.t) {
-            case 'ready': this._send({ t: 'init', code: this.source }); break;
+            case 'ready': this._send({ t: 'init', code: this.source, tv: PekSandbox._tvOn() }); break;
             case 'started':
                 this.started = true;
+                this._bindEnv();
                 if (window.PekActivity) window.PekActivity.note((this.manifest.name || this.folder) + ' started', true);
                 if (!m.hasRender) this._log('this plugin never called pek.render(); nothing to show');
                 this._renderTree();
@@ -618,9 +609,6 @@ class PekSandbox {
                 case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.PekFavorites.keys())); break;
                 case 'favAdd': reply(true, this._favAdd(a)); break;
                 case 'favRemove': reply(true, this._favRemove(a)); break;
-                case 'deviceProfile': reply(true, this._deviceProfile()); break;
-                case 'watchedCheck': reply(true, this._watchedCheck(a)); break;
-                case 'watchedSet': reply(true, this._watchedSet(a)); break;
                 case 'pluginStreamers': reply(true, this._pluginStreamers()); break;
                 case 'pluginOpen': reply(true, this._pluginOpen(a)); break;
                 case 'livePlay': reply(true, this._livePlay(a)); break;
@@ -637,7 +625,6 @@ class PekSandbox {
     _need(perm) {
         if (!this.manifest.permissions[perm]) throw new Error("plugin.json does not request the '" + perm + "' permission");
         if (perm === 'favorites' && !window.PekFavorites) throw new Error('Favorites are not available in this PEK TV');
-        if (perm === 'watched' && !(window.PekSync && window.PekSync.setWatched)) throw new Error('Watch history is not available in this PEK TV');
         if (perm === 'plugins' && !(window.PekHost && window.PekHost.streamers)) throw new Error('Plugin launching is not available in this PEK TV');
     }
 
@@ -651,47 +638,6 @@ class PekSandbox {
         this._need('favorites');
         if (typeof a.key !== 'string' || !/^(movie|tv):\d{1,10}$/.test(a.key)) throw new Error('invalid key');
         return window.PekFavorites.remove(a.key);
-    }
-
-    // ---------------- device capabilities (permission "device") ----------------
-
-    // The Android app answers from MediaCodecList and the display; anywhere else the plugin is told
-    // "unknown" and keeps its normal behaviour.
-    _deviceProfile() {
-        this._need('device');
-        const a = window.PekAndroid;
-        if (a && typeof a.deviceProfile === 'function') {
-            try { return String(a.deviceProfile()); } catch (e) { /* fall through */ }
-        }
-        return JSON.stringify({ v: 1, unknown: true });
-    }
-
-    // ---------------- watched marks (permission "watched") ----------------
-
-    _watchedItem(o) {
-        if (!o || typeof o !== 'object') throw new Error('invalid item');
-        const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
-        const text = (v) => (typeof v === 'string' ? v.trim().slice(0, 200) : '');
-        if (o.kind === 'movie' && text(o.title)) return { kind: 'movie', title: text(o.title), year: int(o.year, 3000) };
-        if (o.kind === 'episode' && text(o.showTitle) && int(o.season, 200) && int(o.episode, 2000)) {
-            return { kind: 'episode', showTitle: text(o.showTitle), season: int(o.season, 200), episode: int(o.episode, 2000) };
-        }
-        throw new Error('invalid item');
-    }
-
-    _watchedCheck(a) {
-        this._need('watched');
-        const S = window.PekSync, W = S.watchedMap();
-        const items = Array.isArray(a.items) ? a.items.slice(0, 300) : [];
-        return JSON.stringify(items.map(i => { try { const k = S.histKey(this._watchedItem(i)); return !!(k && W[k]); } catch (e) { return false; } }));
-    }
-
-    _watchedSet(a) {
-        this._need('watched');
-        const meta = this._watchedItem(a.item);
-        // Tag it with this plugin, so Watch History can say where it was watched and open the plugin again.
-        if (a.on === true) meta.origin = { id: this.folder, name: this.manifest.name || this.folder };
-        return window.PekSync.setWatched(meta, a.on === true);
     }
 
     _pluginStreamers() {
@@ -940,6 +886,10 @@ class PekSandbox {
         const fo = c.querySelector('.focused');
         if (fo && fo.dataset) keep.focusKey = fo.dataset.sxFocus || '';
         c.querySelectorAll('[data-sx-scroll]').forEach(el => { keep.scroll[el.dataset.sxScroll] = el.scrollLeft; });
+        // The Netflix-style TV screen scrolls inside .nf-rows (not the page). A redraw builds a new one, which starts at the
+        // top, so remember how far it was scrolled (and which list it was) or the rows jump back up after every redraw.
+        const nfRows = c.querySelector('.nf-stage > .nf-rows');
+        if (nfRows) { keep.rowsTop = nfRows.scrollTop; keep.rowsSig = PekSandbox._rowsSig(nfRows); }
         const a = document.activeElement;
         if (a && a.dataset && a.dataset.sxKey && c.contains(a)) {
             keep.input = { key: a.dataset.sxKey, value: a.value, start: a.selectionStart, end: a.selectionEnd };
@@ -957,6 +907,10 @@ class PekSandbox {
             const x = keep.scroll[el.dataset.sxScroll];
             if (x) el.scrollLeft = x;
         });
+        if (keep.rowsTop > 0) {
+            const nr = c.querySelector('.nf-stage > .nf-rows');
+            if (nr && PekSandbox._rowsSig(nr) === keep.rowsSig) nr.scrollTop = keep.rowsTop;   // same list: stay where we were
+        }
         if (keep.input) {
             const inp = c.querySelector('input[data-sx-key="' + keep.input.key + '"]');
             if (inp) {
@@ -1352,6 +1306,21 @@ class PekSandbox {
 
     // Holding the D-pad on a tile (one with a focus handler) tells the plugin which title is highlighted, once the
     // highlight has settled for a moment, so it can show that title in the billboard and start its trailer.
+    static _tvOn() { return !!(document.documentElement && document.documentElement.classList.contains('pek-tv')); }
+
+    // Tells the plugin when TV / D-pad mode is switched on or off while it is open.
+    _bindEnv() {
+        if (this._envBound || typeof MutationObserver !== 'function') return;
+        this._envBound = true;
+        let last = PekSandbox._tvOn();
+        new MutationObserver(() => {
+            const now = PekSandbox._tvOn();
+            if (now === last) return;
+            last = now;
+            this._send({ t: 'env', tv: now });
+        }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    }
+
     _bindNfFocus() {
         if (this._nfFocusBound || typeof MutationObserver !== 'function' || !this.container) return;
         this._nfFocusBound = true;
