@@ -1,0 +1,1248 @@
+diff -ruN -x __pycache__ orig_main/SUBTITLES.md b/SUBTITLES.md
+--- orig_main/SUBTITLES.md	1970-01-01 00:00:00.000000000 +0000
++++ b/SUBTITLES.md	2026-10-13 22:32:32.385430599 +0000
+@@ -0,0 +1,22 @@
++# Automatic subtitles
++
++PEK TV looks subtitles up online when what you are watching has none (torrent streams, bare files).
++Nobody needs an OpenSubtitles account: one shared account lives in the cloud worker (see cloud/DEPLOY.md, "Subtitles").
++
++## How it behaves
++- A few seconds after playback starts, if the file has no subtitle track of its own, the best match is
++  downloaded and switched on. A short message on the picture says what was chosen. Files that already have
++  subtitles are left alone.
++- The subtitle button (CC) always offers "Find subtitles online..." to see the other matches (release name,
++  language, trusted uploader, hearing-impaired, auto-translated) and pick one by hand.
++- Settings > Subtitles: automatic on/off and the language.
++- The daily OpenSubtitles download limit is shared by everyone, so the worker stores every subtitle it downloads and
++  serves it to all later users for free, and caps new downloads per day and per person.
++
++## Where things are
++- cloud/worker.js      /v1/subs/search, /v1/subs/get (shared account, D1 cache, daily limits)  [pekmain only]
++- backend/subtitles.h  local routes /api/subtitles/search, /fetch, /cache/<id>.srt (forwards to the worker)
++- www/subtitles.js     release-name parsing, client, SRT->VTT, the per-player controller
++- www/app_subtitles.js Settings > Subtitles
++- www/player.js        addSubtitle() on the backends, subtitle menu entry, on-screen message
++- Android: MpvController.addSubtitle + PekAndroid.mpvAddSubtitle (mpv sub-add)
+diff -ruN -x __pycache__ orig_main/backend/server.cpp b/backend/server.cpp
+--- orig_main/backend/server.cpp	2026-10-11 18:39:08.000000000 +0000
++++ b/backend/server.cpp	2026-10-13 22:15:36.609410284 +0000
+@@ -7,6 +7,7 @@
+ #include "plugin_install.h"
+ #include "github_install.h"
+ #include "skin_install.h"
++#include "subtitles.h"
+ #include <iostream>
+ #include <fstream>
+ #include <functional>
+@@ -641,6 +642,7 @@
+         res.set_content(json, "application/json");
+     });
+ 
++    peksubs::registerSubtitleRoutes(svr);   // automatic subtitle look-up (subtitles.h)
+     pekgithub::registerGithubRoutes(svr);   // install a plugin from GitHub by name (github_install.h)
+ 
+     svr.Post("/api/plugins/fetch", [isZipName](const httplib::Request& req, httplib::Response& res) {
+diff -ruN -x __pycache__ orig_main/backend/subtitles.h b/backend/subtitles.h
+--- orig_main/backend/subtitles.h	1970-01-01 00:00:00.000000000 +0000
++++ b/backend/subtitles.h	2026-10-13 22:31:53.458929304 +0000
+@@ -0,0 +1,391 @@
++#pragma once
++// ============================================================
++// Automatic subtitle look-up
++//
++// The app does not talk to OpenSubtitles itself: one shared account lives in the cloud worker
++// (cloud/worker.js: /v1/subs/search and /v1/subs/get), so nobody needs their own key. This file is the
++// local half: it forwards the page's requests to the worker and keeps the downloaded text so the player
++// (mpv, or the <video> element) can load it from this device.
++//
++//   POST /api/subtitles/search   title, [year], [season], [episode], [lang], [file]
++//        -> {"ok":true,"results":[{id,name,lang,downloads,hi,ai,trusted,score}, ...]}   best first
++//   POST /api/subtitles/fetch    id
++//        -> {"ok":true,"url":"/api/subtitles/cache/<id>.srt"}
++//   GET  /api/subtitles/cache/<id>.srt      the subtitle as UTF-8 SubRip text
++//
++// The worker's address is the PEK_SUBS_URL environment variable, default the sync worker.
++// Downloaded subtitles are kept in memory only (a few at a time), so no storage permission is needed.
++// ============================================================
++
++#include <algorithm>
++#include <chrono>
++#include <cstdlib>
++#include <cctype>
++#include <deque>
++#include <map>
++#include <mutex>
++#include <set>
++#include <sstream>
++#include <string>
++#include <utility>
++#include <vector>
++
++#include "httplib.h"
++
++namespace peksubs {
++
++// ---------------- a small JSON reader (the answers are small and well formed) ----------------
++
++struct J {
++    enum Type { Null, Bool, Num, Str, Arr, Obj } t = Null;
++    bool b = false;
++    double n = 0;
++    std::string s;
++    std::vector<J> a;
++    std::vector<std::pair<std::string, J>> o;
++
++    const J* get(const std::string& k) const {
++        if (t != Obj) return nullptr;
++        for (const auto& kv : o) if (kv.first == k) return &kv.second;
++        return nullptr;
++    }
++    std::string str(const std::string& k, const std::string& def = "") const {
++        const J* v = get(k);
++        if (!v) return def;
++        if (v->t == Str) return v->s;
++        if (v->t == Num) { std::ostringstream os; os << static_cast<long long>(v->n); return os.str(); }
++        return def;
++    }
++    double num(const std::string& k, double def = 0) const {
++        const J* v = get(k);
++        return (v && v->t == Num) ? v->n : def;
++    }
++    bool flag(const std::string& k) const {
++        const J* v = get(k);
++        return v && v->t == Bool && v->b;
++    }
++};
++
++class Parser {
++public:
++    explicit Parser(const std::string& text) : p_(text.c_str()), end_(text.c_str() + text.size()) {}
++    bool parse(J& out) { ws(); if (!value(out, 0)) return false; ws(); return true; }
++
++private:
++    const char* p_;
++    const char* end_;
++
++    void ws() { while (p_ < end_ && (*p_ == ' ' || *p_ == '\n' || *p_ == '\r' || *p_ == '\t')) ++p_; }
++
++    static void putUtf8(std::string& o, unsigned cp) {
++        if (cp < 0x80) o += static_cast<char>(cp);
++        else if (cp < 0x800) { o += static_cast<char>(0xC0 | (cp >> 6)); o += static_cast<char>(0x80 | (cp & 0x3F)); }
++        else if (cp < 0x10000) { o += static_cast<char>(0xE0 | (cp >> 12)); o += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); o += static_cast<char>(0x80 | (cp & 0x3F)); }
++        else { o += static_cast<char>(0xF0 | (cp >> 18)); o += static_cast<char>(0x80 | ((cp >> 12) & 0x3F)); o += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); o += static_cast<char>(0x80 | (cp & 0x3F)); }
++    }
++
++    bool hex4(unsigned& v) {
++        if (end_ - p_ < 4) return false;
++        v = 0;
++        for (int i = 0; i < 4; ++i) {
++            char c = *p_++;
++            v <<= 4;
++            if (c >= '0' && c <= '9') v |= static_cast<unsigned>(c - '0');
++            else if (c >= 'a' && c <= 'f') v |= static_cast<unsigned>(c - 'a' + 10);
++            else if (c >= 'A' && c <= 'F') v |= static_cast<unsigned>(c - 'A' + 10);
++            else return false;
++        }
++        return true;
++    }
++
++    bool string(std::string& out) {
++        if (p_ >= end_ || *p_ != '"') return false;
++        ++p_;
++        while (p_ < end_) {
++            char c = *p_++;
++            if (c == '"') return true;
++            if (c != '\\') { out += c; continue; }
++            if (p_ >= end_) return false;
++            char e = *p_++;
++            switch (e) {
++                case '"': out += '"'; break;
++                case '\\': out += '\\'; break;
++                case '/': out += '/'; break;
++                case 'b': out += '\b'; break;
++                case 'f': out += '\f'; break;
++                case 'n': out += '\n'; break;
++                case 'r': out += '\r'; break;
++                case 't': out += '\t'; break;
++                case 'u': {
++                    unsigned cp;
++                    if (!hex4(cp)) return false;
++                    if (cp >= 0xD800 && cp < 0xDC00 && end_ - p_ >= 6 && p_[0] == '\\' && p_[1] == 'u') {
++                        p_ += 2;
++                        unsigned lo;
++                        if (!hex4(lo)) return false;
++                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
++                    }
++                    putUtf8(out, cp);
++                    break;
++                }
++                default: return false;
++            }
++        }
++        return false;
++    }
++
++    bool value(J& v, int depth) {
++        if (depth > 40 || p_ >= end_) return false;
++        char c = *p_;
++        if (c == '{') {
++            ++p_; v.t = J::Obj; ws();
++            if (p_ < end_ && *p_ == '}') { ++p_; return true; }
++            for (;;) {
++                ws();
++                std::string k;
++                if (!string(k)) return false;
++                ws();
++                if (p_ >= end_ || *p_++ != ':') return false;
++                ws();
++                J child;
++                if (!value(child, depth + 1)) return false;
++                v.o.emplace_back(std::move(k), std::move(child));
++                ws();
++                if (p_ >= end_) return false;
++                if (*p_ == ',') { ++p_; continue; }
++                if (*p_ == '}') { ++p_; return true; }
++                return false;
++            }
++        }
++        if (c == '[') {
++            ++p_; v.t = J::Arr; ws();
++            if (p_ < end_ && *p_ == ']') { ++p_; return true; }
++            for (;;) {
++                ws();
++                J child;
++                if (!value(child, depth + 1)) return false;
++                v.a.push_back(std::move(child));
++                ws();
++                if (p_ >= end_) return false;
++                if (*p_ == ',') { ++p_; continue; }
++                if (*p_ == ']') { ++p_; return true; }
++                return false;
++            }
++        }
++        if (c == '"') { v.t = J::Str; return string(v.s); }
++        if (end_ - p_ >= 4 && std::string(p_, 4) == "true") { p_ += 4; v.t = J::Bool; v.b = true; return true; }
++        if (end_ - p_ >= 5 && std::string(p_, 5) == "false") { p_ += 5; v.t = J::Bool; v.b = false; return true; }
++        if (end_ - p_ >= 4 && std::string(p_, 4) == "null") { p_ += 4; v.t = J::Null; return true; }
++        char* e = nullptr;
++        double d = std::strtod(p_, &e);
++        if (e == p_) return false;
++        p_ = e; v.t = J::Num; v.n = d;
++        return true;
++    }
++};
++
++inline bool parseJson(const std::string& text, J& out) { Parser p(text); return p.parse(out); }
++
++// ---------------- helpers ----------------
++
++inline std::string jesc(const std::string& s) {
++    std::string o;
++    o.reserve(s.size() + 8);
++    for (unsigned char c : s) {
++        switch (c) {
++            case '"': o += "\\\""; break;
++            case '\\': o += "\\\\"; break;
++            case '\n': o += "\\n"; break;
++            case '\r': o += "\\r"; break;
++            case '\t': o += "\\t"; break;
++            default:
++                if (c < 0x20) o += ' ';
++                else o += static_cast<char>(c);
++        }
++    }
++    return o;
++}
++
++inline void fail(httplib::Response& res, int status, const std::string& msg) {
++    res.status = status;
++    res.set_header("Cache-Control", "no-store");
++    res.set_content("{\"ok\": false, \"error\": \"" + jesc(msg) + "\"}", "application/json");
++}
++
++inline std::string lower(std::string s) {
++    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++    return s;
++}
++
++// Words of a release name / title, lower case (used to rank candidates against the playing file).
++inline std::set<std::string> words(const std::string& s) {
++    std::set<std::string> out;
++    std::string cur;
++    for (unsigned char ch : s) {
++        if (std::isalnum(ch)) cur += static_cast<char>(std::tolower(ch));
++        else { if (cur.size() > 1) out.insert(cur); cur.clear(); }
++    }
++    if (cur.size() > 1) out.insert(cur);
++    return out;
++}
++
++#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
++inline void applyCa(httplib::SSLClient& c) {
++    const char* f = std::getenv("SSL_CERT_FILE");
++    const char* d = std::getenv("SSL_CERT_DIR");
++    bool hasF = f && *f, hasD = d && *d;
++    if (hasF || hasD) c.set_ca_cert_path(hasF ? f : "", hasD ? d : "");
++}
++
++// Where the shared subtitle service lives: https://host[:port]
++inline bool workerHost(std::string& host, int& port) {
++    const char* env = std::getenv("PEK_SUBS_URL");
++    std::string u = (env && *env) ? env : "https://pek-sync.aquariusibeats.workers.dev";
++    const std::string pre = "https://";
++    if (u.compare(0, pre.size(), pre) != 0) return false;
++    u = u.substr(pre.size());
++    while (!u.empty() && u.back() == '/') u.pop_back();
++    port = 443;
++    size_t colon = u.find(':');
++    if (colon != std::string::npos) { port = std::atoi(u.c_str() + colon + 1); u = u.substr(0, colon); }
++    if (u.empty() || port <= 0 || port > 65535) return false;
++    for (unsigned char c : u) if (!(std::isalnum(c) || c == '.' || c == '-')) return false;
++    host = u;
++    return true;
++}
++
++// POST a small JSON body to the worker. Returns false (and fills msg) when it cannot be reached.
++inline bool workerPost(const std::string& path, const std::string& body, int& status, std::string& answer, std::string& msg) {
++    std::string host; int port;
++    if (!workerHost(host, port)) { msg = "The subtitle service address is not valid."; return false; }
++    httplib::SSLClient cli(host, port);
++    applyCa(cli);
++    cli.set_connection_timeout(8);
++    cli.set_read_timeout(25);
++    cli.set_follow_location(true);
++    auto r = cli.Post(path, httplib::Headers{{"User-Agent", "PEK-TV-subtitles"}, {"Accept", "application/json"}}, body, "application/json");
++    if (!r) { msg = "Couldn't reach the subtitle service (" + httplib::to_string(r.error()) + ")."; return false; }
++    status = r->status;
++    answer = r->body;
++    return true;
++}
++#endif  // CPPHTTPLIB_OPENSSL_SUPPORT
++
++// ---------------- text: make it UTF-8 SubRip ----------------
++
++inline bool validUtf8(const std::string& s) {
++    size_t i = 0, n = s.size();
++    while (i < n) {
++        unsigned char c = static_cast<unsigned char>(s[i]);
++        size_t len = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
++        if (!len || i + len > n) return false;
++        for (size_t k = 1; k < len; ++k) if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
++        i += len;
++    }
++    return true;
++}
++
++// Old subtitle files are often Windows-1252. 0x80-0x9F differ from Latin-1; the rest map straight.
++inline std::string fromCp1252(const std::string& s) {
++    static const unsigned short hi[32] = {
++        0x20AC, 0x81, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021, 0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x8D, 0x017D, 0x8F,
++        0x90, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014, 0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x9D, 0x017E, 0x0178};
++    std::string o;
++    o.reserve(s.size() + s.size() / 8);
++    for (unsigned char c : s) {
++        unsigned cp = c;
++        if (c >= 0x80 && c < 0xA0) cp = hi[c - 0x80];
++        if (cp < 0x80) o += static_cast<char>(cp);
++        else if (cp < 0x800) { o += static_cast<char>(0xC0 | (cp >> 6)); o += static_cast<char>(0x80 | (cp & 0x3F)); }
++        else { o += static_cast<char>(0xE0 | (cp >> 12)); o += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); o += static_cast<char>(0x80 | (cp & 0x3F)); }
++    }
++    return o;
++}
++
++inline std::string normalizeSubtitle(std::string s) {
++    if (s.size() >= 3 && static_cast<unsigned char>(s[0]) == 0xEF && static_cast<unsigned char>(s[1]) == 0xBB && static_cast<unsigned char>(s[2]) == 0xBF) s.erase(0, 3);
++    if (!validUtf8(s)) s = fromCp1252(s);
++    return s;
++}
++
++// A few subtitles at a time, in memory.
++inline std::mutex& cacheMu() { static std::mutex m; return m; }
++inline std::map<std::string, std::string>& cacheMap() { static std::map<std::string, std::string> m; return m; }
++inline std::deque<std::string>& cacheOrder() { static std::deque<std::string> d; return d; }
++inline void cachePut(const std::string& id, const std::string& text) {
++    std::lock_guard<std::mutex> lk(cacheMu());
++    if (!cacheMap().count(id)) cacheOrder().push_back(id);
++    cacheMap()[id] = text;
++    while (cacheOrder().size() > 12) { cacheMap().erase(cacheOrder().front()); cacheOrder().pop_front(); }
++}
++inline bool cacheGet(const std::string& id, std::string& out) {
++    std::lock_guard<std::mutex> lk(cacheMu());
++    auto it = cacheMap().find(id);
++    if (it == cacheMap().end()) return false;
++    out = it->second;
++    return true;
++}
++
++inline void registerSubtitleRoutes(httplib::Server& svr) {
++#ifdef CPPHTTPLIB_OPENSSL_SUPPORT
++    svr.Post("/api/subtitles/search", [](const httplib::Request& req, httplib::Response& res) {
++        std::string title = req.get_param_value("title");
++        if (title.empty() || title.size() > 200) { fail(res, 400, "No title to search for."); return; }
++        std::string body = "{\"title\":\"" + jesc(title) + "\"";
++        for (const char* k : {"year", "season", "episode"}) body += std::string(",\"") + k + "\":" + std::to_string(std::atoi(req.get_param_value(k).c_str()));
++        body += ",\"lang\":\"" + jesc(req.get_param_value("lang").substr(0, 40)) + "\"";
++        body += ",\"file\":\"" + jesc(req.get_param_value("file").substr(0, 300)) + "\"}";
++
++        int status = 0; std::string answer, msg;
++        if (!workerPost("/v1/subs/search", body, status, answer, msg)) { fail(res, 502, msg); return; }
++        J j;
++        if (!parseJson(answer, j)) { fail(res, 502, "The subtitle service sent an answer that could not be read."); return; }
++        if (status != 200 || j.t != J::Obj || j.flag("ok") == false) {
++            std::string e = j.str("error");
++            fail(res, status >= 400 ? status : 502, e.empty() ? "The subtitle service answered HTTP " + std::to_string(status) + "." : e);
++            return;
++        }
++        res.set_header("Cache-Control", "no-store");
++        res.set_content(answer, "application/json");     // already in the shape the page wants
++    });
++
++    svr.Post("/api/subtitles/fetch", [](const httplib::Request& req, httplib::Response& res) {
++        std::string id = req.get_param_value("id");
++        if (id.empty() || id.size() > 12 || !std::all_of(id.begin(), id.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
++            fail(res, 400, "Bad subtitle id.");
++            return;
++        }
++        std::string have;
++        if (!cacheGet(id, have)) {                       // not on this device yet: ask the service (free if anyone fetched it before)
++            int status = 0; std::string answer, msg;
++            if (!workerPost("/v1/subs/get", "{\"id\":\"" + id + "\"}", status, answer, msg)) { fail(res, 502, msg); return; }
++            J j;
++            if (!parseJson(answer, j)) { fail(res, 502, "The subtitle service sent an answer that could not be read."); return; }
++            std::string text = j.str("text");
++            if (status != 200 || !j.flag("ok") || text.empty()) {
++                std::string e = j.str("error");
++                fail(res, status >= 400 ? status : 502, e.empty() ? "Couldn't get that subtitle." : e);
++                return;
++            }
++            if (text.size() > 3 * 1024 * 1024) { fail(res, 502, "That subtitle file is too large."); return; }
++            cachePut(id, normalizeSubtitle(text));
++        }
++        res.set_header("Cache-Control", "no-store");
++        res.set_content("{\"ok\": true, \"url\": \"/api/subtitles/cache/" + id + ".srt\"}", "application/json");
++    });
++
++    svr.Get(R"(/api/subtitles/cache/(\d{1,12})\.srt)", [](const httplib::Request& req, httplib::Response& res) {
++        std::string text;
++        if (!cacheGet(req.matches[1].str(), text)) { res.status = 404; res.set_content("not found", "text/plain"); return; }
++        res.set_header("Cache-Control", "no-store");
++        res.set_content(text, "application/x-subrip; charset=utf-8");
++    });
++#else
++    svr.Post("/api/subtitles/search", [](const httplib::Request&, httplib::Response& res) {
++        res.status = 501;
++        res.set_content("{\"ok\": false, \"error\": \"This build has no HTTPS support, so it can't look up subtitles.\"}", "application/json");
++    });
++#endif
++}
++
++}  // namespace peksubs
+diff -ruN -x __pycache__ orig_main/cloud/DEPLOY.md b/cloud/DEPLOY.md
+--- orig_main/cloud/DEPLOY.md	2026-10-13 03:15:16.000000000 +0000
++++ b/cloud/DEPLOY.md	2026-10-13 22:32:32.385099229 +0000
+@@ -35,6 +35,29 @@
+ 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
+    already limits sign-ups, sign-ins, reset requests and code guesses itself.
+ 
++## Subtitles (one shared OpenSubtitles account for every user)
++
++Users set nothing up. The worker holds one OpenSubtitles.com account and the app asks the worker.
++
++1. Make an account at opensubtitles.com, confirm the email, then create an API consumer/key
++   (profile -> API consumers). The free tier allows about 20 subtitle downloads per day, to check on your account.
++   If many people use the app, an OpenSubtitles VIP plan raises that limit a lot.
++2. Worker -> **Settings** -> **Variables and Secrets** -> Add:
++   - Type **Secret**, name `OPENSUBTITLES_API_KEY`, value = the API key
++   - Type **Secret**, name `OPENSUBTITLES_USER`, value = the account user name
++   - Type **Secret**, name `OPENSUBTITLES_PASS`, value = the account password
++   - Optional, Type **Text**: `SUBS_DAILY_LIMIT` (default 18: keep it a little under your real limit) and
++     `SUBS_IP_DAILY_LIMIT` (default 8 new downloads per person per day). Then **Deploy**.
++3. Paste the new `worker.js` and deploy (the `subs_cache` table is created on the first request).
++
++How the daily limit is protected:
++- Searching is free and is not counted.
++- Every subtitle that has been downloaded once is stored in D1 and given to everyone after that at no cost, so
++  popular episodes and films use the daily limit only once for all users together.
++- New downloads are counted for the whole service per day and per IP address, so one person cannot use it all up.
++  When the limit is reached the app says "Subtitle downloads are used up for today"; subtitles already stored still work.
++- If the worker is not on the sync address, set the `PEK_SUBS_URL` environment variable of the app's backend to its address.
++
+ ## Plugin backup (no extra setup)
+ 
+ The same worker and the same D1 database also store plugin backups. There is nothing new to configure:
+diff -ruN -x __pycache__ orig_main/cloud/worker.js b/cloud/worker.js
+--- orig_main/cloud/worker.js	2026-10-13 03:15:16.000000000 +0000
++++ b/cloud/worker.js	2026-10-13 22:31:20.573267857 +0000
+@@ -21,6 +21,8 @@
+ //                                                                  or 403 email_not_verified (new account that never confirmed its email)
+ //   POST   /v1/auth/forgot   { email }                          -> { ok }   (always, so emails can't be probed)
+ //   POST   /v1/auth/reset    { email, code, password }          -> { ok, token, email }
++//   POST   /v1/subs/search   { title, year?, season?, episode?, lang?, file? } -> { ok, results }   (shared OpenSubtitles account, no sign-in)
++//   POST   /v1/subs/get      { id }                                            -> { ok, text, cached }  (see "subtitles" below)
+ //   POST   /v1/auth/logout                                      -> { ok }
+ //   POST   /v1/auth/confirm  { password }                      -> { ok }   (re-checks the signed-in account's password, e.g. to reset a forgotten profile passcode; rate limited)
+ //   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted,avatar,pin}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins;
+@@ -109,6 +111,7 @@
+     await db.prepare('CREATE TABLE IF NOT EXISTS store_chunks (owner TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (owner, id, fp, idx))').run();
+     await db.prepare('CREATE TABLE IF NOT EXISTS gh_states (state TEXT PRIMARY KEY, ret TEXT NOT NULL, created INTEGER NOT NULL)').run();
+     await db.prepare('CREATE TABLE IF NOT EXISTS gh_sessions (token_hash TEXT PRIMARY KEY, gh_id TEXT NOT NULL, login TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
++    await db.prepare('CREATE TABLE IF NOT EXISTS subs_cache (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL)').run();
+     ready = true;
+ }
+ 
+@@ -970,6 +973,175 @@
+ }
+ 
+ // ---------------------------------------------------------------- router
++// ---------------------------------------------------------------- subtitles (one shared OpenSubtitles.com account)
++// Everyone's app asks this worker, so nobody needs their own OpenSubtitles account. The worker holds the key.
++//   POST /v1/subs/search  { title, year?, season?, episode?, lang?, file? }  -> { ok, results: [{id,name,lang,title,downloads,hi,ai,trusted,score}] }
++//   POST /v1/subs/get     { id }                                             -> { ok, text, cached }   (SubRip, UTF-8)
++// Search costs nothing against OpenSubtitles' daily download limit. A download does, so:
++//   - every downloaded subtitle is kept in D1 (table subs_cache) and served to all later users for free;
++//   - downloads are counted per day for the whole service (SUBS_DAILY_LIMIT, default 18 of the free 20)
++//     and per IP address (SUBS_IP_DAILY_LIMIT, default 8), so one person cannot use everybody's quota.
++// Secrets: OPENSUBTITLES_API_KEY, OPENSUBTITLES_USER, OPENSUBTITLES_PASS  (Text: SUBS_DAILY_LIMIT, SUBS_IP_DAILY_LIMIT optional)
++const OS_HOST = 'https://api.opensubtitles.com';
++const OS_UA = 'PEK TV v1.0';
++const SUBS_CACHE_DAYS = 90;
++const SUBS_MAX_BYTES = 2 * 1024 * 1024;
++let osSession = null;   // { token, base, exp } kept while this worker instance lives
++
++function subsReady(env) { return !!(env.OPENSUBTITLES_API_KEY && env.OPENSUBTITLES_USER && env.OPENSUBTITLES_PASS); }
++function osHeaders(env, extra) {
++    return Object.assign({ 'Api-Key': env.OPENSUBTITLES_API_KEY, 'User-Agent': OS_UA, 'Accept': 'application/json' }, extra || {});
++}
++function wordSet(s) {
++    const out = new Set();
++    String(s || '').toLowerCase().split(/[^a-z0-9]+/).forEach(w => { if (w.length > 1) out.add(w); });
++    return out;
++}
++function goodLang(l) { return typeof l === 'string' && /^[a-z]{2}(-[a-z]{2})?(,[a-z]{2}(-[a-z]{2})?){0,4}$/i.test(l); }
++
++async function osLogin(env, force) {
++    const now = Date.now();
++    if (!force && osSession && osSession.exp > now) return osSession;
++    const r = await fetch(OS_HOST + '/api/v1/login', {
++        method: 'POST',
++        headers: osHeaders(env, { 'Content-Type': 'application/json' }),
++        body: JSON.stringify({ username: env.OPENSUBTITLES_USER, password: env.OPENSUBTITLES_PASS })
++    });
++    if (!r.ok) { osSession = null; throw new Error('os_login_' + r.status); }
++    const j = await r.json();
++    if (!j.token) throw new Error('os_login_no_token');
++    let base = String(j.base_url || 'api.opensubtitles.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
++    if (!/^[a-z0-9.-]+$/i.test(base)) base = 'api.opensubtitles.com';
++    osSession = { token: j.token, base: 'https://' + base, exp: now + 20 * 3600 * 1000 };
++    return osSession;
++}
++
++async function handleSubsSearch(request, env) {
++    if (!subsReady(env)) return json({ ok: false, error: 'Subtitles are not set up on the server yet.' }, 503);
++    const { body, err } = await readJson(request);
++    if (err) return err;
++    const db = env.DB, now = Date.now();
++    if (await limited(db, 'subs:search:ip:' + clientIp(request), 120, 3600 * 1000, now)) return json({ ok: false, error: 'Too many subtitle searches. Try again in a little while.' }, 429);
++    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
++    if (!title) return json({ ok: false, error: 'No title to search for.' }, 400);
++    const year = Number(body.year) | 0, season = Number(body.season) | 0, episode = Number(body.episode) | 0;
++    const lang = goodLang(body.lang) ? String(body.lang).toLowerCase() : 'en';
++    const file = typeof body.file === 'string' ? body.file.slice(0, 300) : '';
++    const isEp = season > 0 && episode > 0;
++
++    // OpenSubtitles wants lower-case parameter names in alphabetical order
++    const p = [];
++    if (isEp) p.push(['episode_number', episode]);
++    p.push(['languages', lang], ['order_by', 'download_count'], ['order_direction', 'desc'], ['query', title.toLowerCase()]);
++    if (isEp) p.push(['season_number', season]);
++    p.push(['type', isEp ? 'episode' : 'movie']);
++    if (!isEp && year > 1800 && year < 2200) p.push(['year', year]);
++    const qs = p.map(kv => kv[0] + '=' + encodeURIComponent(kv[1])).join('&');
++
++    // the same title is searched by many people: keep the raw answer for 6 hours (search is free, this just saves calls)
++    const cacheKey = new Request('https://subs-cache.invalid/search?' + qs);
++    let raw = null;
++    const hit = await caches.default.match(cacheKey);
++    if (hit) raw = await hit.json();
++    if (!raw) {
++        const r = await fetch(OS_HOST + '/api/v1/subtitles?' + qs, { headers: osHeaders(env) });
++        if (r.status === 429) return json({ ok: false, error: 'OpenSubtitles is busy. Try again in a minute.' }, 429);
++        if (!r.ok) return json({ ok: false, error: 'OpenSubtitles answered HTTP ' + r.status + '.' }, 502);
++        raw = await r.json();
++        await caches.default.put(cacheKey, new Response(JSON.stringify(raw), { headers: { 'Cache-Control': 'max-age=21600', 'Content-Type': 'application/json' } }));
++    }
++
++    const want = wordSet(file || title), wantLower = file.toLowerCase();
++    const list = [];
++    for (const item of (raw.data || [])) {
++        const at = item && item.attributes;
++        const f = at && at.files && at.files[0];
++        if (!f || !f.file_id) continue;
++        const name = at.release || f.file_name || '';
++        const downloads = Number(at.download_count) || 0;
++        const ai = !!(at.ai_translated || at.machine_translated), hi = !!at.hearing_impaired, trusted = !!at.from_trusted;
++        let shared = 0;
++        wordSet(name).forEach(w => { if (want.has(w)) shared++; });
++        let score = shared * 12;
++        if (file && name.toLowerCase() === wantLower) score += 60;
++        score += Math.min(40, downloads / 500);
++        if (trusted) score += 15;
++        if (ai) score -= 40;
++        if (hi) score -= 8;
++        list.push({ id: String(f.file_id), name: name, lang: at.language || '', title: (at.feature_details && at.feature_details.title) || '', downloads: downloads, hi: hi, ai: ai, trusted: trusted, score: Math.round(score) });
++    }
++    list.sort((a, b) => b.score - a.score);
++    return json({ ok: true, results: list.slice(0, 25) });
++}
++
++function decodeSubtitle(buf) {
++    let text;
++    try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
++    catch (e) { text = new TextDecoder('windows-1252').decode(buf); }   // old files are often Windows-1252
++    return text.replace(/^\uFEFF/, '');
++}
++
++async function handleSubsGet(request, env) {
++    if (!subsReady(env)) return json({ ok: false, error: 'Subtitles are not set up on the server yet.' }, 503);
++    const { body, err } = await readJson(request);
++    if (err) return err;
++    const db = env.DB, now = Date.now();
++    const id = typeof body.id === 'string' || typeof body.id === 'number' ? String(body.id) : '';
++    if (!/^\d{1,12}$/.test(id)) return json({ ok: false, error: 'Bad subtitle id.' }, 400);
++    if (await limited(db, 'subs:get:ip:' + clientIp(request), 200, 3600 * 1000, now)) return json({ ok: false, error: 'Too many requests. Try again in a little while.' }, 429);
++
++    // 1) already downloaded by anyone: free
++    const row = await db.prepare('SELECT text FROM subs_cache WHERE id = ?').bind(id).first();
++    if (row && row.text) return json({ ok: true, text: row.text, cached: true });
++
++    // 2) a real download: counted against the service's day and this address's day
++    const dayLimit = Math.max(1, Number(env.SUBS_DAILY_LIMIT) || 18);
++    const ipLimit = Math.max(1, Number(env.SUBS_IP_DAILY_LIMIT) || 8);
++    const DAY = 24 * 3600 * 1000;
++    if (await limited(db, 'subs:dl:ip:' + clientIp(request), ipLimit, DAY, now)) return json({ ok: false, error: 'You have reached today\'s subtitle download limit. It resets tomorrow.' }, 429);
++    if (await limited(db, 'subs:dl:all', dayLimit, DAY, now)) return json({ ok: false, error: 'Subtitle downloads are used up for today. Try again tomorrow.' }, 429);
++
++    let text = '';
++    try {
++        for (let attempt = 0; attempt < 2; attempt++) {
++            const s = await osLogin(env, attempt > 0);
++            const r = await fetch(s.base + '/api/v1/download', {
++                method: 'POST',
++                headers: osHeaders(env, { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.token }),
++                body: JSON.stringify({ file_id: Number(id), sub_format: 'srt' })
++            });
++            if (r.status === 401 && attempt === 0) continue;                       // token went stale: sign in again once
++            if (r.status === 406) {                                                  // OpenSubtitles says the real limit is reached: stop for everybody until tomorrow
++                await db.prepare('UPDATE throttle SET n = ? WHERE k = ?').bind(dayLimit, 'subs:dl:all').run();
++                return json({ ok: false, error: 'Subtitle downloads are used up for today. Try again tomorrow.' }, 429);
++            }
++            if (r.status === 429) return json({ ok: false, error: 'OpenSubtitles is busy. Try again in a minute.' }, 429);
++            if (!r.ok) return json({ ok: false, error: 'OpenSubtitles answered HTTP ' + r.status + '.' }, 502);
++            const j = await r.json();
++            let link;
++            try { link = new URL(j.link); } catch (e) { return json({ ok: false, error: 'No download link came back.' }, 502); }
++            const h = link.hostname.toLowerCase();
++            if (link.protocol !== 'https:' || !(h === 'opensubtitles.org' || h === 'opensubtitles.com' || h.endsWith('.opensubtitles.org') || h.endsWith('.opensubtitles.com'))) {
++                return json({ ok: false, error: 'Unexpected download address.' }, 502);
++            }
++            const d = await fetch(link.href, { headers: { 'User-Agent': OS_UA } });
++            if (!d.ok) return json({ ok: false, error: 'Could not download that subtitle.' }, 502);
++            const buf = await d.arrayBuffer();
++            if (!buf.byteLength || buf.byteLength > SUBS_MAX_BYTES) return json({ ok: false, error: 'That subtitle file is empty or too large.' }, 502);
++            text = decodeSubtitle(buf);
++            break;
++        }
++    } catch (e) {
++        return json({ ok: false, error: 'Could not reach OpenSubtitles.' }, 502);
++    }
++    if (!text) return json({ ok: false, error: 'No subtitle came back.' }, 502);
++
++    await db.prepare('INSERT OR REPLACE INTO subs_cache (id, text, created) VALUES (?, ?, ?)').bind(id, text, now).run();
++    // tidy up now and then: old entries go
++    if (Math.random() < 0.05) await db.prepare('DELETE FROM subs_cache WHERE created < ?').bind(now - SUBS_CACHE_DAYS * DAY).run();
++    return json({ ok: true, text: text, cached: false });
++}
++
+ export default {
+     async fetch(request, env) {
+         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+@@ -989,6 +1161,10 @@
+             if (method === 'POST' && path === '/v1/auth/forgot') return await handleForgot(request, env);
+             if (method === 'POST' && path === '/v1/auth/reset') return await handleReset(request, env);
+ 
++            // Subtitles: no sign-in needed (everyone shares the server's OpenSubtitles account)
++            if (method === 'POST' && path === '/v1/subs/search') return await handleSubsSearch(request, env);
++            if (method === 'POST' && path === '/v1/subs/get') return await handleSubsGet(request, env);
++
+             // GitHub sign-in (used by the GitHub Pages site)
+             if (method === 'GET' && path === '/v1/gh/login') return await ghLogin(url, request, env);
+             if (method === 'GET' && path === '/v1/gh/callback') return await ghCallback(url, env);
+diff -ruN -x __pycache__ orig_main/www/app.js b/www/app.js
+--- orig_main/www/app.js	2026-10-13 03:45:27.000000000 +0000
++++ b/www/app.js	2026-10-13 22:18:03.872811500 +0000
+@@ -303,6 +303,7 @@
+                 ),
+                 this._renderProfileSettings(),
+                 this._renderSyncSettings(),
++                this._renderSubtitleSettings(),
+                 createElement('div', { className: 'settings-section' },
+                     createElement('h2', {}, 'Layout'),
+                     createElement('div', { className: 'plugin-list layout-cards' },
+diff -ruN -x __pycache__ orig_main/www/app_subtitles.js b/www/app_subtitles.js
+--- orig_main/www/app_subtitles.js	1970-01-01 00:00:00.000000000 +0000
++++ b/www/app_subtitles.js	2026-10-13 22:32:15.263670248 +0000
+@@ -0,0 +1,49 @@
++// ============================================================
++// MainApp: Settings > Subtitles (automatic subtitle look-up, see subtitles.js)
++// Loaded after app.js. These methods are added to MainApp.prototype.
++// ============================================================
++
++class MainAppSubtitleMethods {
++
++    _renderSubtitleSettings() {
++        const S = window.PekSubs;
++        if (!S) return null;
++        const { createElement, ui } = this.props.engine;
++        const c = S.config;
++        const langs = S.languages;
++        const current = c.lang.split(',')[0].trim().toLowerCase();
++        return createElement('div', { className: 'settings-section' },
++            createElement('h2', {}, 'Subtitles'),
++            createElement('p', { className: 'sub' },
++                'Finds subtitles online for anything that plays without its own, like torrents. ' +
++                'Nothing to set up. Pick the language you want.'),
++            ui.toggle('Find subtitles automatically', c.auto, (on) => { S.setConfig({ auto: on }); this.setState({}); }),
++            createElement('p', { className: 'sub' }, 'Language'),
++            createElement('div', { className: 'section-actions' },
++                ...langs.map(l => this._choiceButton(l[1], current === l[0], () => { S.setConfig({ lang: l[0] }); this.setState({}); }))
++            ),
++            createElement('div', { className: 'section-actions' },
++                ui.button(this._subsTesting ? 'Testing\u2026' : 'Test', () => this.testSubtitleSettings())
++            ),
++            this._subsMsg ? createElement('p', { className: 'sub' }, this._subsMsg) : null
++        );
++    }
++
++    async testSubtitleSettings() {
++        const S = window.PekSubs;
++        if (this._subsTesting) return;
++        this._subsTesting = true;
++        this._subsMsg = '';
++        this.setState({});
++        try {
++            const list = await S.test();
++            this._subsMsg = list.length ? 'Subtitle service is working.' : 'Connected, but the test search found nothing.';
++        } catch (e) {
++            this._subsMsg = (e && e.message) || 'The test failed.';
++        }
++        this._subsTesting = false;
++        this.setState({});
++    }
++}
++
++pekMixin(MainApp, MainAppSubtitleMethods);
+diff -ruN -x __pycache__ orig_main/www/index.html b/www/index.html
+--- orig_main/www/index.html	2026-10-13 19:24:07.000000000 +0000
++++ b/www/index.html	2026-10-13 22:18:14.249654070 +0000
+@@ -81,7 +81,8 @@
+ <script src="favorites.js?v=2"></script>
+ <script src="providers.js?v=1"></script>
+ <script src="skip_segments.js?v=2"></script>
+-<script src="player.js?v=10"></script>
++<script src="subtitles.js?v=1"></script>
++<script src="player.js?v=11"></script>
+ <script src="live_overlay.js?v=2"></script>
+ <script src="sync.js?v=6"></script>
+ <script src="busy.js?v=1"></script>
+@@ -99,6 +100,7 @@
+ <script src="app_library.js?v=4"></script>
+ <script src="app_watch.js?v=10"></script>
+ <script src="app_playback.js?v=5"></script>
++<script src="app_subtitles.js?v=1"></script>
+ <script src="app_plugins.js?v=gh1"></script>
+ <script src="plugin_store.js?v=gh1"></script>
+ <script src="next_episode.js?v=1"></script>
+diff -ruN -x __pycache__ orig_main/www/player.js b/www/player.js
+--- orig_main/www/player.js	2026-10-13 03:45:27.000000000 +0000
++++ b/www/player.js	2026-10-13 22:17:42.469126490 +0000
+@@ -20,6 +20,8 @@
+    Backend contract (extend PekPlayerBackend):
+      load(url, startSec)  play()  pause()  seek(sec)          seek = absolute seconds
+      setAudioTrack(id)    setSubtitleTrack(id | null)         null = subtitles off
++     addSubtitle(url, label)   load an extra subtitle file (SubRip text at url) and switch it on;
++                          returns a Promise: false = this backend cannot (see subtitles.js)
+      destroy()
+      drawsBehindPage      getter, true when the video is a native surface behind
+                           the page (the page then stays transparent)
+@@ -75,6 +77,10 @@
+     font-size: 1.08rem; font-weight: 600; letter-spacing: 0.01em; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65); }
+ 
+ /* live torrent chip (top right, only for torrent streams) */
++.hp-toast { position: absolute; left: 50%; bottom: 17%; max-width: 86%; padding: 9px 16px; border-radius: 999px;
++    transform: translateX(-50%); font-size: 0.85rem; text-align: center; pointer-events: none; z-index: 5;
++    background-color: rgba(28, 24, 21, 0.78); opacity: 0; transition: opacity 0.25s; }
++.hp-toast.hp-on { opacity: 1; }
+ .hp-chip { flex: none; display: none; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px;
+     font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
+ .hp-chip.hp-on { display: flex; }
+@@ -437,6 +443,7 @@
+         seek(sec) {}
+         setAudioTrack(id) {}
+         setSubtitleTrack(id) {}
++        addSubtitle(url, label) { return Promise.resolve(false); }
+         destroy() {}
+     }
+ 
+@@ -460,13 +467,37 @@
+             v.addEventListener('seeked', () => this.emit('state', { playing: !v.paused, buffering: v.readyState < 3 }));
+             v.addEventListener('canplay', () => this.emit('state', { playing: !v.paused, buffering: false }));
+             v.addEventListener('ended', () => this.emit('ended'));
+-            v.addEventListener('loadedmetadata', () => this.emit('tracks', { audio: [], subtitles: [] }));
++            this._ext = [];   // subtitles added with addSubtitle(): { id, label, el, url, on }
++            v.addEventListener('loadedmetadata', () => this._emitTracks());
+             v.addEventListener('error', () => {
+                 const err = v.error;
+                 this.emit('error', { message: (err && err.message) || 'This file could not be played here.' });
+             });
+         }
+         attach(container) { container.appendChild(this.video); }
++        _emitTracks() {
++            this.emit('tracks', { audio: [], subtitles: this._ext.map(e => ({ id: e.id, label: e.label, selected: e.on })) });
++        }
++        setSubtitleTrack(id) {
++            this._ext.forEach(e => { e.on = (e.id === id); try { e.el.track.mode = e.on ? 'showing' : 'disabled'; } catch (x) { /* ignore */ } });
++        }
++        async addSubtitle(url, label) {
++            const r = await fetch(url, { cache: 'no-store' });
++            if (!r.ok) throw new Error('Could not load that subtitle.');
++            let text = await r.text();
++            if (window.PekSubs && window.PekSubs.toVtt) text = window.PekSubs.toVtt(text);
++            const blobUrl = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
++            const t = document.createElement('track');
++            t.kind = 'subtitles';
++            t.label = label || 'Subtitles';
++            t.src = blobUrl;
++            this.video.appendChild(t);
++            const id = 'x' + (this._ext.length + 1);
++            this._ext.push({ id: id, label: label || 'Subtitles', el: t, url: blobUrl, on: false });
++            this.setSubtitleTrack(id);
++            this._emitTracks();
++            return true;
++        }
+         load(url, startSec) {
+             const v = this.video;
+             v.src = url;
+@@ -489,6 +520,7 @@
+         destroy() {
+             const v = this.video;
+             v.pause();
++            (this._ext || []).forEach(e => { try { URL.revokeObjectURL(e.url); } catch (x) { /* ignore */ } });
+             v.removeAttribute('src');
+             if (v.load) v.load();
+             if (v.parentNode) v.parentNode.removeChild(v);
+@@ -517,6 +549,12 @@
+         seek(sec) { window.PekAndroid.mpvSeek(sec); }
+         setAudioTrack(id) { window.PekAndroid.mpvSetAudio(id); }
+         setSubtitleTrack(id) { window.PekAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
++        addSubtitle(url, label) {
++            // an older app build has no mpvAddSubtitle: the caller then says the player can't do it
++            if (typeof window.PekAndroid.mpvAddSubtitle !== 'function') return Promise.resolve(false);
++            window.PekAndroid.mpvAddSubtitle(url, label || 'Subtitles');
++            return Promise.resolve(true);
++        }
+         destroy() {
+             try { window.PekAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
+             window.__pekMpv = null;
+@@ -551,6 +589,8 @@
+             this._streamTick = null;
+             // Skip intro / recap (skip_segments.js). opts.skipMeta = what is playing.
+             this.skip = window.PekSkip ? new window.PekSkip.Controller(this, opts.skipMeta || null) : null;
++            // Automatic subtitles (subtitles.js): looks them up when the file has none; opts.skipMeta is what is playing.
++            this.subs = window.PekSubs ? new window.PekSubs.Controller(this, opts.skipMeta || null) : null;
+             // Up next (next_episode.js): opts.next = { resolve, start } from the app, or none.
+             this.next = window.PekNext && opts.next ? new window.PekNext.Controller(this, opts.next) : null;
+             // Live channel overlay (live_overlay.js): opts.live = { channel, query, check } from a plugin's live session.
+@@ -598,6 +638,7 @@
+                 this.state.subtitles = d.subtitles || [];
+                 if (this.skip && d.chapters) this.skip.setChapters(d.chapters);
+                 this._updateButtons();
++                if (this.subs) this.subs.onTracks();
+             });
+             b.on('ended', () => { if (this.next && this.next.onEnded()) return; this.close(); });
+             b.on('error', (d) => {
+@@ -625,6 +666,8 @@
+             if (this.skip) this.skip.destroy();
+             if (this.next) this.next.destroy();
+             if (this.live) this.live.destroy();
++            if (this.subs) this.subs.destroy();
++            clearTimeout(this._toastTimer);
+             window.removeEventListener('keydown', this._onKey, true);
+             window.removeEventListener('keyup', this._onKeyUp, true);
+             try { this.backend.destroy(); } catch (e) { /* ignore */ }
+@@ -1039,7 +1082,7 @@
+             if (this.skip && this.skip.cur) order.push('skipnow');
+             if (this.next && this.next.visible()) { order.push('nextnow'); order.push('nextno'); }
+             if (this.state.audio.length > 1) order.push('audio');
+-            if (this.state.subtitles.length > 0) order.push('subs');
++            if (this._subsButton()) order.push('subs');
+             if (this.skip && this.skip.available()) order.push('skip');
+             if (this.live) {
+                 const ls = this.live.buttonsShown();
+@@ -1055,7 +1098,7 @@
+             this.btns.play.setAttribute('aria-label', this.state.playing ? 'Pause' : 'Play');
+             this.btns.play.title = this.state.playing ? 'Pause' : 'Play';
+             this.btns.audio.style.display = this.state.audio.length > 1 ? '' : 'none';
+-            this.btns.subs.style.display = this.state.subtitles.length > 0 ? '' : 'none';
++            this.btns.subs.style.display = this._subsButton() ? '' : 'none';
+             this.btns.skip.style.display = this.skip && this.skip.available() ? '' : 'none';
+             const waiting = this.state.buffering && this.errorBox.style.display !== 'block';
+             this.spinner.classList.toggle('hp-on', waiting);
+@@ -1120,6 +1163,28 @@
+             this.exitBtn.classList.toggle('hp-focused', this.confirmIndex === 1);
+         }
+ 
++        // The subtitle button shows when the file has tracks, or when online look-up is set up.
++        _subsButton() { return this.state.subtitles.length > 0 || !!(this.subs && this.subs.available()); }
++
++        // A short message over the picture ("Subtitles on: EN"). Shows even while the controls are hidden.
++        _toast(text) {
++            if (this._closed || !this.root) return;
++            if (!this.toastEl) { this.toastEl = el('div', 'hp-toast'); this.root.appendChild(this.toastEl); }
++            this.toastEl.textContent = text;
++            this.toastEl.classList.add('hp-on');
++            clearTimeout(this._toastTimer);
++            this._toastTimer = setTimeout(() => { if (this.toastEl) this.toastEl.classList.remove('hp-on'); }, 3800);
++        }
++
++        // The online search finished (or changed): redraw the "Find subtitles" list if it is open.
++        _refreshSubMenu() {
++            const m = this.menu;
++            if (!m || m.kind !== 'subfind' || !this.subs) return;
++            m.items = this.subs.menuItems();
++            m.index = Math.max(0, Math.min(m.index, m.items.length - 1));
++            this._renderMenu();
++        }
++
+         _openMenu(kind) {
+             if (kind === 'skip') {
+                 if (!this.skip) return;
+@@ -1128,10 +1193,19 @@
+                 this._renderMenu();
+                 return;
+             }
++            if (kind === 'subfind') {
++                if (!this.subs) return;
++                this.subs.openList();
++                this.menu = { kind: 'subfind', items: this.subs.menuItems(), index: 0 };
++                this.mode = 'menu';
++                this._renderMenu();
++                return;
++            }
+             const tracks = kind === 'audio' ? this.state.audio : this.state.subtitles;
+-            const items = kind === 'subs'
++            let items = kind === 'subs'
+                 ? [{ id: null, label: 'Off', selected: !tracks.some(t => t.selected) }].concat(tracks)
+                 : tracks.slice();
++            if (kind === 'subs' && this.subs && this.subs.available()) items.push({ id: '__find', find: true, label: 'Find subtitles online\u2026' });
+             if (!items.length) return;
+             let index = 0;
+             items.forEach((it, i) => { if (it.selected) index = i; });
+@@ -1143,7 +1217,7 @@
+         _renderMenu() {
+             const m = this.menu;
+             this.menuEl.textContent = '';
+-            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : (m.kind === 'skip' ? 'Skip intro & recap' : 'Subtitles')));
++            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : (m.kind === 'skip' ? 'Skip intro & recap' : (m.kind === 'subfind' ? 'Find subtitles' : 'Subtitles'))));
+             m.items.forEach((it, i) => {
+                 const row = el('div', 'hp-menu-item' + (i === m.index ? ' hp-focused' : ''),
+                     (it.selected ? '\u2713  ' : '     ') + it.label);
+@@ -1164,6 +1238,13 @@
+                 this._renderMenu();
+                 return;
+             }
++            if (m.kind === 'subfind') {               // an online result: load it (or, for a status row, stay)
++                try { item.action(); } catch (e) { console.error('[PekPlayer]', e); }
++                if (item.keep) { this._refreshSubMenu(); return; }
++                this._closeMenu();
++                return;
++            }
++            if (m.kind === 'subs' && item.find) { this._openMenu('subfind'); return; }
+             const list = m.kind === 'audio' ? this.state.audio : this.state.subtitles;
+             if (m.kind === 'audio') this.backend.setAudioTrack(item.id);
+             else this.backend.setSubtitleTrack(item.id);
+diff -ruN -x __pycache__ orig_main/www/subtitles.js b/www/subtitles.js
+--- orig_main/www/subtitles.js	1970-01-01 00:00:00.000000000 +0000
++++ b/www/subtitles.js	2026-10-13 22:32:15.263360650 +0000
+@@ -0,0 +1,271 @@
++/* ============================================================
++   PEK TV automatic subtitles (PekSubs)
++
++   When something plays that has no subtitles of its own (typically a torrent stream), this looks
++   them up online (OpenSubtitles.com, through the app's own backend: /api/subtitles/*), picks the best
++   match and switches it on. The subtitle menu also gets a "Find subtitles online" entry to choose by hand.
++
++   What is playing is worked out from, in order: the library / torrent metadata the player was opened
++   with (movie title + year, or show + season + episode), then the release name of the torrent, then the
++   player's title. Release names like "Show.Name.S02E05.1080p.WEB-DL.x264-GRP" are cleaned up here.
++
++   Nobody needs an account: the app's backend asks one shared OpenSubtitles account kept in the cloud worker
++   (cloud/worker.js), which also keeps every subtitle it has downloaded so it is only ever fetched once.
++
++   Settings (Settings > Subtitles, kept in this device's local storage):
++     pek_subs_lang                                   language code(s), e.g. "en" or "en,es"
++     pek_subs_auto                                   '0' = never search on its own (default: on)
++
++   Used by player.js:
++     new PekSubs.Controller(player, meta)   .onTracks()  .available()  .menuItems()  .find(auto)  .destroy()
++   Also:  PekSubs.parseName(text)  PekSubs.toVtt(srt)  PekSubs.config / PekSubs.setConfig(...)
++   ============================================================ */
++(function () {
++    'use strict';
++
++    const K = { lang: 'pek_subs_lang', auto: 'pek_subs_auto' };
++    const AUTO_DELAY_MS = 2500;      // wait for the file's own subtitle tracks to show up before deciding there are none
++    const AUTO_MIN_SCORE = 8;        // the backend's ranking: below this the best match is too doubtful to switch on by itself
++    const MENU_RESULTS = 12;
++
++    function read(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
++    function write(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: setting just isn't kept */ } }
++
++    const config = {
++        get lang() { return String(read(K.lang, 'en')).trim() || 'en'; },
++        get auto() { return read(K.auto, '1') !== '0'; }
++    };
++    function setConfig(o) {
++        if (!o) return;
++        if ('lang' in o) write(K.lang, String(o.lang || 'en').trim() || 'en');
++        if ('auto' in o) write(K.auto, o.auto ? '1' : '0');
++    }
++    function configured() { return true; }   // the shared service needs no set-up on the device
++
++    // ---------------- what is playing ----------------
++
++    const JUNK = /\b(2160p|1080p|1080i|720p|576p|480p|4k|uhd|hdr10?\+?|hdr|dv|dolby\s*vision|blu-?ray|bdrip|brrip|web-?dl|web-?rip|webrip|web|hdtv|dvdrip|dvd|remux|x\.?26[45]|h\.?26[45]|hevc|avc|xvid|divx|aac|ac3|eac3|dd[p+]?\s*5\s*1|dts|truehd|atmos|10bit|8bit|proper|repack|extended|unrated|remastered|imax|multi|dual|subbed|hardsub)\b/i;
++
++    // "Show.Name.S02E05.1080p.WEB-DL-GRP.mkv"  ->  { title: 'Show Name', season: 2, episode: 5, year: 0 }
++    function parseName(raw) {
++        let s = String(raw || '').trim();
++        s = s.replace(/\.(mkv|mp4|m4v|avi|mov|wmv|webm|ts|m2ts|mpg|mpeg|srt)$/i, '');
++        s = s.replace(/\[[^\]]*\]/g, ' ').replace(/[._]+/g, ' ').replace(/\s+/g, ' ').trim();
++        let season = 0, episode = 0, year = 0, cut = s.length;
++
++        let m = /\bS(\d{1,2})\s*[.\-_ ]?\s*E(\d{1,3})\b/i.exec(s) || /\b(\d{1,2})x(\d{2,3})\b/i.exec(s);
++        if (m) { season = parseInt(m[1], 10); episode = parseInt(m[2], 10); cut = Math.min(cut, m.index); }
++        else if ((m = /\bseason\s*(\d{1,2})\D{0,6}episode\s*(\d{1,3})\b/i.exec(s))) { season = parseInt(m[1], 10); episode = parseInt(m[2], 10); cut = Math.min(cut, m.index); }
++
++        // a year only counts once something comes before it ("2012" alone is a title)
++        const re = /\b(19[2-9]\d|20[0-4]\d)\b/g;
++        let y;
++        while ((y = re.exec(s))) {
++            if (y.index > 2) { year = parseInt(y[1], 10); if (!season) cut = Math.min(cut, y.index); break; }
++        }
++        const j = JUNK.exec(s);
++        if (j && j.index > 2) cut = Math.min(cut, j.index);
++
++        let title = s.slice(0, cut).replace(/[\(\[\-:\s]+$/g, '').replace(/^[\s\-]+/, '').trim();
++        if (!title) title = s.replace(JUNK, ' ').replace(/\s+/g, ' ').trim();
++        return { title: title, season: season, episode: episode, year: year };
++    }
++
++    // meta = what the player was opened with (see app_watch / torrent.js), name = the player's title
++    function identify(meta, name) {
++        const m = meta || {};
++        const rel = (m.torrent && m.torrent.title) ? String(m.torrent.title) : '';
++        let q = null;
++        if (m.kind === 'movie' && m.title) q = { title: String(m.title), year: m.year | 0, season: 0, episode: 0 };
++        else if (m.kind === 'episode' && m.showTitle && (m.season | 0) > 0 && (m.episode | 0) > 0) {
++            q = { title: String(m.showTitle), year: 0, season: m.season | 0, episode: m.episode | 0 };
++        }
++        if (!q) {
++            const p = parseName(rel || m.title || name);
++            q = { title: p.title, year: p.year, season: p.season, episode: p.episode };
++            if ((m.season | 0) > 0 && (m.episode | 0) > 0) { q.season = m.season | 0; q.episode = m.episode | 0; }
++        }
++        q.file = rel || String(name || '');
++        return q;
++    }
++
++    // ---------------- backend calls ----------------
++
++    function form(o) {
++        const p = new URLSearchParams();
++        Object.keys(o).forEach(k => { if (o[k] !== undefined && o[k] !== null && o[k] !== '') p.set(k, String(o[k])); });
++        return p.toString();
++    }
++
++    async function call(path, params) {
++        let r;
++        try {
++            r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: form(params) });
++        } catch (e) { throw new Error('Could not reach the app. Check your connection.'); }
++        let j = null;
++        try { j = await r.json(); } catch (e) { /* not JSON */ }
++        if (!r.ok || !j || j.ok === false) throw new Error((j && j.error) || ('Subtitle lookup failed (HTTP ' + r.status + ').'));
++        return j;
++    }
++
++    function search(q) {
++        return call('/api/subtitles/search', {
++            title: q.title, year: q.year > 0 ? q.year : '', season: q.season > 0 ? q.season : '',
++            episode: q.episode > 0 ? q.episode : '', lang: config.lang, file: q.file
++        }).then(j => j.results || []);
++    }
++
++    function download(id) {
++        return call('/api/subtitles/fetch', { id: id });
++    }
++
++    // SubRip -> WebVTT, for the <video> element's text tracks (mpv reads SubRip as it is).
++    function toVtt(srt) {
++        let t = String(srt || '').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
++        t = t.replace(/(\d{1,2}:\d{2}:\d{2}),(\d{1,3})/g, '$1.$2');
++        t = t.replace(/\{\\an?\d+\}/g, '');
++        t = t.replace(/<font[^>]*>|<\/font>/gi, '');
++        return 'WEBVTT\n\n' + t;
++    }
++
++    function fmtCount(n) {
++        n = n | 0;
++        return n >= 1000000 ? (n / 1000000).toFixed(1) + 'M' : n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n);
++    }
++
++    function labelOf(r) {
++        let name = String(r.name || r.title || 'Subtitle');
++        if (name.length > 46) name = name.slice(0, 45) + '\u2026';
++        const bits = [String(r.lang || '').toUpperCase()].filter(Boolean);
++        if (r.trusted) bits.push('trusted');
++        if (r.hi) bits.push('HI');
++        if (r.ai) bits.push('auto-translated');
++        if (r.downloads) bits.push(fmtCount(r.downloads) + ' downloads');
++        return name + '  \u00b7  ' + bits.join(' \u00b7 ');
++    }
++
++    // ---------------- the controller: one per player ----------------
++
++    class Controller {
++        constructor(player, meta) {
++            this.player = player;
++            this.meta = meta || null;
++            this.status = 'idle';       // idle | searching | results | none | error
++            this.error = '';
++            this.results = [];
++            this.applied = null;        // the result currently on screen
++            this._autoDone = false;
++            this._timer = null;
++            this._gen = 0;              // bumped when a new search starts, so a slow old one is ignored
++            this._dead = false;
++        }
++
++        available() { return configured(); }
++
++        destroy() { this._dead = true; clearTimeout(this._timer); }
++
++        // The player tells us whenever the file's track list changes.
++        onTracks() {
++            if (this._dead || this._autoDone || !config.auto || !configured()) return;
++            clearTimeout(this._timer);
++            this._timer = setTimeout(() => {
++                if (this._dead || this._autoDone) return;
++                this._autoDone = true;
++                if (this.player.state.subtitles.length > 0) return;   // the file brings its own: leave it alone
++                this.find(true);
++            }, AUTO_DELAY_MS);
++        }
++
++        _toast(text) { try { this.player._toast(text); } catch (e) { /* player closed */ } }
++        _notify() { try { this.player._refreshSubMenu(); } catch (e) { /* player closed */ } }
++
++        // auto = true: pick the best match and switch it on. auto = false: just fill the list for the menu.
++        async find(auto) {
++            if (this._dead) return;
++            const gen = ++this._gen;
++            this.status = 'searching';
++            this.error = '';
++            this._notify();
++            if (auto) this._toast('Looking for subtitles\u2026');
++            let list;
++            try {
++                list = await search(identify(this.meta, this.player.title));
++            } catch (e) {
++                if (gen !== this._gen || this._dead) return;
++                this.status = 'error';
++                this.error = e.message || 'Subtitle lookup failed.';
++                this._notify();
++                if (auto) this._toast(this.error);
++                return;
++            }
++            if (gen !== this._gen || this._dead) return;
++            this.results = list;
++            if (!list.length) {
++                this.status = 'none';
++                this._notify();
++                if (auto) this._toast('No subtitles found for this one');
++                return;
++            }
++            this.status = 'results';
++            this._notify();
++            if (!auto) return;
++            if (list[0].score >= AUTO_MIN_SCORE) await this.apply(list[0]);
++            else this._toast('Subtitles found. Pick one in the subtitle menu.');
++        }
++
++        async apply(r) {
++            if (this._dead) return;
++            const b = this.player.backend;
++            if (!b || typeof b.addSubtitle !== 'function') { this._toast("This player can't load extra subtitles"); return; }
++            this._toast('Downloading subtitles\u2026');
++            try {
++                const f = await download(r.id);
++                if (this._dead) return;
++                const ok = await b.addSubtitle(window.location.origin + f.url, labelOf(r));
++                if (ok === false) { this._toast("This player can't load extra subtitles"); return; }
++                this.applied = r;
++                this._toast('Subtitles on: ' + String(r.lang || '').toUpperCase() + (r.name ? ' \u00b7 ' + String(r.name).slice(0, 40) : ''));
++            } catch (e) {
++                this._toast((e && e.message) || "Couldn't load those subtitles");
++            }
++        }
++
++        // Rows for the "Find subtitles" menu (player.js renders them; an item with keep: true leaves the menu open).
++        menuItems() {
++            if (this.status === 'searching') return [{ label: 'Searching\u2026', keep: true, action: function () {} }];
++            if (this.status === 'error') {
++                return [{ label: this.error || 'Subtitle lookup failed', keep: true, action: function () {} },
++                        { label: 'Try again', keep: true, action: () => this.find(false) }];
++            }
++            if (this.status === 'none') {
++                return [{ label: 'No subtitles found', keep: true, action: function () {} },
++                        { label: 'Try again', keep: true, action: () => this.find(false) }];
++            }
++            return this.results.slice(0, MENU_RESULTS).map(r => ({
++                label: labelOf(r), selected: !!(this.applied && this.applied.id === r.id), action: () => this.apply(r)
++            }));
++        }
++
++        // Called when the menu opens: search if nothing has been searched yet.
++        openList() {
++            if (this.status === 'idle' || this.status === 'error') this.find(false);
++        }
++    }
++
++    window.PekSubs = {
++        Controller: Controller,
++        parseName: parseName,
++        identify: identify,
++        toVtt: toVtt,
++        config: config,
++        setConfig: setConfig,
++        configured: configured,
++        // Settings > Subtitles > Test: a search for a well-known film proves the service answers.
++        test: function () { return search({ title: 'The Matrix', year: 1999, season: 0, episode: 0, file: '' }); },
++        languages: [
++            ['en', 'English'], ['es', 'Spanish'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'],
++            ['pt-br', 'Portuguese (BR)'], ['pt-pt', 'Portuguese (PT)'], ['nl', 'Dutch'], ['ru', 'Russian'], ['ar', 'Arabic'],
++            ['tr', 'Turkish'], ['pl', 'Polish'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh-cn', 'Chinese']
++        ]
++    };
++})();

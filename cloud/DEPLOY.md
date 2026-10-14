@@ -35,6 +35,29 @@ stops working nobody can sign in on a new device (devices that are already signe
 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
    already limits sign-ups, sign-ins, reset requests and code guesses itself.
 
+## Subtitles (one shared OpenSubtitles account for every user)
+
+Users set nothing up. The worker holds one OpenSubtitles.com account and the app asks the worker.
+
+1. Make an account at opensubtitles.com, confirm the email, then create an API consumer/key
+   (profile -> API consumers). The free tier allows about 20 subtitle downloads per day, to check on your account.
+   If many people use the app, an OpenSubtitles VIP plan raises that limit a lot.
+2. Worker -> **Settings** -> **Variables and Secrets** -> Add:
+   - Type **Secret**, name `OPENSUBTITLES_API_KEY`, value = the API key
+   - Type **Secret**, name `OPENSUBTITLES_USER`, value = the account user name
+   - Type **Secret**, name `OPENSUBTITLES_PASS`, value = the account password
+   - Optional, Type **Text**: `SUBS_DAILY_LIMIT` (default 18: keep it a little under your real limit) and
+     `SUBS_IP_DAILY_LIMIT` (default 8 new downloads per person per day). Then **Deploy**.
+3. Paste the new `worker.js` and deploy (the `subs_cache` table is created on the first request).
+
+How the daily limit is protected:
+- Searching is free and is not counted.
+- Every subtitle that has been downloaded once is stored in D1 and given to everyone after that at no cost, so
+  popular episodes and films use the daily limit only once for all users together.
+- New downloads are counted for the whole service per day and per IP address, so one person cannot use it all up.
+  When the limit is reached the app says "Subtitle downloads are used up for today"; subtitles already stored still work.
+- If the worker is not on the sync address, set the `PEK_SUBS_URL` environment variable of the app's backend to its address.
+
 ## Plugin backup (no extra setup)
 
 The same worker and the same D1 database also store plugin backups. There is nothing new to configure:

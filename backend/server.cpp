@@ -7,6 +7,7 @@
 #include "plugin_install.h"
 #include "github_install.h"
 #include "skin_install.h"
+#include "subtitles.h"
 #include <iostream>
 #include <fstream>
 #include <functional>
@@ -641,6 +642,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         res.set_content(json, "application/json");
     });
 
+    peksubs::registerSubtitleRoutes(svr);   // automatic subtitle look-up (subtitles.h)
     pekgithub::registerGithubRoutes(svr);   // install a plugin from GitHub by name (github_install.h)
 
     svr.Post("/api/plugins/fetch", [isZipName](const httplib::Request& req, httplib::Response& res) {

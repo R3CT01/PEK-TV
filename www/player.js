@@ -20,6 +20,8 @@ function pekAnnouncePlayer(active) {
    Backend contract (extend PekPlayerBackend):
      load(url, startSec)  play()  pause()  seek(sec)          seek = absolute seconds
      setAudioTrack(id)    setSubtitleTrack(id | null)         null = subtitles off
+     addSubtitle(url, label)   load an extra subtitle file (SubRip text at url) and switch it on;
+                          returns a Promise: false = this backend cannot (see subtitles.js)
      destroy()
      drawsBehindPage      getter, true when the video is a native surface behind
                           the page (the page then stays transparent)
@@ -75,6 +77,10 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
     font-size: 1.08rem; font-weight: 600; letter-spacing: 0.01em; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65); }
 
 /* live torrent chip (top right, only for torrent streams) */
+.hp-toast { position: absolute; left: 50%; bottom: 17%; max-width: 86%; padding: 9px 16px; border-radius: 999px;
+    transform: translateX(-50%); font-size: 0.85rem; text-align: center; pointer-events: none; z-index: 5;
+    background-color: rgba(28, 24, 21, 0.78); opacity: 0; transition: opacity 0.25s; }
+.hp-toast.hp-on { opacity: 1; }
 .hp-chip { flex: none; display: none; align-items: center; gap: 8px; padding: 7px 13px; border-radius: 999px;
     font-size: 0.78rem; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .hp-chip.hp-on { display: flex; }
@@ -437,6 +443,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         seek(sec) {}
         setAudioTrack(id) {}
         setSubtitleTrack(id) {}
+        addSubtitle(url, label) { return Promise.resolve(false); }
         destroy() {}
     }
 
@@ -460,13 +467,37 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             v.addEventListener('seeked', () => this.emit('state', { playing: !v.paused, buffering: v.readyState < 3 }));
             v.addEventListener('canplay', () => this.emit('state', { playing: !v.paused, buffering: false }));
             v.addEventListener('ended', () => this.emit('ended'));
-            v.addEventListener('loadedmetadata', () => this.emit('tracks', { audio: [], subtitles: [] }));
+            this._ext = [];   // subtitles added with addSubtitle(): { id, label, el, url, on }
+            v.addEventListener('loadedmetadata', () => this._emitTracks());
             v.addEventListener('error', () => {
                 const err = v.error;
                 this.emit('error', { message: (err && err.message) || 'This file could not be played here.' });
             });
         }
         attach(container) { container.appendChild(this.video); }
+        _emitTracks() {
+            this.emit('tracks', { audio: [], subtitles: this._ext.map(e => ({ id: e.id, label: e.label, selected: e.on })) });
+        }
+        setSubtitleTrack(id) {
+            this._ext.forEach(e => { e.on = (e.id === id); try { e.el.track.mode = e.on ? 'showing' : 'disabled'; } catch (x) { /* ignore */ } });
+        }
+        async addSubtitle(url, label) {
+            const r = await fetch(url, { cache: 'no-store' });
+            if (!r.ok) throw new Error('Could not load that subtitle.');
+            let text = await r.text();
+            if (window.PekSubs && window.PekSubs.toVtt) text = window.PekSubs.toVtt(text);
+            const blobUrl = URL.createObjectURL(new Blob([text], { type: 'text/vtt' }));
+            const t = document.createElement('track');
+            t.kind = 'subtitles';
+            t.label = label || 'Subtitles';
+            t.src = blobUrl;
+            this.video.appendChild(t);
+            const id = 'x' + (this._ext.length + 1);
+            this._ext.push({ id: id, label: label || 'Subtitles', el: t, url: blobUrl, on: false });
+            this.setSubtitleTrack(id);
+            this._emitTracks();
+            return true;
+        }
         load(url, startSec) {
             const v = this.video;
             v.src = url;
@@ -489,6 +520,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         destroy() {
             const v = this.video;
             v.pause();
+            (this._ext || []).forEach(e => { try { URL.revokeObjectURL(e.url); } catch (x) { /* ignore */ } });
             v.removeAttribute('src');
             if (v.load) v.load();
             if (v.parentNode) v.parentNode.removeChild(v);
@@ -517,6 +549,12 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         seek(sec) { window.PekAndroid.mpvSeek(sec); }
         setAudioTrack(id) { window.PekAndroid.mpvSetAudio(id); }
         setSubtitleTrack(id) { window.PekAndroid.mpvSetSubtitle(id === null || id === undefined ? -1 : id); }
+        addSubtitle(url, label) {
+            // an older app build has no mpvAddSubtitle: the caller then says the player can't do it
+            if (typeof window.PekAndroid.mpvAddSubtitle !== 'function') return Promise.resolve(false);
+            window.PekAndroid.mpvAddSubtitle(url, label || 'Subtitles');
+            return Promise.resolve(true);
+        }
         destroy() {
             try { window.PekAndroid.mpvDestroy(); } catch (e) { /* ignore */ }
             window.__pekMpv = null;
@@ -551,6 +589,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this._streamTick = null;
             // Skip intro / recap (skip_segments.js). opts.skipMeta = what is playing.
             this.skip = window.PekSkip ? new window.PekSkip.Controller(this, opts.skipMeta || null) : null;
+            // Automatic subtitles (subtitles.js): looks them up when the file has none; opts.skipMeta is what is playing.
+            this.subs = window.PekSubs ? new window.PekSubs.Controller(this, opts.skipMeta || null) : null;
             // Up next (next_episode.js): opts.next = { resolve, start } from the app, or none.
             this.next = window.PekNext && opts.next ? new window.PekNext.Controller(this, opts.next) : null;
             // Live channel overlay (live_overlay.js): opts.live = { channel, query, check } from a plugin's live session.
@@ -598,6 +638,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 this.state.subtitles = d.subtitles || [];
                 if (this.skip && d.chapters) this.skip.setChapters(d.chapters);
                 this._updateButtons();
+                if (this.subs) this.subs.onTracks();
             });
             b.on('ended', () => { if (this.next && this.next.onEnded()) return; this.close(); });
             b.on('error', (d) => {
@@ -625,6 +666,8 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             if (this.skip) this.skip.destroy();
             if (this.next) this.next.destroy();
             if (this.live) this.live.destroy();
+            if (this.subs) this.subs.destroy();
+            clearTimeout(this._toastTimer);
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
             try { this.backend.destroy(); } catch (e) { /* ignore */ }
@@ -1039,7 +1082,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             if (this.skip && this.skip.cur) order.push('skipnow');
             if (this.next && this.next.visible()) { order.push('nextnow'); order.push('nextno'); }
             if (this.state.audio.length > 1) order.push('audio');
-            if (this.state.subtitles.length > 0) order.push('subs');
+            if (this._subsButton()) order.push('subs');
             if (this.skip && this.skip.available()) order.push('skip');
             if (this.live) {
                 const ls = this.live.buttonsShown();
@@ -1055,7 +1098,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.btns.play.setAttribute('aria-label', this.state.playing ? 'Pause' : 'Play');
             this.btns.play.title = this.state.playing ? 'Pause' : 'Play';
             this.btns.audio.style.display = this.state.audio.length > 1 ? '' : 'none';
-            this.btns.subs.style.display = this.state.subtitles.length > 0 ? '' : 'none';
+            this.btns.subs.style.display = this._subsButton() ? '' : 'none';
             this.btns.skip.style.display = this.skip && this.skip.available() ? '' : 'none';
             const waiting = this.state.buffering && this.errorBox.style.display !== 'block';
             this.spinner.classList.toggle('hp-on', waiting);
@@ -1120,6 +1163,28 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
             this.exitBtn.classList.toggle('hp-focused', this.confirmIndex === 1);
         }
 
+        // The subtitle button shows when the file has tracks, or when online look-up is set up.
+        _subsButton() { return this.state.subtitles.length > 0 || !!(this.subs && this.subs.available()); }
+
+        // A short message over the picture ("Subtitles on: EN"). Shows even while the controls are hidden.
+        _toast(text) {
+            if (this._closed || !this.root) return;
+            if (!this.toastEl) { this.toastEl = el('div', 'hp-toast'); this.root.appendChild(this.toastEl); }
+            this.toastEl.textContent = text;
+            this.toastEl.classList.add('hp-on');
+            clearTimeout(this._toastTimer);
+            this._toastTimer = setTimeout(() => { if (this.toastEl) this.toastEl.classList.remove('hp-on'); }, 3800);
+        }
+
+        // The online search finished (or changed): redraw the "Find subtitles" list if it is open.
+        _refreshSubMenu() {
+            const m = this.menu;
+            if (!m || m.kind !== 'subfind' || !this.subs) return;
+            m.items = this.subs.menuItems();
+            m.index = Math.max(0, Math.min(m.index, m.items.length - 1));
+            this._renderMenu();
+        }
+
         _openMenu(kind) {
             if (kind === 'skip') {
                 if (!this.skip) return;
@@ -1128,10 +1193,19 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 this._renderMenu();
                 return;
             }
+            if (kind === 'subfind') {
+                if (!this.subs) return;
+                this.subs.openList();
+                this.menu = { kind: 'subfind', items: this.subs.menuItems(), index: 0 };
+                this.mode = 'menu';
+                this._renderMenu();
+                return;
+            }
             const tracks = kind === 'audio' ? this.state.audio : this.state.subtitles;
-            const items = kind === 'subs'
+            let items = kind === 'subs'
                 ? [{ id: null, label: 'Off', selected: !tracks.some(t => t.selected) }].concat(tracks)
                 : tracks.slice();
+            if (kind === 'subs' && this.subs && this.subs.available()) items.push({ id: '__find', find: true, label: 'Find subtitles online\u2026' });
             if (!items.length) return;
             let index = 0;
             items.forEach((it, i) => { if (it.selected) index = i; });
@@ -1143,7 +1217,7 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
         _renderMenu() {
             const m = this.menu;
             this.menuEl.textContent = '';
-            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : (m.kind === 'skip' ? 'Skip intro & recap' : 'Subtitles')));
+            this.menuEl.appendChild(el('div', 'hp-menu-title', m.kind === 'audio' ? 'Audio' : (m.kind === 'skip' ? 'Skip intro & recap' : (m.kind === 'subfind' ? 'Find subtitles' : 'Subtitles'))));
             m.items.forEach((it, i) => {
                 const row = el('div', 'hp-menu-item' + (i === m.index ? ' hp-focused' : ''),
                     (it.selected ? '\u2713  ' : '     ') + it.label);
@@ -1164,6 +1238,13 @@ html.hp-mpv body > *:not(.hp-root) { visibility: hidden !important; }
                 this._renderMenu();
                 return;
             }
+            if (m.kind === 'subfind') {               // an online result: load it (or, for a status row, stay)
+                try { item.action(); } catch (e) { console.error('[PekPlayer]', e); }
+                if (item.keep) { this._refreshSubMenu(); return; }
+                this._closeMenu();
+                return;
+            }
+            if (m.kind === 'subs' && item.find) { this._openMenu('subfind'); return; }
             const list = m.kind === 'audio' ? this.state.audio : this.state.subtitles;
             if (m.kind === 'audio') this.backend.setAudioTrack(item.id);
             else this.backend.setSubtitleTrack(item.id);
