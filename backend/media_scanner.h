@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <chrono>
 #include "vfs.h"
 
 enum class MediaKind {
@@ -96,6 +97,25 @@ public:
     std::vector<MediaEntry> getUnclassified();      // the "Unknown" category
     bool findById(const std::string& id, MediaEntry& out);
 
+    // --- What the user's own files say about a title (NFO plot + artwork next to the video) ---
+    // Works for local folders and network sources (SMB, NFS, FTP, WebDAV, UPnP) alike. The detail screens and the
+    // poster grid prefer these over a TMDb lookup; TMDb is only asked for whatever is still missing.
+    //   NFO:      "<video>.nfo", "movie.nfo" (movie alone in its folder), "tvshow.nfo" (show folder)
+    //   Movie art:   <video>-poster.jpg, <video>.jpg, then poster / folder / cover .jpg (movie alone in its folder)
+    //   Show art:    poster / folder / cover / show .jpg in the show folder
+    //   Episode art: <video>-thumb.jpg, <video>.jpg           (.jpg, .jpeg, .png and .webp are all accepted)
+    // Results are remembered for a couple of minutes, and forgotten at every scan.
+    struct Local {
+        std::string title;   // the NFO <title>: the episode name for an episode, the show name for a show
+        std::string plot;    // <plot>, or <outline> when there is no plot; "" = none
+        std::string art;     // path or network URL of an image file; "" = none. Only ever read by readArtwork().
+    };
+    Local localMovie(const MediaEntry& entry);
+    Local localEpisode(const std::string& show, int season, int episode);
+    Local localShow(const std::string& show);
+    // Reads the image named by Local::art (local or network). False = too big / unreadable.
+    static bool readArtwork(const std::string& art, std::string& bytes, std::string& mime);
+
 private:
     std::string sources_file_path_;
     std::string cache_file_path_;
@@ -104,6 +124,9 @@ private:
     std::mutex mutex_;
     ShowResolver show_resolver_;
     std::map<std::string, std::string> resolved_names_;   // lowercase guess -> official name ("" = no match); only touched under scan_mutex_
+    std::mutex local_mutex_;
+    std::map<std::string, std::pair<std::chrono::steady_clock::time_point, Local>> local_cache_;   // "m:<id>" / "e:<show>|s|e" / "s:<show>"
+    Local cachedLocal(const std::string& key, const std::function<Local()>& make);
     std::mutex scan_mutex_;   // serializes scan() so overlapping scans (startup + POST /api/sources + /api/rescan) can't race on the cache file
 
     bool dirHasNomedia(const std::string& dir_path);

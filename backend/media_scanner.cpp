@@ -1,6 +1,7 @@
 #include "media_scanner.h"
 #include "vfs.h"
 #include "nfo.h"
+#include <set>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -349,6 +350,169 @@ bool applyNfo(MediaEntry& entry) {
 }
 
 
+// ---- Reading small files next to a video: the same code for local folders and network sources ----
+// One FileIo per request: it keeps the last network connection open, so a lookup that lists a folder and then
+// reads two files talks to the NAS / server once, not three times. Not thread-safe (like vfs::Share).
+constexpr uint64_t kMaxArtBytes = 8ull * 1024 * 1024;
+
+class FileIo {
+public:
+    // Names of the files in a folder (local path or network URL). False = it could not be listed.
+    bool list(const std::string& dir, std::vector<std::string>& names) {
+        names.clear();
+        if (!vfs::isRemote(dir)) {
+            std::error_code ec;
+            fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+            if (ec) return false;
+            for (fs::directory_iterator end; it != end && names.size() < 5000; it.increment(ec)) {
+                if (ec) break;
+                std::error_code e2;
+                if (it->is_regular_file(e2) && !e2) names.push_back(it->path().filename().string());
+            }
+            return true;
+        }
+        vfs::Url u;
+        vfs::Error err;
+        if (!vfs::parseUrl(dir, u)) return false;
+        vfs::Share* s = connect(u);
+        if (!s) return false;
+        std::vector<vfs::Entry> entries;
+        if (!s->list(u.path, entries, err)) return false;
+        for (const auto& e : entries)
+            if (!e.is_dir && !e.name.empty() && names.size() < 5000) names.push_back(e.name);
+        return true;
+    }
+
+    // The whole file, refused when it is bigger than maxBytes.
+    bool read(const std::string& file, uint64_t maxBytes, std::string& out) {
+        out.clear();
+        if (!vfs::isRemote(file)) {
+            std::error_code ec;
+            const auto size = fs::file_size(file, ec);
+            if (ec || size == 0 || size > maxBytes) return false;
+            std::ifstream in(file, std::ios::binary);
+            if (!in) return false;
+            out.assign((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            return !out.empty();
+        }
+        vfs::Url u;
+        vfs::Error err;
+        if (!vfs::parseUrl(file, u)) return false;
+        vfs::Share* s = connect(u);
+        if (!s || !s->open(u.path, err)) return false;
+        const uint64_t size = s->fileSize();
+        if (size == 0 || size > maxBytes) return false;
+        out.resize(static_cast<size_t>(size));
+        uint64_t off = 0;
+        while (off < size) {
+            const int64_t n = s->read(off, &out[static_cast<size_t>(off)],
+                                      static_cast<size_t>(std::min<uint64_t>(size - off, 64 * 1024)));
+            if (n <= 0) break;
+            off += static_cast<uint64_t>(n);
+        }
+        if (off != size) { out.clear(); return false; }
+        return true;
+    }
+
+    static std::string parent(const std::string& p) {
+        if (vfs::isRemote(p)) return vfs::parent(p);
+        return fs::path(p).parent_path().string();
+    }
+    static std::string join(const std::string& dir, const std::string& name) {
+        if (vfs::isRemote(dir)) return vfs::join(dir, name);
+        return (fs::path(dir) / name).string();
+    }
+    // The last segment of a folder path / URL: "Season 1" (used to tell a season folder from a show folder).
+    static std::string leaf(const std::string& dir) {
+        std::string d = dir;
+        while (d.size() > 1 && (d.back() == '/' || d.back() == '\\')) d.pop_back();
+        size_t slash = d.find_last_of("/\\");
+        return slash == std::string::npos ? d : d.substr(slash + 1);
+    }
+
+private:
+    vfs::Share* connect(const vfs::Url& u) {
+        if (vfs::hasShares(u.scheme) && u.share.empty()) return nullptr;
+        const std::string key = u.scheme + "://" + u.host + "/" + u.share;
+        if (conn_ && key == conn_key_) return conn_.get();
+        vfs::Error err;
+        conn_ = vfs::connect(u, err);
+        conn_key_ = conn_ ? key : std::string();
+        return conn_.get();
+    }
+    std::string conn_key_;
+    std::unique_ptr<vfs::Share> conn_;
+};
+
+// The real file name in a listing that matches one of the wanted lowercase names (first wanted name wins), or "".
+std::string pickName(const std::vector<std::string>& names, const std::vector<std::string>& wanted) {
+    for (const auto& w : wanted)
+        for (const auto& n : names)
+            if (toLower(n) == w) return n;
+    return "";
+}
+
+// "poster" -> {"poster.jpg", "poster.jpeg", "poster.png", "poster.webp"} for each base, in order.
+std::vector<std::string> artNames(const std::vector<std::string>& bases) {
+    static const char* kExt[] = {"jpg", "jpeg", "png", "webp"};
+    std::vector<std::string> out;
+    for (const auto& b : bases)
+        for (const char* e : kExt) out.push_back(toLower(b) + "." + e);
+    return out;
+}
+
+int videoCount(const std::vector<std::string>& names) {
+    int n = 0;
+    for (const auto& name : names) {
+        const std::string ext = toLower(fs::path(name).extension().string());
+        if (std::find(kVideoExtensions.begin(), kVideoExtensions.end(), ext) != kVideoExtensions.end()) ++n;
+    }
+    return n;
+}
+
+bool readNfoFrom(FileIo& io, const std::string& dir, const std::string& name, nfo::Info& out) {
+    if (name.empty()) return false;
+    std::string text;
+    if (!io.read(FileIo::join(dir, name), 256 * 1024, text)) return false;   // not a real NFO: never slurp a huge file
+    out = nfo::parse(text);
+    return out.ok;
+}
+
+// What the user's files say about one video file (a movie or an episode). Same rules as applyNfo(): the NFO named like
+// the video wins; "movie.nfo" and folder-level artwork only count when the movie is alone in its folder.
+MediaScanner::Local resolveVideo(FileIo& io, const MediaEntry& e) {
+    MediaScanner::Local out;
+    const std::string dir = FileIo::parent(e.path);
+    std::vector<std::string> names;
+    if (dir.empty() || !io.list(dir, names)) return out;
+    const bool episode = e.kind == MediaKind::Episode;
+    const std::string stem = toLower(fs::path(e.filename).stem().string());
+    const bool alone = videoCount(names) <= 1;
+
+    nfo::Info info;
+    const std::string own = pickName(names, {stem + ".nfo"});
+    bool have = readNfoFrom(io, dir, own, info);
+    if (have && info.root != (episode ? "episodedetails" : "movie")) have = false;
+    if (!have && own.empty() && !episode && alone)
+        have = readNfoFrom(io, dir, pickName(names, {"movie.nfo"}), info) && info.root == "movie";
+    if (have) { out.title = info.title; out.plot = info.plot; }
+
+    std::vector<std::string> bases = episode ? std::vector<std::string>{stem + "-thumb", stem}
+                                             : std::vector<std::string>{stem + "-poster", stem};
+    if (!episode && alone) { bases.push_back("poster"); bases.push_back("folder"); bases.push_back("cover"); }
+    const std::string art = pickName(names, artNames(bases));
+    if (!art.empty()) out.art = FileIo::join(dir, art);
+    return out;
+}
+
+// The folder that holds tvshow.nfo and the show's poster: the show folder, one above a "Season N" folder.
+std::string showDirOfEpisode(const MediaEntry& e) {
+    const std::string dir = FileIo::parent(e.path);
+    int season = 0;
+    return parseSeasonFolder(FileIo::leaf(dir), season) ? FileIo::parent(dir) : dir;
+}
+
+
 } // namespace
 
 MediaScanner::MediaScanner(std::string sources_file_path, std::string cache_file_path)
@@ -630,6 +794,10 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
 
 void MediaScanner::scan() {
     std::lock_guard<std::mutex> scan_lock(scan_mutex_);
+    {
+        std::lock_guard<std::mutex> lock(local_mutex_);
+        local_cache_.clear();       // files may have changed: look at the NFOs and artwork again
+    }
     std::vector<std::string> dirs_snapshot;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -759,6 +927,78 @@ bool MediaScanner::findById(const std::string& id, MediaEntry& out) {
         if (e.id == id) { out = e; return true; }
     }
     return false;
+}
+
+// ---- the user's own plots and artwork (see media_scanner.h) ----
+MediaScanner::Local MediaScanner::cachedLocal(const std::string& key, const std::function<Local()>& make) {
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(local_mutex_);
+        auto it = local_cache_.find(key);
+        if (it != local_cache_.end() && now - it->second.first < std::chrono::minutes(2)) return it->second.second;
+    }
+    Local value = make();                       // slow (network): never hold the lock while it runs
+    std::lock_guard<std::mutex> lock(local_mutex_);
+    if (local_cache_.size() > 4000) local_cache_.clear();
+    local_cache_[key] = {now, value};
+    return value;
+}
+
+MediaScanner::Local MediaScanner::localMovie(const MediaEntry& entry) {
+    if (entry.kind != MediaKind::Movie) return Local();
+    return cachedLocal("m:" + entry.id, [&]() { FileIo io; return resolveVideo(io, entry); });
+}
+
+MediaScanner::Local MediaScanner::localEpisode(const std::string& show, int season, int episode) {
+    const std::string key = toLower(show);
+    return cachedLocal("e:" + key + "|" + std::to_string(season) + "|" + std::to_string(episode), [&]() {
+        FileIo io;
+        for (const auto& e : getEpisodes()) {
+            if (e.season != season || e.episode != episode || toLower(e.show_title) != key) continue;
+            Local l = resolveVideo(io, e);
+            if (!l.plot.empty() || !l.art.empty()) return l;     // the same episode in another folder may still have one
+        }
+        return Local();
+    });
+}
+
+MediaScanner::Local MediaScanner::localShow(const std::string& show) {
+    const std::string key = toLower(show);
+    return cachedLocal("s:" + key, [&]() {
+        FileIo io;
+        Local out;
+        std::set<std::string> tried;                // one look per show folder, not one per episode
+        for (const auto& e : getEpisodes()) {
+            if (toLower(e.show_title) != key) continue;
+            const std::string dir = showDirOfEpisode(e);
+            if (dir.empty() || !tried.insert(dir).second) continue;
+            std::vector<std::string> names;
+            if (!io.list(dir, names)) continue;
+            nfo::Info ts;
+            if (out.plot.empty() && readNfoFrom(io, dir, pickName(names, {"tvshow.nfo"}), ts) && ts.root == "tvshow") {
+                out.title = ts.title;
+                out.plot = ts.plot;
+            }
+            if (out.art.empty()) {
+                const std::string art = pickName(names, artNames({"poster", "folder", "cover", "show"}));
+                if (!art.empty()) out.art = FileIo::join(dir, art);
+            }
+            if (!out.plot.empty() && !out.art.empty()) break;
+            if (tried.size() >= 8) break;           // a show spread over many folders: stop looking
+        }
+        return out;
+    });
+}
+
+bool MediaScanner::readArtwork(const std::string& art, std::string& bytes, std::string& mime) {
+    if (art.empty()) return false;
+    const std::string ext = toLower(fs::path(art).extension().string());
+    if (ext == ".jpg" || ext == ".jpeg") mime = "image/jpeg";
+    else if (ext == ".png") mime = "image/png";
+    else if (ext == ".webp") mime = "image/webp";
+    else return false;
+    FileIo io;
+    return io.read(art, kMaxArtBytes, bytes);
 }
 
 // Tab-delimited cache — internal only, never served directly.
