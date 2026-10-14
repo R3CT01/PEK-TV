@@ -178,6 +178,10 @@ class MainAppPluginsMethods {
                 else rows.push(ui.listRow(e.name, sizeText(e.size || 0), () => this.pluginPickChoose(e)));
             });
             if (!(pp.entries || []).length) rows.push(createElement('p', { className: 'sub' }, 'No folders or .zip files here.'));
+            // Android hides every non-media file (.zip) from apps unless "All files access" is on.
+            const local = String(pp.path || '').indexOf('/') === 0;
+            const needAll = local && this._needsAllFiles();
+            if (needAll) rows.unshift(ui.listRow('Can\u2019t see your .zip files?', 'Tap to allow \u201cAll files access\u201d. Android hides .zip files from apps until you do.', () => this.askAllFilesAccess()));
             const body = createElement('div', {},
                 createElement('div', { className: 'browse-path' }, pp.path || ''),
                 err,
@@ -190,7 +194,7 @@ class MainAppPluginsMethods {
         // Start list: library folders, this device, and the network.
         const rows = [];
         (pp.sources || []).forEach(src => rows.push(ui.listRow(String(src), 'Library folder', () => this.pluginPickBrowse(String(src)))));
-        rows.push(ui.listRow('This device', 'Storage on this phone or box', () => this.pluginPickBrowse('@local')));
+        rows.push(ui.listRow('This device', this._needsAllFiles() ? 'Storage on this phone or box (.zip files need \u201cAll files access\u201d, you\u2019ll be asked)' : 'Storage on this phone or box', () => this.pluginPickBrowse('@local')));
         rows.push(ui.listRow(pp.scanning ? 'Searching the network\u2026' : 'Search the network', 'Find shared folders on your Wi-Fi or Ethernet', () => this.pluginPickFindNetwork()));
         (pp.hosts || []).forEach(h => rows.push(ui.listRow(h.name || h.address, h.label || h.protocol || '', () => this.pluginPickBrowse(h.url))));
         if (this._pluginPickCanSystem()) {

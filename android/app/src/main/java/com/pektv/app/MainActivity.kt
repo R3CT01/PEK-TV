@@ -210,6 +210,11 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         splash?.resumeIfNeeded()
+        // Back from Android's "All files access" screen: tell the web UI so the open file browser can refresh.
+        if (waitingForAllFiles) {
+            waitingForAllFiles = false
+            webView.evaluateJavascript("window.__pekAllFiles&&window.__pekAllFiles(" + hasAllFilesAccess() + ");", null)
+        }
     }
 
     // The picker intent, or null when this device has no app that can answer it (typical on TV).
@@ -263,6 +268,33 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean("asked_storage", true).apply()
             requestPermissions(arrayOf(storagePerm), storageRequest)
         }
+    }
+
+    // ---- "All files access" (lets the in-app file browser see .zip files) ----
+    // READ_MEDIA_VIDEO / READ_EXTERNAL_STORAGE only expose media files on Android 11+, so plugin and skin .zip files
+    // in Downloads etc. are invisible to PEK's own browser. Android 10 and older already show everything.
+    private var waitingForAllFiles = false
+
+    fun hasAllFilesAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= 30) android.os.Environment.isExternalStorageManager() else hasStoragePermission()
+
+    /** Opens Android's "All files access" screen for PEK TV. Returns false when this device has no such screen. */
+    fun requestAllFilesAccess(): Boolean {
+        if (Build.VERSION.SDK_INT < 30) return false
+        val attempts = listOf(
+            Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")),
+            Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION),
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        )
+        for (intent in attempts) {
+            try {
+                if (intent.resolveActivity(packageManager) == null) continue
+                waitingForAllFiles = true
+                startActivity(intent)
+                return true
+            } catch (e: Throwable) { waitingForAllFiles = false }
+        }
+        return false
     }
 
     private fun notifyStorage(granted: Boolean, openedSettings: Boolean) {
@@ -489,6 +521,15 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     // Storage access (see app_storage.js): ask first start, and again when a file browser is opened.
     @JavascriptInterface fun hasStoragePermission(): Boolean = activity.hasStoragePermission()
     @JavascriptInterface fun requestStoragePermission(auto: Boolean) { activity.requestStoragePermission(auto) }
+    // "All files access": without it the file browser cannot see .zip files (see MainActivity.hasAllFilesAccess).
+    @JavascriptInterface fun hasAllFilesAccess(): Boolean = activity.hasAllFilesAccess()
+    @JavascriptInterface fun requestAllFilesAccess(): Boolean {
+        var ok = false
+        val latch = java.util.concurrent.CountDownLatch(1)
+        activity.runOnUiThread { ok = activity.requestAllFilesAccess(); latch.countDown() }
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        return ok
+    }
 
     // "Watch on <service>" buttons: open the service's app (or its website). See providers.js.
     @JavascriptInterface fun openStreamingApp(packages: String, url: String) { activity.openStreamingApp(packages, url) }

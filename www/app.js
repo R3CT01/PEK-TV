@@ -87,6 +87,7 @@ class MainApp extends PekComponent {
 
         // Android's answer to a storage permission prompt (the one at first start has no one waiting for it).
         window.__pekStorageAny = (granted) => this._onStorageAnswer(granted);
+        window.__pekAllFiles = (granted) => this._onAllFilesAnswer(granted);
 
         this.loadSources();
         this.loadSkins();

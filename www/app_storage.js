@@ -29,6 +29,29 @@ class MainAppStorageMethods {
         });
     }
 
+    // "All files access" (Android 11+): without it Android hides .zip files from PEK's own file browser.
+    // True when the app can still gain something by asking for it.
+    _needsAllFiles() {
+        const a = window.PekAndroid;
+        return !!(a && typeof a.hasAllFilesAccess === 'function' && typeof a.requestAllFilesAccess === 'function' && !a.hasAllFilesAccess());
+    }
+
+    askAllFilesAccess() {
+        const { ui } = this.props.engine;
+        let opened = false;
+        try { opened = !!window.PekAndroid.requestAllFilesAccess(); } catch (e) { opened = false; }
+        if (opened) ui.toast('Turn on \u201cAllow access to manage all files\u201d for PEK TV, then press Back to return.', 7000);
+        else ui.toast('This device has no \u201cAll files access\u201d screen. Put the .zip on a network folder, or use the system file picker.', 7000);
+    }
+
+    // Called by the Android app when the user comes back from the "All files access" screen.
+    _onAllFilesAnswer(granted) {
+        const pp = this.state.pluginPick;
+        if (granted) this.props.engine.ui.toast('All files access allowed.', 2500);
+        if (pp && pp.stage === 'browse' && pp.path) this.pluginPickBrowse(pp.path);   // list the folder again, now with .zip files
+        else if (pp) this.setState({ pluginPick: Object.assign({}, pp) });             // repaint the start list without the prompt
+    }
+
     // Called by the Android app whenever a storage permission answer arrives (including the first-start prompt).
     _onStorageAnswer(granted) {
         if (!granted) return;
