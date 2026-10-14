@@ -1,7 +1,9 @@
 #include "media_scanner.h"
 #include "vfs.h"
+#include "nfo.h"
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <iostream>
 #include <algorithm>
@@ -266,6 +268,84 @@ bool isUsableShowFolder(const fs::path& dir, const std::vector<std::string>& roo
         if (fs::equivalent(dir, fs::path(r), ec) && !ec) return false;   // the source root itself
     }
     return std::find(kGenericFolders.begin(), kGenericFolders.end(), toLower(name)) == kGenericFolders.end();
+}
+
+
+// ---- NFO files (Kodi, Radarr, Sonarr, tinyMediaManager...): see nfo.h ----
+// An NFO next to a video is the user's own word on what it is, so it wins over ffprobe tags and filename guesses.
+// Looked for, in this order: "<video name>.nfo" (movie or episode), "movie.nfo" (only when the folder holds a single
+// video), and "tvshow.nfo" (the show's title, in the show folder or above a "Season N" folder).
+bool readNfo(const fs::path& p, nfo::Info& out) {
+    std::error_code ec;
+    if (!fs::is_regular_file(p, ec) || ec) return false;
+    const auto size = fs::file_size(p, ec);
+    if (ec || size == 0 || size > 256 * 1024) return false;       // not a real NFO: do not let a huge file slow a scan
+    std::ifstream in(p, std::ios::binary);
+    if (!in) return false;
+    std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    out = nfo::parse(text);
+    return out.ok;
+}
+
+int videosIn(const fs::path& dir) {                                // counts up to 2: enough to tell "one" from "several"
+    int n = 0;
+    std::error_code ec;
+    fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec);
+    if (ec) return 2;
+    for (fs::directory_iterator end; it != end && n < 2; it.increment(ec)) {
+        if (ec) break;
+        std::error_code e2;
+        if (!it->is_regular_file(e2) || e2) continue;
+        const std::string ext = toLower(it->path().extension().string());
+        if (std::find(kVideoExtensions.begin(), kVideoExtensions.end(), ext) != kVideoExtensions.end()) ++n;
+    }
+    return n;
+}
+
+// Fills kind / title / year / show / season / episode from the NFO. False = no usable NFO (nothing was changed).
+bool applyNfo(MediaEntry& entry) {
+    if (vfs::isRemote(entry.path)) return false;
+    const fs::path video(entry.path), dir = video.parent_path();
+    nfo::Info own;
+    const bool haveOwn = readNfo(fs::path(video).replace_extension(".nfo"), own);
+
+    if (haveOwn && own.root == "episodedetails" && own.episode > 0) {
+        int folder_season = 0;
+        fs::path show_dir = dir;
+        if (parseSeasonFolder(dir.filename().string(), folder_season)) show_dir = dir.parent_path();
+        std::string show = own.showtitle;
+        if (show.empty()) {
+            nfo::Info ts;
+            if (readNfo(show_dir / "tvshow.nfo", ts) && ts.root == "tvshow") show = ts.title;
+        }
+        int season = own.season > 0 ? own.season : folder_season;
+        if (season == 0) {
+            size_t st; int se, ep;
+            if (matchEpisodePattern(cleanSeparators(video.stem().string()), st, se, ep)) season = se;
+        }
+        if (show.empty() || season <= 0) return false;              // the old rules decide
+        entry.kind = MediaKind::Episode;
+        entry.show_title = sanitizeField(show);
+        entry.season = season;
+        entry.episode = own.episode;
+        entry.title.clear(); entry.year = 0;
+        entry.guessed = false;                                      // the NFO is authoritative: no TMDb name check
+        return true;
+    }
+
+    nfo::Info mv;
+    bool haveMovie = false;
+    if (haveOwn && own.root == "movie") { mv = own; haveMovie = true; }
+    else if (!haveOwn && videosIn(dir) <= 1 && readNfo(dir / "movie.nfo", mv) && mv.root == "movie") haveMovie = true;
+    if (haveMovie && !mv.title.empty()) {
+        entry.kind = MediaKind::Movie;
+        entry.title = sanitizeField(mv.title);
+        entry.year = mv.year;
+        entry.show_title.clear(); entry.season = 0; entry.episode = 0;
+        entry.guessed = false;
+        return true;
+    }
+    return false;
 }
 
 
@@ -591,7 +671,12 @@ void MediaScanner::scan() {
             entry.show_title = it->second.show_title;
             entry.season = it->second.season;
             entry.episode = it->second.episode;
+            applyNfo(entry);          // cheap (a few small files), so an edited NFO is picked up on the next scan
         } else {
+            if (applyNfo(entry)) {    // described by an NFO: no ffprobe, no filename guessing
+                std::cout << "[MediaScanner] From NFO: " << entry.filename << std::endl;
+                continue;
+            }
             std::cout << "[MediaScanner] Probing: " << entry.filename << std::endl;
             probeAndClassify(entry);
 
