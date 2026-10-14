@@ -71,6 +71,16 @@
         return { title: title, season: season, episode: episode, year: year };
     }
 
+    // Only things registered as a movie or a TV episode get a look-up. Anything else (plugin streams such as
+    // XVideos, live TV, bare files) never touches the subtitle service, because every search uses the shared
+    // OpenSubtitles quota. Metadata is what decides it: guessing from a file name is not enough.
+    function registered(meta) {
+        const m = meta || {};
+        if (m.kind === 'movie') return !!m.title;
+        if (m.kind === 'episode') return !!(m.showTitle && (m.season | 0) > 0 && (m.episode | 0) > 0);
+        return false;
+    }
+
     // meta = what the player was opened with (see app_watch / torrent.js), name = the player's title
     function identify(meta, name) {
         const m = meta || {};
@@ -160,13 +170,13 @@
             this._dead = false;
         }
 
-        available() { return configured(); }
+        available() { return configured() && registered(this.meta); }
 
         destroy() { this._dead = true; clearTimeout(this._timer); }
 
         // The player tells us whenever the file's track list changes.
         onTracks() {
-            if (this._dead || this._autoDone || !config.auto || !configured()) return;
+            if (this._dead || this._autoDone || !config.auto || !this.available()) return;
             clearTimeout(this._timer);
             this._timer = setTimeout(() => {
                 if (this._dead || this._autoDone) return;
@@ -181,7 +191,7 @@
 
         // auto = true: pick the best match and switch it on. auto = false: just fill the list for the menu.
         async find(auto) {
-            if (this._dead) return;
+            if (this._dead || !this.available()) return;
             const gen = ++this._gen;
             this.status = 'searching';
             this.error = '';
@@ -248,6 +258,7 @@
 
         // Called when the menu opens: search if nothing has been searched yet.
         openList() {
+            if (!this.available()) return;
             if (this.status === 'idle' || this.status === 'error') this.find(false);
         }
     }
@@ -256,6 +267,7 @@
         Controller: Controller,
         parseName: parseName,
         identify: identify,
+        registered: registered,
         toVtt: toVtt,
         config: config,
         setConfig: setConfig,
