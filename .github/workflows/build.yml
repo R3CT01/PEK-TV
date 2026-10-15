@@ -1,0 +1,160 @@
+name: Build PEK TV (Android)
+
+# Tag push  (v0.1.3-beta.1)  -> signed RELEASE apk + GitHub pre-release
+# Manual run (Actions tab / gh) -> pick debug or release, optional publish
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'debug = fast, installs next to the beta | release = signed beta apk'
+        type: choice
+        options: [debug, release]
+        default: debug
+      torrent:
+        description: 'Build in torrent streaming (libtorrent) - slower, experimental'
+        type: boolean
+        default: false
+      publish:
+        description: 'Release builds only: also publish a GitHub pre-release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BUILD_TYPE: ${{ github.event_name == 'push' && 'release' || inputs.build_type }}
+      WANT_TORRENT: ${{ github.event_name == 'workflow_dispatch' && inputs.torrent || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The repo has no Gradle wrapper, so install Gradle here (AGP 8.7 needs >= 8.9).
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Install SDK pieces
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" || true
+
+      # ---- Version -------------------------------------------------------
+      - name: Work out version name
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            V="${GITHUB_REF_NAME#v}"
+          else
+            V="$(grep -oP "versionName '\K[^']+" android/app/build.gradle)-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "VERSION_NAME=$V" >> "$GITHUB_ENV"
+          echo "Version: $V  (type: $BUILD_TYPE)"
+
+      # ---- Bundle the web UI, plugins and skins into the apk -------------
+      - name: Stage app assets
+        run: |
+          A=android/app/src/main/assets/hesper
+          mkdir -p "$A"
+          cp -r www plugins skins "$A/"
+          find "$A" -name __pycache__ -type d -prune -exec rm -rf {} +
+          rm -rf "$A"/plugins/*/data
+
+      # ---- Native dependencies -------------------------------------------
+      - name: Cache OpenSSL
+        id: ossl
+        uses: actions/cache@v4
+        with:
+          path: android/openssl
+          key: openssl-${{ hashFiles('android/scripts/build-openssl.sh') }}
+
+      - name: Build OpenSSL
+        if: steps.ossl.outputs.cache-hit != 'true'
+        run: bash android/scripts/build-openssl.sh
+
+      - name: Clone libsmb2 (SMB shares)
+        continue-on-error: true
+        run: git clone --depth 1 https://github.com/sahlberg/libsmb2 android/libsmb2
+
+      - name: Clone libtorrent + Boost headers (optional)
+        if: env.WANT_TORRENT == 'true'
+        continue-on-error: true
+        run: |
+          git clone --depth 1 --branch RC_2_0 --recurse-submodules --shallow-submodules \
+            https://github.com/arvidn/libtorrent android/libtorrent
+          curl -fsSL https://github.com/boostorg/boost/releases/download/boost-1.86.0/boost-1.86.0-cmake.tar.gz \
+            | tar xz -C android
+          mv android/boost-1.86.0 android/boost
+
+      # ---- Signing (release only) ----------------------------------------
+      - name: Check signing secrets
+        if: env.BUILD_TYPE == 'release'
+        env:
+          KS: ${{ secrets.PEK_KEYSTORE_BASE64 }}
+          KSP: ${{ secrets.PEK_KEYSTORE_PASSWORD }}
+          KA: ${{ secrets.PEK_KEY_ALIAS }}
+          KP: ${{ secrets.PEK_KEY_PASSWORD }}
+        run: |
+          for v in KS KSP KA KP; do
+            [ -n "${!v}" ] || { echo "::error::Missing secret for $v - see the setup guide (PEK_KEYSTORE_BASE64 / _PASSWORD / PEK_KEY_ALIAS / PEK_KEY_PASSWORD)"; exit 1; }
+          done
+          echo "$KS" | base64 -d > "$RUNNER_TEMP/pek-release.jks"
+          echo "PEK_KEYSTORE_FILE=$RUNNER_TEMP/pek-release.jks" >> "$GITHUB_ENV"
+          echo "PEK_KEYSTORE_PASSWORD=$KSP" >> "$GITHUB_ENV"
+          echo "PEK_KEY_ALIAS=$KA" >> "$GITHUB_ENV"
+          echo "PEK_KEY_PASSWORD=$KP" >> "$GITHUB_ENV"
+
+      # ---- Build ---------------------------------------------------------
+      - name: Build APK
+        working-directory: android
+        run: |
+          TASK=$([ "$BUILD_TYPE" = release ] && echo assembleRelease || echo assembleDebug)
+          COMMON="-PpekVersionName=$VERSION_NAME --stacktrace -Dorg.gradle.jvmargs=-Xmx4g"
+          T=""; [ "$WANT_TORRENT" = true ] && [ -f libtorrent/CMakeLists.txt ] && T="-PpekTorrent=true"
+
+          if ! gradle $TASK $COMMON $T; then
+            echo "::warning::Full build failed - retrying without optional native libs (SMB / torrent)"
+            rm -rf libsmb2 libtorrent boost app/.cxx app/build
+            gradle $TASK $COMMON
+          fi
+
+      - name: Collect + verify apk
+        run: |
+          mkdir -p dist
+          SRC=$(ls android/app/build/outputs/apk/$BUILD_TYPE/*.apk | head -1)
+          OUT="dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}.apk"
+          cp "$SRC" "$OUT"
+          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs "$OUT" | head -5
+          ls -lh dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PEK-TV-${{ env.VERSION_NAME }}-${{ env.BUILD_TYPE }}
+          path: dist/*.apk
+          retention-days: 30
+
+      # ---- Publish -------------------------------------------------------
+      - name: GitHub pre-release
+        if: env.BUILD_TYPE == 'release' && (github.event_name == 'push' || inputs.publish)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', env.VERSION_NAME) }}
+          name: PEK TV ${{ env.VERSION_NAME }}
+          prerelease: true
+          generate_release_notes: true
+          files: dist/*.apk

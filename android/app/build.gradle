@@ -22,8 +22,9 @@ android {
         // 36 = Android 16, the level Google Play requires for new apps and
         // updates from Aug 31, 2026.
         targetSdk 36
-        versionCode 4
-        versionName '0.1.3'
+        versionCode 4   // bump this by 1 for every release you publish
+        // CI passes -PpekVersionName=<tag>; local builds use 0.1.3
+        versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '0.1.3')
 
         ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
         externalNativeBuild {
@@ -37,6 +38,39 @@ android {
 
     externalNativeBuild {
         cmake { path 'src/main/cpp/CMakeLists.txt' }
+    }
+
+    // Release signing: CI supplies these as environment variables (from GitHub secrets).
+    // With none set (e.g. a local assembleRelease) the release build is signed with the
+    // debug key so it still installs - never publish one of those.
+    def pekKs = System.getenv('PEK_KEYSTORE_FILE')
+    signingConfigs {
+        if (pekKs) {
+            release {
+                storeFile file(pekKs)
+                storePassword System.getenv('PEK_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('PEK_KEY_ALIAS')
+                keyPassword System.getenv('PEK_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Installs NEXT TO the beta (different app id) so you can keep both.
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+            debuggable true
+            // Debug builds both armeabi-v7a (32-bit) and arm64-v8a (64-bit), same as release.
+        }
+        release {
+            debuggable false
+            // R8 off for the first beta: the JNI bridge and Chaquopy are easy to break with shrinking.
+            minifyEnabled false
+            shrinkResources false
+            signingConfig pekKs ? signingConfigs.release : signingConfigs.debug
+            if (!pekKs) logger.warn('WARNING: PEK_KEYSTORE_FILE not set - release signed with DEBUG key')
+        }
     }
 
     compileOptions {
