@@ -406,6 +406,7 @@ class PekUIKit {
         });
         const img = this.engine.createElement('img', { className: 'sx-poster-img', src: posterUrl, alt: title });
         img.decoding = 'async';
+        img.loading = 'lazy';   // only decode the posters that are on (or near) the screen
         img.addEventListener('error', () => {
             const plain = this.card(title, subtitle, onClick, opts);
             if (wrap.parentNode) {
@@ -616,7 +617,7 @@ class PekWindow {
             kept.set(el.dataset.keepScroll, [el.scrollLeft, el.scrollTop]);
         });
         const next = this.render();
-        if (this.#engine.gsap) {
+        if (this.#engine.gsap && !document.documentElement.classList.contains('pek-lite')) {   // a whole-screen fade on every repaint is costly on weak GPUs
             this.#engine.gsap.fromTo(next, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
         }
         this.#rootElement.replaceWith(next);

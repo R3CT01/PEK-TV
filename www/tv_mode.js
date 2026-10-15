@@ -24,6 +24,7 @@
 
     function apply() {
         root.classList.toggle('pek-tv', isOn());
+        if (window.PekLite) window.PekLite.refresh();   // light paint follows the TV look in Auto
         var s = safe();
         root.style.setProperty('--tv-safe-x', s + 'vw');
         root.style.setProperty('--tv-safe-y', s + 'vh');

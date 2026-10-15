@@ -1738,3 +1738,24 @@ html.pek-tv .pek-auth-screen { background-color: var(--sx-bg); }
 .pek-auth-title { margin: 6px 0 0; font-size: 1.7rem; }
 .pek-auth-card .section-actions { margin-top: 6px; }
 .pek-auth-msg { margin-top: 4px; }
+
+
+/* ============================================================
+   Performance mode (html.pek-lite, see lite_mode.js): TV boxes, low-memory / few-core devices, or Settings > Advanced.
+   Same layout, lighter paint: no live blur, no soft wide shadows, no full-screen fades or entrance animations.
+   (The 10-foot sizing stays under html.pek-tv; this block is paint only, so a weak phone keeps its phone layout.)
+   ============================================================ */
+html.pek-lite * { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+html.pek-lite .theme-panel-overlay, html.pek-lite .plugin-window-overlay { background-color: rgba(8, 8, 10, 0.86); }
+html.pek-lite .pek-auth-screen { background-color: var(--sx-bg); }
+html.pek-lite .hero-backdrop { -webkit-filter: none; filter: none; opacity: 0.32; will-change: auto;
+    -webkit-transform: scale(1.12) translateZ(0); transform: scale(1.12) translateZ(0); }
+html.pek-lite .focusable { -webkit-transition: border-color 0.08s, background-color 0.08s; transition: border-color 0.08s, background-color 0.08s; }
+html.pek-lite .sx-poster-card { -webkit-transition: -webkit-transform 0.1s ease-out; transition: transform 0.1s ease-out; }
+/* entrance animations (the spinners keep spinning) */
+html.pek-lite .hero, html.pek-lite .glass-panel, html.pek-lite .sx-toast, html.pek-lite .theme-panel-overlay { animation: none; }
+/* wide soft shadows are the expensive kind: a tight one looks nearly the same */
+html.pek-lite .theme-panel, html.pek-lite .hero, html.pek-lite .hero-poster, html.pek-lite .detail-image, html.pek-lite .sx-toast {
+    box-shadow: 0 4px 10px var(--sx-shadow);
+}
+html.pek-lite .settings-page .settings-section { background: rgba(255, 255, 255, 0.07); box-shadow: none; }
