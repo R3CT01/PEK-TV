@@ -2,6 +2,7 @@
 // compiled into the app yet because it embeds Python).
 #include <jni.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <atomic>
 #include <string>
 #include <thread>
@@ -29,7 +30,11 @@ Java_com_pektv_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) 
 
     // Bundled Mozilla CA list (downloaded by the workflow). Works on any
     // Android version, even if the device's own certificate store is old.
-    setenv("SSL_CERT_FILE", (root + "/cacert.pem").c_str(), 1);
+    // Only point at the bundle if it was actually shipped; otherwise a missing file breaks every HTTPS call.
+    {
+        std::string pem = root + "/cacert.pem";
+        if (access(pem.c_str(), R_OK) == 0) setenv("SSL_CERT_FILE", pem.c_str(), 1);
+    }
 
     std::string www     = root + "/www";
     std::string plugins = root + "/plugins";

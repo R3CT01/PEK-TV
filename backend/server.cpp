@@ -1,3 +1,4 @@
+#include <unistd.h>
 #include "server.h"
 #include "playback.h"
 #include "torrent_routes.h"
@@ -239,8 +240,12 @@ static std::string tmdbProxyUrl() {
 // HTTPS to the TMDb proxy. No-op everywhere else.
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
 static void applyTls(httplib::Client& c) {
+    // Bundled file (if it really exists) AND the system store, so a missing cacert.pem can't break HTTPS.
     const char* f = std::getenv("SSL_CERT_FILE");
-    if (f && *f) c.set_ca_cert_path(f, "");
+    const char* d = std::getenv("SSL_CERT_DIR");
+    bool hasF = f && *f && access(f, R_OK) == 0;
+    bool hasD = d && *d;
+    if (hasF || hasD) c.set_ca_cert_path(hasF ? f : "", hasD ? d : "");
 }
 #else
 static void applyTls(httplib::Client&) {}
