@@ -734,45 +734,77 @@ class MainAppWatchMethods {
         return out;
     }
 
-    _renderSyncSettings() {
+    // ---------------- Sign in / Create account: its own screen (not part of Settings) ----------------
+    // Settings only has the Sign In and Create Account buttons. They set syncUi.mode, and while a mode is set this
+    // screen covers the whole app. Back (button, remote, Android) steps back or closes it.
+
+    _authOpen() {
+        const S = window.PekSync;
+        return !!(S && !S.isLinked() && this.state.syncUi.mode);
+    }
+
+    // One step back: the code / reset steps return to Sign In, Sign In and Create Account close the screen.
+    _authBack() {
+        const m = this.state.syncUi.mode;
+        this._openAuth(m === 'verify' || m === 'forgot' || m === 'reset' ? 'signin' : '');
+    }
+
+    _renderAuthScreen() {
+        if (!this._authOpen()) return null;
         const { createElement, ui } = this.props.engine;
         const S = window.PekSync;
         const u = this.state.syncUi;
         const f = this._authForm();
-        const parts = [createElement('h2', {}, 'Cloud Sync')];
+        const parts = [];
         const row = (...btns) => createElement('div', { className: 'section-actions' }, ...btns);
         const email = () => ui.textInput('Email', f.email, (v) => { f.email = v; }, { type: 'email', placeholder: 'you@example.com' });
         const pass = (label, key) => ui.textInput(label, f[key], (v) => { f[key] = v; }, { type: 'password', placeholder: 'At least 8 characters' });
+        const go = (label, fn, primary) => ui.button(u.busy ? 'Working\u2026' : label, () => { if (!u.busy) fn(); }, primary ? { variant: 'primary' } : undefined);
+        const titles = { signin: 'Sign In', signup: 'Create Account', verify: 'Check Your Email', forgot: 'Forgot Password', reset: 'Set a New Password' };
+
+        if (u.mode === 'signin') {
+            parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points, and to get your plugins back.'));
+            parts.push(email(), pass('Password', 'password'));
+            parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
+        } else if (u.mode === 'signup') {
+            parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices.'));
+            parts.push(email(), pass('Password', 'password'), pass('Confirm password', 'confirm'));
+            parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
+        } else if (u.mode === 'verify') {
+            parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));
+            parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }));
+            parts.push(row(go('Confirm Code', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
+        } else if (u.mode === 'forgot') {
+            parts.push(createElement('p', { className: 'sub' }, 'We will email you a 6-digit code to set a new password.'));
+            parts.push(email());
+            parts.push(row(go('Send Reset Code', () => this.sendResetCode(), true), ui.button('I Have a Code', () => this._openAuth('reset')), ui.button('Back', () => this._openAuth('signin'))));
+        } else if (u.mode === 'reset') {
+            parts.push(createElement('p', { className: 'sub' }, 'Enter the code from the email and choose a new password.'));
+            parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
+            parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
+        }
+        if (u.msg) parts.push(createElement('p', { className: 'sub pek-auth-msg' }, u.msg));
+        return createElement('div', { className: 'theme-panel-overlay pek-auth-screen' },
+            createElement('div', { className: 'pek-auth-card' },
+                ui.button('\u2190 Back', () => this._authBack()),
+                createElement('h1', { className: 'pek-auth-title' }, titles[u.mode] || 'Account'),
+                ...parts));
+    }
+
+    _renderSyncSettings() {
+        const { createElement, ui } = this.props.engine;
+        const S = window.PekSync;
+        const u = this.state.syncUi;
+        const parts = [createElement('h2', {}, 'Cloud Sync')];
+        const row = (...btns) => createElement('div', { className: 'section-actions' }, ...btns);
         const go = (label, fn, primary) => ui.button(u.busy ? 'Working\u2026' : label, () => { if (!u.busy) fn(); }, primary ? { variant: 'primary' } : undefined);
 
         if (!S) {
             parts.push(createElement('p', { className: 'sub' }, 'Sync is not available in this build.'));
         } else if (!S.isLinked()) {
-            if (u.mode === 'signin') {
-                parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points, and to get your plugins back.'));
-                parts.push(email(), pass('Password', 'password'));
-                parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
-            } else if (u.mode === 'signup') {
-                parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices.'));
-                parts.push(email(), pass('Password', 'password'), pass('Confirm password', 'confirm'));
-                parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
-            } else if (u.mode === 'verify') {
-                parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));
-                parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }));
-                parts.push(row(go('Confirm Code', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
-            } else if (u.mode === 'forgot') {
-                parts.push(createElement('p', { className: 'sub' }, 'We will email you a 6-digit code to set a new password.'));
-                parts.push(email());
-                parts.push(row(go('Send Reset Code', () => this.sendResetCode(), true), ui.button('I Have a Code', () => this._openAuth('reset')), ui.button('Back', () => this._openAuth('signin'))));
-            } else if (u.mode === 'reset') {
-                parts.push(createElement('p', { className: 'sub' }, 'Enter the code from the email and choose a new password.'));
-                parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
-                parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
-            } else {
-                parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: profiles, watch history, favorites and plugin backup stay in step across your devices. Signing in to an account that already has data replaces what is on this device.',
-                    createElement('span', { className: 'sub-more' }, ' Only what you watched before creating an account is carried into it. Nothing is uploaded until you sign in.')));
-                parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
-            }
+            parts.push(createElement('p', { className: 'sub' }, 'Optional. One account for the household: profiles, watch history, favorites and plugin backup stay in step across your devices. Signing in to an account that already has data replaces what is on this device.',
+                createElement('span', { className: 'sub-more' }, ' Only what you watched before creating an account is carried into it. Nothing is uploaded until you sign in.')));
+            parts.push(row(ui.button('Sign In', () => this._openAuth('signin'), { variant: 'primary' }), ui.button('Create Account', () => this._openAuth('signup'))));
         } else {
             const last = S.lastSync();
             parts.push(ui.listRow('Signed in', S.getEmail(), null));
@@ -786,7 +818,7 @@ class MainAppWatchMethods {
             parts.push(...this._renderPluginBackup(go, row));
             parts.push(row(ui.button(u.confirmDelete ? 'Tap again to delete your account and cloud data' : 'Delete Account & Cloud Data', () => this.deleteCloudData())));
         }
-        if (u.msg) parts.push(createElement('p', { className: 'sub' }, u.msg));
+        if (u.msg && !this._authOpen()) parts.push(createElement('p', { className: 'sub' }, u.msg));
         return createElement('div', { className: 'settings-section' }, ...parts);
     }
 

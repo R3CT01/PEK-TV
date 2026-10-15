@@ -169,6 +169,7 @@ class MainApp extends PekComponent {
         if (this.state.appClose) return true;   // the "close PEK TV" screen cannot be dismissed
         if (this.state.exitAsk) { this.setState({ exitAsk: false }); return true; }
         if (this.state.signOutAsk) { this.setState({ signOutAsk: false }); return true; }   // Back on the sign-out question = stay signed in
+        if (this._authOpen()) { this._authBack(); return true; }   // the sign in / create account screen: step back or close it
         if (this._player) { this._player.onBack(); return true; }
         if (engine.windows.activeWindow) {
             if (this._pluginBack && this._pluginBack()) return true;   // a plugin screen stepped back by itself
@@ -578,6 +579,7 @@ class MainApp extends PekComponent {
             this._renderPluginRemoveModal(),
             this._renderFavoriteRemoveModal(),
             this._renderSignOutModal(),
+            this._renderAuthScreen(),
             this._renderExitModal(),
             this._renderBusy(),
             this._renderAppCloseModal()
