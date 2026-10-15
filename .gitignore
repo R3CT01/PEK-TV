@@ -38,3 +38,7 @@ android/boost/
 
 # Plugin runtime data
 plugins/*/data/
+
+*.jks
+*.keystore
+keystore.b64
