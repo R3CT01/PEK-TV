@@ -25,8 +25,12 @@
 //                                                                  or 403 email_not_verified (new account that never confirmed its email)
 //   POST   /v1/auth/forgot   { email }                          -> { ok }   (always, so emails can't be probed)
 //   POST   /v1/auth/reset    { email, code, password }          -> { ok, token, email }
+//   POST   /v1/subs/search   { title, year?, season?, episode?, lang?, file? } -> { ok, results }   (shared OpenSubtitles account, no sign-in)
+//   POST   /v1/subs/get      { id }                                            -> { ok, text, cached }  (see "subtitles" below)
 //   POST   /v1/auth/logout                                      -> { ok }
-//   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins)
+//   POST   /v1/auth/confirm  { password }                      -> { ok }   (re-checks the signed-in account's password, e.g. to reset a forgotten profile passcode; rate limited)
+//   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted,avatar,pin}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins;
+//                                                                  avatar = built-in picture id or a small photo, pin = salted passcode hash, both optional)
 //   POST   /v1/sync          push changed items (history, progress, favorites) of ONE profile ({ profile, since, ... }), pull newer ones
 //   GET    /v1/plugins                                          -> { ok, plugins: [{id,name,version,size,fp,updated,deleted,chunks}] }
 //   POST   /v1/plugins/chunk   { id, fp, index, total, data }   -> { ok }      (one piece of a plugin backup)
@@ -99,7 +103,7 @@ async function init(db) {
     try { await db.prepare('ALTER TABLE users ADD COLUMN verified INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
     // gf = 1: the account existed before invite-only sign-up, so it is never asked for a code. New sign-ups are stored with gf = 0.
     try { await db.prepare('ALTER TABLE users ADD COLUMN gf INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
-    // Optional username (3 to 20 characters), unique ignoring upper/lower case. Older accounts have none ('').
+    // Username (3 to 20 characters, required at sign-up), unique ignoring upper/lower case. Older accounts have none ('').
     try { await db.prepare("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
     await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE) WHERE username <> ''").run();
     await db.prepare('CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created INTEGER NOT NULL, expires INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT \'\', reserved_by TEXT, reserved_until INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at INTEGER)').run();
@@ -111,12 +115,16 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS items (acct TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, srv INTEGER NOT NULL, PRIMARY KEY (acct, kind, key))').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS items_srv ON items (acct, srv)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS profiles (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, color TEXT NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
+    // Profile picture and passcode hash (added later: older tables get the columns here).
+    try { await db.prepare("ALTER TABLE profiles ADD COLUMN avatar TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    try { await db.prepare("ALTER TABLE profiles ADD COLUMN pin TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
     await db.prepare('CREATE TABLE IF NOT EXISTS plugins (acct TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, updated INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (acct, id))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS plugin_chunks (acct TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (acct, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS store_plugins (id TEXT PRIMARY KEY, shelf TEXT NOT NULL, name TEXT NOT NULL, version TEXT NOT NULL, author TEXT NOT NULL DEFAULT \'\', description TEXT NOT NULL DEFAULT \'\', size INTEGER NOT NULL, fp TEXT NOT NULL, chunks INTEGER NOT NULL, status TEXT NOT NULL, owner TEXT NOT NULL, updated INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS store_chunks (owner TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (owner, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_states (state TEXT PRIMARY KEY, ret TEXT NOT NULL, created INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_sessions (token_hash TEXT PRIMARY KEY, gh_id TEXT NOT NULL, login TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS subs_cache (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL)').run();
     ready = true;
 }
 
@@ -179,7 +187,7 @@ function cleanEmail(v) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
     return e;
 }
-// '' = none given (it is optional), null = not allowed, otherwise the cleaned name.
+// '' = none given, null = not allowed, otherwise the cleaned name.
 function cleanUsername(v) {
     const u = String(v == null ? '' : v).trim();
     if (!u) return '';
@@ -376,9 +384,10 @@ async function handleSignup(request, env) {
     const existing = await db.prepare('SELECT id, verified, gf FROM users WHERE email = ?').bind(email).first();
     if (existing && existing.verified) return json({ error: 'email_taken' }, 409);
 
-    // Username (optional): checked before an invite is held, so a taken name never ties up a code.
+    // Username (required for new accounts): checked before an invite is held, so a taken name never ties up a code.
     const username = cleanUsername(body.username);
     if (username === null) return json({ error: 'bad_username' }, 400);
+    if (!username && !(existing && existing.gf)) return json({ error: 'username_required' }, 400);   // accounts from before usernames existed (gf = 1) may finish without one
     if (username && await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?').bind(username, existing ? existing.id : '').first()) return json({ error: 'username_taken' }, 409);
 
     // Invite-only: a new address (or one left unconfirmed since the switch) needs an unused code. Accounts that already
@@ -569,11 +578,38 @@ function goodProfileId(id) { return typeof id === 'string' && /^[A-Za-z0-9_-]{1,
 function itemsAcct(userId, profile) { return (!profile || profile === 'p1') ? userId : userId + ':' + profile; }
 function likeProfiles(userId) { return userId + ':%'; }   // user ids are hex: no wildcard characters
 
-// POST /v1/profiles/sync  { profiles: [{ id, name, color, updated, deleted }] } -> { ok, profiles, rejected }
+// A profile picture is a built-in avatar id ("b:cat") or a small JPEG photo ("d:data:image/jpeg;base64,..."). The passcode is only ever a
+// salted hash made on the device ("<16 hex>:<64 hex>"), never the digits.
+function goodAvatar(a) {
+    if (a === '') return true;
+    if (typeof a !== 'string' || a.length > 14000) return false;
+    return /^b:[a-z]{2,16}$/.test(a) || /^d:data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(a);
+}
+function goodPin(p) { return p === '' || (typeof p === 'string' && /^[0-9a-f]{16}:[0-9a-f]{64}$/.test(p)); }
+
+// POST /v1/auth/confirm  { password } -> { ok }   (session required)
+// Lets the app re-check the account password, e.g. so a forgotten profile passcode can be removed. Shares the login
+// failure limit, so it cannot be used to guess the password.
+async function handleConfirm(request, env, userId) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const password = typeof body.password === 'string' ? body.password.slice(0, MAX_PASSWORD) : '';
+    if (!password) return json({ error: 'bad_credentials' }, 401);
+    const key = 'confirm:' + userId;
+    const lim = await db.prepare('SELECT n, reset_at FROM throttle WHERE k = ?').bind(key).first();
+    if (lim && lim.reset_at > now && lim.n >= 6) return json({ error: 'rate_limited' }, 429);
+    const row = await db.prepare('SELECT pw FROM users WHERE id = ?').bind(userId).first();
+    const ok = row ? await checkPassword(password, row.pw) : false;
+    if (!ok) { await limited(db, key, 6, 15 * 60 * 1000, now); return json({ error: 'bad_credentials' }, 401); }
+    await clearLimit(db, key);
+    return json({ ok: true });
+}
+
+// POST /v1/profiles/sync  { profiles: [{ id, name, color, updated, deleted, avatar, pin }] } -> { ok, profiles, rejected }
 // Last writer wins per profile, by its own "updated" time. Removing a profile (deleted: 1) also removes its stored items.
 async function handleProfiles(request, env, userId) {
     const text = await request.text();
-    if (text.length > 64 * 1024) return json({ error: 'too_large' }, 413);
+    if (text.length > 160 * 1024) return json({ error: 'too_large' }, 413);   // up to 5 small photos
     let body;
     try { body = JSON.parse(text); } catch (e) { return json({ error: 'bad_json' }, 400); }
     const incoming = body && Array.isArray(body.profiles) ? body.profiles.slice(0, 40) : null;
@@ -581,9 +617,9 @@ async function handleProfiles(request, env, userId) {
 
     const db = env.DB;
     const now = Date.now();
-    const rows = (await db.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ?').bind(userId).all()).results || [];
+    const rows = (await db.prepare('SELECT id, name, color, updated, deleted, avatar, pin FROM profiles WHERE acct = ?').bind(userId).all()).results || [];
     const have = {};
-    rows.forEach(r => { have[r.id] = { id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: r.deleted ? 1 : 0 }; });
+    rows.forEach(r => { have[r.id] = { id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: r.deleted ? 1 : 0, avatar: r.avatar || '', pin: r.pin || '' }; });
     let live = rows.filter(r => !r.deleted).length;
     let total = rows.length;
     const stmts = [];
@@ -597,6 +633,8 @@ async function handleProfiles(request, env, userId) {
         const name = deleted ? '' : String(raw.name == null ? '' : raw.name).replace(/\s+/g, ' ').trim().slice(0, 40);
         const color = deleted ? '' : (/^#[0-9a-fA-F]{6}$/.test(raw.color) ? raw.color : '#E04A00');
         if (!deleted && !name) continue;
+        const avatar = deleted ? '' : goodAvatar(raw.avatar) ? raw.avatar : '';
+        const pin = deleted ? '' : goodPin(raw.pin) ? raw.pin : '';
         const cur = have[raw.id];
         if (cur && updated <= cur.updated) continue;                       // the cloud's copy is as new or newer
         if (!cur && !deleted && live >= MAX_PROFILES) { rejected.push(raw.id); continue; }
@@ -606,11 +644,11 @@ async function handleProfiles(request, env, userId) {
         if (!cur) total++;
         if (!cur || cur.deleted) { if (!deleted) live++; }
         else if (deleted) live--;
-        have[raw.id] = { id: raw.id, name, color, updated, deleted };
+        have[raw.id] = { id: raw.id, name, color, updated, deleted, avatar, pin };
         stmts.push(db.prepare(
-            'INSERT INTO profiles (acct, id, name, color, updated, deleted) VALUES (?, ?, ?, ?, ?, ?) ' +
-            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, color = excluded.color, updated = excluded.updated, deleted = excluded.deleted'
-        ).bind(userId, raw.id, name, color, updated, deleted));
+            'INSERT INTO profiles (acct, id, name, color, updated, deleted, avatar, pin) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
+            'ON CONFLICT(acct, id) DO UPDATE SET name = excluded.name, color = excluded.color, updated = excluded.updated, deleted = excluded.deleted, avatar = excluded.avatar, pin = excluded.pin'
+        ).bind(userId, raw.id, name, color, updated, deleted, avatar, pin));
         if (deleted) stmts.push(db.prepare('DELETE FROM items WHERE acct = ?').bind(itemsAcct(userId, raw.id)));
     }
     if (stmts.length) await db.batch(stmts);
@@ -779,8 +817,8 @@ async function handleExport(env, acct) {
         const profile = r.owner === acct ? 'p1' : r.owner.slice(acct.length + 1);
         return { profile, kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
     });
-    const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
-    const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted }));
+    const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted, avatar, pin FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
+    const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted, avatar: r.avatar || '', hasPasscode: !!r.pin }));   // the passcode hash is not exported
     const pl = await env.DB.prepare('SELECT id, name, version, size, updated, deleted FROM plugins WHERE acct = ? ORDER BY id').bind(acct).all();
     const plugins = (pl.results || []).map(r => ({ id: r.id, name: r.name, version: r.version, size: r.size, updated: r.updated, deleted: !!r.deleted }));
     return json({ exported: Date.now(), email: user ? user.email : '', profiles, items, plugins });
@@ -1013,6 +1051,175 @@ async function storeOwnerApprove(request, env) {
 }
 
 // ---------------------------------------------------------------- router
+// ---------------------------------------------------------------- subtitles (one shared OpenSubtitles.com account)
+// Everyone's app asks this worker, so nobody needs their own OpenSubtitles account. The worker holds the key.
+//   POST /v1/subs/search  { title, year?, season?, episode?, lang?, file? }  -> { ok, results: [{id,name,lang,title,downloads,hi,ai,trusted,score}] }
+//   POST /v1/subs/get     { id }                                             -> { ok, text, cached }   (SubRip, UTF-8)
+// Search costs nothing against OpenSubtitles' daily download limit. A download does, so:
+//   - every downloaded subtitle is kept in D1 (table subs_cache) and served to all later users for free;
+//   - downloads are counted per day for the whole service (SUBS_DAILY_LIMIT, default 18 of the free 20)
+//     and per IP address (SUBS_IP_DAILY_LIMIT, default 8), so one person cannot use everybody's quota.
+// Secrets: OPENSUBTITLES_API_KEY, OPENSUBTITLES_USER, OPENSUBTITLES_PASS  (Text: SUBS_DAILY_LIMIT, SUBS_IP_DAILY_LIMIT optional)
+const OS_HOST = 'https://api.opensubtitles.com';
+const OS_UA = 'PEK TV v1.0';
+const SUBS_CACHE_DAYS = 90;
+const SUBS_MAX_BYTES = 2 * 1024 * 1024;
+let osSession = null;   // { token, base, exp } kept while this worker instance lives
+
+function subsReady(env) { return !!(env.OPENSUBTITLES_API_KEY && env.OPENSUBTITLES_USER && env.OPENSUBTITLES_PASS); }
+function osHeaders(env, extra) {
+    return Object.assign({ 'Api-Key': env.OPENSUBTITLES_API_KEY, 'User-Agent': OS_UA, 'Accept': 'application/json' }, extra || {});
+}
+function wordSet(s) {
+    const out = new Set();
+    String(s || '').toLowerCase().split(/[^a-z0-9]+/).forEach(w => { if (w.length > 1) out.add(w); });
+    return out;
+}
+function goodLang(l) { return typeof l === 'string' && /^[a-z]{2}(-[a-z]{2})?(,[a-z]{2}(-[a-z]{2})?){0,4}$/i.test(l); }
+
+async function osLogin(env, force) {
+    const now = Date.now();
+    if (!force && osSession && osSession.exp > now) return osSession;
+    const r = await fetch(OS_HOST + '/api/v1/login', {
+        method: 'POST',
+        headers: osHeaders(env, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ username: env.OPENSUBTITLES_USER, password: env.OPENSUBTITLES_PASS })
+    });
+    if (!r.ok) { osSession = null; throw new Error('os_login_' + r.status); }
+    const j = await r.json();
+    if (!j.token) throw new Error('os_login_no_token');
+    let base = String(j.base_url || 'api.opensubtitles.com').replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    if (!/^[a-z0-9.-]+$/i.test(base)) base = 'api.opensubtitles.com';
+    osSession = { token: j.token, base: 'https://' + base, exp: now + 20 * 3600 * 1000 };
+    return osSession;
+}
+
+async function handleSubsSearch(request, env) {
+    if (!subsReady(env)) return json({ ok: false, error: 'Subtitles are not set up on the server yet.' }, 503);
+    const { body, err } = await readJson(request);
+    if (err) return err;
+    const db = env.DB, now = Date.now();
+    if (await limited(db, 'subs:search:ip:' + clientIp(request), 120, 3600 * 1000, now)) return json({ ok: false, error: 'Too many subtitle searches. Try again in a little while.' }, 429);
+    const title = typeof body.title === 'string' ? body.title.trim().slice(0, 200) : '';
+    if (!title) return json({ ok: false, error: 'No title to search for.' }, 400);
+    const year = Number(body.year) | 0, season = Number(body.season) | 0, episode = Number(body.episode) | 0;
+    const lang = goodLang(body.lang) ? String(body.lang).toLowerCase() : 'en';
+    const file = typeof body.file === 'string' ? body.file.slice(0, 300) : '';
+    const isEp = season > 0 && episode > 0;
+
+    // OpenSubtitles wants lower-case parameter names in alphabetical order
+    const p = [];
+    if (isEp) p.push(['episode_number', episode]);
+    p.push(['languages', lang], ['order_by', 'download_count'], ['order_direction', 'desc'], ['query', title.toLowerCase()]);
+    if (isEp) p.push(['season_number', season]);
+    p.push(['type', isEp ? 'episode' : 'movie']);
+    if (!isEp && year > 1800 && year < 2200) p.push(['year', year]);
+    const qs = p.map(kv => kv[0] + '=' + encodeURIComponent(kv[1])).join('&');
+
+    // the same title is searched by many people: keep the raw answer for 6 hours (search is free, this just saves calls)
+    const cacheKey = new Request('https://subs-cache.invalid/search?' + qs);
+    let raw = null;
+    const hit = await caches.default.match(cacheKey);
+    if (hit) raw = await hit.json();
+    if (!raw) {
+        const r = await fetch(OS_HOST + '/api/v1/subtitles?' + qs, { headers: osHeaders(env) });
+        if (r.status === 429) return json({ ok: false, error: 'OpenSubtitles is busy. Try again in a minute.' }, 429);
+        if (!r.ok) return json({ ok: false, error: 'OpenSubtitles answered HTTP ' + r.status + '.' }, 502);
+        raw = await r.json();
+        await caches.default.put(cacheKey, new Response(JSON.stringify(raw), { headers: { 'Cache-Control': 'max-age=21600', 'Content-Type': 'application/json' } }));
+    }
+
+    const want = wordSet(file || title), wantLower = file.toLowerCase();
+    const list = [];
+    for (const item of (raw.data || [])) {
+        const at = item && item.attributes;
+        const f = at && at.files && at.files[0];
+        if (!f || !f.file_id) continue;
+        const name = at.release || f.file_name || '';
+        const downloads = Number(at.download_count) || 0;
+        const ai = !!(at.ai_translated || at.machine_translated), hi = !!at.hearing_impaired, trusted = !!at.from_trusted;
+        let shared = 0;
+        wordSet(name).forEach(w => { if (want.has(w)) shared++; });
+        let score = shared * 12;
+        if (file && name.toLowerCase() === wantLower) score += 60;
+        score += Math.min(40, downloads / 500);
+        if (trusted) score += 15;
+        if (ai) score -= 40;
+        if (hi) score -= 8;
+        list.push({ id: String(f.file_id), name: name, lang: at.language || '', title: (at.feature_details && at.feature_details.title) || '', downloads: downloads, hi: hi, ai: ai, trusted: trusted, score: Math.round(score) });
+    }
+    list.sort((a, b) => b.score - a.score);
+    return json({ ok: true, results: list.slice(0, 25) });
+}
+
+function decodeSubtitle(buf) {
+    let text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+    catch (e) { text = new TextDecoder('windows-1252').decode(buf); }   // old files are often Windows-1252
+    return text.replace(/^\uFEFF/, '');
+}
+
+async function handleSubsGet(request, env) {
+    if (!subsReady(env)) return json({ ok: false, error: 'Subtitles are not set up on the server yet.' }, 503);
+    const { body, err } = await readJson(request);
+    if (err) return err;
+    const db = env.DB, now = Date.now();
+    const id = typeof body.id === 'string' || typeof body.id === 'number' ? String(body.id) : '';
+    if (!/^\d{1,12}$/.test(id)) return json({ ok: false, error: 'Bad subtitle id.' }, 400);
+    if (await limited(db, 'subs:get:ip:' + clientIp(request), 200, 3600 * 1000, now)) return json({ ok: false, error: 'Too many requests. Try again in a little while.' }, 429);
+
+    // 1) already downloaded by anyone: free
+    const row = await db.prepare('SELECT text FROM subs_cache WHERE id = ?').bind(id).first();
+    if (row && row.text) return json({ ok: true, text: row.text, cached: true });
+
+    // 2) a real download: counted against the service's day and this address's day
+    const dayLimit = Math.max(1, Number(env.SUBS_DAILY_LIMIT) || 18);
+    const ipLimit = Math.max(1, Number(env.SUBS_IP_DAILY_LIMIT) || 8);
+    const DAY = 24 * 3600 * 1000;
+    if (await limited(db, 'subs:dl:ip:' + clientIp(request), ipLimit, DAY, now)) return json({ ok: false, error: 'You have reached today\'s subtitle download limit. It resets tomorrow.' }, 429);
+    if (await limited(db, 'subs:dl:all', dayLimit, DAY, now)) return json({ ok: false, error: 'Subtitle downloads are used up for today. Try again tomorrow.' }, 429);
+
+    let text = '';
+    try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const s = await osLogin(env, attempt > 0);
+            const r = await fetch(s.base + '/api/v1/download', {
+                method: 'POST',
+                headers: osHeaders(env, { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + s.token }),
+                body: JSON.stringify({ file_id: Number(id), sub_format: 'srt' })
+            });
+            if (r.status === 401 && attempt === 0) continue;                       // token went stale: sign in again once
+            if (r.status === 406) {                                                  // OpenSubtitles says the real limit is reached: stop for everybody until tomorrow
+                await db.prepare('UPDATE throttle SET n = ? WHERE k = ?').bind(dayLimit, 'subs:dl:all').run();
+                return json({ ok: false, error: 'Subtitle downloads are used up for today. Try again tomorrow.' }, 429);
+            }
+            if (r.status === 429) return json({ ok: false, error: 'OpenSubtitles is busy. Try again in a minute.' }, 429);
+            if (!r.ok) return json({ ok: false, error: 'OpenSubtitles answered HTTP ' + r.status + '.' }, 502);
+            const j = await r.json();
+            let link;
+            try { link = new URL(j.link); } catch (e) { return json({ ok: false, error: 'No download link came back.' }, 502); }
+            const h = link.hostname.toLowerCase();
+            if (link.protocol !== 'https:' || !(h === 'opensubtitles.org' || h === 'opensubtitles.com' || h.endsWith('.opensubtitles.org') || h.endsWith('.opensubtitles.com'))) {
+                return json({ ok: false, error: 'Unexpected download address.' }, 502);
+            }
+            const d = await fetch(link.href, { headers: { 'User-Agent': OS_UA } });
+            if (!d.ok) return json({ ok: false, error: 'Could not download that subtitle.' }, 502);
+            const buf = await d.arrayBuffer();
+            if (!buf.byteLength || buf.byteLength > SUBS_MAX_BYTES) return json({ ok: false, error: 'That subtitle file is empty or too large.' }, 502);
+            text = decodeSubtitle(buf);
+            break;
+        }
+    } catch (e) {
+        return json({ ok: false, error: 'Could not reach OpenSubtitles.' }, 502);
+    }
+    if (!text) return json({ ok: false, error: 'No subtitle came back.' }, 502);
+
+    await db.prepare('INSERT OR REPLACE INTO subs_cache (id, text, created) VALUES (?, ?, ?)').bind(id, text, now).run();
+    // tidy up now and then: old entries go
+    if (Math.random() < 0.05) await db.prepare('DELETE FROM subs_cache WHERE created < ?').bind(now - SUBS_CACHE_DAYS * DAY).run();
+    return json({ ok: true, text: text, cached: false });
+}
+
 // ---------------------------------------------------------------- invite admin (only with ADMIN_KEY)
 // Anyone without the key gets the same answer as for a route that does not exist.
 async function adminCheck(request, env, db, now) {
@@ -1082,6 +1289,10 @@ export default {
             if (method === 'POST' && path === '/v1/auth/reset') return await handleReset(request, env);
             if (method === 'POST' && path.indexOf('/v1/invites/') === 0) return await handleInvites(request, env, path);
 
+            // Subtitles: no sign-in needed (everyone shares the server's OpenSubtitles account)
+            if (method === 'POST' && path === '/v1/subs/search') return await handleSubsSearch(request, env);
+            if (method === 'POST' && path === '/v1/subs/get') return await handleSubsGet(request, env);
+
             // GitHub sign-in (used by the GitHub Pages site)
             if (method === 'GET' && path === '/v1/gh/login') return await ghLogin(url, request, env);
             if (method === 'GET' && path === '/v1/gh/callback') return await ghCallback(url, env);
@@ -1114,6 +1325,7 @@ export default {
             if (!sess) return json({ error: 'bad_session' }, 401);
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
+            if (method === 'POST' && path === '/v1/auth/confirm') return await handleConfirm(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/profiles/sync') return await handleProfiles(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/sync') return await handleSync(request, env, sess.userId);
             if (method === 'GET' && path === '/v1/plugins') return await handlePluginList(env, sess.userId);
