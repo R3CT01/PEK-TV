@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PEK TV plugin documentation</title>
+<meta name="description" content="How to write, package and publish PEK TV plugins: plugin.json, permissions, the UI API, Python backends and skins.">
+<meta name="theme-color" content="#140b07">
+<link rel="icon" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="wrap bar">
+<a class="brand" href="index.html"><span class="dot"></span>PEK TV</a>
+<button class="menu-btn" aria-expanded="false" aria-label="Menu">Menu</button>
+<nav><a href="index.html">Home</a><a href="build.html">Build</a><a href="plugins.html" aria-current="page">Plugins</a><a href="source.html">Source</a><a href="https://github.com/R3CT01/PEK-TV" rel="noopener">GitHub &#8599;</a></nav>
+</div></header>
+<main><div class="wrap doc"><aside class="toc"><b>On this page</b><a href="#trust">Three tiers</a><a href="#manifest">plugin.json</a><a href="#permissions">Permissions</a><a href="#ui">UI API</a><a href="#backend">Backend</a><a href="#zip">Packaging</a><a href="#more">More APIs</a><a href="#bundled">In the repo</a><a href="#skins">Skins</a></aside><article>
+<span class="tag">Plugin guide</span>
+<h1>Writing PEK TV plugins</h1>
+<p>A plugin is a folder with a <code>plugin.json</code>, a <code>ui.js</code> and, optionally, a Python <code>backend.py</code>. Anything that is not bundled with PEK TV runs sandboxed.</p>
+
+<h2 id="trust">Three ways to get a plugin</h2>
+<div class="tablewrap"><table><thead><tr><th>Tier</th><th>What it is</th><th>Marked as</th></tr></thead><tbody><tr><td><b>Official</b></td><td>Plugins that ship with PEK TV, or that the owner publishes on the PEK Store's Official shelf.</td><td>Listed above the separator in the Plugins tab</td></tr><tr><td><b>PEK Store</b></td><td>Plugins other people submitted and the owner approved.</td><td>Community</td></tr><tr><td><b>GitHub</b></td><td><b>Settings &rarr; Plugins &rarr; Install from GitHub</b>, then <code>owner/repo</code>. PEK TV keeps no list, so there is nothing to submit.</td><td><b>Unverified</b>. PEK TV did not review it and the developer is responsible for it</td></tr></tbody></table></div>
+<p>There is a Settings switch for GitHub installs and a first-time warning. A build that must not install from GitHub can start with <code>PEK_ALLOW_GITHUB=0</code>. Every tier gets the same sandbox, the same safety scan and the same permissions screen.</p>
+
+<h2 id="manifest">plugin.json</h2>
+<pre><code>{
+  "name": "My Plugin",
+  "version": "1.0.0",
+  "permissions": {
+    "network": ["api.example.com", "*.cdn.example.com"],
+    "storage": true,
+    "library": true
+  },
+  "ui": { "navTab": "Discover", "reloadOnInstall": true, "closeOnRemove": true }
+}</code></pre>
+<p>No permission listed means no access. The optional <code>ui</code> block only changes PEK TV's own screens:</p>
+<ul>
+<li><code>navTab</code> adds a sidebar / More entry that opens the plugin.</li>
+<li><code>reloadOnInstall</code> reloads the app right after installing.</li>
+<li><code>closeOnRemove</code> asks the user to close and reopen PEK TV after the plugin is removed.</li>
+<li><code>warning</code> shows a screen before the permissions screen. Plain text only: a <code>title</code> (max 60), up to 5 paragraphs of 400 characters, and a <code>button</code> label (max 40). Shortcuts: <code>"warning": "one paragraph"</code> or an array of paragraphs.</li>
+</ul>
+
+<h2 id="permissions">Permissions</h2>
+<div class="tablewrap"><table><thead><tr><th>Permission</th><th>What it allows</th></tr></thead><tbody><tr><td><code>network</code></td><td>List of https host names (no IPs, no <code>localhost</code>). <code>*.x.com</code> matches subdomains. Poster art and the YouTube player only load from listed hosts.</td></tr><tr><td><code>storage</code></td><td>A small private key/value store (256 KB) and read access to <code>plugins/&lt;id&gt;/data/</code>.</td></tr><tr><td><code>library</code></td><td>Lets the Python backend call <code>pek_host.library_titles()</code>: titles and years only, never file names or folders.</td></tr><tr><td><code>torrent</code></td><td><code>pek.torrent.info / search / play</code>. The plugin never sees the provider address or key.</td></tr><tr><td><code>favorites</code></td><td><code>pek.favorites.list / add / remove</code>: the shared Favorites tab.</td></tr><tr><td><code>providers</code></td><td><code>ui.providerButton</code>: a &ldquo;Watch on &lt;service&gt;&rdquo; button.</td></tr><tr><td><code>plugins</code></td><td><code>pek.plugins.streamers / open</code>: hand a title to another plugin that can stream it.</td></tr><tr><td><code>live</code></td><td><code>pek.live.play</code> and live sessions (channel switcher, guide, now / next banner).</td></tr></tbody></table></div>
+<div class="note"><p><b>Android branch:</b> the installer also accepts <code>watched</code> and <code>device</code>. The bridge that exposes <code>pek.watched</code> and <code>pek.device</code> to plugin code is not wired into the sandbox yet, so treat both as planned.</p></div>
+
+<h2 id="ui">The UI API (<code>ui.js</code>)</h2>
+<p>Your UI runs in a sandboxed iframe with no access to the page, PEK TV's API, cookies or storage. You get one global, <code>pek</code> (the older name <code>hesper</code> still works).</p>
+<div class="tablewrap"><table><thead><tr><th>Call</th><th>What it does</th></tr></thead><tbody><tr><td><code>pek.render(ui =&gt; tree)</code></td><td>Draw the screen. Runs again after taps and <code>requestRender()</code>.</td></tr><tr><td><code>pek.requestRender()</code></td><td>Redraw after your own async work.</td></tr><tr><td><code>pek.fetchText(url)</code> / <code>fetchJSON(url)</code></td><td>HTTPS GET of an allowed host (1 MB, 8 s, no redirects). Needs <code>network</code>.</td></tr><tr><td><code>pek.storage.get / set / remove</code></td><td>Private store. Needs <code>storage</code>.</td></tr><tr><td><code>pek.readData(name)</code> / <code>readJSON(name)</code></td><td>Read <code>data/&lt;name&gt;</code> written by the backend. Needs <code>storage</code>.</td></tr><tr><td><code>pek.readBundled(name)</code></td><td>Read a JSON file shipped inside your own zip (<code>playlists/&lt;name&gt;</code>, 1 MB). No permission needed.</td></tr><tr><td><code>ui.card / listRow / button / text / heading / column / row</code></td><td>Basic building blocks. Text only, no HTML. <code>ui.button(label, fn, {primary, selected})</code>.</td></tr><tr><td><code>ui.episodeRow({...})</code></td><td>One episode: 16:9 still, title, a line of facts and a description. Check <code>if (ui.episodeRow)</code> for older versions.</td></tr><tr><td><code>ui.posterCard(title, sub, posterUrl, fn, {badge})</code></td><td>A poster tile like the library grid.</td></tr><tr><td><code>ui.grid(children, {minColWidth, scroll})</code></td><td>Responsive poster grid, or one sideways-scrolling row.</td></tr><tr><td><code>ui.tabs / textInput / spinner / toggle</code></td><td>Tab strip, text box, loading wheel, on/off switch.</td></tr><tr><td><code>ui.video({id, autoplay, muted, title})</code></td><td>A YouTube player pinned to the top of the screen. Needs <code>www.youtube-nocookie.com</code> in <code>network</code>.</td></tr><tr><td><code>{autofocus: 'key'}</code></td><td>Where the remote's highlight lands when a screen first shows.</td></tr><tr><td><code>pek.setBack(fn)</code></td><td>Make Back call <code>fn</code> first so a plugin can step out of its own screens. Pass <code>null</code> to let Back close the plugin.</td></tr><tr><td><code>pek.scrollTop()</code></td><td>Scroll back to the top after changing page.</td></tr></tbody></table></div>
+<pre><code>pek.render(function (ui) {
+  return ui.column([
+    ui.heading('Hello'),
+    ui.button('Tap me', function () { pek.requestRender(); }, { primary: true })
+  ]);
+});</code></pre>
+
+<h2 id="backend">Backend (<code>backend.py</code>)</h2>
+<p>Optional. It must pass an automatic scan and then runs with a limited host API. <code>run()</code> is called once at startup with a 10 second limit.</p>
+<ul>
+<li><b>Allowed imports:</b> <code>json re math datetime time collections itertools functools string textwrap html urllib.parse base64 hashlib random statistics decimal fractions typing dataclasses enum copy operator unicodedata</code>, your own <code>.py</code> files in the same folder, and <code>pek_host</code>.</li>
+<li><b>Not allowed:</b> <code>eval exec compile open getattr setattr __import__</code>, any attribute starting with <code>_</code>, <code>os sys subprocess socket ctypes</code> and similar, and native or compiled files.</li>
+<li><code>import pek_host as h</code> gives <code>h.fetch_text(url)</code>, <code>h.fetch_json(url)</code>, <code>h.write_json(name, obj)</code>, <code>h.read_json(name)</code> and <code>h.library_titles()</code> (needs <code>"library": true</code>). Network and storage obey <code>plugin.json</code>. The old name <code>hesper_host</code> also works.</li>
+<li>Installed plugins' backends start the next time PEK TV starts. If the scan refuses one, the reason is in PEK TV's log (<code>[PEK Plugin Guard] REFUSED ...</code>).</li>
+</ul>
+<pre><code>import pek_host as h
+
+def run():
+    titles = h.library_titles()
+    h.write_json("library.json", {"count": len(titles)})</code></pre>
+
+<h2 id="zip">Packaging and installing</h2>
+<p>In the app: <b>Settings &rarr; Plugins &rarr; Install plugin from .zip</b>, pick the file, read the permissions and confirm. Hold a plugin's row to remove it. The zip needs <code>plugin.json</code> and <code>ui.js</code>, at the top or inside one folder (the folder name becomes the plugin id: lowercase letters, digits, <code>-</code> and <code>_</code>). Installing again with the same id updates the plugin and keeps its <code>data/</code> folder.</p>
+<ul>
+<li>Allowed files: <code>.js .json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf</code>, and <code>.py</code> for the backend.</li>
+<li>Limits: 200 files, 2 MB per file (200 KB per <code>.py</code>), 8 MB total, no hidden files, no <code>..</code> in paths.</li>
+<li>On Android the plugins folder is private to the app, so a .zip install is the way to add plugins. On a computer or Termux you can also drop a folder into <code>plugins/</code>.</li>
+</ul>
+<h3>Publish on GitHub</h3>
+<ol>
+<li>Put <code>plugin.json</code> and <code>ui.js</code> at the top of your zip, or inside one folder.</li>
+<li>Make a <b>GitHub Release</b> and attach the zip (a <code>.zip</code> asset up to 8 MB). PEK TV installs the latest release.</li>
+<li>Keep the folder name or plugin name the same across versions so updates replace the old copy.</li>
+</ol>
+
+<h2 id="more">More APIs</h2>
+<h3>Torrent streaming</h3>
+<p>With <code>"torrent": true</code>, a plugin can call <code>pek.torrent.info()</code>, <code>pek.torrent.search({kind, title, year, season, episode})</code> and <code>pek.torrent.play({source, title, kind, name, season, episode, year, image})</code>. PEK TV shows its own buffering box and opens the player when enough is downloaded. The plugin never sees the provider's address or key, which the user sets under <b>Settings &rarr; Torrents</b>. PEK TV ships with no search provider; the user supplies their own Torznab provider.</p>
+<h3>Up next</h3>
+<pre><code>pek.onNextEpisode(function (req) {
+  // req = { phase: 'check' | 'play', showTitle, season, episode }
+  // 'check' -> resolve { ok: true, season, episode, name } or { ok: false }
+  // 'play'  -> start it with pek.torrent.play(...) and resolve { ok: true }
+});</code></pre>
+<h3>Live streams</h3>
+<p>With <code>"live": true</code>, <code>pek.live.play({url, title})</code> opens PEK's player on an http(s) stream (not this device, no credentials in the URL). Add a <code>channel</code> id and PEK TV opens a <i>live session</i> with a now / next banner, a channel switcher and a guide. You register one function with <code>pek.live.onQuery</code> and answer four questions: <code>list</code>, <code>now</code>, <code>guide</code> and <code>url</code>.</p>
+<h3>Launching and favorites</h3>
+<p><code>pek.onLaunch(fn)</code> runs when PEK TV opens your plugin on a title (from Favorites or another plugin). Streaming services and their Android packages are listed in <code>www/providers.js</code>.</p>
+<p>The full reference is <a href="https://github.com/R3CT01/PEK-TV/blob/main/PLUGINS.md"><code>PLUGINS.md</code></a> in the repository.</p>
+
+<h2 id="bundled">Plugins in the repository</h2>
+<div class="tablewrap"><table><thead><tr><th>Plugin</th><th>What it is</th></tr></thead><tbody><tr><td><code>plugins/tmdb-discover</code></td><td>Official. Trending, top rated, popular and now playing rows for movies and TV, numbered pages, search, streaming-service chips, a trailer that autoplays at the top of a title (with a Settings toggle), cast, more titles like it, favorites, and &ldquo;In library&rdquo; badges. Uses PEK TV's built-in TMDb access, so no key is needed. Still runs sandboxed. The best full example.</td></tr><tr><td><code>plugins/weather</code></td><td>Official. A weather widget: pick a city and it feeds the header badge and the dashboard tile. City search and forecasts come from Open-Meteo; there is no default city.</td></tr></tbody></table></div>
+
+<h2 id="skins">Skins are not plugins</h2>
+<p>A skin changes colours, corner radius and, optionally, adds CSS. It cannot run code or use the network. Install one from <b>Settings &rarr; Skins &rarr; Install skin from .zip</b>. A zip is a plugin or a skin, never both: installing the wrong kind fails with a message that says which it is.</p>
+<pre><code>{
+  "name": "Sunset",
+  "author": "You",
+  "version": "1.0.0",
+  "description": "Warm dusk colours with soft rounded corners.",
+  "tokens": { "bg": "#1a0f14", "text": "#fff1e8", "accent": "#ffb347", "radius": "14px" }
+}</code></pre>
+<p>Allowed files: <code>json css md txt png jpg jpeg gif webp ico woff woff2 ttf otf</code>, up to 60 files, 2 MB each, 6 MB total. The server re-checks every rule. See <a href="https://github.com/R3CT01/PEK-TV/blob/main/SKINS.md"><code>SKINS.md</code></a>.</p>
+</article></div></main>
+<footer><div class="wrap">
+<p><b>PEK TV</b> is made by PEK Industries. Source: <a href="https://github.com/R3CT01/PEK-TV">github.com/R3CT01/PEK-TV</a>. See the <code>LICENCE</code> file in the repository for what you may and may not do with the code.</p>
+<p>PEK Industries is not associated with any illegal activity involving torrents. PEK TV does not host, provide or link to any content, and ships with no search provider or index. You are responsible for what you play.</p>
+<p>This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming availability data provided by JustWatch.</p>
+</div></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

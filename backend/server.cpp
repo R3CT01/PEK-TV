@@ -510,7 +510,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     });
 
     // 3b-2. Plugin backup: list an installed plugin's files, and read one of them. Used by the app to
-    //       back plugins up to Hesper Cloud. plugin_install.h only lets through plain allowed files
+    //       back plugins up to PEK Cloud. plugin_install.h only lets through plain allowed files
     //       (never data/, hidden files or built-in plugins).
     svr.Get("/api/plugins/files", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
         std::vector<pek_plugins::ListedFile> files;

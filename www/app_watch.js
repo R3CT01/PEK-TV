@@ -140,7 +140,7 @@ class MainAppWatchMethods {
 
     _syncMessage(err) {
         return ({
-            offline: 'Could not reach Hesper Cloud. Check your connection.',
+            offline: 'Could not reach PEK Cloud. Check your connection.',
             bad_email: 'That email address does not look right.',
             weak_password: 'Passwords need at least 8 characters.',
             bad_credentials: 'Wrong email or password.',
@@ -164,7 +164,7 @@ class MainAppWatchMethods {
             plugin_quota: 'Your plugin backup is full (30 plugins or 60 MB). Remove one you no longer use.',
             damaged: 'The plugin from the cloud arrived damaged. Try again.',
             gone: 'That plugin is no longer in your cloud backup.'
-        })[err] || 'Hesper Cloud is having trouble. Try again later.';
+        })[err] || 'PEK Cloud is having trouble. Try again later.';
     }
 
     // opts: { manual }. Updates the screen when something changed.

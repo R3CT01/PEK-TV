@@ -59,7 +59,7 @@ You get one global, `pek`:
 | `pek.setBack(fn)` / `pek.setBack(null)` | | Make Back (Esc, the remote's Back, the window's Back button) call `fn` first, so a plugin can step out of its own screens. Pass `null` when there is nothing to step out of; Back then closes the plugin. |
 | `pek.scrollTop()` | | Scroll the plugin screen back to the top (after changing page, say). |
 
-See `plugins/sample_counter/` for a small example and `plugins/tmdb-discover/` for a full one (rows, numbered pages, search, provider chips, trailer, cast, library badges).
+See `plugins/tmdb-discover/` for a full example (rows, numbered pages, search, provider chips, trailer, cast, library badges).
 
 ## Backend (`backend.py`, optional)
 
@@ -84,7 +84,7 @@ PEK TV only answers the device it runs on. To open it to other devices on your n
 
 In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, check the permissions PEK TV
 shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
-with PEK TV (`weather`, `sample_scraper`, `sample_counter`, `tmdb-discover`) can't be replaced or removed.
+with PEK TV (`weather` and `tmdb-discover`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
 
 The zip must contain `plugin.json` and `ui.js`, either at the top of the zip or inside one folder
 (the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:
@@ -102,7 +102,7 @@ Termux you can still drop a folder into `plugins/` yourself. A build that must n
 (for example a store build) can start with `PEK_ALLOW_PLUGIN_BACKEND=0`, which refuses `.py` files.
 
 
-## Backing plugins up to Hesper Cloud
+## Backing plugins up to PEK Cloud
 
 When you are signed in (Settings -> Cloud Sync), plugins you installed from a .zip are backed up to your account
 automatically; switch it off with **Back up my plugins**. Built-in plugins are not backed up, and neither is a
@@ -130,7 +130,7 @@ What the plugin does NOT get: the search provider's address or API key (set by t
 Torrents and kept in PEK TV), the downloaded files, or any other PEK TV API. `source` must be a
 `magnet:?` link or a `source` value returned by `search()`. The install screen lists this permission.
 
-Playing a pasted magnet link is no longer built into the app: install `plugin_packages/magnet-player.zip` for that (it is a normal third-party plugin using this permission).
+Playing a pasted magnet link is not built into the app: a normal plugin using this permission does that. No such plugin is included in this repository.
 
 PEK TV ships with no search provider. The engine (libtorrent) is optional at build time: without it,
 `search` still works and `play` fails with "not built in".
@@ -234,5 +234,5 @@ Any plugin (no permission needed) can also read JSON files that shipped inside i
 
 One package uses both, as a TV directory (now playing, up next, time left) over `playlists/*.json`:
 
-- `plugin_packages/live-tv/` - **Live TV Guide**, PEK's official plugin. Not built in: the owner publishes `live-tv.zip` on the
-  PEK Store's Official shelf and users install it if they want it. It ships without channels.
+- **Live TV Guide** is PEK's official plugin for this. It is not built in and its source is not part of this repository: it is
+  published as `live-tv.zip` on the PEK Store's Official shelf and users install it if they want it. It ships without channels.

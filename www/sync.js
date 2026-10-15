@@ -2,7 +2,7 @@
  *
  * Local part: a permanent "watched" record (kept after resume points are gone).
  * Cloud part: optional sync of watch history, resume positions AND favorites between devices,
- * through the Hesper Cloud worker (cloud/worker.js). An account is an email address and
+ * through the PEK Cloud worker (cloud/worker.js). An account is an email address and
  * a password; nothing is sent until the user signs in.
  *
  * Items are matched across devices by title (not file id), so a movie or episode

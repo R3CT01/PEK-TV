@@ -1,5 +1,5 @@
 // ============================================================
-// Hesper Plugin — "Weather Widget" (Loop-Broken & Stable)
+// PEK TV Plugin — "Weather Widget" (Loop-Broken & Stable)
 // ============================================================
 
 window.app_name = 'Weather Widget';
@@ -121,8 +121,8 @@ window.render = function (engine) {
         return response;
     };
 
-    // Uses the city you picked (if any). The weather.json cache from backend.py is only
-    // the default for when no city has been chosen, so it can no longer overwrite your pick.
+    // Uses the city you picked. There is no default city: weather.json is a leftover sample
+    // that nothing reads, so it can never overwrite your pick.
     async function refreshWeather() {
         unit = localStorage.getItem(UNIT_KEY) || 'F';   // may have come from the cloud (Cloud Sync)
         const saved = readJson(COORDS_KEY);
