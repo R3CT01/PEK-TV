@@ -145,6 +145,7 @@ class MainAppWatchMethods {
             weak_password: 'Passwords need at least 8 characters.',
             bad_credentials: 'Wrong email or password.',
             email_taken: 'There is already an account with that email. Try signing in.',
+            username_required: 'Please choose a username (3 to 20 characters).',
             bad_username: 'Usernames are 3 to 20 characters: letters, numbers, dots, dashes or underscores, starting with a letter or number.',
             username_taken: 'That username is already taken. Try another.',
             invite_required: 'PEK Cloud is invite-only for now. Enter the invite code you were given.',
@@ -772,7 +773,7 @@ class MainAppWatchMethods {
             parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'signup') {
             parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices. PEK Cloud is invite-only for now: enter the invite code you were given.'));
-            parts.push(email(), ui.textInput('Username (optional)', f.username, (v) => { f.username = v; }, { placeholder: 'How you want to be known' }), pass('Password', 'password'), pass('Confirm password', 'confirm'), ui.textInput('Invite code', f.invite, (v) => { f.invite = v; }, { placeholder: 'PEK-XXXXX-XXXXX' }));
+            parts.push(email(), ui.textInput('Username', f.username, (v) => { f.username = v; }, { placeholder: 'How you want to be known' }), pass('Password', 'password'), pass('Confirm password', 'confirm'), ui.textInput('Invite code', f.invite, (v) => { f.invite = v; }, { placeholder: 'PEK-XXXXX-XXXXX' }));
             parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'verify') {
             parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));

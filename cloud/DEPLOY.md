@@ -145,9 +145,9 @@ confirmed it is used up for good. Unused codes also stop working after 14 days (
 A person who starts sign-up and abandons it cannot finish later without a code.
 
 
-## Usernames (optional)
+## Usernames
 
-Sign-up has an optional **Username** box: 3 to 20 characters (letters, numbers, `.`, `-`, `_`, starting with a letter or number),
-unique without regard to upper/lower case. Accounts made before this have none, and nobody is required to pick one. It is shown under
+Sign-up has a required **Username** box: 3 to 20 characters (letters, numbers, `.`, `-`, `_`, starting with a letter or number),
+unique without regard to upper/lower case. Accounts made before this have none and are not asked for one. It is shown under
 Settings -> Cloud Sync once signed in. Sign-in still uses the email and password. Deploy the new `worker.js` (the `username` column and its
 unique index are created on the first request), then update the app.

@@ -103,7 +103,7 @@ async function init(db) {
     try { await db.prepare('ALTER TABLE users ADD COLUMN verified INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
     // gf = 1: the account existed before invite-only sign-up, so it is never asked for a code. New sign-ups are stored with gf = 0.
     try { await db.prepare('ALTER TABLE users ADD COLUMN gf INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
-    // Optional username (3 to 20 characters), unique ignoring upper/lower case. Older accounts have none ('').
+    // Username (3 to 20 characters, required at sign-up), unique ignoring upper/lower case. Older accounts have none ('').
     try { await db.prepare("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
     await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE) WHERE username <> ''").run();
     await db.prepare('CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created INTEGER NOT NULL, expires INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT \'\', reserved_by TEXT, reserved_until INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at INTEGER)').run();
@@ -187,7 +187,7 @@ function cleanEmail(v) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
     return e;
 }
-// '' = none given (it is optional), null = not allowed, otherwise the cleaned name.
+// '' = none given, null = not allowed, otherwise the cleaned name.
 function cleanUsername(v) {
     const u = String(v == null ? '' : v).trim();
     if (!u) return '';
@@ -384,9 +384,10 @@ async function handleSignup(request, env) {
     const existing = await db.prepare('SELECT id, verified, gf FROM users WHERE email = ?').bind(email).first();
     if (existing && existing.verified) return json({ error: 'email_taken' }, 409);
 
-    // Username (optional): checked before an invite is held, so a taken name never ties up a code.
+    // Username (required for new accounts): checked before an invite is held, so a taken name never ties up a code.
     const username = cleanUsername(body.username);
     if (username === null) return json({ error: 'bad_username' }, 400);
+    if (!username && !(existing && existing.gf)) return json({ error: 'username_required' }, 400);   // accounts from before usernames existed (gf = 1) may finish without one
     if (username && await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?').bind(username, existing ? existing.id : '').first()) return json({ error: 'username_taken' }, 409);
 
     // Invite-only: a new address (or one left unconfirmed since the switch) needs an unused code. Accounts that already
