@@ -12,9 +12,13 @@
 //   BREVO_API_KEY       (Secret)  your Brevo API key
 //   BREVO_SENDER_EMAIL  (Text)    a sender address you verified in Brevo
 //   BREVO_SENDER_NAME   (Text, optional)  shown as the sender name, default "PEK TV"
+//   INVITE_ONLY        (Text, optional)  1 = new accounts need a single-use invite code (existing accounts are not affected)
+//   ADMIN_KEY          (Secret, optional) a long random text (16+ characters); lets YOU make invite codes (see cloud/DEPLOY.md)
 //
 // Routes:
-//   POST   /v1/auth/signup   { email, password }                -> { ok, needsVerify, email }   (code emailed)
+//   POST   /v1/auth/signup   { email, password, invite? }       -> { ok, needsVerify, email }   (code emailed; invite needed when INVITE_ONLY=1)
+//   POST   /v1/invites/new   { count?, days?, note? }           -> { ok, codes }   (Authorization: Bearer <ADMIN_KEY>; codes are shown once)
+//   POST   /v1/invites/list  {}                                 -> { ok, invites }   (same key)   POST /v1/invites/revoke { id } -> { ok }
 //   POST   /v1/auth/verify   { email, code }                    -> { ok, token, email }   (finishes a sign-up OR a sign-in)
 //   POST   /v1/auth/resend   { email }                          -> { ok }   (always; new code for an unconfirmed account or a pending sign-in)
 //   POST   /v1/auth/login    { email, password }                -> { ok, needsVerify, email }  (a 6-digit code is emailed; every sign-in needs it)
@@ -65,6 +69,9 @@ const SESSION_REFRESH_BELOW = 60 * 24 * 3600 * 1000;
 const RESET_TTL = 15 * 60 * 1000;
 const RESET_MAX_TRIES = 5;
 const VERIFY_TTL = 30 * 60 * 1000;
+const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 31 characters, no 0 / O / 1 / I / L
+const INVITE_MAX_NEW = 20;          // codes made per request
+const INVITE_DEFAULT_DAYS = 14;     // an unused code stops working after this many days (0 = never)
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 200;
 
@@ -90,6 +97,12 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, pw TEXT NOT NULL, created INTEGER NOT NULL, last_seen INTEGER NOT NULL, verified INTEGER NOT NULL DEFAULT 0)').run();
     // A users table made before email verification existed has no such column: add it (those accounts count as verified).
     try { await db.prepare('ALTER TABLE users ADD COLUMN verified INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
+    // gf = 1: the account existed before invite-only sign-up, so it is never asked for a code. New sign-ups are stored with gf = 0.
+    try { await db.prepare('ALTER TABLE users ADD COLUMN gf INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
+    // Optional username (3 to 20 characters), unique ignoring upper/lower case. Older accounts have none ('').
+    try { await db.prepare("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE) WHERE username <> ''").run();
+    await db.prepare('CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created INTEGER NOT NULL, expires INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT \'\', reserved_by TEXT, reserved_until INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at INTEGER)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS verifs (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
     await db.prepare('CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id)').run();
@@ -166,6 +179,12 @@ function cleanEmail(v) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) return null;
     return e;
 }
+// '' = none given (it is optional), null = not allowed, otherwise the cleaned name.
+function cleanUsername(v) {
+    const u = String(v == null ? '' : v).trim();
+    if (!u) return '';
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{2,19}$/.test(u) ? u : null;
+}
 function goodPassword(v) {
     return typeof v === 'string' && v.length >= MIN_PASSWORD && v.length <= MAX_PASSWORD;
 }
@@ -193,6 +212,44 @@ async function limited(db, key, max, windowMs, now) {
 }
 async function clearLimit(db, key) { await db.prepare('DELETE FROM throttle WHERE k = ?').bind(key).run(); }
 function clientIp(request) { return request.headers.get('CF-Connecting-IP') || 'unknown'; }
+
+// ---------------------------------------------------------------- invite codes (single use)
+// A code looks like PEK-7K3QX-9MLTA. Only its SHA-256 hash is stored, so the code can't be read back from the database.
+// Life of a code: unused -> held (while its owner confirms their email, 30 minutes, renewed by "resend") -> used (for good).
+function inviteOnly(env) {
+    const v = String(env.INVITE_ONLY == null ? '' : env.INVITE_ONLY).trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'on' || v === 'yes';
+}
+function normInvite(v) {                       // "pek-7k3qx-9mlta", "PEK7K3QX9MLTA" and "7K3QX9MLTA" are the same code
+    let n = String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (n.length === 13 && n.indexOf('PEK') === 0) n = n.slice(3);
+    return n;
+}
+async function inviteHash(v) {
+    const n = normInvite(v);
+    return n.length === 10 ? sha256Hex('pek:invite:' + n) : null;
+}
+function newInviteCode() {
+    let s = '';
+    while (s.length < 10) {                    // rejection sampling: no bias towards the first letters
+        const b = crypto.getRandomValues(new Uint8Array(16));
+        for (const x of b) if (x < 248 && s.length < 10) s += INVITE_ALPHABET[x % 31];
+    }
+    return 'PEK-' + s.slice(0, 5) + '-' + s.slice(5);
+}
+// Holds an unused, unexpired code for this account. One UPDATE decides it, so two people can never get the same code.
+async function holdInvite(db, hash, userId, now) {
+    await db.prepare('UPDATE invites SET reserved_by = NULL, reserved_until = 0 WHERE reserved_by = ? AND used_by IS NULL AND hash <> ?').bind(userId, hash).run();
+    const r = await db.prepare('UPDATE invites SET reserved_by = ?, reserved_until = ? WHERE hash = ? AND used_by IS NULL AND (expires = 0 OR expires > ?) AND (reserved_by IS NULL OR reserved_until < ? OR reserved_by = ?)')
+        .bind(userId, now + VERIFY_TTL, hash, now, now, userId).run();
+    return !!(r.meta && r.meta.changes);
+}
+// The confirmed email burns the code for good. Returns false when this account does not hold one (it must not be confirmed then).
+async function useInvite(env, db, user, now) {
+    if (!inviteOnly(env) || user.verified || user.gf) return true;
+    const r = await db.prepare('UPDATE invites SET used_by = ?, used_at = ?, reserved_by = NULL, reserved_until = 0 WHERE reserved_by = ? AND used_by IS NULL').bind(user.id, now, user.id).run();
+    return !!(r.meta && r.meta.changes);
+}
 
 // ---------------------------------------------------------------- sessions
 async function startSession(db, userId, now) {
@@ -289,6 +346,7 @@ async function issueVerification(env, db, userId, email, now) {
         'ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires = excluded.expires, tries = 0')
         .bind(userId, await sha256Hex('hesper:verify:' + userId + ':' + code), now + VERIFY_TTL).run();
     try { await sendCodeEmail(env, email, code, 'verify'); } catch (e) { console.error('Brevo request error', String(e)); }
+    await db.prepare('UPDATE invites SET reserved_until = ? WHERE reserved_by = ? AND used_by IS NULL').bind(now + VERIFY_TTL, userId).run();   // the invite stays held while this code works
     return true;
 }
 
@@ -315,8 +373,23 @@ async function handleSignup(request, env) {
     if (!goodPassword(body.password)) return json({ error: 'weak_password' }, 400);
     if (await limited(db, 'signup:ip:' + clientIp(request), 10, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
 
-    const existing = await db.prepare('SELECT id, verified FROM users WHERE email = ?').bind(email).first();
+    const existing = await db.prepare('SELECT id, verified, gf FROM users WHERE email = ?').bind(email).first();
     if (existing && existing.verified) return json({ error: 'email_taken' }, 409);
+
+    // Username (optional): checked before an invite is held, so a taken name never ties up a code.
+    const username = cleanUsername(body.username);
+    if (username === null) return json({ error: 'bad_username' }, 400);
+    if (username && await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?').bind(username, existing ? existing.id : '').first()) return json({ error: 'username_taken' }, 409);
+
+    // Invite-only: a new address (or one left unconfirmed since the switch) needs an unused code. Accounts that already
+    // existed before the switch (gf = 1) never do, and sign-in / password reset never come through here.
+    const userId = existing ? existing.id : randomHex(16);
+    if (inviteOnly(env) && !(existing && existing.gf)) {
+        if (await limited(db, 'invite:ip:' + clientIp(request), 20, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
+        if (!normInvite(body.invite)) return json({ error: 'invite_required' }, 403);
+        const hash = await inviteHash(body.invite);
+        if (!hash || !(await holdInvite(db, hash, userId, now))) return json({ error: 'bad_invite' }, 403);
+    }
 
     const pw = await hashPassword(body.password);
     let id;
@@ -324,13 +397,15 @@ async function handleSignup(request, env) {
         // Someone started this sign-up but never verified. The newest attempt takes it over, so nobody can
         // lock a real owner out of their own address by registering it first.
         id = existing.id;
-        await db.prepare('UPDATE users SET pw = ?, created = ? WHERE id = ?').bind(pw, now, id).run();
+        await db.prepare('UPDATE users SET pw = ?, created = ?, username = ? WHERE id = ?').bind(pw, now, username, id).run();
     } else {
-        id = randomHex(16);
+        id = userId;
         try {
-            await db.prepare('INSERT INTO users (id, email, pw, created, last_seen, verified) VALUES (?, ?, ?, ?, ?, 0)')
-                .bind(id, email, pw, now, now).run();
+            await db.prepare('INSERT INTO users (id, email, pw, created, last_seen, verified, gf, username) VALUES (?, ?, ?, ?, ?, 0, 0, ?)')
+                .bind(id, email, pw, now, now, username).run();
         } catch (e) {
+            await db.prepare('UPDATE invites SET reserved_by = NULL, reserved_until = 0 WHERE reserved_by = ? AND used_by IS NULL').bind(userId).run();   // give the code back
+            if (username && await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE').bind(username).first()) return json({ error: 'username_taken' }, 409);
             return json({ error: 'email_taken' }, 409);     // lost a race with a second sign-up
         }
     }
@@ -346,7 +421,7 @@ async function handleVerify(request, env) {
     if (!email || code.length !== 6) return json({ error: 'bad_code' }, 400);
     if (await limited(db, 'verify:ip:' + clientIp(request), 30, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
 
-    const user = await db.prepare('SELECT id, verified FROM users WHERE email = ?').bind(email).first();
+    const user = await db.prepare('SELECT id, verified, gf, username FROM users WHERE email = ?').bind(email).first();
     const row = user ? await db.prepare('SELECT code_hash, expires, tries FROM verifs WHERE user_id = ?').bind(user.id).first() : null;
     if (!user || !row || row.expires < now || row.tries >= RESET_MAX_TRIES) return json({ error: 'bad_code' }, 400);
 
@@ -354,11 +429,12 @@ async function handleVerify(request, env) {
         await db.prepare('UPDATE verifs SET tries = tries + 1 WHERE user_id = ?').bind(user.id).run();
         return json({ error: 'bad_code' }, 400);
     }
+    if (!(await useInvite(env, db, user, now))) return json({ error: 'bad_invite' }, 403);   // sign-up only: the invite is burned here
     await db.batch([
         db.prepare('UPDATE users SET verified = 1, last_seen = ? WHERE id = ?').bind(now, user.id),
         db.prepare('DELETE FROM verifs WHERE user_id = ?').bind(user.id)
     ]);
-    return json({ ok: true, token: await startSession(db, user.id, now), email });
+    return json({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' });
 }
 
 // Sends a new code: to an unverified account, or to a sign-in that is waiting for its code. Always answers ok.
@@ -443,7 +519,7 @@ async function handleReset(request, env) {
     if (!goodPassword(body.password)) return json({ error: 'weak_password' }, 400);
     if (await limited(db, 'reset:ip:' + clientIp(request), 30, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
 
-    const user = await db.prepare('SELECT id FROM users WHERE email = ?').bind(email).first();
+    const user = await db.prepare('SELECT id, verified, gf, username FROM users WHERE email = ?').bind(email).first();
     const row = user ? await db.prepare('SELECT code_hash, expires, tries FROM resets WHERE user_id = ?').bind(user.id).first() : null;
     if (!user || !row || row.expires < now || row.tries >= RESET_MAX_TRIES) return json({ error: 'bad_code' }, 400);
 
@@ -452,6 +528,7 @@ async function handleReset(request, env) {
         await db.prepare('UPDATE resets SET tries = tries + 1 WHERE user_id = ?').bind(user.id).run();
         return json({ error: 'bad_code' }, 400);
     }
+    if (!(await useInvite(env, db, user, now))) return json({ error: 'bad_invite' }, 403);
     await db.batch([
         db.prepare('UPDATE users SET pw = ?, last_seen = ?, verified = 1 WHERE id = ?').bind(await hashPassword(body.password), now, user.id),   // a reset code proves the email too
         db.prepare('DELETE FROM resets WHERE user_id = ?').bind(user.id),
@@ -459,7 +536,7 @@ async function handleReset(request, env) {
         db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id)      // everyone is signed out
     ]);
     await clearLimit(db, 'login:mail:' + email);
-    return json({ ok: true, token: await startSession(db, user.id, now), email });
+    return json({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' });
 }
 
 async function handleLogout(env, sess) {
@@ -936,6 +1013,55 @@ async function storeOwnerApprove(request, env) {
 }
 
 // ---------------------------------------------------------------- router
+// ---------------------------------------------------------------- invite admin (only with ADMIN_KEY)
+// Anyone without the key gets the same answer as for a route that does not exist.
+async function adminCheck(request, env, db, now) {
+    const key = String(env.ADMIN_KEY || '');
+    if (key.length < 16) return 'denied';                                   // not set up, or too short to be safe
+    if (await limited(db, 'admin:ip:' + clientIp(request), 30, 15 * 60 * 1000, now)) return 'limited';
+    const given = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    return sameString(await sha256Hex('pek:admin:' + given), await sha256Hex('pek:admin:' + key)) ? 'ok' : 'denied';
+}
+
+async function handleInvites(request, env, path) {
+    const db = env.DB, now = Date.now(), DAY_MS = 24 * 3600 * 1000;
+    const auth = await adminCheck(request, env, db, now);
+    if (auth === 'limited') return json({ error: 'rate_limited' }, 429);
+    if (auth !== 'ok') return json({ error: 'not_found' }, 404);
+    const { body, err } = await readJson(request); if (err) return err;
+
+    if (path === '/v1/invites/new') {
+        const count = Math.max(1, Math.min(INVITE_MAX_NEW, Math.floor(Number(body.count) || 1)));
+        const days = body.days == null ? INVITE_DEFAULT_DAYS : Math.max(0, Math.min(365, Math.floor(Number(body.days) || 0)));
+        const note = String(body.note == null ? '' : body.note).replace(/\s+/g, ' ').trim().slice(0, 60);
+        const codes = [], stmts = [];
+        for (let i = 0; i < count; i++) {
+            const code = newInviteCode();
+            codes.push(code);
+            stmts.push(db.prepare('INSERT INTO invites (hash, created, expires, note) VALUES (?, ?, ?, ?)').bind(await inviteHash(code), now, days ? now + days * DAY_MS : 0, note));
+        }
+        await db.batch(stmts);
+        return json({ ok: true, codes, expiresInDays: days || null });
+    }
+    if (path === '/v1/invites/list') {
+        const rows = (await db.prepare('SELECT i.hash, i.created, i.expires, i.note, i.reserved_by, i.reserved_until, i.used_at, u.email AS used_email FROM invites i LEFT JOIN users u ON u.id = i.used_by ORDER BY i.created DESC LIMIT 200').all()).results || [];
+        return json({ ok: true, invites: rows.map(r => ({
+            id: r.hash.slice(0, 8),
+            status: r.used_at ? 'used' : (r.expires && r.expires <= now) ? 'expired' : (r.reserved_by && r.reserved_until > now) ? 'waiting for email confirmation' : 'unused',
+            note: r.note, created: new Date(r.created).toISOString(),
+            expires: r.expires ? new Date(r.expires).toISOString() : null,
+            usedBy: r.used_at ? (r.used_email || '(account deleted)') : null
+        })) });
+    }
+    if (path === '/v1/invites/revoke') {
+        const id = String(body.id || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+        if (id.length !== 8) return json({ error: 'bad_id' }, 400);
+        const r = await db.prepare('DELETE FROM invites WHERE substr(hash, 1, 8) = ? AND used_at IS NULL').bind(id).run();
+        return r.meta && r.meta.changes ? json({ ok: true }) : json({ error: 'not_found' }, 404);
+    }
+    return json({ error: 'not_found' }, 404);
+}
+
 export default {
     async fetch(request, env) {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
@@ -954,6 +1080,7 @@ export default {
             if (method === 'POST' && path === '/v1/auth/login') return await handleLogin(request, env);
             if (method === 'POST' && path === '/v1/auth/forgot') return await handleForgot(request, env);
             if (method === 'POST' && path === '/v1/auth/reset') return await handleReset(request, env);
+            if (method === 'POST' && path.indexOf('/v1/invites/') === 0) return await handleInvites(request, env, path);
 
             // GitHub sign-in (used by the GitHub Pages site)
             if (method === 'GET' && path === '/v1/gh/login') return await ghLogin(url, request, env);

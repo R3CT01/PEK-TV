@@ -15,6 +15,7 @@
     var K = {
         token: 'hesper_sync_token',      // session token from signing in (never the password)
         email: 'hesper_sync_email',
+        username: 'hesper_sync_username',
         legacyKey: 'hesper_sync_key',    // the old 25-character key; removed on load
         cursor: 'hesper_sync_cursor_v1',
         last: 'hesper_sync_last_v1',
@@ -177,6 +178,7 @@
 
     function getToken() { return getRaw(K.token) || ''; }
     function getEmail() { return getRaw(K.email) || ''; }
+    function getUsername() { return getRaw(K.username) || ''; }
     function lastSync() { return parseInt(getRaw(K.last), 10) || 0; }
 
     // Forget what we know about the cloud (cursor, what was already uploaded). Local history stays.
@@ -186,15 +188,16 @@
         [K.cursor, K.last, K.seen, K.pending].forEach(delRaw);
     }
     // Starts a signed-in session. Sync state is reset so this account gets a full two-way merge.
-    function startSession(token, email) {
+    function startSession(token, email, username) {
         resetSyncState();
         setRaw(K.token, token);
         setRaw(K.email, email);
+        if (username) setRaw(K.username, username); else delRaw(K.username);
     }
     // Signs this device out locally. Watch history and resume points on the device are kept.
     function unlink() {
         resetSyncState();
-        [K.token, K.email].forEach(delRaw);
+        [K.token, K.email, K.username].forEach(delRaw);
     }
 
     // The old key-based accounts no longer exist; drop the stale key.
@@ -240,14 +243,17 @@
             if (!res.ok) return res;
             if (res.body.needsVerify) return { ok: true, needsVerify: true };   // account made; email code still to enter
             if (!res.body.token) return { ok: false, error: 'server' };
-            startSession(res.body.token, res.body.email || cleanEmail(body.email));
+            startSession(res.body.token, res.body.email || cleanEmail(body.email), res.body.username);
             return { ok: true };
         });
     }
-    function signUp(email, password) {
+    function signUp(email, password, invite, username) {
         if (!validEmail(email)) return Promise.resolve({ ok: false, error: 'bad_email' });
         if (!validPassword(password)) return Promise.resolve({ ok: false, error: 'weak_password' });
-        return authSession('/v1/auth/signup', { email: cleanEmail(email), password: password });
+        var body = { email: cleanEmail(email), password: password };
+        if (invite && String(invite).trim()) body.invite = String(invite).trim();   // only needed while the cloud is invite-only
+        if (username && String(username).trim()) body.username = String(username).trim();
+        return authSession('/v1/auth/signup', body);
     }
     // Finishes sign-up with the 6-digit code from the email, and signs this device in.
     function verifyEmail(email, code) {
@@ -756,7 +762,7 @@
         signUp: signUp, signIn: signIn, signOut: signOut, confirmPassword: confirmPassword, peekProfiles: peekProfiles,
         verifyEmail: verifyEmail, resendCode: resendCode,
         forgotPassword: forgotPassword, resetPassword: resetPassword,
-        getEmail: getEmail, lastSync: lastSync, unlink: unlink,
+        getEmail: getEmail, getUsername: getUsername, lastSync: lastSync, unlink: unlink,
         sync: sync, hasLocalChanges: hasLocalChanges, deleteAccount: deleteAccount, cloud: cloud,
         isLinked: function () { return !!getToken(); },
         _setApi: function (u) { API = u; },
