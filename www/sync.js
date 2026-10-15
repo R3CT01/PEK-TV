@@ -161,6 +161,18 @@
             .sort(function (a, b) { return (b.watchedAt || 0) - (a.watchedAt || 0); });
     }
 
+    // Marks one item as not watched (kept as a "deleted" marker so the removal syncs too).
+    function forgetWatched(meta) {
+        var key = histKey(meta);
+        if (!key) return false;
+        var map = readHistory();
+        if (!map[key] || map[key].deleted) return false;
+        map[key] = { deleted: 1, updated: clock.now() };
+        writeHistory(map);
+        try { document.dispatchEvent(new CustomEvent('pek-history')); } catch (e) { /* no events */ }
+        return true;
+    }
+
     // Removes everything from the history (kept as a "deleted" marker so the removal syncs too).
     function clearHistory() {
         var now = clock.now();
@@ -756,6 +768,8 @@
     window.PekSync = {
         histKey: histKey,
         recordWatched: recordWatched,
+        forgetWatched: forgetWatched,
+        watchedKey: histKey,
         listHistory: listHistory,
         clearHistory: clearHistory,
         validEmail: validEmail, validPassword: validPassword,
