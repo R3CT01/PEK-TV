@@ -404,6 +404,14 @@ class MainApp extends PekComponent {
                     this._renderVideoOutputSettings(),
                     this._renderAudioOutputSettings(),
                 createElement('div', { className: 'settings-section' },
+                    createElement('h2', {}, 'Performance mode'),
+                    createElement('p', { className: 'sub' }, 'Lighter visuals for weak TV boxes and older devices: no blur or soft shadows, no fades, and no trailer video behind the featured title (On only). Same layout.'),
+                    createElement('div', { className: 'plugin-list' },
+                        ...[['auto', 'Auto', 'Light on TV boxes and low-memory devices'], ['on', 'On', 'Always light, and no trailer video'], ['off', 'Off', 'Always full visuals']].map(([id, name, desc]) =>
+                            ui.listRow(name, desc, () => { window.PekLite.setMode(id); this.setState({}); }, { statusDot: window.PekLite.mode() === id }))
+                    )
+                ),
+                createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'TV mode'),
                     createElement('p', { className: 'sub' }, 'Bigger text, safe margins and a bolder highlight for the couch.'),
                     createElement('div', { className: 'plugin-list' },

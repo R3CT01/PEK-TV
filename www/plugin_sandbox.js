@@ -1099,6 +1099,7 @@ class PekSandbox {
     }
 
     _trailerAllowed() {
+        if (window.PekLite && window.PekLite.noVideo()) return false;   // performance mode: no trailer video behind the billboard
         return PekSandbox.hostAllowed('www.youtube-nocookie.com', this.manifest.permissions.network);
     }
 
