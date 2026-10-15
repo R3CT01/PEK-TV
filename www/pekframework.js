@@ -532,13 +532,34 @@ class PekUIKit {
 
     /** A themed single-line text input. onInput(value) fires on every change. */
     textInput(label, value, onInput, opts = {}) {
-        const input = this.engine.createElement('input', {
+        const props = {
             className: 'focusable sx-text-input',
             type: opts.type || 'text',
             value: value || '',
             placeholder: opts.placeholder || '',
             onInput: (e) => onInput(e.target.value)
-        });
+        };
+        // Optional: opts.onSubmit(value, inputEl) runs when Enter / Go / Next is pressed (the keyboard is closed first
+        // unless the callback moves focus to another field). opts.autocomplete / enterKeyHint are passed to the input.
+        if (opts.autocomplete) props.autocomplete = opts.autocomplete;
+        if (opts.enterKeyHint) props.enterKeyHint = opts.enterKeyHint;
+        if (typeof opts.onSubmit === 'function') {
+            props.onKeyDown = (e) => {
+                if (e.key !== 'Enter' || e.isComposing || e.repeat) return;
+                e.preventDefault();
+                const el = e.target;
+                const before = document.activeElement;
+                opts.onSubmit(el.value, el);
+                // If the callback did not move focus to another field, close the keyboard.
+                if (document.activeElement === before && el.blur) el.blur();
+            };
+        }
+        const input = this.engine.createElement('input', props);
+        if (opts.type === 'email' || opts.type === 'password' || opts.noAssist) {
+            input.setAttribute('autocapitalize', 'none');
+            input.setAttribute('autocorrect', 'off');
+            input.setAttribute('spellcheck', 'false');
+        }
         return this.engine.createElement('div', { className: 'sx-field' },
             label ? this.engine.createElement('label', { className: 'sx-field-label' }, label) : null,
             input
