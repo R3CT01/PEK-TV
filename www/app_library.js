@@ -512,3 +512,45 @@ class MainAppLibraryMethods {
 }
 
 pekMixin(MainApp, MainAppLibraryMethods);
+
+// ---------------- Watched marks (library cards, season screens, detail popup) ----------------
+class MainAppWatchedMethods {
+
+    // Returns fn(meta) -> true when that movie/episode is in the watch history.
+    _watchedLookup() {
+        const S = window.PekSync;
+        if (!S || typeof S.listHistory !== 'function' || typeof S.watchedKey !== 'function') return () => false;
+        const keys = new Set();
+        try { S.listHistory().forEach(e => { if (e && e.key) keys.add(e.key); }); } catch (e) { /* no history */ }
+        return (meta) => { const k = S.watchedKey(meta); return !!k && keys.has(k); };
+    }
+
+    _setWatched(meta, on) {
+        const S = window.PekSync;
+        if (!S) return;
+        if (on) S.recordWatched(this._historyMeta(null, meta));
+        else if (typeof S.forgetWatched === 'function') S.forgetWatched(meta);
+    }
+
+    // Marks every episode of the given seasons watched / unwatched.
+    _setSeasonWatched(show, seasons, on) {
+        (seasons || []).forEach(se => (se.episodes || []).forEach(e => {
+            this._setWatched({ kind: 'episode', showTitle: show.showTitle, season: e.season != null ? e.season : se.season, episode: e.episode }, on);
+        }));
+        this.setState({ progress: this.state.progress });   // repaint
+    }
+
+    // "Mark as watched / unwatched" button for the detail popup.
+    _renderWatchedButton(d) {
+        const { createElement, ui } = this.props.engine;
+        if (!d || !d.meta) return null;
+        const seen = this._watchedLookup()(d.meta);
+        return createElement('div', { style: { margin: '6px 0' } },
+            ui.button(seen ? 'Mark as unwatched' : 'Mark as watched', () => {
+                this._setWatched(d.meta, !seen);
+                this.setState({ detail: { ...d } });
+            }));
+    }
+}
+
+pekMixin(MainApp, MainAppWatchedMethods);
