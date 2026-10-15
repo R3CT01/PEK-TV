@@ -592,6 +592,23 @@ class PekUIKit {
    onDestroy() are optional overrides, like a virtual method with
    a default (empty) base implementation.
    ============================================================ */
+const PekTouch = {
+    down: false, queue: new Map(), safety: 0,
+    defer(owner, fn) { this.queue.set(owner, fn); },
+    release() {
+        this.down = false; clearTimeout(this.safety);
+        // after the click that belongs to this touch has been delivered
+        setTimeout(() => { if (this.down) return; const jobs = [...this.queue.values()]; this.queue.clear(); jobs.forEach(f => f()); }, 80);
+    },
+    init() {
+        const press = () => { this.down = true; clearTimeout(this.safety); this.safety = setTimeout(() => this.release(), 2500); };
+        document.addEventListener('pointerdown', press, true);
+        document.addEventListener('touchstart', press, { capture: true, passive: true });
+        ['pointerup', 'pointercancel', 'touchend', 'touchcancel'].forEach(n => document.addEventListener(n, () => this.release(), true));
+    }
+};
+PekTouch.init();
+
 class PekWindow {
     #id;
     #engine;
@@ -630,6 +647,9 @@ class PekWindow {
 
     #repaint() {
         if (!this.#mounted) return;
+        // A finger is down: rebuilding the DOM now would delete the element being tapped and the click would
+        // never arrive ("nothing happens"). Wait until the touch ends, then repaint once.
+        if (PekTouch.down) { PekTouch.defer(this, () => this.#repaint()); return; }
         // Repainting builds brand-new elements, so any scrollable strip (e.g. the
         // phone tab bar) would snap back to 0. Elements marked data-keep-scroll
         // get their scroll position carried over to their replacement.
