@@ -120,3 +120,34 @@ Profile pictures, passcodes (stored only as a salted hash) and "forgot passcode"
 `POST /v1/auth/confirm`) need the newest `worker.js`: paste it, deploy, done. The `profiles` table gets its two new columns
 (`avatar`, `pin`) by itself. Until the worker is updated everything still works on the device; pictures and passcodes just don't
 reach other devices, and "Forgot passcode?" says the cloud service needs an update.
+
+
+## Invite-only sign-up (single-use codes)
+
+New accounts, and with them cloud backup and multiple profiles (profiles live inside the account), can be limited to people
+you give a code to. Accounts that already exist are not affected: they keep signing in, resetting passwords and syncing as before
+(they are marked `gf = 1` by the worker the first time it runs).
+
+**Switch it on:** Cloudflare -> Worker -> Settings -> Variables and Secrets:
+- `INVITE_ONLY` (Text) = `1`. Delete it, or set it to `0`, to open sign-up to everyone again.
+- `ADMIN_KEY` (Secret) = a long random text of 16 or more characters. Keep it to yourself: it is the only thing that can make codes.
+Then paste the new `worker.js` and deploy. The `invites` table and the `gf` column are created on the first request.
+
+**Make codes:** with your own private admin tool (it is deliberately not part of this repo). It sends
+`POST <your worker>/v1/invites/new` with the header `Authorization: Bearer <ADMIN_KEY>` and a JSON body such as
+`{"count": 3, "note": "for Sam", "days": 14}`; the worker answers with the codes. `/v1/invites/list` and
+`/v1/invites/revoke` work the same way. Without the right key every one of these answers "not found".
+A code is shown once when it is made and cannot be read back later (only its hash is stored). Give each person their own code.
+
+**How a code behaves:** it works for one account, once. While that person types the email code it is *held* for them
+(30 minutes, renewed by "Resend code"); if they never confirm, it frees itself and can be used again. The moment their email is
+confirmed it is used up for good. Unused codes also stop working after 14 days (`days` in the request; 0 = never).
+A person who starts sign-up and abandons it cannot finish later without a code.
+
+
+## Usernames (optional)
+
+Sign-up has an optional **Username** box: 3 to 20 characters (letters, numbers, `.`, `-`, `_`, starting with a letter or number),
+unique without regard to upper/lower case. Accounts made before this have none, and nobody is required to pick one. It is shown under
+Settings -> Cloud Sync once signed in. Sign-in still uses the email and password. Deploy the new `worker.js` (the `username` column and its
+unique index are created on the first request), then update the app.

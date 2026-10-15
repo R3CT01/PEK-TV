@@ -145,6 +145,10 @@ class MainAppWatchMethods {
             weak_password: 'Passwords need at least 8 characters.',
             bad_credentials: 'Wrong email or password.',
             email_taken: 'There is already an account with that email. Try signing in.',
+            bad_username: 'Usernames are 3 to 20 characters: letters, numbers, dots, dashes or underscores, starting with a letter or number.',
+            username_taken: 'That username is already taken. Try another.',
+            invite_required: 'PEK Cloud is invite-only for now. Enter the invite code you were given.',
+            bad_invite: 'That invite code is not valid, was already used, or has expired. Go back to Create Account and enter a valid code.',
             bad_code: 'That code is wrong or has expired. Request a new one.',
             email_not_verified: 'Your email is not verified yet.',
             rate_limited: 'Too many attempts. Wait a few minutes and try again.',
@@ -255,13 +259,13 @@ class MainAppWatchMethods {
 
     // What is typed in the sign-in boxes lives here (not in state), so typing never redraws the screen.
     _authForm() {
-        if (!this._auth) this._auth = { email: '', password: '', confirm: '', code: '' };
+        if (!this._auth) this._auth = { email: '', password: '', confirm: '', code: '', invite: '', username: '' };
         return this._auth;
     }
 
     _openAuth(mode) {
         const f = this._authForm();
-        if (!mode) { f.password = ''; f.confirm = ''; f.code = ''; }
+        if (!mode) { f.password = ''; f.confirm = ''; f.code = ''; f.invite = ''; f.username = ''; }
         this._setSyncUi({ mode: mode, msg: '', busy: false, confirmDelete: false });
     }
 
@@ -269,7 +273,7 @@ class MainAppWatchMethods {
     // created: this sign-in finishes a brand-new account (the only time the device's own data is carried into an account).
     async _afterSignIn(toast, created) {
         const f = this._authForm();
-        f.password = ''; f.confirm = ''; f.code = '';
+        f.password = ''; f.confirm = ''; f.code = ''; f.invite = ''; f.username = '';
         this._setSyncUi({ mode: '', busy: true, msg: '' });
         this.props.engine.ui.toast(toast);
         const hp = window.PekProfiles, S = window.PekSync;
@@ -293,7 +297,7 @@ class MainAppWatchMethods {
         if (!S.validPassword(f.password)) { this._setSyncUi({ msg: this._syncMessage('weak_password') }); return; }
         if (f.password !== f.confirm) { this._setSyncUi({ msg: 'The two passwords do not match.' }); return; }
         this._setSyncUi({ busy: true, msg: '' });
-        const res = await S.signUp(f.email, f.password);
+        const res = await S.signUp(f.email, f.password, f.invite, f.username);
         if (!res.ok) { this._setSyncUi({ busy: false, msg: this._syncMessage(res.error) }); return; }
         f.code = '';
         this._createdEmail = f.email.trim().toLowerCase();   // this account is brand new: its first sign-in keeps what is on the device
@@ -767,8 +771,8 @@ class MainAppWatchMethods {
             parts.push(email(), pass('Password', 'password'));
             parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'signup') {
-            parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices.'));
-            parts.push(email(), pass('Password', 'password'), pass('Confirm password', 'confirm'));
+            parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices. PEK Cloud is invite-only for now: enter the invite code you were given.'));
+            parts.push(email(), ui.textInput('Username (optional)', f.username, (v) => { f.username = v; }, { placeholder: 'How you want to be known' }), pass('Password', 'password'), pass('Confirm password', 'confirm'), ui.textInput('Invite code', f.invite, (v) => { f.invite = v; }, { placeholder: 'PEK-XXXXX-XXXXX' }));
             parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'verify') {
             parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));
@@ -808,6 +812,7 @@ class MainAppWatchMethods {
         } else {
             const last = S.lastSync();
             parts.push(ui.listRow('Signed in', S.getEmail(), null));
+            if (S.getUsername && S.getUsername()) parts.push(ui.listRow('Username', S.getUsername(), null));
             { const hp = window.PekProfiles, me = hp && hp.enabled ? hp.current() : null;
               if (me) parts.push(createElement('p', { className: 'sub' }, `Syncing the profile "${me.name}". Use Sign out of profile (Settings > Profiles) to sync another one.`)); }
             parts.push(ui.listRow(u.busy ? 'Syncing\u2026' : 'Sync is on',
