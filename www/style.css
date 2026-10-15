@@ -1712,3 +1712,29 @@ html.nf-on .plugin-window-bar .sx-btn.focused { background: #fff; color: #000; b
 .nf-root .sx-btn.nav-item:not(.nf-btn):not(.theme-launch-btn) { background: #333; color: #fff; border: 0; }
 .nf-root .sx-btn.nav-item:not(.nf-btn).focused { background: #fff; color: #000; }
 .nf-root .sx-btn.nav-item.sx-selected { background: #fff; color: #000; }
+
+
+/* Sign in / Create account: a screen of its own, opened from Settings > Cloud Sync */
+.pek-auth-screen {
+    background: var(--sx-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px calc(env(safe-area-inset-bottom, 0px) + 24px);
+    box-sizing: border-box;
+}
+html.pek-tv .pek-auth-screen { background-color: var(--sx-bg); }
+.pek-auth-card {
+    width: 100%;
+    max-width: 440px;
+    margin: auto;            /* centred when short, scrolls from the top when the keyboard shrinks the screen */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+}
+.pek-auth-card > .sx-btn, .pek-auth-card > button:first-child { align-self: flex-start; }
+.pek-auth-title { margin: 6px 0 0; font-size: 1.7rem; }
+.pek-auth-card .section-actions { margin-top: 6px; }
+.pek-auth-msg { margin-top: 4px; }
