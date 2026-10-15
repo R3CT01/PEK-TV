@@ -76,6 +76,8 @@ class MainApp extends PekComponent {
         const isField = (el) => el && el.matches && el.matches('input, textarea, select');
         document.addEventListener('focusin', (e) => { if (isField(e.target)) document.documentElement.classList.add('hp-typing'); });
         document.addEventListener('focusout', () => document.documentElement.classList.remove('hp-typing'));
+        // A repaint can delete the focused field without a focusout; any tap outside a field clears the flag.
+        document.addEventListener('pointerdown', (e) => { if (!isField(e.target) && !isField(document.activeElement)) document.documentElement.classList.remove('hp-typing'); }, true);
 
         // A plugin added or removed a favorite. Only repaint when the Favorites tab is showing;
         // otherwise just keep the list current so repainting the shell never disturbs an open plugin.

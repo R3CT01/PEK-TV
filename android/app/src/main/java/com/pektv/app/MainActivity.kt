@@ -79,6 +79,12 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
             cacheMode = WebSettings.LOAD_NO_CACHE
+            // Phone layout must not be zoomable / pannable like a desktop page.
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
+            useWideViewPort = false
+            loadWithOverviewMode = false
         }
         // Android's autofill popup (saved emails under a field) steals the window focus on every key press, which
         // closes and reopens the keyboard while typing in the sign-in screen. The app has no use for it.
