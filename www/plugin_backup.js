@@ -1,6 +1,6 @@
 /* PEK TV plugin backup  (window.PekPluginBackup)
  *
- * Backs up the plugins you installed from a .zip to your Hesper Cloud account, and lets you
+ * Backs up the plugins you installed from a .zip to your PEK Cloud account, and lets you
  * bring them back on another device (or after reinstalling PEK TV).
  *
  *  - Only third-party plugins are backed up. Built-in ones ship with PEK TV.

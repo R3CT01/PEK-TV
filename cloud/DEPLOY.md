@@ -1,4 +1,4 @@
-# Deploying Hesper Cloud (accounts + sync). A phone browser is enough.
+# Deploying PEK Cloud (accounts + sync). A phone browser is enough.
 
 Accounts are an email and a password. New accounts confirm their email with a 6-digit code, and
 "Forgot password" works the same way. **Every sign-in also needs a fresh 6-digit code from the email**

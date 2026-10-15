@@ -1,4 +1,4 @@
-// Hesper Cloud: accounts + sync service for watch history and resume positions.
+// PEK Cloud: accounts + sync service for watch history and resume positions.
 // Runs as a Cloudflare Worker with ONE D1 database bound as "DB".
 //
 // Accounts are an email address and a password.

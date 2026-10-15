@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PEK TV: a media center that is simple and deep</title>
+<meta name="description" content="PEK TV is a media center with a sandboxed plugin system, network library support and a TV-first interface.">
+<meta name="theme-color" content="#140b07">
+<link rel="icon" href="assets/favicon.png">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header class="site-header"><div class="wrap bar">
+<a class="brand" href="index.html"><span class="dot"></span>PEK TV</a>
+<button class="menu-btn" aria-expanded="false" aria-label="Menu">Menu</button>
+<nav><a href="index.html" aria-current="page">Home</a><a href="build.html">Build</a><a href="plugins.html">Plugins</a><a href="source.html">Source</a><a href="https://github.com/R3CT01/PEK-TV" rel="noopener">GitHub &#8599;</a></nav>
+</div></header>
+<main>
+<section class="hero"><div class="wrap">
+<span class="pill">Beta &middot; open for reading</span>
+<h1>PEK TV</h1>
+<p class="lead">A media center that is simple for regular people and deep for power users. Your own library, plugins you can trust, and a screen that looks like it was made for the TV.</p>
+<div class="btns"><a class="btn primary" href="https://github.com/R3CT01/PEK-TV">View on GitHub</a><a class="btn" href="build.html">Build it</a><a class="btn" href="plugins.html">Write a plugin</a></div>
+</div></section>
+
+<section><div class="wrap"><h2>What it does</h2><p class="sub">Everything below is in the code today.</p><div class="grid"><div class="card reveal"><span class="ico">&#128193;</span><h3>Your library, everywhere</h3><p>Scans local folders and network shares: SMB, NFS, FTP, WebDAV and UPnP/DLNA, with automatic discovery. Reads Kodi-style NFO files and artwork first, and asks TMDb only for what is missing.</p></div><div class="card reveal"><span class="ico">&#127916;</span><h3>A player that stays out of the way</h3><p>libmpv on Android, the browser's player elsewhere. Automatic subtitles, Skip Intro / Skip Recap, and an Up Next card near the end of an episode.</p></div><div class="card reveal"><span class="ico">&#128250;</span><h3>Built for the couch</h3><p>A full D-pad / remote / gamepad mode with a 10-foot look, navigation sounds, and a performance mode for weak devices.</p></div><div class="card reveal"><span class="ico">&#127968;</span><h3>A dashboard you design</h3><p>A home screen made of widgets you choose and order: Clock, Weather, Continue Watching, Recently Added, Favorites, and a shortcut tile for any installed plugin. Saved per profile.</p></div><div class="card reveal"><span class="ico">&#128101;</span><h3>Profiles and PEK Cloud</h3><p>Netflix-style profiles with their own history, favorites and look. Optional cloud sign-in syncs history, resume points, favorites and settings between devices.</p></div><div class="card reveal"><span class="ico">&#127912;</span><h3>Skins</h3><p>Install a skin from a .zip. Ships with PEK Ember (default), Green and Neon. Skins cannot run code or reach the network.</p></div><div class="card reveal"><span class="ico">&#129513;</span><h3>Sandboxed plugins</h3><p>Plugins declare what they may do and run in a locked-down sandbox. Three trust tiers: Official, the PEK Store, and install-from-GitHub.</p></div><div class="card reveal"><span class="ico">&#128225;</span><h3>Live TV through plugins</h3><p>A plugin can play live streams with a channel switcher, a guide and a now / next banner. The player does the work; the plugin only supplies data.</p></div></div></div></section>
+
+<section><div class="wrap"><h2>PEK plugins vs Kodi add-ons</h2>
+<p class="sub">PEK TV feels familiar if you have used Kodi, but plugins work differently on purpose.</p>
+<div class="tablewrap"><table><thead><tr><th></th><th>PEK TV plugins</th><th>Kodi add-ons (general)</th></tr></thead><tbody><tr><td><b>Plugin language</b></td><td>JavaScript UI in a sandboxed iframe, plus an optional restricted Python backend</td><td>Python scripts (and some binary add-ons)</td></tr><tr><td><b>Permissions</b></td><td>Declared in <code>plugin.json</code> and shown on the install screen. No permission listed means no access</td><td>No per-add-on permission model: add-on code generally runs with Kodi's own privileges</td></tr><tr><td><b>Sandbox</b></td><td>Third-party plugin UI cannot touch the app, cookies or storage. Backends must pass an automatic safety scan</td><td>Add-ons are not sandboxed from the app</td></tr><tr><td><b>Network access</b></td><td>Only the HTTPS hosts the plugin lists</td><td>Whatever the add-on's code opens</td></tr><tr><td><b>Where plugins come from</b></td><td>Official, the PEK Store, or <code>owner/repo</code> from GitHub (marked unverified)</td><td>Repositories and zip files</td></tr><tr><td><b>Look and feel</b></td><td>A plugin builds screens from PEK's own building blocks, so every plugin feels native on a TV and on a phone</td><td>Add-ons use Kodi's windows and list model</td></tr></tbody></table></div>
+<div class="note"><p>Kodi's PVR clients play the role that the optional <b>Live TV Guide</b> plugin plays in PEK TV: a channel directory with now / next, fed by m3u streams.</p></div>
+</div></section>
+
+<section><div class="wrap"><h2>Development outline</h2><p class="sub">Where PEK TV has been and where it is going. It is in beta, so expect rough edges.</p>
+<ol class="steps">
+<li class="done"><b>Core.</b> C++ backend with embedded Python, web UI, library scanner, NFO and artwork support, network sources.</li>
+<li class="done"><b>Plugins.</b> Sandbox, permissions, the Python backend guard, install from .zip, then the three trust tiers (Official, PEK Store, GitHub).</li>
+<li class="done"><b>Look and feel.</b> Skins and the skin installer, PEK Ember default look, TV mode, performance mode.</li>
+<li class="done"><b>Accounts.</b> PEK Cloud: profiles, sync of history, resume points, favorites and settings; optional invite-only sign-up.</li>
+<li class="done"><b>Player features.</b> Automatic subtitles, Skip Intro / Skip Recap, Up Next, live sessions for TV plugins.</li>
+<li class="now"><b>Now.</b> Customizable dashboard polish, the Music tab (currently in development), more official plugins, public documentation.</li>
+<li><b>Next.</b> Wider plugin APIs and a growing PEK Store.</li>
+</ol></div></section>
+
+<section><div class="wrap"><h2>Read the code</h2><p class="sub">PEK TV lives in one repository with two branches.</p>
+<div class="grid">
+<div class="card reveal"><h3><code>main</code></h3><p>Backend, web UI, plugins, skins and cloud workers. Runs on Linux, Windows (MSYS2 / WSL) and Android through Termux.</p></div>
+<div class="card reveal"><h3><code>android</code></h3><p>Everything in main plus the Android app (Kotlin, libmpv, Chaquopy) and the GitHub Actions build.</p></div>
+</div>
+<div class="btns" style="margin-top:22px"><a class="btn" href="source.html">Source documentation</a></div></div></section>
+</main>
+<footer><div class="wrap">
+<p><b>PEK TV</b> is made by PEK Industries. Source: <a href="https://github.com/R3CT01/PEK-TV">github.com/R3CT01/PEK-TV</a>. See the <code>LICENCE</code> file in the repository for what you may and may not do with the code.</p>
+<p>PEK Industries is not associated with any illegal activity involving torrents. PEK TV does not host, provide or link to any content, and ships with no search provider or index. You are responsible for what you play.</p>
+<p>This product uses the TMDB API but is not endorsed or certified by TMDB. Streaming availability data provided by JustWatch.</p>
+</div></footer>
+<script src="assets/site.js"></script>
+</body>
+</html>

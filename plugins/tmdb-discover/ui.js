@@ -2,8 +2,8 @@
 // streaming-service chips, search, a detail page with an auto-playing trailer, cast and
 // related titles, numbered pages for every list, and a badge on titles you already own.
 //
-// Official Hesper plugin. It still runs in the plugin sandbox, but it uses Hesper's built-in
-// TMDb access (a proxy that holds Hesper's key), so nobody has to enter a key. Settings has an
+// Official PEK TV plugin. It still runs in the plugin sandbox, but it uses PEK TV's built-in
+// TMDb access (a proxy that holds PEK TV's key), so nobody has to enter a key. Settings has an
 // optional "use my own key" override, stored only in this plugin's private storage.
 // Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 (function () {
@@ -137,8 +137,8 @@
         Object.keys(params || {}).forEach(function (k) {
             q.push(encodeURIComponent(k) + '=' + encodeURIComponent(params[k]));
         });
-        // Personal key: straight to TMDb. No key: Hesper's built-in access (the proxy adds the key).
-        return hesper.fetchJSON((S.key ? API : PROXY) + path + '?' + q.join('&'));
+        // Personal key: straight to TMDb. No key: PEK TV's built-in access (the proxy adds the key).
+        return pek.fetchJSON((S.key ? API : PROXY) + path + '?' + q.join('&'));
     }
 
     function today() {
@@ -150,8 +150,8 @@
     function favKey(it) { return it.type + ':' + it.id; }
 
     function loadFavs() {
-        if (!hesper.favorites) return Promise.resolve();
-        return hesper.favorites.list().then(function (keys) {
+        if (!pek.favorites) return Promise.resolve();
+        return pek.favorites.list().then(function (keys) {
             var m = {};
             (keys || []).forEach(function (k) { m[k] = true; });
             S.favs = m;
@@ -159,14 +159,14 @@
     }
 
     function toggleFav(it) {
-        if (!hesper.favorites) return;
+        if (!pek.favorites) return;
         var k = favKey(it), on = !S.favs[k];
         if (on) S.favs[k] = true; else delete S.favs[k];
         S.favMsg = '';
         redraw();
         var job = on
-            ? hesper.favorites.add({ type: it.type, id: it.id, title: it.title, year: it.year, posterPath: it.posterPath || '' })
-            : hesper.favorites.remove(k);
+            ? pek.favorites.add({ type: it.type, id: it.id, title: it.title, year: it.year, posterPath: it.posterPath || '' })
+            : pek.favorites.remove(k);
         job.then(noop, function () {
             if (on) delete S.favs[k]; else S.favs[k] = true;       // undo: it did not save
             S.favMsg = 'Could not update your favorites.';
@@ -174,8 +174,8 @@
     }
 
     function loadStreamers() {
-        if (!hesper.plugins) return;
-        hesper.plugins.streamers().then(function (l) { S.streamers = l || []; }, noop).then(redraw);
+        if (!pek.plugins) return;
+        pek.plugins.streamers().then(function (l) { S.streamers = l || []; }, noop).then(redraw);
     }
 
     // Is this title released? (If it is not, there is nothing to watch yet.)
@@ -219,16 +219,16 @@
 
     // "Play with <plugin>" for every other installed plugin that can play movies and shows.
     function streamerButtons(ui, it, info) {
-        if (!hesper.plugins || !S.streamers.length || !isOut(it, info)) return [];
+        if (!pek.plugins || !S.streamers.length || !isOut(it, info)) return [];
         return [ui.heading('Play with a plugin'), ui.row.apply(ui, S.streamers.map(function (p) {
             return ui.button('\u25b6  ' + p.name, function () {
-                return hesper.plugins.open(p.id, { type: it.type, id: it.id, title: it.title, year: it.year })
+                return pek.plugins.open(p.id, { type: it.type, id: it.id, title: it.title, year: it.year })
                     .then(noop, function () { S.favMsg = 'Could not open ' + p.name + '.'; });
             }, { primary: true });
         }))];
     }
 
-    // Hesper opened this plugin on a title (Favorites tab, or another plugin's button).
+    // PEK TV opened this plugin on a title (Favorites tab, or another plugin's button).
     function launch(intent) {
         if (!intent || !intent.id || !intent.type) return;
         if (!S.ready) { S.pendingLaunch = intent; return; }
@@ -239,13 +239,13 @@
         openDetail({ id: intent.id, type: S.tab, title: intent.title || 'Loading\u2026', alt: '', year: intent.year || 0,
             poster: '', posterPath: '', overview: '', rating: 0, votes: 0 });
     }
-    if (hesper.onLaunch) hesper.onLaunch(launch);
+    if (pek.onLaunch) pek.onLaunch(launch);
 
-    function redraw() { hesper.requestRender(); }
-    function top() { if (hesper.scrollTop) hesper.scrollTop(); }
+    function redraw() { pek.requestRender(); }
+    function top() { if (pek.scrollTop) pek.scrollTop(); }
     function noop() { /* ignore */ }
 
-    // Older Hesper builds do not know spinner / toggle; fall back to plain text / a button.
+    // Older PEK TV builds do not know spinner / toggle; fall back to plain text / a button.
     function spin(ui, text, big) { return ui.spinner ? ui.spinner(text, big) : ui.text(text); }
 
     function merge(a, b) {
@@ -369,7 +369,7 @@
     }
 
     function readLibrary() {
-        return hesper.readJSON('library.json').then(function (j) {
+        return pek.readJSON('library.json').then(function (j) {
             var movies = {}, shows = {}, nm = 0, ns = 0;
             (j.movies || []).forEach(function (m) {
                 var k = norm(m.title);
@@ -491,7 +491,7 @@
         api('/configuration', {}).then(function () {
             S.keyDraft = ''; S.authError = false;
             S.pages = {}; S.providers = { movie: null, tv: null };
-            return hesper.storage.set('tmdb_key', k).then(function () {
+            return pek.storage.set('tmdb_key', k).then(function () {
                 S.keyMsg = 'Key saved.';
             }, function () {
                 S.keyMsg = 'The key works, but it could not be saved on this device. You will need to enter it again next time.';
@@ -504,7 +504,7 @@
 
     function removeKey() {
         S.key = ''; S.keyDraft = ''; S.keyMsg = "Key removed. Using PEK TV's built-in access."; S.authError = false; S.pages = {}; resetViews();
-        hesper.storage.remove('tmdb_key').then(redraw, redraw);
+        pek.storage.remove('tmdb_key').then(redraw, redraw);
     }
 
     function saveRegion() {
@@ -512,24 +512,24 @@
         if (!/^[A-Z]{2}$/.test(r)) { S.keyMsg = 'Use a 2-letter country code, for example US or GB.'; return; }
         S.region = r; S.provider = 0; S.pages = {}; S.providers = { movie: null, tv: null }; resetViews();
         S.keyMsg = 'Region set to ' + r + '.';
-        hesper.storage.set('region', r).then(redraw, redraw);
+        pek.storage.set('region', r).then(redraw, redraw);
     }
 
     function autoRegion() {
         S.region = detectLocale().region; S.regionDraft = S.region; S.provider = 0; S.pages = {}; resetViews();
         S.providers = { movie: null, tv: null };
         S.keyMsg = 'Using your device region: ' + S.region + '.';
-        hesper.storage.remove('region').then(redraw, redraw);
+        pek.storage.remove('region').then(redraw, redraw);
     }
 
     function setAutoplay(on) {
         S.autoplay = on;
-        hesper.storage.set('autoplay', on ? '1' : '0').then(noop, noop);
+        pek.storage.set('autoplay', on ? '1' : '0').then(noop, noop);
     }
 
     function setSound(on) {
         S.sound = on;
-        hesper.storage.set('sound', on ? '1' : '0').then(noop, noop);
+        pek.storage.set('sound', on ? '1' : '0').then(noop, noop);
     }
 
     // ---------------------------------------------------------------- views
@@ -619,7 +619,7 @@
         var d = S.detail, it = d.item, info = d.info || {};
         var kids = [];
 
-        // The trailer goes first: Hesper pins it to the very top of the page.
+        // The trailer goes first: PEK TV pins it to the very top of the page.
         if (d.loading) kids.push(spin(ui, 'Loading\u2026', true));
         else if (!d.error && ui.video) {
             var tr = pickTrailer(info);
@@ -631,20 +631,20 @@
         if (info.runtime) meta.push(info.runtime + ' min');
         if (info.number_of_seasons) meta.push(info.number_of_seasons + (info.number_of_seasons === 1 ? ' season' : ' seasons'));
         var backBtn = ui.button('\u2190 Back', back, { autofocus: 'detail:' + it.type + it.id });
-        if (hesper.favorites && !d.loading) {
+        if (pek.favorites && !d.loading) {
             var isFav = !!S.favs[favKey(it)];
             kids.push(ui.row(backBtn, ui.button(isFav ? '\u2665  In your favorites' : '\u2661  Add to favorites',
                 function () { toggleFav(it); }, { selected: isFav })));
             if (S.favMsg) kids.push(ui.text(S.favMsg));
         } else kids.push(backBtn);
-        if (hesper.watched && it.type === 'movie' && !d.loading) {
+        if (pek.watched && it.type === 'movie' && !d.loading) {
             if (S.seen === undefined || S.seenFor !== it.id) {
                 S.seenFor = it.id; S.seen = false;
-                hesper.watched.check([{ kind: 'movie', title: it.title, year: it.year || 0 }]).then(function (r) { S.seen = !!(r && r[0]); redraw(); }, function () {});
+                pek.watched.check([{ kind: 'movie', title: it.title, year: it.year || 0 }]).then(function (r) { S.seen = !!(r && r[0]); redraw(); }, function () {});
             }
             kids.push(ui.button(S.seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', function () {
                 var next = !S.seen;
-                hesper.watched.set({ kind: 'movie', title: it.title, year: it.year || 0 }, next).then(function () { S.seen = next; redraw(); }, function () {});
+                pek.watched.set({ kind: 'movie', title: it.title, year: it.year || 0 }, next).then(function () { S.seen = next; redraw(); }, function () {});
             }, { selected: !!S.seen }));
         }
         kids.push(ui.heading(it.title));
@@ -748,9 +748,9 @@
         return ui.column.apply(ui, kids);
     }
 
-    hesper.render(function (ui) {
+    pek.render(function (ui) {
         if (!S.ready) return ui.column(spin(ui, 'Loading\u2026', true));
-        if (hesper.setBack) hesper.setBack((S.detail || S.list) ? back : null);
+        if (pek.setBack) pek.setBack((S.detail || S.list) ? back : null);
         if (S.detail) return detailView(ui);
 
         var kids = [];
@@ -781,7 +781,7 @@
     });
 
     // ---------------------------------------------------------------- start
-    function get(k) { return hesper.storage.get(k).then(function (v) { return v || ''; }, function () { return ''; }); }
+    function get(k) { return pek.storage.get(k).then(function (v) { return v || ''; }, function () { return ''; }); }
 
     Promise.all([get('tmdb_key'), get('region'), get('autoplay'), get('sound'), readLibrary()]).then(function (r) {
         S.key = r[0];

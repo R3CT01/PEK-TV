@@ -2,9 +2,9 @@
 
 Mirrors PekCore::executePluginModule / runFolderPlugins in backend/core.cpp:
 every plugins/<name>/backend.py that defines run() is imported and run() is
-called once. Plugins keep working unchanged, including writing files next to
-themselves (e.g. weather.json), because they run from the real extracted
-plugins folder, not from inside the APK.
+called once. Plugins keep working unchanged, including writing files into their
+own data/ folder (e.g. tmdb-discover's library.json), because they run from the
+real extracted plugins folder, not from inside the APK.
 """
 import os
 import sys

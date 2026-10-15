@@ -16,7 +16,7 @@
 //                        listed under network, and (b) have PEK TV's server fetch its allow-listed network
 //                        hosts when the browser blocks the request (CORS).
 //   permissions.library  true => the plugin's Python backend may read the titles and years
-//                        in the user's library (hesper_host.library_titles); no UI effect here
+//                        in the user's library (pek_host.library_titles); no UI effect here
 //   permissions.favorites true => pek.favorites.list / add / remove: the shared Favorites list that
 //                        PEK TV's Favorites tab shows. Only a TMDb type + id, title, year and poster path are kept.
 //   permissions.providers true => ui.providerButton: a "Watch on <service>" button. PEK TV decides what it
@@ -482,7 +482,7 @@ class PekSandbox {
         if (this.frame && this.frame.contentWindow) this.frame.contentWindow.postMessage(msg, '*');
     }
 
-    /** Ask the plugin about the next episode (see hesper.onNextEpisode). Always resolves: { ok, season, episode, name, error }. */
+    /** Ask the plugin about the next episode (see pek.onNextEpisode). Always resolves: { ok, season, episode, name, error }. */
     nextEpisode(req, timeoutMs) {
         return new Promise((resolve) => {
             if (!this.started || !this.frame) { resolve({ ok: false, error: 'not running' }); return; }
