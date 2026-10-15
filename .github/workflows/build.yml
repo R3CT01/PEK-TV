@@ -13,9 +13,9 @@ on:
         options: [debug, release]
         default: debug
       torrent:
-        description: 'Build in torrent streaming (libtorrent) - slower, experimental'
+        description: 'Build in torrent streaming (libtorrent) - needed for stream playback'
         type: boolean
-        default: false
+        default: true
       publish:
         description: 'Release builds only: also publish a GitHub pre-release'
         type: boolean
@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 60
     env:
       BUILD_TYPE: ${{ github.event_name == 'push' && 'release' || inputs.build_type }}
-      WANT_TORRENT: ${{ github.event_name == 'workflow_dispatch' && inputs.torrent || 'false' }}
+      WANT_TORRENT: ${{ github.event_name == 'workflow_dispatch' && inputs.torrent || github.event_name == 'push' && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -90,9 +90,8 @@ jobs:
         continue-on-error: true
         run: git clone --depth 1 https://github.com/sahlberg/libsmb2 android/libsmb2
 
-      - name: Clone libtorrent + Boost headers (optional)
+      - name: Clone libtorrent + Boost headers
         if: env.WANT_TORRENT == 'true'
-        continue-on-error: true
         run: |
           git clone --depth 1 --branch RC_2_0 --recurse-submodules --shallow-submodules \
             https://github.com/arvidn/libtorrent android/libtorrent
@@ -124,12 +123,23 @@ jobs:
         run: |
           TASK=$([ "$BUILD_TYPE" = release ] && echo assembleRelease || echo assembleDebug)
           COMMON="-PpekVersionName=$VERSION_NAME --stacktrace -Dorg.gradle.jvmargs=-Xmx4g"
-          T=""; [ "$WANT_TORRENT" = true ] && [ -f libtorrent/CMakeLists.txt ] && T="-PpekTorrent=true"
+          T=""
+          if [ "$WANT_TORRENT" = true ]; then
+            [ -f libtorrent/CMakeLists.txt ] || { echo "::error::libtorrent missing - cannot build torrent support"; exit 1; }
+            T="-PpekTorrent=true"
+          fi
 
           if ! gradle $TASK $COMMON $T; then
-            echo "::warning::Full build failed - retrying without optional native libs (SMB / torrent)"
-            rm -rf libsmb2 libtorrent boost app/.cxx app/build
-            gradle $TASK $COMMON
+            if [ "$WANT_TORRENT" = true ]; then
+              # Do NOT silently drop torrents: that produces the "cannot play torrents" apk.
+              echo "::warning::Full build failed - retrying without SMB but KEEPING torrent"
+              rm -rf libsmb2 app/.cxx app/build
+              gradle $TASK $COMMON $T
+            else
+              echo "::warning::Full build failed - retrying without optional native libs"
+              rm -rf libsmb2 libtorrent boost app/.cxx app/build
+              gradle $TASK $COMMON
+            fi
           fi
 
       - name: Collect + verify apk
