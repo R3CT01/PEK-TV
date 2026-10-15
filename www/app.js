@@ -516,6 +516,11 @@ class MainApp extends PekComponent {
                 this._renderHeader(currentLabel, false, true),
                 this._renderDashboard()
             );
+        } else if (activeTab === 'music') {
+            mainContent = createElement('div', {},
+                this._renderHeader(currentLabel),
+                ui.card('Music', '(currently in development)')
+            );
         } else if (LIBRARY_ENDPOINTS[activeTab]) {
             mainContent = createElement('div', {},
                 this._renderHeader(currentLabel, true),
