@@ -80,6 +80,9 @@ class MainActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             cacheMode = WebSettings.LOAD_NO_CACHE
         }
+        // Android's autofill popup (saved emails under a field) steals the window focus on every key press, which
+        // closes and reopens the keyboard while typing in the sign-in screen. The app has no use for it.
+        webView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)

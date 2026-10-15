@@ -762,30 +762,45 @@ class MainAppWatchMethods {
         const f = this._authForm();
         const parts = [];
         const row = (...btns) => createElement('div', { className: 'section-actions' }, ...btns);
-        const email = () => ui.textInput('Email', f.email, (v) => { f.email = v; }, { type: 'email', placeholder: 'you@example.com' });
-        const pass = (label, key) => ui.textInput(label, f[key], (v) => { f[key] = v; }, { type: 'password', placeholder: 'At least 8 characters' });
+        // Enter / Go / Next: move to the next field of this screen; on the last field, run the screen's main action.
+        let submitFn = null;
+        const enter = (value, el) => {
+            const fields = Array.from(document.querySelectorAll('.pek-auth-card input'));
+            const i = fields.indexOf(el);
+            if (i >= 0 && i < fields.length - 1) { fields[i + 1].focus(); return; }
+            if (submitFn && !this.state.syncUi.busy) submitFn();
+        };
+        const hint = (last) => last ? 'go' : 'next';
+        const email = (last) => ui.textInput('Email', f.email, (v) => { f.email = v; }, { type: 'email', placeholder: 'you@example.com', autocomplete: 'off', onSubmit: enter, enterKeyHint: hint(last) });
+        const pass = (label, key, last) => ui.textInput(label, f[key], (v) => { f[key] = v; }, { type: 'password', placeholder: 'At least 8 characters', autocomplete: 'off', onSubmit: enter, enterKeyHint: hint(last) });
+        const text = (label, key, ph, last) => ui.textInput(label, f[key], (v) => { f[key] = v; }, { placeholder: ph, autocomplete: 'off', noAssist: true, onSubmit: enter, enterKeyHint: hint(last) });
         const go = (label, fn, primary) => ui.button(u.busy ? 'Working\u2026' : label, () => { if (!u.busy) fn(); }, primary ? { variant: 'primary' } : undefined);
         const titles = { signin: 'Sign In', signup: 'Create Account', verify: 'Check Your Email', forgot: 'Forgot Password', reset: 'Set a New Password' };
 
         if (u.mode === 'signin') {
             parts.push(createElement('p', { className: 'sub' }, 'Sign in to sync your watch history and resume points, and to get your plugins back.'));
-            parts.push(email(), pass('Password', 'password'));
+            submitFn = () => this.signInAccount();
+            parts.push(email(), pass('Password', 'password', true));
             parts.push(row(go('Sign In', () => this.signInAccount(), true), ui.button('Forgot Password?', () => this._openAuth('forgot')), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'signup') {
             parts.push(createElement('p', { className: 'sub' }, 'Create an account with your email and a password. We will email you a code to confirm the address. You will use the same details on your other devices. PEK Cloud is invite-only for now: enter the invite code you were given.'));
-            parts.push(email(), ui.textInput('Username', f.username, (v) => { f.username = v; }, { placeholder: 'How you want to be known' }), pass('Password', 'password'), pass('Confirm password', 'confirm'), ui.textInput('Invite code', f.invite, (v) => { f.invite = v; }, { placeholder: 'PEK-XXXXX-XXXXX' }));
+            submitFn = () => this.signUpAccount();
+            parts.push(email(), text('Username', 'username', 'How you want to be known'), pass('Password', 'password'), pass('Confirm password', 'confirm'), text('Invite code', 'invite', 'PEK-XXXXX-XXXXX', true));
             parts.push(row(go('Create Account', () => this.signUpAccount(), true), ui.button('Cancel', () => this._openAuth(''))));
         } else if (u.mode === 'verify') {
             parts.push(createElement('p', { className: 'sub' }, 'Enter the 6-digit code we emailed you.'));
-            parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }));
+            submitFn = () => this.verifyAccountEmail();
+            parts.push(email(), text('6-digit code', 'code', '123456', true));
             parts.push(row(go('Confirm Code', () => this.verifyAccountEmail(), true), go('Resend Code', () => this.resendVerifyCode()), ui.button('Back', () => this._openAuth('signin'))));
         } else if (u.mode === 'forgot') {
             parts.push(createElement('p', { className: 'sub' }, 'We will email you a 6-digit code to set a new password.'));
-            parts.push(email());
+            submitFn = () => this.sendResetCode();
+            parts.push(email(true));
             parts.push(row(go('Send Reset Code', () => this.sendResetCode(), true), ui.button('I Have a Code', () => this._openAuth('reset')), ui.button('Back', () => this._openAuth('signin'))));
         } else if (u.mode === 'reset') {
             parts.push(createElement('p', { className: 'sub' }, 'Enter the code from the email and choose a new password.'));
-            parts.push(email(), ui.textInput('6-digit code', f.code, (v) => { f.code = v; }, { placeholder: '123456' }), pass('New password', 'password'), pass('Confirm new password', 'confirm'));
+            submitFn = () => this.resetPasswordAccount();
+            parts.push(email(), text('6-digit code', 'code', '123456'), pass('New password', 'password'), pass('Confirm new password', 'confirm', true));
             parts.push(row(go('Set New Password', () => this.resetPasswordAccount(), true), ui.button('Send a New Code', () => this._openAuth('forgot')), ui.button('Back', () => this._openAuth('signin'))));
         }
         if (u.msg) parts.push(createElement('p', { className: 'sub pek-auth-msg' }, u.msg));
