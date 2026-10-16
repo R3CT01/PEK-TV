@@ -1,9 +1,11 @@
 /* ============================================================
    PEK TV - Music player
-   The audio engine behind the Music tab: one queue, one <audio> element, shuffle / repeat, playlists, and the
+   The audio engine behind the Music tab: one queue, one sound engine, shuffle / repeat, playlists, and the
    little "now playing" bar that stays on screen while you browse. It owns its own DOM and never asks the app to
    repaint for a progress tick, so scrolling, typing and focus are never disturbed by the music.
    Songs come from /api/music/stream/<id> (the backend reads them from local folders and network shares).
+   The sound engine is libmpv on Android (MpvAudioController.kt, plays every format the library lists) and the
+   browser's <audio> element everywhere else.
    Saved per profile (see profiles.js): hesper_music_state (queue + position), hesper_music_playlists.
    ============================================================ */
 (function () {
@@ -17,8 +19,91 @@
         '.aiff': 'audio/aiff', '.aif': 'audio/aiff'
     };
 
-    var audio = new Audio();
-    audio.preload = 'auto';
+    // ---------------------------------------------------------------- sound engines
+    // Both engines have the same small interface, so the queue code below never knows which one it is talking to:
+    //   load(url, startAt, autoplay)  start a song (startAt in seconds)     play() / pause() / seek(sec)
+    //   unload()                      stop and let go of the song           position() / duration() in seconds
+    //   hasSource() / paused()        is a song loaded / is it not playing  canPlay(track)
+    //   on(name, fn)                  names: playing, pause, time, ended, error
+    var engine = (function () {
+        var handlers = {};
+        function fire(name) { if (handlers[name]) handlers[name](); }
+        var api = { on: function (name, fn) { handlers[name] = fn; } };
+        var native = window.PekAndroid;
+
+        if (native && typeof native.musicLoad === 'function') {
+            // Android: libmpv. State lives in the app, which reports it through window.__pekMusicMpv.
+            var src = '', pos = 0, dur = 0, playing = false;
+            window.__pekMusicMpv = function (ev, d) {
+                if (!src) return;                                  // a late report from a song that was already let go
+                if (ev === 'time') { pos = d.position || 0; dur = d.duration || 0; fire('time'); }
+                else if (ev === 'state') {
+                    var was = playing;
+                    playing = !!d.playing && !!d.loaded && !d.buffering;
+                    if (playing) fire('playing'); else if (was) fire('pause');
+                }
+                else if (ev === 'ended') { src = ''; pos = 0; dur = 0; playing = false; fire('ended'); }
+                else if (ev === 'error') {
+                    var failed = src;
+                    fire('error');                                 // the handler may already have started the next song
+                    if (src === failed) { src = ''; pos = 0; dur = 0; playing = false; }
+                }
+            };
+            api.load = function (url, startAt, autoplay) {
+                src = new URL(url, location.href).href; pos = startAt || 0; dur = 0; playing = false;
+                native.musicLoad(src, startAt || 0, !!autoplay);
+            };
+            api.play = function () { if (src) native.musicPlay(); };
+            api.pause = function () { if (src) native.musicPause(); };
+            api.seek = function (sec) { if (!src) return; pos = sec; native.musicSeek(sec); };
+            api.unload = function () { src = ''; pos = 0; dur = 0; playing = false; native.musicStop(); };
+            api.position = function () { return pos; };
+            api.duration = function () { return dur; };
+            api.hasSource = function () { return !!src; };
+            api.paused = function () { return !playing; };
+            api.canPlay = function () { return true; };           // mpv decodes everything the scanner lists
+        } else {
+            // Browsers (desktop and the TV web view): the <audio> element. What it can decode decides what plays.
+            var audio = new Audio();
+            var pendingStart = 0;     // seconds to jump to once the song's length is known
+            audio.preload = 'auto';
+            audio.addEventListener('ended', function () { fire('ended'); });
+            audio.addEventListener('playing', function () { fire('playing'); });
+            audio.addEventListener('pause', function () { fire('pause'); });
+            audio.addEventListener('loadedmetadata', function () {
+                if (pendingStart > 0) { try { audio.currentTime = pendingStart; } catch (e) { /* not seekable yet */ } pendingStart = 0; }
+                fire('time');
+            });
+            audio.addEventListener('durationchange', function () { fire('time'); });
+            audio.addEventListener('timeupdate', function () { fire('time'); });
+            audio.addEventListener('error', function () { fire('error'); });
+            api.load = function (url, startAt, autoplay) {
+                pendingStart = startAt > 0 ? startAt : 0;
+                audio.src = url;
+                if (autoplay) {
+                    var p = audio.play();
+                    if (p && p.catch) p.catch(function () { fire('pause'); });   // blocked (no tap yet): stays paused, the button still works
+                }
+            };
+            api.play = function () { audio.play().catch(function () {}); };
+            api.pause = function () { if (!audio.paused) audio.pause(); };
+            api.seek = function (sec) { audio.currentTime = sec; };
+            api.unload = function () {
+                audio.pause();
+                try { audio.removeAttribute('src'); audio.load(); } catch (e) { /* ignore */ }
+            };
+            api.position = function () { return audio.currentTime || 0; };
+            api.duration = function () { return audio.duration; };
+            api.hasSource = function () { return !!audio.src; };
+            api.paused = function () { return audio.paused; };
+            api.canPlay = function (t) {
+                var m = MIME[(t.ext || '').toLowerCase()];
+                if (!m) return false;
+                try { return audio.canPlayType(m) !== ''; } catch (e) { return true; }
+            };
+        }
+        return api;
+    })();
 
     var P = {};
     var queue = [];           // what plays, in order (already shuffled when shuffle is on)
@@ -48,7 +133,7 @@
         if (!force && now - lastSave < 4000) return;
         lastSave = now;
         writeJson(STATE_KEY, { queue: queue, index: index, shuffle: shuffle, repeat: repeat, original: original,
-                               position: audio.currentTime || 0 });
+                               position: engine.position() });
     }
     function emit(kind) {
         listeners.slice().forEach(function (fn) { try { fn(kind); } catch (e) { /* a listener must not break playback */ } });
@@ -71,11 +156,7 @@
         if (!t || !t.art) return '';
         return t.albumId ? '/api/music/art?album=' + encodeURIComponent(t.albumId) : '/api/music/art?track=' + encodeURIComponent(t.id);
     }
-    function canPlay(t) {
-        var m = MIME[(t.ext || '').toLowerCase()];
-        if (!m) return false;
-        try { return audio.canPlayType(m) !== ''; } catch (e) { return true; }
-    }
+    function canPlay(t) { return engine.canPlay(t); }
     function shuffled(list) {
         var a = list.slice();
         for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var x = a[i]; a[i] = a[j]; a[j] = x; }
@@ -107,11 +188,8 @@
         loadedId = t.id;
         pendingSeek = startAt > 0 ? startAt : 0;
         if (!canPlay(t)) { skipUnplayable(t); return; }
-        audio.src = streamUrl(t);
-        if (autoplay) {
-            var p = audio.play();
-            if (p && p.catch) p.catch(function () { P.sync(); });       // blocked (no tap yet): stays paused, the button still works
-        }
+        engine.load(streamUrl(t), pendingSeek, autoplay);
+        pendingSeek = 0;
         setMediaSession(t);
         saveState(true);
         emit('track');
@@ -121,7 +199,7 @@
         failures++;
         toast('Can\u2019t play this kind of file here: ' + (t.title || t.ext));
         if (failures < queue.length && queue.length > 1) { setTimeout(function () { P.next(true); }, 50); }
-        else { audio.pause(); failures = 0; emit('track'); P.sync(); }
+        else { engine.pause(); failures = 0; emit('track'); P.sync(); }
     }
 
     P.play = function (list, startIndex, opts) {
@@ -149,32 +227,31 @@
 
     P.next = function (auto) {
         if (!queue.length) return;
-        if (auto && repeat === 'one') { audio.currentTime = 0; audio.play().catch(function () {}); return; }
+        if (auto && repeat === 'one') { load(index, true, 0); return; }
         if (index + 1 < queue.length) load(index + 1, true, 0);
         else if (repeat === 'all') load(0, true, 0);
-        else { audio.pause(); audio.currentTime = 0; P.sync(); emit('state'); }
+        else { engine.pause(); engine.seek(0); P.sync(); emit('state'); }
     };
     P.prev = function () {
         if (!queue.length) return;
-        if (audio.currentTime > 3 || index <= 0) { audio.currentTime = 0; return; }
+        if (engine.position() > 3 || index <= 0) { engine.seek(0); return; }
         load(index - 1, true, 0);
     };
     P.toggle = function () {
         if (!queue.length) return;
-        if (!audio.src || loadedId !== (current() || {}).id) { load(index < 0 ? 0 : index, true, pendingSeek); return; }
-        if (audio.paused) audio.play().catch(function () {}); else audio.pause();
+        if (!engine.hasSource() || loadedId !== (current() || {}).id) { load(index < 0 ? 0 : index, true, pendingSeek); return; }
+        if (engine.paused()) engine.play(); else engine.pause();
     };
-    P.pause = function () { if (!audio.paused) audio.pause(); };
+    P.pause = function () { engine.pause(); };
     P.stop = function () {                       // the X on the bar: stop and put the bar away (the queue is kept for next time)
-        audio.pause();
-        try { audio.removeAttribute('src'); audio.load(); } catch (e) { /* ignore */ }
+        engine.unload();
         loadedId = '';
         saveState(true);
         P.hidden = true;
         P.sync(); emit('state');
     };
-    P.seek = function (sec) { if (isFinite(sec)) audio.currentTime = Math.max(0, sec); };
-    P.skip = function (delta) { P.seek((audio.currentTime || 0) + delta); };
+    P.seek = function (sec) { if (isFinite(sec)) engine.seek(Math.max(0, sec)); };
+    P.skip = function (delta) { P.seek(engine.position() + delta); };
     P.seekFraction = function (f) { var d = duration(); if (d) P.seek(d * f); };
     P.jump = function (i) { load(i, true, 0); };
 
@@ -228,12 +305,11 @@
         if (original) original = original.filter(function (t) { return t.id !== removed.id; });
         if (i < index) index--;
         if (!queue.length) { P.clear(); return; }
-        if (wasCurrent) { if (index >= queue.length) index = queue.length - 1; load(index, !audio.paused, 0); return; }
+        if (wasCurrent) { if (index >= queue.length) index = queue.length - 1; load(index, !engine.paused(), 0); return; }
         saveState(true); emit('track');
     };
     P.clear = function () {
-        audio.pause();
-        try { audio.removeAttribute('src'); audio.load(); } catch (e) { /* ignore */ }
+        engine.unload();
         queue = []; original = null; index = -1; loadedId = ''; pendingSeek = 0;
         saveState(true); P.sync(); emit('track');
     };
@@ -242,7 +318,7 @@
     P.queue = function () { return queue.slice(); };
     P.index = function () { return index; };
     P.current = current;
-    P.isPlaying = function () { return !audio.paused && !!audio.src; };
+    P.isPlaying = function () { return !engine.paused() && engine.hasSource(); };
     P.shuffle = function () { return shuffle; };
     P.repeat = function () { return repeat; };
     P.hasQueue = function () { return queue.length > 0; };
@@ -251,7 +327,7 @@
     P.artUrl = artUrl;
     P.on = function (fn) { listeners.push(fn); return function () { listeners = listeners.filter(function (f) { return f !== fn; }); }; };
     function duration() {
-        var d = audio.duration;
+        var d = engine.duration();
         if (isFinite(d) && d > 0) return d;
         var t = current();
         return t && t.duration ? t.duration : 0;
@@ -291,7 +367,7 @@
         P.tick();
     };
     P.tick = function () {
-        var d = duration(), pos = audio.currentTime || 0, frac = d ? Math.min(1, pos / d) : 0;
+        var d = duration(), pos = engine.position(), frac = d ? Math.min(1, pos / d) : 0;
         var fills = document.querySelectorAll('[data-pm-fill]');
         for (var i = 0; i < fills.length; i++) fills[i].style.width = (frac * 100) + '%';
         var ranges = document.querySelectorAll('[data-pm-range]');
@@ -382,19 +458,14 @@
         else if (k === 'MediaStop') { P.pause(); e.preventDefault(); }
     }, true);
 
-    // ---------------------------------------------------------------- audio element events
-    audio.addEventListener('ended', function () { P.next(true); });
-    audio.addEventListener('playing', function () { failures = 0; P.hidden = false; P.sync(); emit('state'); });
-    audio.addEventListener('pause', function () { P.sync(); emit('state'); saveState(true); });
-    audio.addEventListener('loadedmetadata', function () {
-        if (pendingSeek > 0) { try { audio.currentTime = pendingSeek; } catch (e) { /* not seekable yet */ } pendingSeek = 0; }
-        P.tick();
-    });
-    audio.addEventListener('durationchange', function () { P.tick(); });
-    audio.addEventListener('timeupdate', function () { P.tick(); saveState(false); });
-    audio.addEventListener('error', function () {
+    // ---------------------------------------------------------------- sound engine events
+    engine.on('ended', function () { P.next(true); });
+    engine.on('playing', function () { failures = 0; P.hidden = false; P.sync(); emit('state'); });
+    engine.on('pause', function () { P.sync(); emit('state'); saveState(true); });
+    engine.on('time', function () { P.tick(); saveState(false); });
+    engine.on('error', function () {
         var t = current();
-        if (!t || !audio.src) return;
+        if (!t || !engine.hasSource()) return;
         failures++;
         toast('Couldn\u2019t play \u201C' + (t.title || 'this song') + '\u201D');
         if (failures < queue.length && queue.length > 1) P.next(true);
