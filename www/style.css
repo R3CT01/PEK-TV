@@ -1792,3 +1792,9 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 .glass-panel p, .glass-panel div, .sx-toast, .sx-card p, .sx-card h3, .sx-toggle-label,
 .nf-root p, .nf-root h3, .nf-root li { overflow-wrap: anywhere; word-break: normal; }
 .theme-panel { overflow-x: hidden; }
+
+/* ---- Episode / suggestion cards show the whole description (0.1.9) ---- */
+.sx-ep-text, .plugin-row .sx-ep-text, html.pek-tv .plugin-row .sx-ep-text {
+    display: block; -webkit-line-clamp: unset; line-clamp: unset; overflow: visible; text-overflow: clip; max-height: none;
+}
+.sx-ep-row { height: auto; }
