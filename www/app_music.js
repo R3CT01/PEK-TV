@@ -153,13 +153,28 @@ class MainAppMusicMethods {
             createElement('div', { className: 'pm-album-sub' }, bits.join(' \u00B7 ')));
         return ui._longPress(el, () => this._mAlbumMenu(a));
     }
+    // "Main feat. Guest A, Guest B": the first artist owns the song, the rest are featured.
+    _mArtistText(t) {
+        const f = t.featured || [];
+        return (t.primary || t.artist) + (f.length ? ' feat. ' + f.join(', ') : '');
+    }
+    _mFeatEls(names) {
+        const { createElement } = this.props.engine;
+        const out = [];
+        (names || []).forEach((n, i) => {
+            out.push(i ? ', ' : ' feat. ');
+            const id = this._mArtistIdByName(n);
+            out.push(id ? createElement('button', { className: 'focusable pm-link', type: 'button', onClick: () => { this._mv.now = false; this._mNav({ artist: id }); } }, n) : createElement('span', {}, n));
+        });
+        return out;
+    }
     _mTrackRow(t, o) {
         const { createElement, ui } = this.props.engine;
         const P = window.PekMusic;
         const cur = P.current();
         const isCur = !!cur && cur.id === t.id && o.highlight !== false;
         const subBits = [];
-        if (o.showArtist !== false && t.artist) subBits.push(t.artist);
+        if (o.showArtist !== false && t.artist) subBits.push(this._mArtistText(t));
         if (o.showAlbum && t.album) subBits.push(t.album);
         const more = createElement('button', { className: 'focusable pm-more', type: 'button', title: 'More', 'aria-label': 'More options' }, '\u22EF');
         more.addEventListener('click', (e) => { e.stopPropagation(); this._mTrackMenu(t, o); });
@@ -231,7 +246,7 @@ class MainAppMusicMethods {
     _mTrackMenu(t, o) {
         const P = window.PekMusic;
         const v = this._mu();
-        const artistId = this._mArtistIdByName(t.artist);
+        const artistId = this._mArtistIdByName(t.primary || t.artist);
         this._mMenu(t.title || 'Song', [
             { label: 'Play next', fn: () => P.playNext([t]) },
             { label: 'Add to queue', fn: () => P.enqueue([t]) },
@@ -286,6 +301,7 @@ class MainAppMusicMethods {
             parts.push(createElement('div', { className: 'pm-online' },
                 ui.button(c.online ? 'Online art & lyrics: On' : 'Online art & lyrics: Off', () => this._mToggleOnline(), { variant: c.online ? 'primary' : undefined })));
         }
+        if (c.onlineAvail && c.online && c.albums && c.albums.length) { parts.push(this._mOfflineCard()); this._mPollOffline(); }
         if (c.scanning) parts.push(createElement('p', { className: 'pm-note' }, 'Looking for music\u2026 ' + (c.albums ? this._mCount(c.albums.length, 'album', 'albums') + ' so far.' : '')));
         if (!c.albums) parts.push(createElement('p', { className: 'pm-note' }, 'Loading your music\u2026'));
         else if (v.tab === 'albums') parts.push(this._mAlbumsTab());
@@ -295,6 +311,87 @@ class MainAppMusicMethods {
         else parts.push(this._mSearchTab());
         return createElement('div', { className: 'pm-home' }, ...parts);
     }
+
+    // ---------------------------------------------------------------- offline library (covers + lyrics kept on disk)
+    // The server saves every artist photo, album / single cover and song lyric once, in the background, so they show
+    // instantly and keep working with no internet. This card shows how far it is. It is updated in place (no repaint),
+    // so scrolling and focus are never disturbed while it counts up.
+    _mOfflineCard() {
+        const { createElement } = this.props.engine;
+        const c = this._mc;
+        const btn = createElement('button', { className: 'focusable sx-btn pm-off-btn', type: 'button', 'data-off': 'btn' }, 'Save for offline');
+        btn.addEventListener('click', () => this._mOfflineAct(c.off && c.off.running ? 'stop' : 'start'));
+        const stat = (k, label) => createElement('div', { className: 'pm-off-stat' },
+            createElement('span', { className: 'pm-off-k' }, label), createElement('span', { className: 'pm-off-v', 'data-off': k }, '\u2026'));
+        const card = createElement('div', { className: 'pm-offline' },
+            createElement('div', { className: 'pm-off-top' },
+                createElement('div', { className: 'pm-off-title' }, 'Offline library'),
+                createElement('div', { className: 'pm-off-pct', 'data-off': 'pct' }, '')),
+            createElement('div', { className: 'pm-off-bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' },
+                createElement('div', { className: 'pm-off-fill', 'data-off': 'fill' })),
+            createElement('div', { className: 'pm-off-stats' }, stat('music', 'Music'), stat('covers', 'Covers'), stat('lyrics', 'Lyrics')),
+            createElement('div', { className: 'pm-off-msg', 'data-off': 'msg' }, 'Checking\u2026'),
+            btn);
+        if (c.off) setTimeout(() => this._mPaintOffline(c.off), 0);
+        return card;
+    }
+    _mPaintOffline(d) {
+        const set = (k, fn) => document.querySelectorAll('[data-off="' + k + '"]').forEach(fn);
+        const running = !!d.running, busy = running || d.scanning || d.phase === 'scanning';
+        const fmt = (n) => Number(n || 0).toLocaleString();
+        const pct = d.phase === 'scanning' || (d.scanning && !d.total) ? null : Math.max(0, Math.min(100, d.percent || 0));
+        set('pct', n => { n.textContent = pct == null ? '' : pct + '%'; });
+        set('fill', n => {
+            n.style.width = (pct == null ? 100 : pct) + '%';
+            n.classList.toggle('pm-off-indet', pct == null);
+            n.classList.toggle('pm-off-done', d.phase === 'done');
+            if (n.parentNode) n.parentNode.setAttribute('aria-valuenow', String(pct == null ? 0 : pct));
+        });
+        set('music', n => { n.textContent = d.music.ready ? fmt(d.music.songs) + ' songs \u2713' : 'reading\u2026 ' + fmt(d.music.songs); });
+        const part = (x) => x.total ? (x.done >= x.total ? fmt(x.total) + ' \u2713' : fmt(x.done) + ' / ' + fmt(x.total)) : (d.phase === 'done' ? '\u2713' : '\u2013');
+        set('covers', n => { n.textContent = part(d.covers); });
+        set('lyrics', n => { n.textContent = part(d.lyrics) + (d.lyrics.total && d.lyrics.done >= d.lyrics.total ? ' \u00B7 ' + fmt(d.lyrics.found) + ' found' : ''); });
+        let msg = '';
+        if (d.phase === 'scanning' || d.scanning) msg = 'Reading your music\u2026';
+        else if (running) msg = 'Saving covers and lyrics for offline use. You can keep listening.';
+        else if (d.phase === 'done') msg = 'All saved. Covers and lyrics now work without internet.' + (d.failed ? ' (' + d.failed + ' could not be reached and will be tried again next time.)' : '');
+        else if (d.phase === 'offline') msg = 'Could not reach the cover and lyrics services. Check the connection, then tap Continue.';
+        else if (d.phase === 'stopped') msg = 'Paused at ' + (d.percent || 0) + '%. Tap Continue to finish.';
+        else if (d.phase === 'off' || !d.enabled) msg = 'Turn on Online art & lyrics to save them for offline.';
+        else msg = 'Not saved yet.';
+        set('msg', n => { n.textContent = msg; });
+        set('btn', n => {
+            n.textContent = running ? 'Stop' : (d.phase === 'stopped' || d.phase === 'offline') ? 'Continue' : d.phase === 'done' ? 'Check for new songs' : 'Save for offline';
+            n.hidden = !d.enabled || (d.phase === 'scanning' && !running);
+        });
+    }
+    _mOfflineAct(action) {
+        fetch('/api/music/offline?action=' + action, { method: 'POST' }).then(r => r.json()).then(d => {
+            this._mc.off = d; this._mPaintOffline(d); this._mc.offPolling = false; this._mPollOffline();
+        }).catch(() => this.props.engine.ui.toast('Could not reach the music service'));
+    }
+    _mPollOffline() {
+        const c = this._mc;
+        if (c.offPolling) return;
+        c.offPolling = true;
+        const tick = () => {
+            if (this.state.activeTab !== 'music' || !document.querySelector('[data-off="pct"]')) { c.offPolling = false; return; }   // left the screen
+            this._mGet('/api/music/offline').then(d => {
+                const was = c.off;
+                c.off = d;
+                this._mPaintOffline(d);
+                const busy = d.running || d.scanning || d.phase === 'scanning';
+                if (was && was.running && !d.running && d.phase === 'done') {          // just finished: pictures that were missing are there now
+                    c.albums = null; c.artists = null; c.detail = {}; c.artistDetail = {}; c.at = 0; c.offPolling = false;
+                    this._mLoadLibrary(true);
+                    return;
+                }
+                if (busy) setTimeout(tick, 1200); else c.offPolling = false;
+            }).catch(() => { c.offPolling = false; });
+        };
+        tick();
+    }
+
     // Online art: artist photos, album covers and covers for single songs, fetched when the files have none.
     _mToggleOnline() {
         const c = this._mc, on = !c.online;
@@ -304,6 +401,7 @@ class MainAppMusicMethods {
                 ? 'Online art is on. Artist, album and song names are sent to Deezer, Apple and LRCLIB to find pictures and lyrics; they are kept until the next rescan.'
                 : 'Online art is off.');
             c.albums = null; c.artists = null; c.detail = {}; c.artistDetail = {}; c.at = 0;     // reload so every picture link is refreshed
+            c.off = null; c.offPolling = false;
             this._mRepaint();
             this._mLoadLibrary(true);
         }).catch(() => this.props.engine.ui.toast('Could not change Online art'));
@@ -443,9 +541,10 @@ class MainAppMusicMethods {
         const artistId = this._mArtistIdByName(d.artist);
         const discs = new Set(tracks.map(t => t.disc || 1));
         const meta = [d.year || null, this._mCount(tracks.length, 'song', 'songs'), d.duration ? P.fmtLong(d.duration) : null].filter(Boolean).join(' \u00B7 ');
-        const artistEl = artistId
+        const mainEl = artistId
             ? createElement('button', { className: 'focusable pm-link', type: 'button', onClick: () => this._mNav({ artist: artistId }) }, d.artist)
             : createElement('span', { className: 'pm-link-plain' }, d.artist);
+        const artistEl = createElement('div', { className: 'pm-artist-line' }, mainEl, ...this._mFeatEls(d.featured));
         const hero = createElement('div', { className: 'pm-hero' },
             this._mArt(this._mAlbumArtUrl(d), 'pm-hero-art'),
             createElement('div', { className: 'pm-hero-info' },
@@ -458,7 +557,7 @@ class MainAppMusicMethods {
         let lastDisc = 0;
         tracks.forEach((t, i) => {
             if (discs.size > 1 && (t.disc || 1) !== lastDisc) { lastDisc = t.disc || 1; rows.push(createElement('div', { className: 'pm-disc' }, 'Disc ' + lastDisc)); }
-            rows.push(this._mTrackRow(t, { num: t.track || i + 1, showArtist: t.artist && t.artist !== d.artist, onPlay: () => P.play(tracks, i) }));
+            rows.push(this._mTrackRow(t, { num: t.track || i + 1, showArtist: !!t.artist && (((t.primary || t.artist) !== d.artist) || (t.featured || []).length > 0), onPlay: () => P.play(tracks, i) }));
         });
         return createElement('div', {}, this._mBackBar(), hero, createElement('div', { className: 'pm-list' }, ...rows));
     }
@@ -518,13 +617,14 @@ class MainAppMusicMethods {
         const P = window.PekMusic;
         const t = P.current();
         if (!t) { setTimeout(() => { this._mv.now = false; this._mRepaint(); }, 0); return createElement('div', {}); }
-        const artistId = this._mArtistIdByName(t.artist);
+        const artistId = this._mArtistIdByName(t.primary || t.artist);
         const range = createElement('input', { type: 'range', min: '0', max: '1000', value: '0', className: 'pm-range', 'data-pm-range': '', 'aria-label': 'Position' });
         range.addEventListener('input', () => range.setAttribute('data-drag', '1'));
         range.addEventListener('change', () => { range.removeAttribute('data-drag'); P.seekFraction(Number(range.value) / 1000); });
         const controls = createElement('div', { className: 'pm-controls' },
             P.button('shuffle'), P.button('prev'), P.button('toggle', 'pm-btn-main'), P.button('next'), P.button('repeat'));
-        const skipRow = createElement('div', { className: 'pm-controls pm-controls-small' }, P.button('back15'), P.button('fwd15'));
+        const skipRow = createElement('div', { className: 'pm-controls pm-controls-small' }, P.button('back15'), P.button('fwd15'),
+            ui.button('Full screen', () => { if (window.PekMusicFS) window.PekMusicFS.open(); }));
         const q = P.queue(), idx = P.index();
         const qRows = q.map((s, i) => {
             const row = this._mTrackRow(s, { num: i + 1, highlight: false, art: s.art ? P.artUrl(s) : '', onPlay: () => P.jump(i), removeLabel: 'Remove from queue', onRemove: () => P.removeAt(i) });
@@ -532,7 +632,8 @@ class MainAppMusicMethods {
             return row;
         });
         const sub = createElement('div', { className: 'pm-now-sub' },
-            artistId ? createElement('button', { className: 'focusable pm-link', type: 'button', onClick: () => { this._mv.now = false; this._mNav({ artist: artistId }); } }, t.artist) : createElement('span', {}, t.artist || ''),
+            artistId ? createElement('button', { className: 'focusable pm-link', type: 'button', onClick: () => { this._mv.now = false; this._mNav({ artist: artistId }); } }, t.primary || t.artist) : createElement('span', {}, t.primary || t.artist || ''),
+            ...this._mFeatEls(t.featured),
             t.album ? createElement('span', { className: 'pm-dot' }, ' \u00B7 ') : null,
             t.album && t.albumId ? createElement('button', { className: 'focusable pm-link', type: 'button', onClick: () => { this._mv.now = false; this._mNav({ album: t.albumId }); } }, t.album) : (t.album ? createElement('span', {}, t.album) : null));
         const view = createElement('div', { className: 'pm-now' },

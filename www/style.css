@@ -1937,3 +1937,22 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 .pm-lyrics-msg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--sx-text-muted); text-align: center; }
 .pm-lyrics-body:has(.pm-lyrics-msg) { -webkit-mask-image: none; mask-image: none; }
 @media (max-width: 700px) { .pm-lyric { font-size: 1.25rem; } .pm-lyrics-body { height: 44vh; } }
+.pm-artist-line { color: var(--sx-text-muted); }
+.pm-artist-line .pm-link { color: var(--sx-text); }
+
+/* Offline library card (Music tab) */
+.pm-offline { margin: 0.4rem 0 0.9rem; padding: 0.85rem 1rem 0.95rem; border-radius: 14px; background: var(--sx-surface); border: 1px solid var(--sx-border); }
+.pm-off-top { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.pm-off-title { font-weight: 800; font-size: 1.02rem; }
+.pm-off-pct { font-weight: 800; font-size: 1.5rem; font-variant-numeric: tabular-nums; color: var(--sx-accent); }
+.pm-off-bar { height: 8px; border-radius: 8px; background: var(--sx-surface-focused); overflow: hidden; margin: 0.55rem 0 0.7rem; }
+.pm-off-fill { height: 100%; width: 0; border-radius: 8px; background: var(--sx-accent); transition: width 0.5s ease; }
+.pm-off-fill.pm-off-indet { background: linear-gradient(90deg, transparent, var(--sx-accent), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: pm-off-slide 1.2s linear infinite; }
+.pm-off-fill.pm-off-done { background: #3fb950; }
+@keyframes pm-off-slide { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.pm-off-stats { display: flex; flex-wrap: wrap; gap: 0.3rem 1.4rem; font-size: 0.86rem; }
+.pm-off-k { color: var(--sx-text-muted); margin-right: 0.4rem; }
+.pm-off-v { font-weight: 700; font-variant-numeric: tabular-nums; }
+.pm-off-msg { margin-top: 0.55rem; font-size: 0.86rem; color: var(--sx-text-muted); }
+.pm-off-btn { margin-top: 0.6rem; }
+.pm-off-btn[hidden] { display: none; }

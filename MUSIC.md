@@ -54,3 +54,22 @@ Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_te
   stops after 10 minutes without playing.
 - Cover pictures are sent at their original size; very large covers on a big album grid cost memory on weak devices.
 - Scanning a large library on a network share the first time can take a while (results appear as they are read).
+
+## Full-screen player
+
+Open **Music > Now Playing > Full screen**. The cover (album, single or artist art) fills the background and the screen
+turns to landscape with the system bars hidden. **Lyrics** turns on time-synced lyrics (the background blurs so they stay
+readable; the choice is remembered). **Browse** (top-right) opens a side window with Queue, Playlists, Albums, Artists
+and Songs; picking something plays it and the window stays open. On a TV remote: arrows move, OK presses, Left/Right on
+the seek bar skips 10 seconds, Back closes the browse window first and then the screen. `L` toggles lyrics on a keyboard.
+
+## Offline library (covers + lyrics)
+
+While **Online art & lyrics** is on, the server walks the whole library after every scan and saves each artist photo,
+album / single cover and song's lyrics to disk (`music_art` in the data folder). The **Offline library** card at the top of
+Music > Albums / Artists shows a live percentage, with Music (songs read), Covers and Lyrics counts. Saved items show
+instantly and keep working with no internet, even if Online art is switched off later. Items already saved are skipped, so
+running it again is quick; **Stop / Continue / Check for new songs** control it. Pictures inside the song files and
+`cover.jpg` / `folder.jpg` beside them are already offline and are not copied. If the services can't be reached
+(12 failures in a row) it pauses with "Continue" instead of marking things as missing. The disk cache is cleared by a
+manual rescan, as before. Songs themselves are never copied: they play from your folders or network shares.

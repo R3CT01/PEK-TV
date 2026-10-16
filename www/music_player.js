@@ -126,7 +126,8 @@
     }
     function slim(t) {
         return { id: t.id, title: t.title || '', artist: t.artist || '', album: t.album || '', albumId: t.albumId || '',
-                 duration: t.duration || 0, ext: t.ext || '', art: !!t.art };
+                 duration: t.duration || 0, ext: t.ext || '', art: !!t.art,
+                 primary: t.primary || '', featured: t.featured || [] };
     }
     function saveState(force) {
         var now = Date.now();

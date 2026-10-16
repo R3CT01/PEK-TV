@@ -463,40 +463,53 @@ struct Store {
 };
 inline Store& store() { static Store s; return s; }
 
-// kind: "artist" | "album" | "song". Returns true with the picture in bytes / mime.
-inline bool lookup(const std::string& kind, const std::string& a, const std::string& b, std::string& bytes, std::string& mime) {
+// kind: "artist" | "album" | "song".
+// Answers what is already kept on disk even when the online switch is off (nothing is sent anywhere for that), so a
+// saved library keeps working with no internet. Returns 1 = picture in bytes / mime, 0 = nothing exists (remembered),
+// -1 = could not be looked up (switch off, or the service could not be reached; tried again next time).
+inline int lookupEx(const std::string& kind, const std::string& a, const std::string& b, std::string& bytes, std::string& mime) {
     Store& st = store();
-    if (!st.on || a.empty()) return false;
+    if (a.empty()) return 0;
     const std::string key = kind + "|" + norm(a) + "|" + norm(b);
     int c = st.load(key, bytes, mime);
-    if (c == 1) return true;
-    if (c == 0) return false;
+    if (c == 1) return 1;
+    if (c == 0) return 0;
+    if (!st.on) return -1;
     Slot slot;
     int r = kind == "artist" ? artistPhoto(a, bytes, mime) : kind == "album" ? albumCover(a, b, bytes, mime) : songCover(a, b, bytes, mime);
-    if (r == 1) { st.save(key, mime, bytes); return true; }
+    if (r == 1) { st.save(key, mime, bytes); return 1; }
     if (r == 0) st.save(key, "", "");                                // remember the miss, until the next refresh
-    return false;
+    return r == 0 ? 0 : -1;
+}
+inline bool lookup(const std::string& kind, const std::string& a, const std::string& b, std::string& bytes, std::string& mime) {
+    return lookupEx(kind, a, b, bytes, mime) == 1;
 }
 
-// Lyrics for one song. Returns true with the texts filled in; the answer (also "none") is kept like the pictures are.
-inline bool lyrics(const std::string& artist, const std::string& title, const std::string& album, double duration,
-                   std::string& synced, std::string& plain) {
+// Lyrics for one song; the answer (also "none") is kept like the pictures are, and served offline from then on.
+// Same return codes as lookupEx.
+inline int lyricsEx(const std::string& artist, const std::string& title, const std::string& album, double duration,
+                    std::string& synced, std::string& plain) {
     Store& st = store();
-    if (!st.on || artist.empty() || title.empty()) return false;
+    if (artist.empty() || title.empty()) return 0;
     const std::string key = "lyrics|" + norm(artist) + "|" + norm(title) + "|" + lrcNum(duration / 4);
     std::string bytes, mime;
     int c = st.load(key, bytes, mime);
-    if (c == 0) return false;
+    if (c == 0) return 0;
     if (c == 1 && mime == "lyrics") {
         size_t k = bytes.find('\x1f');
         synced = bytes.substr(0, k); plain = k == std::string::npos ? std::string() : bytes.substr(k + 1);
-        return true;
+        return 1;
     }
+    if (!st.on) return -1;
     Slot slot;
     int r = lyricsFetch(artist, title, album, duration, synced, plain);
-    if (r == 1) { st.save(key, "lyrics", synced + "\x1f" + plain); return true; }
+    if (r == 1) { st.save(key, "lyrics", synced + "\x1f" + plain); return 1; }
     if (r == 0) st.save(key, "", "");
-    return false;
+    return r == 0 ? 0 : -1;
+}
+inline bool lyrics(const std::string& artist, const std::string& title, const std::string& album, double duration,
+                   std::string& synced, std::string& plain) {
+    return lyricsEx(artist, title, album, duration, synced, plain) == 1;
 }
 
 } // namespace musiconline
