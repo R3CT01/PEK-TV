@@ -15,6 +15,8 @@ add_library(pek SHARED
     ${BACKEND}/server.cpp
     ${BACKEND}/media_scanner.cpp
     ${BACKEND}/playback.cpp
+    ${BACKEND}/music.cpp       # /api/music/* (library, albums, artists, streaming)
+    ${BACKEND}/music_tags.cpp  # reads song tags + covers (MP3, FLAC, Ogg, M4A) without ffprobe
     ${BACKEND}/discovery.cpp
     ${BACKEND}/vfs.cpp
     ${BACKEND}/vfs_ftp.cpp     # FTP

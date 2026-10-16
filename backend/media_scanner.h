@@ -76,6 +76,10 @@ public:
     using ShowResolver = std::function<std::string(const std::string&)>;
     void setShowResolver(ShowResolver resolver);
 
+    // Called (on the scan thread, after the results are stored) at the end of every scan(). The music library uses it
+    // to refresh itself; it must return quickly (start its own thread for anything slow).
+    void setAfterScan(std::function<void()> callback);
+
     // --- Source folder management (the picker UI) ---
     // Validates the path is a real directory, adds it, and persists
     // the source list. Does NOT scan automatically — call scan()
@@ -123,6 +127,7 @@ private:
     std::vector<MediaEntry> entries_;
     std::mutex mutex_;
     ShowResolver show_resolver_;
+    std::function<void()> after_scan_;
     std::map<std::string, std::string> resolved_names_;   // lowercase guess -> official name ("" = no match); only touched under scan_mutex_
     std::mutex local_mutex_;
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, Local>> local_cache_;   // "m:<id>" / "e:<show>|s|e" / "s:<show>"

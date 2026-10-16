@@ -13,6 +13,7 @@ class MainAppPlaybackMethods {
     // no native player, such as the web/dev build.
     _openWebPlayer(url, title, backend, track, onCloseCb, live) {
         if (this._player) return;
+        if (window.PekMusic) window.PekMusic.pause();   // a video starts: the music waits
         this.setState({ detail: null });
         const player = new window.PekPlayer({
             title: title || '',

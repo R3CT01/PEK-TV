@@ -898,6 +898,18 @@ void MediaScanner::scan() {
 
     std::cout << "[MediaScanner] Scan complete. " << indexed << " file(s) indexed." << std::endl;
     persistCacheToDisk();
+
+    std::function<void()> after;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        after = after_scan_;
+    }
+    if (after) { try { after(); } catch (...) {} }
+}
+
+void MediaScanner::setAfterScan(std::function<void()> callback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    after_scan_ = std::move(callback);
 }
 
 std::vector<MediaEntry> MediaScanner::getMovies() {

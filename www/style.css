@@ -1798,3 +1798,118 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
     display: block; -webkit-line-clamp: unset; line-clamp: unset; overflow: visible; text-overflow: clip; max-height: none;
 }
 .sx-ep-row { height: auto; }
+
+/* ============================================================
+   Music tab + player bar  (music_player.js, app_music.js)
+   ============================================================ */
+.pm-root { padding-bottom: 1rem; }
+.pm-home .sx-tabs { overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+.pm-home .sx-tab { white-space: nowrap; flex: none; }
+.pm-note { color: var(--sx-text-muted); margin: 0.75rem 0; }
+.pm-sub { color: var(--sx-text-muted); font-size: 0.9rem; margin: 0.25rem 0 0.75rem; }
+.pm-empty { max-width: 40rem; }
+.pm-list { display: flex; flex-direction: column; gap: 0.35rem; margin: 0.5rem 0 1rem; }
+.pm-section { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1.25rem 0 0.5rem; }
+.pm-section h3 { margin: 0; font-size: 1.05rem; }
+.pm-menu { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 1rem; }
+.pm-menu p { margin: 0 0 0.5rem; color: var(--sx-text-muted); }
+
+/* cover pictures: a note on a soft tile underneath, the image on top when there is one */
+.pm-art { position: relative; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 12px; background: var(--sx-surface); border: 1px solid var(--sx-border); display: flex; align-items: center; justify-content: center; flex: none; }
+.pm-art-note { font-size: 2.2rem; color: var(--sx-text-muted); opacity: 0.55; user-select: none; }
+.pm-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* album grid */
+.pm-grid { --sx-grid-min: 150px; }
+.pm-album.sx-card { padding: 0.6rem; display: flex; flex-direction: column; gap: 0.35rem; min-width: 0; }
+.pm-album-art { width: 100%; }
+.pm-album-title { font-weight: 600; font-size: 0.95rem; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+@media (min-width: 1200px) { .pm-grid { --sx-grid-min: 176px; } }
+.pm-album-sub { color: var(--sx-text-muted); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* song rows */
+.pm-track { display: flex; align-items: center; gap: 0.75rem; padding: 0.55rem 0.75rem; min-width: 0; }
+.pm-track-no { width: 1.8rem; text-align: right; color: var(--sx-text-muted); font-size: 0.85rem; flex: none; font-variant-numeric: tabular-nums; }
+.pm-track-art { width: 2.6rem; flex: none; border-radius: 8px; }
+.pm-track-art .pm-art-note { font-size: 1.1rem; }
+.pm-track-main { flex: 1; min-width: 0; }
+.pm-track-main h3 { margin: 0; font-size: 0.98rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-track-main p { margin: 0.1rem 0 0; font-size: 0.8rem; color: var(--sx-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-track-time { color: var(--sx-text-muted); font-size: 0.85rem; flex: none; font-variant-numeric: tabular-nums; }
+.pm-track.pm-current { border-color: var(--sx-border-focus); }
+.pm-track.pm-current .pm-track-no { color: var(--sx-text); }
+.pm-more { flex: none; background: transparent; border: none; color: var(--sx-text-muted); font-size: 1.3rem; line-height: 1; padding: 0.35rem 0.6rem; border-radius: 10px; cursor: pointer; }
+.pm-disc { margin: 0.9rem 0 0.2rem; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sx-text-muted); }
+
+/* album / artist / playlist page */
+.pm-backbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.pm-backtitle { color: var(--sx-text-muted); }
+.pm-hero { display: flex; gap: 1.5rem; align-items: flex-end; margin-bottom: 1rem; }
+.pm-hero-art { width: 14rem; max-width: 40%; }
+.pm-hero-info { min-width: 0; flex: 1; }
+.pm-hero-info h2 { margin: 0 0 0.25rem; font-size: 1.6rem; overflow-wrap: anywhere; }
+.pm-hero-artist { align-items: center; }
+.pm-link { background: transparent; border: none; padding: 0.1rem 0.2rem; margin: 0 -0.2rem; font: inherit; color: var(--sx-text); text-decoration: underline; text-decoration-color: var(--sx-border); text-underline-offset: 3px; cursor: pointer; border-radius: 6px; }
+.pm-link-plain { color: var(--sx-text); }
+
+/* round transport buttons (bar + Now Playing) */
+.pm-btn { width: 2.5rem; height: 2.5rem; padding: 0; border-radius: 50%; border: none; background: transparent; color: var(--sx-text); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.pm-btn svg { width: 1.35rem; height: 1.35rem; fill: currentColor; }
+.pm-btn-main { background: var(--sx-accent); color: var(--sx-bg); }
+.pm-btn.on { color: var(--sx-accent); background: var(--sx-surface-focused); }
+.pm-btn-repeat[data-mode="one"]::after { content: "1"; position: absolute; font-size: 0.6rem; font-weight: 700; margin: 0.9rem 0 0 1.1rem; }
+.pm-btn-repeat { position: relative; }
+
+/* Now Playing */
+.pm-now-top { display: flex; gap: 2rem; align-items: center; margin-bottom: 1rem; }
+.pm-now-art { width: min(22rem, 42%); flex: none; border-radius: 16px; }
+.pm-now-art .pm-art-note { font-size: 4rem; }
+.pm-now-info { flex: 1; min-width: 0; }
+.pm-now-info h2 { margin: 0 0 0.3rem; font-size: 1.7rem; overflow-wrap: anywhere; }
+.pm-now-sub { color: var(--sx-text-muted); margin-bottom: 1rem; }
+.pm-seek { display: flex; align-items: center; gap: 0.6rem; margin: 0.5rem 0 0.75rem; }
+.pm-range { flex: 1; min-width: 0; accent-color: var(--sx-accent); height: 1.5rem; }
+.pm-time { color: var(--sx-text-muted); font-size: 0.82rem; font-variant-numeric: tabular-nums; min-width: 2.6rem; text-align: center; }
+.pm-controls { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.pm-controls .pm-btn { width: 3rem; height: 3rem; }
+.pm-controls .pm-btn-main { width: 3.8rem; height: 3.8rem; }
+.pm-controls .pm-btn-main svg { width: 1.8rem; height: 1.8rem; }
+.pm-controls-small { margin-top: 0.4rem; }
+.pm-controls-small .pm-btn { width: 2.6rem; height: 2.6rem; }
+
+/* the bar that stays on screen while you browse (one persistent node, see PekMusic.bar) */
+.pm-bar { z-index: 40; background: var(--sx-glass-strong); border: 1px solid var(--sx-border); box-shadow: 0 8px 28px var(--sx-shadow); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.pm-bar[hidden], html.pm-hide-bar .pm-bar { display: none; }
+.pm-bar-progress { height: 3px; background: var(--sx-border); }
+.pm-bar-fill { height: 100%; width: 0; background: var(--sx-accent); }
+.pm-bar-row { display: flex; align-items: center; gap: 0.25rem; padding: 0.45rem 0.6rem; }
+.pm-bar-info { display: flex; align-items: center; gap: 0.65rem; flex: 1; min-width: 0; text-align: left; background: transparent; border: none; color: inherit; padding: 0.1rem; border-radius: 10px; cursor: pointer; font: inherit; }
+.pm-bar-art { width: 2.7rem; border-radius: 8px; }
+.pm-bar-art .pm-art-note { font-size: 1.1rem; }
+.pm-bar-text { min-width: 0; }
+.pm-bar-title { font-weight: 600; font-size: 0.92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-bar-sub { color: var(--sx-text-muted); font-size: 0.78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-bar .pm-btn { width: 2.3rem; height: 2.3rem; }
+.pm-bar .pm-btn-main { width: 2.6rem; height: 2.6rem; }
+
+@media (min-width: 721px) {
+    .pm-bar { position: fixed; right: 1.25rem; bottom: 1.25rem; width: min(27rem, calc(100vw - 2.5rem)); border-radius: 16px; overflow: hidden; }
+    html.pek-tv .pm-bar { right: calc(2rem + var(--tv-safe-x, 0px)); bottom: calc(1.5rem + var(--tv-safe-y, 0px)); }
+    html.pm-has-bar .pek-content { padding-bottom: 6.5rem; }
+}
+@media (max-width: 720px) {
+    /* phones: a normal strip between the screen and the bottom tab bar */
+    .pm-bar { position: relative; flex: none; border-width: 1px 0 0 0; border-radius: 0; box-shadow: none; }
+    html.hp-typing .pm-bar { display: none; }
+    .pm-hero { flex-direction: column; align-items: flex-start; }
+    .pm-hero-art { width: 11rem; max-width: 60%; }
+    .pm-now-top { flex-direction: column; align-items: stretch; gap: 1rem; }
+    .pm-now-art { width: min(18rem, 70%); align-self: center; }
+    .pm-controls { justify-content: center; }
+    .pm-track-no { display: none; }
+}
+
+@media (max-width: 720px) {
+    .pm-home .sx-tabs { gap: 0.1rem; }
+    .pm-home .sx-tab { padding: 0.6rem 0.5rem; font-size: 0.9rem; }
+}

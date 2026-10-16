@@ -60,7 +60,7 @@ if [ "$1" != "--run" ]; then
     fi
     g++ -std=c++17 -O1 \
         -DCPPHTTPLIB_OPENSSL_SUPPORT \
-        core.cpp server.cpp media_scanner.cpp playback.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp torrent.cpp torrent_routes.cpp $SMB_SRC \
+        core.cpp server.cpp media_scanner.cpp playback.cpp music.cpp music_tags.cpp discovery.cpp vfs.cpp vfs_ftp.cpp vfs_http.cpp torrent.cpp torrent_routes.cpp $SMB_SRC \
         -o "$ROOT/bin/pek" \
         $(python3-config --cflags --embed) \
         $(python3-config --ldflags --embed) \

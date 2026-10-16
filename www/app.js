@@ -196,6 +196,7 @@ class MainApp extends PekComponent {
         if (this.state.pluginRemove) { this.cancelRemovePlugin(); return true; }
         if (this.state.favRemove) { this.cancelRemoveFavorite(); return true; }
         if (this.state.moreOpen) { this.setState({ moreOpen: false }); return true; }
+        if (this._musicBack && this._musicBack()) return true;   // a page inside the Music tab (album, artist, Now Playing ...)
         if (this.state.dashAdd) { this.setState({ dashAdd: false }); return true; }
         if (this.state.showClockSettings) { this.setState({ showClockSettings: false }); return true; }
         if (this.state.dashEdit && this.state.activeTab === 'dashboard') { this.setState({ dashEdit: false }); return true; }
@@ -519,10 +520,7 @@ class MainApp extends PekComponent {
                 this._renderDashboard()
             );
         } else if (activeTab === 'music') {
-            mainContent = createElement('div', {},
-                this._renderHeader(currentLabel),
-                ui.card('Music', '(currently in development)')
-            );
+            mainContent = this._renderMusic();       // app_music.js
         } else if (LIBRARY_ENDPOINTS[activeTab]) {
             mainContent = createElement('div', {},
                 this._renderHeader(currentLabel, true),
@@ -574,11 +572,12 @@ class MainApp extends PekComponent {
 
         const contentPane = createElement('div', { className: 'pek-content' }, mainContent);
         // New tab or drill-down level => new key => starts at the top; same screen => keeps its place.
-        contentPane.dataset.keepScroll = `content:${activeTab}:${this.state.showNav.show}:${this.state.showNav.season}`;
+        contentPane.dataset.keepScroll = `content:${activeTab}:${this.state.showNav.show}:${this.state.showNav.season}` + (activeTab === 'music' && this._musicScrollKey ? ':' + this._musicScrollKey() : '');
 
         return createElement('div', { className: 'pek-shell' },
             sidebar,
             contentPane,
+            this._musicBarNode ? this._musicBarNode() : null,   // the mini player (app_music.js); sits above the phone tab bar
             bottomBar,
             this._renderDetailModal(),
             this._renderClockSettings(),
