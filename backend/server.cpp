@@ -1,5 +1,6 @@
 #include "server.h"
 #include "playback.h"
+#include "music.h"
 #include "torrent_routes.h"
 #include "discovery.h"
 #include "vfs.h"
@@ -345,6 +346,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     registerPlaybackRoutes(svr, scanner);   // /api/stream/<id>
     peektrailer::registerTrailerRoutes(svr);   // /api/trailer: trailers as a plain video stream (trailer.h)
     registerTorrentRoutes(svr);             // /api/torrent/* (search, start, stream)
+    registerMusicRoutes(svr, scanner, std::filesystem::path(plugins_dir).parent_path().string());   // /api/music/* (music.h)
     // 1a. Serve plugin folders (ui.js / backend.js) at /plugins — registered
     //     before the catch-all below so it's matched directly, without
     //     needing to fail against www_dir first.
