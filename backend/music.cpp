@@ -246,14 +246,35 @@ void parseFileName(const std::string& stem, int& disc, int& track, std::string& 
     title = trimmed(stem.substr(i));
     if (title.empty()) title = trimmed(stem);
 }
+// "Bonus Tracks", "Extras", "Deluxe", "Instrumentals" ... : a sub-folder that belongs to the album above it.
+bool isPartFolder(const std::string& name) {
+    std::string s = lower(trimmed(name));
+    static const char* words[] = {"bonus", "extras", "extra", "deluxe", "instrumentals", "instrumental", "acapellas", "acapella"};
+    for (const char* w : words) {
+        size_t n = std::strlen(w);
+        if (s.compare(0, n, w) == 0 && (s.size() == n || s[n] == ' ' || s[n] == '-' || s[n] == '_' || s[n] == '.')) return true;
+    }
+    return false;
+}
+// A folder that only holds the library (e.g. the source is "/storage/emulated/0" and the music is in "Music/").
+bool isWrapperFolder(const std::string& name) {
+    std::string s = lower(trimmed(name));
+    return s == "music" || s == "songs" || s == "audio" || s == "download" || s == "downloads";
+}
 void deriveFromPath(Track& t, const std::vector<std::string>& relDirs) {
     int disc = 0, trk = 0;
     std::string title;
     parseFileName(stemOf(t.filename), disc, trk, title);
     t.fbTitle = title; t.fbTrack = trk; t.fbDisc = disc;
     std::vector<std::string> dirs = relDirs;
+    if (!dirs.empty() && isWrapperFolder(dirs.front())) dirs.erase(dirs.begin());
+    // Artist/Album/CD1, Artist/Album/Disc 2, Artist/Album/Bonus Tracks: the sub-folder is part of the album
     int folderDisc = 0;
-    if (!dirs.empty() && isDiscFolder(dirs.back())) { folderDisc = discNumberOf(dirs.back()); dirs.pop_back(); }
+    for (int pass = 0; pass < 2 && !dirs.empty(); ++pass) {
+        if (isDiscFolder(dirs.back())) { if (!folderDisc) folderDisc = discNumberOf(dirs.back()); dirs.pop_back(); }
+        else if (dirs.size() >= 3 && isPartFolder(dirs.back())) dirs.pop_back();
+        else break;
+    }
     if (folderDisc && !t.fbDisc) t.fbDisc = folderDisc;
     std::string dirKey;
     for (const auto& d : dirs) dirKey += "/" + d;
@@ -267,6 +288,25 @@ void deriveFromPath(Track& t, const std::vector<std::string>& relDirs) {
     if (t.fbArtist.empty()) {                                           // a loose "Artist - Title" file name
         size_t dash = title.find(" - ");
         if (dash != std::string::npos && dash > 0 && dash + 3 < title.size()) { t.fbArtist = trimmed(title.substr(0, dash)); t.fbTitle = trimmed(title.substr(dash + 3)); }
+    }
+}
+
+// Needs the whole folder tree, so it runs after a scan: a top-level folder that has album folders inside it is an
+// artist folder, and the songs lying directly in it (singles) belong to that artist instead of an "album" named
+// after the artist.
+void inferFromTree(std::vector<Track>& tracks) {
+    std::set<std::string> audioDirs;
+    for (const auto& t : tracks) if (!t.albumDir.empty()) audioDirs.insert(t.albumDir);
+    auto hasSubFolders = [&](const std::string& d) {
+        std::string p = d + "/";
+        auto it = audioDirs.lower_bound(p);
+        return it != audioDirs.end() && it->compare(0, p.size(), p) == 0;
+    };
+    for (auto& t : tracks) {
+        if (t.albumDir.size() < 2 || t.albumDir.find('/', 1) != std::string::npos) continue;     // top-level folders only
+        if (!hasSubFolders(t.albumDir)) continue;
+        t.fbArtist = t.albumDir.substr(1);
+        t.fbAlbum = "Singles";
     }
 }
 
@@ -515,6 +555,7 @@ private:
         std::set<std::string> seen;
         std::vector<Track> unique;
         for (auto& t : ctx.found) if (seen.insert(t.path).second) unique.push_back(std::move(t));
+        inferFromTree(unique);
         cache_ = unique;
         publish(unique);
         saveCache(unique);
