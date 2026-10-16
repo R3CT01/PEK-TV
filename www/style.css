@@ -1772,3 +1772,14 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
     body { width: 100%; }
     .pek-bottombar { touch-action: manipulation; }
 }
+
+/* ---- Phone fixes (0.1.6) ----
+   1) The later unscoped ".nf-stage > .nf-rows { margin-top: -2.4rem }" and "height: 60vh" rules beat the phone
+      block above them, so the "Trending now" row slid up over the Play / My List buttons. Re-assert the phone layout.
+   2) The "Starting stream..." status pill is parked above the phone tab bar, but plugin screens have no tab bar,
+      so it floated over the content. Put it at the very bottom there. */
+@media (max-width: 700px), (max-height: 500px) {
+    .nf-stage > .nf-bb { height: auto; }
+    .nf-stage > .nf-rows { margin-top: 0.8rem; padding-top: 0; }
+    html.nf-on #pek-activity { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+}

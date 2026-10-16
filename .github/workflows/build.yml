@@ -53,6 +53,19 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" || true
 
+      # Gradle's own NDK auto-download can hand back a corrupt zip ("Error on ZipFile unknown archive").
+      # Install the exact NDK AGP asks for ourselves, with retries, and wipe any half-downloaded copy first.
+      - name: Install NDK (with retry)
+        run: |
+          NDK=27.0.12077973
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          for i in 1 2 3 4; do
+            rm -rf "$ANDROID_HOME/ndk/$NDK"
+            "$SM" "ndk;$NDK" && [ -f "$ANDROID_HOME/ndk/$NDK/source.properties" ] && { echo "NDK ok"; exit 0; }
+            echo "NDK install attempt $i failed, retrying..."; sleep 10
+          done
+          echo "::error::Could not install NDK $NDK"; exit 1
+
       # ---- Version -------------------------------------------------------
       - name: Work out version name
         run: |
@@ -95,9 +108,12 @@ jobs:
         run: |
           git clone --depth 1 --branch RC_2_0 --recurse-submodules --shallow-submodules \
             https://github.com/arvidn/libtorrent android/libtorrent
-          curl -fsSL https://github.com/boostorg/boost/releases/download/boost-1.86.0/boost-1.86.0-cmake.tar.gz \
+          # NOTE: must be the b2 (classic) tarball: it has boost/version.hpp at its top level, which CMakeLists.txt
+          # checks for. The "-cmake" tarball keeps headers under libs/*/include, so torrents were silently built OFF.
+          curl -fsSL https://github.com/boostorg/boost/releases/download/boost-1.86.0/boost-1.86.0-b2-nodocs.tar.gz \
             | tar xz -C android
           mv android/boost-1.86.0 android/boost
+          test -f android/boost/boost/version.hpp || { echo "::error::Boost headers not where CMake expects them"; exit 1; }
 
       # ---- Signing (release only) ----------------------------------------
       - name: Check signing secrets
@@ -149,6 +165,16 @@ jobs:
           OUT="dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}.apk"
           cp "$SRC" "$OUT"
           echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
+          if [ "$WANT_TORRENT" = true ]; then
+            # The stub in torrent.cpp contains this text; a real libtorrent build does not.
+            TMP=$(mktemp -d); unzip -q -o "$OUT" 'lib/*/libpek.so' -d "$TMP"
+            for so in "$TMP"/lib/*/libpek.so; do
+              if strings "$so" | grep -q "Torrent support is not built into this PEK TV"; then
+                echo "::error::$so was built WITHOUT libtorrent (stub). Not publishing."; exit 1
+              fi
+            done
+            echo "Torrent engine verified in apk"
+          fi
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           "$APKSIGNER" verify --print-certs "$OUT" | head -5
           ls -lh dist
