@@ -801,7 +801,7 @@ struct ArtCache {
 // interrupted run simply continues. Songs, albums and covers that live in the files themselves are already offline.
 bool isSinglesTitle(const std::string& title);
 struct OfflineJob {
-    struct Item { int kind; std::string a, b, c; double dur; };      // kind: 0 lyrics, 1 artist photo, 2 album cover, 3 single cover
+    struct Item { int kind; std::string a, b, c; double dur; std::vector<std::pair<std::string, std::string>> songs; };      // kind: 0 lyrics, 1 artist photo, 2 album cover, 3 single cover
     std::atomic<bool> running{false}, stop{false}, again{false};
     std::atomic<int> total{0}, done{0}, lyTotal{0}, lyDone{0}, lyFound{0}, cvTotal{0}, cvDone{0}, cvFound{0}, failed{0}, songs{0};
     std::atomic<int64_t> finishedAt{0};
@@ -840,7 +840,11 @@ struct OfflineJob {
             if (isSinglesTitle(al.title)) continue;
             bool local = al.art;
             if (!local) for (int ti : al.tracks) if (s->tracks[ti].hasArt || !s->tracks[ti].folderArt.empty()) { local = true; break; }
-            if (!local && seen.insert("a|" + lower(al.artist) + "|" + lower(al.title)).second) items.push_back({2, al.artist, al.title, "", 0});
+            if (!local && seen.insert("a|" + lower(al.artist) + "|" + lower(al.title)).second) {
+                Item it{2, al.artist, al.title, "", 0, {}};
+                for (int ti : al.tracks) { if (it.songs.size() >= 3) break; it.songs.push_back({s->tracks[ti].rPrimary, s->tracks[ti].rTitle}); }
+                items.push_back(std::move(it));
+            }
         }
         for (const auto& t : s->tracks) {
             auto f = s->albumOfTrack.find(t.id);
@@ -868,7 +872,11 @@ struct OfflineJob {
                 int r;
                 std::string x, y;
                 if (it.kind == 0) r = musiconline::lyricsEx(it.a, it.b, it.c, it.dur, x, y);
-                else r = musiconline::lookupEx(it.kind == 1 ? "artist" : it.kind == 2 ? "album" : "song", it.a, it.b, x, y);
+                else {
+                    r = musiconline::lookupEx(it.kind == 1 ? "artist" : it.kind == 2 ? "album" : "song", it.a, it.b, x, y);
+                    if (it.kind == 2 && r != 1)                              // same fallback as the cover route: one of its songs may have the picture
+                        for (const auto& sg : it.songs) { int r2 = musiconline::lookupEx("song", sg.first, sg.second, x, y); if (r2 == 1) { r = 1; break; } if (r2 < 0) r = -1; }
+                }
                 if (r < 0) { ++failed; ++streak; } else streak = 0;
                 if (it.kind == 0) { ++lyDone; if (r == 1) ++lyFound; } else { ++cvDone; if (r == 1) ++cvFound; }
                 ++done;
@@ -1094,6 +1102,14 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
                     else {
                         ok = albumLocal(a);
                         if (!ok) ok = musiconline::lookup("album", a.artist, a.title, bytes, mime);
+                        if (!ok) {                                               // the album is not listed: one of its songs may be (singles, deluxe editions)
+                            int tried = 0;
+                            for (int ti : a.tracks) {
+                                if (tried++ >= 3) break;
+                                const Track& tt = s->tracks[ti];
+                                if (musiconline::lookup("song", tt.rPrimary, tt.rTitle, bytes, mime)) { ok = true; break; }
+                            }
+                        }
                     }
                 }
             } else {
@@ -1137,6 +1153,10 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
     svr.Post("/api/music/offline", [lib, offline](const httplib::Request& req, httplib::Response& res) {
         std::string a = req.get_param_value("action");
         if (a == "stop") offline->stop.store(true);
+        else if (a == "retry") {                                  // ask again for everything that came back empty
+            if (!musiconline::store().on.load()) offline->setPhase("off");
+            else if (!offline->running.load()) { musiconline::store().forgetMisses(); offline->start(lib); }
+        }
         else if (a == "start") {
             if (!musiconline::store().on.load()) offline->setPhase("off");
             else if (!offline->running.load()) offline->start(lib);

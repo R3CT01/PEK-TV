@@ -73,3 +73,7 @@ running it again is quick; **Stop / Continue / Check for new songs** control it.
 `cover.jpg` / `folder.jpg` beside them are already offline and are not copied. If the services can't be reached
 (12 failures in a row) it pauses with "Continue" instead of marking things as missing. The disk cache is cleared by a
 manual rescan, as before. Songs themselves are never copied: they play from your folders or network shares.
+
+Songs or albums that no service knows (bootlegs, mixtapes) simply keep the note icon; **Retry missing covers & lyrics**
+on the card asks the services again for everything that came back empty. Covers are matched leniently: "(Deluxe)",
+"[Remastered]", "feat." tails and curly quotes are ignored, and if the album is not listed one of its songs is tried.
