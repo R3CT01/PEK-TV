@@ -17,7 +17,10 @@ Tags are read straight from the files (no ffprobe, so it works on Android and on
 v2.3 / v2.4), FLAC, Ogg Vorbis / Opus, M4A / M4B. Embedded covers are used; otherwise `cover.jpg`, `folder.jpg`,
 `front.jpg` or `albumart.jpg` next to the songs.
 Where tags are missing the folder layout fills in: `Artist/Album/01 - Title.mp3`, `Artist - Album/01 Title.mp3`, a
-`CD1` / `Disc 2` sub-folder, or a loose `Artist - Title.mp3`.
+`CD1` / `Disc 2` / `Bonus Tracks` / `Deluxe` / `Extras` sub-folder inside an album, or a loose `Artist - Title.mp3`.
+Folders are searched at any depth. A wrapper folder at the top (`Music`, `Songs`, `Audio`, `Download`) is ignored when
+working out the artist, and songs lying directly in an artist folder that also has album folders become that artist's
+**Singles** album.
 Albums are grouped by album + album artist; an album with three or more different artists and no album-artist tag
 becomes **Various Artists**. Folders containing a `.nomedia` file are skipped (same as videos).
 
