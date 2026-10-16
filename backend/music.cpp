@@ -931,7 +931,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         res.set_content(bytes, mime);
     });
 
-    // Online art (artist photos, album and single covers) on / off. Off by default: names are sent to Deezer / Apple.
+    // Online art (artist photos, album and single covers) on / off. On by default (the user can switch it off): names are sent to Deezer / Apple.
     svr.Get("/api/music/online", [](const httplib::Request&, httplib::Response& res) {
         jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");
     });
