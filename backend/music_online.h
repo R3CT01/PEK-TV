@@ -123,17 +123,31 @@ struct Parser {
 // ---------------------------------------------------------------- names
 inline std::string norm(const std::string& in) {                  // letters and digits only, lower case
     std::string o;
-    for (unsigned char c : in) {
+    for (size_t i = 0; i < in.size(); ++i) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == 0xE2 && i + 2 < in.size() && ((unsigned char)in[i + 1] == 0x80 || (unsigned char)in[i + 1] == 0x81)) { i += 2; continue; }   // ’ “ ” – … and friends
         if (c >= 128) o += (char)c;
         else if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z')) o += (char)c;
         else if (c >= 'A' && c <= 'Z') o += (char)(c - 'A' + 'a');
     }
     return o;
 }
+inline std::string core(const std::string& in) {                   // "Song (feat. X) [Remastered] - Deluxe" -> "song"
+    std::string s; int depth = 0;
+    for (char c : in) {
+        if (c == '(' || c == '[') ++depth;
+        else if (c == ')' || c == ']') { if (depth) --depth; }
+        else if (!depth) s += c;
+    }
+    size_t k = s.find(" - ");
+    if (k != std::string::npos && k > 0) s = s.substr(0, k);
+    return norm(s);
+}
 inline bool similar(const std::string& x, const std::string& y) {  // same name, or one holds the other ("Album (Deluxe)")
     std::string a = norm(x), b = norm(y);
     if (a.empty() || b.empty()) return false;
     if (a == b) return true;
+    { std::string ca = core(x), cb = core(y); if (!ca.empty() && ca == cb) return true; }
     return (a.size() >= 4 && b.find(a) != std::string::npos) || (b.size() >= 4 && a.find(b) != std::string::npos);
 }
 inline std::string enc(const std::string& s) {
@@ -328,6 +342,17 @@ inline int albumCover(const std::string& artist, const std::string& album, std::
             }
         }
     }
+    // last tries: the album name alone (odd characters in the artist name can sink the combined search), with the artist checked on the answers
+    { std::string plainAlbum = core(album).empty() ? album : album;
+      if (fromDeezer(noQuotes(plainAlbum))) return 1;
+      if (itunes("album", plainAlbum, r, failed)) {
+          const J* d = r.get("results");
+          if (d && d->t == J::Arr) for (const J& x : d->a) {
+              if (!similar(x.str("collectionName"), album) || !similarAny(x.str("artistName"), names)) continue;
+              std::string u = bigger(x.str("artworkUrl100"));
+              if (!u.empty() && fetchImage(u, bytes, mime)) return 1;
+          }
+      } }
     return failed ? -1 : 0;
 }
 
@@ -360,6 +385,9 @@ inline int songCover(const std::string& artist, const std::string& title, std::s
             }
         }
     }
+    // last try: the title with its "(feat. ...)" / "[Remastered]" part removed, artist checked on the answers
+    { std::string bare = title; size_t k = bare.find_first_of("(["); if (k != std::string::npos && k > 2) bare = bare.substr(0, k);
+      if (!names.empty() && fromDeezer(names[0] + " " + noQuotes(bare))) return 1; }
     return failed ? -1 : 0;
 }
 
@@ -452,6 +480,18 @@ struct Store {
         std::ofstream f(file(key), std::ios::binary | std::ios::trunc);
         if (!bytes.empty()) f << mime << "\n"; else f << "none\n";
         f.write(bytes.data(), (std::streamsize)bytes.size());
+    }
+    // Forget every remembered "nothing found" (pictures and lyrics), so a retry asks the services again.
+    int forgetMisses() {
+        std::lock_guard<std::mutex> l(m);
+        std::error_code ec; int n = 0;
+        if (dir.empty()) return 0;
+        for (auto& e : fs::directory_iterator(dir, ec)) {
+            std::string head;
+            { std::ifstream f(e.path(), std::ios::binary); std::getline(f, head); }
+            if (head == "none") { std::error_code e2; fs::remove(e.path(), e2); ++n; }
+        }
+        return n;
     }
     void clear() {                                                   // "till the next refresh"
         std::lock_guard<std::mutex> l(m);

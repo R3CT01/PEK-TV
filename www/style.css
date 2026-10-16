@@ -1956,3 +1956,6 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 .pm-off-msg { margin-top: 0.55rem; font-size: 0.86rem; color: var(--sx-text-muted); }
 .pm-off-btn { margin-top: 0.6rem; }
 .pm-off-btn[hidden] { display: none; }
+
+.pm-off-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.pm-off-retry[hidden] { display: none; }

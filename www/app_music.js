@@ -321,6 +321,8 @@ class MainAppMusicMethods {
         const c = this._mc;
         const btn = createElement('button', { className: 'focusable sx-btn pm-off-btn', type: 'button', 'data-off': 'btn' }, 'Save for offline');
         btn.addEventListener('click', () => this._mOfflineAct(c.off && c.off.running ? 'stop' : 'start'));
+        const retry = createElement('button', { className: 'focusable sx-btn pm-off-btn pm-off-retry', type: 'button', 'data-off': 'retry', hidden: true }, 'Retry missing covers & lyrics');
+        retry.addEventListener('click', () => this._mOfflineAct('retry'));
         const stat = (k, label) => createElement('div', { className: 'pm-off-stat' },
             createElement('span', { className: 'pm-off-k' }, label), createElement('span', { className: 'pm-off-v', 'data-off': k }, '\u2026'));
         const card = createElement('div', { className: 'pm-offline' },
@@ -331,7 +333,7 @@ class MainAppMusicMethods {
                 createElement('div', { className: 'pm-off-fill', 'data-off': 'fill' })),
             createElement('div', { className: 'pm-off-stats' }, stat('music', 'Music'), stat('covers', 'Covers'), stat('lyrics', 'Lyrics')),
             createElement('div', { className: 'pm-off-msg', 'data-off': 'msg' }, 'Checking\u2026'),
-            btn);
+            createElement('div', { className: 'pm-off-btns' }, btn, retry));
         if (c.off) setTimeout(() => this._mPaintOffline(c.off), 0);
         return card;
     }
@@ -354,12 +356,16 @@ class MainAppMusicMethods {
         let msg = '';
         if (d.phase === 'scanning' || d.scanning) msg = 'Reading your music\u2026';
         else if (running) msg = 'Saving covers and lyrics for offline use. You can keep listening.';
-        else if (d.phase === 'done') msg = 'All saved. Covers and lyrics now work without internet.' + (d.failed ? ' (' + d.failed + ' could not be reached and will be tried again next time.)' : '');
+        else if (d.phase === 'done') {
+            const miss = Math.max(0, (d.covers.total || 0) - (d.covers.found || 0));
+            msg = 'All saved. Covers and lyrics now work without internet.' + (miss ? ' ' + fmt(miss) + ' cover' + (miss === 1 ? '' : 's') + ' could not be found online.' : '') + (d.failed ? ' (' + d.failed + ' could not be reached and will be tried again next time.)' : '');
+        }
         else if (d.phase === 'offline') msg = 'Could not reach the cover and lyrics services. Check the connection, then tap Continue.';
         else if (d.phase === 'stopped') msg = 'Paused at ' + (d.percent || 0) + '%. Tap Continue to finish.';
         else if (d.phase === 'off' || !d.enabled) msg = 'Turn on Online art & lyrics to save them for offline.';
         else msg = 'Not saved yet.';
         set('msg', n => { n.textContent = msg; });
+        set('retry', n => { n.hidden = !d.enabled || running || !(d.phase === 'done' || d.phase === 'stopped') || (d.covers.total - d.covers.found) <= 0 && !(d.lyrics.total - d.lyrics.found > 0); });
         set('btn', n => {
             n.textContent = running ? 'Stop' : (d.phase === 'stopped' || d.phase === 'offline') ? 'Continue' : d.phase === 'done' ? 'Check for new songs' : 'Save for offline';
             n.hidden = !d.enabled || (d.phase === 'scanning' && !running);
