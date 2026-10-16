@@ -143,6 +143,39 @@ inline std::string enc(const std::string& s) {
     }
     return o;
 }
+// "$uicideboy$, Aristos Petrou, Scott Arceneaux Jr." (an album artist tag with every credit) -> the whole string first,
+// then each single name, so the lookups can still find the real artist.
+inline std::vector<std::string> artistNames(const std::string& in) {
+    std::vector<std::string> out;
+    auto add = [&](std::string x) {
+        size_t b = x.find_first_not_of(" \t"), e = x.find_last_not_of(" \t");
+        if (b == std::string::npos) return;
+        x = x.substr(b, e - b + 1);
+        for (const auto& y : out) if (norm(y) == norm(x)) return;
+        out.push_back(x);
+    };
+    add(in);
+    std::string cur;
+    auto flush = [&]() { add(cur); cur.clear(); };
+    for (size_t i = 0; i < in.size(); ++i) {
+        char c = in[i];
+        if (c == ',' || c == ';' || c == '/' || c == '&') { flush(); continue; }
+        auto word = [&](const char* w) { size_t n = std::char_traits<char>::length(w); return in.compare(i, n, w) == 0; };
+        if (word(" feat. ") || word(" ft. ") || word(" with ") || word(" and ") || word(" x ")) {
+            flush();
+            while (i + 1 < in.size() && in[i + 1] != ' ') ++i;      // skip the joining word
+            ++i;
+            continue;
+        }
+        cur += c;
+    }
+    flush();
+    return out;
+}
+inline bool similarAny(const std::string& x, const std::vector<std::string>& names) {
+    for (const auto& n : names) if (similar(x, n)) return true;
+    return false;
+}
 inline std::string noQuotes(std::string s) { for (char& c : s) if (c == '"') c = ' '; return s; }
 
 // ---------------------------------------------------------------- network
@@ -251,10 +284,11 @@ inline std::string bigger(std::string u) {                           // iTunes g
 inline int artistPhoto(const std::string& name, std::string& bytes, std::string& mime) {
     bool failed = false;
     J r;
-    if (deezer("artist", name, r, failed)) {
+    for (const auto& n : artistNames(name)) {
+        if (!deezer("artist", n, r, failed)) continue;
         const J* d = r.get("data");
         if (d && d->t == J::Arr) for (const J& x : d->a) {
-            if (norm(x.str("name")) != norm(name)) continue;                 // exact name only: a wrong face is worse than none
+            if (norm(x.str("name")) != norm(n)) continue;                    // exact name only: a wrong face is worse than none
             std::string u = x.str("picture_big");
             if (u.empty() || u.find("/images/artist//") != std::string::npos) continue;      // Deezer's grey "no photo" picture
             if (fetchImage(u, bytes, mime)) return 1;
@@ -266,25 +300,30 @@ inline int artistPhoto(const std::string& name, std::string& bytes, std::string&
 inline int albumCover(const std::string& artist, const std::string& album, std::string& bytes, std::string& mime) {
     bool failed = false;
     J r;
+    const std::vector<std::string> names = artistNames(artist);
     auto fromDeezer = [&](const std::string& q) {
         if (!deezer("album", q, r, failed)) return false;
         const J* d = r.get("data");
         if (d && d->t == J::Arr) for (const J& x : d->a) {
             const J* ar = x.get("artist");
-            if (!similar(x.str("title"), album) || !ar || !similar(ar->str("name"), artist)) continue;
+            if (!similar(x.str("title"), album) || !ar || !similarAny(ar->str("name"), names)) continue;
             std::string u = x.str("cover_big");
             if (!u.empty() && fetchImage(u, bytes, mime)) return true;
         }
         return false;
     };
-    if (fromDeezer("artist:\"" + noQuotes(artist) + "\" album:\"" + noQuotes(album) + "\"")) return 1;
-    if (fromDeezer(artist + " " + album)) return 1;
-    if (itunes("album", artist + " " + album, r, failed)) {
-        const J* d = r.get("results");
-        if (d && d->t == J::Arr) for (const J& x : d->a) {
-            if (!similar(x.str("collectionName"), album) || !similar(x.str("artistName"), artist)) continue;
-            std::string u = bigger(x.str("artworkUrl100"));
-            if (!u.empty() && fetchImage(u, bytes, mime)) return 1;
+    for (const auto& n : names) {
+        if (fromDeezer("artist:\"" + noQuotes(n) + "\" album:\"" + noQuotes(album) + "\"")) return 1;
+        if (fromDeezer(n + " " + album)) return 1;
+    }
+    for (const auto& n : names) {
+        if (itunes("album", n + " " + album, r, failed)) {
+            const J* d = r.get("results");
+            if (d && d->t == J::Arr) for (const J& x : d->a) {
+                if (!similar(x.str("collectionName"), album) || !similarAny(x.str("artistName"), names)) continue;
+                std::string u = bigger(x.str("artworkUrl100"));
+                if (!u.empty() && fetchImage(u, bytes, mime)) return 1;
+            }
         }
     }
     return failed ? -1 : 0;
@@ -293,25 +332,30 @@ inline int albumCover(const std::string& artist, const std::string& album, std::
 inline int songCover(const std::string& artist, const std::string& title, std::string& bytes, std::string& mime) {
     bool failed = false;
     J r;
+    const std::vector<std::string> names = artistNames(artist);
     auto fromDeezer = [&](const std::string& q) {
         if (!deezer("track", q, r, failed)) return false;
         const J* d = r.get("data");
         if (d && d->t == J::Arr) for (const J& x : d->a) {
             const J* ar = x.get("artist"); const J* al = x.get("album");
-            if (!similar(x.str("title"), title) || !ar || !al || !similar(ar->str("name"), artist)) continue;
+            if (!similar(x.str("title"), title) || !ar || !al || !similarAny(ar->str("name"), names)) continue;
             std::string u = al->str("cover_big");
             if (!u.empty() && fetchImage(u, bytes, mime)) return true;
         }
         return false;
     };
-    if (fromDeezer("artist:\"" + noQuotes(artist) + "\" track:\"" + noQuotes(title) + "\"")) return 1;
-    if (fromDeezer(artist + " " + title)) return 1;
-    if (itunes("song", artist + " " + title, r, failed)) {
-        const J* d = r.get("results");
-        if (d && d->t == J::Arr) for (const J& x : d->a) {
-            if (!similar(x.str("trackName"), title) || !similar(x.str("artistName"), artist)) continue;
-            std::string u = bigger(x.str("artworkUrl100"));
-            if (!u.empty() && fetchImage(u, bytes, mime)) return 1;
+    for (const auto& n : names) {
+        if (fromDeezer("artist:\"" + noQuotes(n) + "\" track:\"" + noQuotes(title) + "\"")) return 1;
+        if (fromDeezer(n + " " + title)) return 1;
+    }
+    for (const auto& n : names) {
+        if (itunes("song", n + " " + title, r, failed)) {
+            const J* d = r.get("results");
+            if (d && d->t == J::Arr) for (const J& x : d->a) {
+                if (!similar(x.str("trackName"), title) || !similarAny(x.str("artistName"), names)) continue;
+                std::string u = bigger(x.str("artworkUrl100"));
+                if (!u.empty() && fetchImage(u, bytes, mime)) return 1;
+            }
         }
     }
     return failed ? -1 : 0;
@@ -331,13 +375,16 @@ struct Store {
         flag = (fs::path(dataDir) / "music_online.flag").string();
         std::error_code ec;
         fs::create_directories(dir, ec);
-        on = kAvailable && fs::exists(flag, ec);
+        // On by default: the flag file holds "1" (on) or "0" (the user switched it off). No file = never touched = on.
+        bool want = true;
+        if (fs::exists(flag, ec)) { std::ifstream f(flag); std::string v; std::getline(f, v); want = v != "0"; }
+        on = kAvailable && want;
     }
     void setEnabled(bool v) {
         std::lock_guard<std::mutex> l(m);
         on = v && kAvailable;
         std::error_code ec;
-        if (on) { std::ofstream(flag) << "1\n"; } else { fs::remove(flag, ec); }
+        std::ofstream(flag, std::ios::trunc) << (v ? "1\n" : "0\n");
     }
     std::string file(const std::string& key) { return (fs::path(dir) / (std::to_string(std::hash<std::string>{}(key)) + ".img")).string(); }
 
