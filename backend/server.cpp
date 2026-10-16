@@ -1128,6 +1128,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             return;
         }
         g_last_rescan_ms.store(now);
+        musicOnlineClearCache();   // online music pictures are looked up afresh after a manual rescan
         std::thread([scanner]() {
             scanner->scan();
             g_rescan_running.store(false);

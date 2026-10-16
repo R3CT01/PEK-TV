@@ -1,5 +1,6 @@
 #include "music.h"
 #include "music_tags.h"
+#include "music_online.h"
 #include "vfs.h"
 
 #include <algorithm>
@@ -210,6 +211,24 @@ struct Snapshot {
 };
 
 // ---- folder / file name fallbacks
+// Names taken from a folder or file name (not from the song's tags) often come as slugs: "21-savage", "a_lot".
+// Show them as words ("21 savage", "a lot"). Underscores always become spaces. Hyphens only do when the name is
+// a slug (no spaces and no capital letters), so "Jay-Z", "Ne-Yo" and "Artist - Title" are left alone.
+std::string prettyName(const std::string& in) {
+    std::string s = trimmed(in);
+    bool hasSpace = false, hasUpper = false;
+    for (unsigned char c : s) { if (c == ' ') hasSpace = true; if (c >= 'A' && c <= 'Z') hasUpper = true; }
+    const bool slug = !hasSpace && !hasUpper;
+    std::string o;
+    o.reserve(s.size());
+    for (char c : s) {
+        if (c == '_' || (c == '-' && slug)) c = ' ';
+        if (c == ' ' && !o.empty() && o.back() == ' ') continue;      // no double spaces
+        o += c;
+    }
+    return trimmed(o);
+}
+
 bool isDiscFolder(const std::string& name) {
     std::string s = lower(trimmed(name));
     size_t i = 0;
@@ -567,9 +586,9 @@ private:
         auto s = std::make_shared<Snapshot>();
         s->tracks = input;
         for (auto& t : s->tracks) {
-            t.rTitle = !t.title.empty() ? t.title : (!t.fbTitle.empty() ? t.fbTitle : stemOf(t.filename));
-            t.rArtist = !t.artist.empty() ? t.artist : (!t.albumArtist.empty() ? t.albumArtist : (!t.fbArtist.empty() ? t.fbArtist : "Unknown Artist"));
-            t.rAlbum = !t.album.empty() ? t.album : (!t.fbAlbum.empty() ? t.fbAlbum : "Unknown Album");
+            t.rTitle = !t.title.empty() ? t.title : prettyName(!t.fbTitle.empty() ? t.fbTitle : stemOf(t.filename));
+            t.rArtist = !t.artist.empty() ? t.artist : (!t.albumArtist.empty() ? t.albumArtist : (!t.fbArtist.empty() ? prettyName(t.fbArtist) : "Unknown Artist"));
+            t.rAlbum = !t.album.empty() ? t.album : (!t.fbAlbum.empty() ? prettyName(t.fbAlbum) : "Unknown Album");
             if (!t.track) t.track = t.fbTrack;
             if (!t.disc) t.disc = t.fbDisc;
         }
@@ -714,6 +733,14 @@ std::string num(double v) {
     std::snprintf(b, sizeof b, "%.0f", v < 0 ? 0 : v);
     return b;
 }
+// The folder-name fallback calls loose songs "Singles" (or "Unknown Album"): one picture for that "album" would be wrong,
+// so each of its songs gets its own cover and the album card shows the artist's photo.
+bool isSinglesTitle(const std::string& title) {
+    std::string l = lower(trimmed(title));
+    return l == "singles" || l == "unknown album";
+}
+bool onlineOn() { return musiconline::store().on.load(); }
+
 std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     const Track& t = s.tracks[ti];
     std::string j = "{\"id\":\"" + t.id + "\",\"title\":\"" + jsonEscape(t.rTitle) + "\",\"artist\":\"" + jsonEscape(t.rArtist) +
@@ -721,14 +748,18 @@ std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     if (withAlbum) {
         j += ",\"album\":\"" + jsonEscape(t.rAlbum) + "\"";
         auto f = s.albumOfTrack.find(t.id);
-        if (f != s.albumOfTrack.end()) j += ",\"albumId\":\"" + s.albums[f->second].id + "\",\"art\":" + (s.albums[f->second].art ? "true" : "false");
+        if (f != s.albumOfTrack.end()) {
+            const Album& al = s.albums[f->second];
+            if (isSinglesTitle(al.title)) j += std::string(",\"art\":") + ((t.hasArt || !t.folderArt.empty() || onlineOn()) ? "true" : "false");   // its own cover: no albumId
+            else j += ",\"albumId\":\"" + al.id + "\",\"art\":" + ((al.art || onlineOn()) ? "true" : "false");
+        }
     }
     return j + ",\"ext\":\"" + jsonEscape(fileExt(t.filename)) + "\"}";
 }
 std::string albumJson(const Album& a) {
     return "{\"id\":\"" + a.id + "\",\"title\":\"" + jsonEscape(a.title) + "\",\"artist\":\"" + jsonEscape(a.artist) + "\",\"year\":" + std::to_string(a.year) +
            ",\"tracks\":" + std::to_string(a.tracks.size()) + ",\"duration\":" + num(a.duration) + ",\"added\":" + std::to_string(a.added) +
-           ",\"art\":" + (a.art ? "true" : "false") + "}";
+           ",\"art\":" + ((a.art || onlineOn()) ? "true" : "false") + ",\"singles\":" + (isSinglesTitle(a.title) ? "true" : "false") + "}";
 }
 void jsonOut(httplib::Response& res, const std::string& body) {
     res.set_header("Cache-Control", "no-store");
@@ -747,6 +778,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
     if (!dataDir.empty()) fs::create_directories(dataDir, ec);
     auto lib = std::make_shared<MusicLibrary>((fs::path(dataDir) / "music_cache.tsv").string(), scanner);
     auto art = std::make_shared<ArtCache>();
+    musiconline::store().init(dataDir);
 
     // Every normal scan (startup, rescan, a new source) refreshes the music too, on its own thread.
     scanner->setAfterScan([lib]() { lib->scanAsync(); });
@@ -776,7 +808,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
             bool art = false;
             for (int ai : a.albums) if (s->albums[ai].art) { art = true; break; }
             j += "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(a.albums.size()) +
-                 ",\"tracks\":" + std::to_string(a.trackCount) + ",\"art\":" + (art ? "true" : "false") + ",\"albumId\":\"" +
+                 ",\"tracks\":" + std::to_string(a.trackCount) + ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albumId\":\"" +
                  (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
         }
         jsonOut(res, j + "]}");
@@ -799,7 +831,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         auto f = s->artistById.find(req.get_param_value("id"));
         if (f == s->artistById.end()) { notFound(res, "Unknown artist"); return; }
         const Artist& a = s->artists[f->second];
-        std::string j = "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"tracks\":" + std::to_string(a.trackCount) + ",\"albums\":[";
+        std::string j = "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"tracks\":" + std::to_string(a.trackCount) + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albums\":[";
         for (size_t i = 0; i < a.albums.size(); ++i) { if (i) j += ","; j += albumJson(s->albums[a.albums[i]]); }
         jsonOut(res, j + "]}");
     });
@@ -833,7 +865,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
                 bool art = false;
                 for (int ai : a.albums) if (s->albums[ai].art) { art = true; break; }
                 ar += "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(a.albums.size()) + ",\"tracks\":" + std::to_string(a.trackCount) +
-                      ",\"art\":" + (art ? "true" : "false") + ",\"albumId\":\"" + (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
+                      ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albumId\":\"" + (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
             }
             for (const auto& a : s->albums) {
                 if (nl >= 40 || (lower(a.title).find(q) == std::string::npos && lower(a.artist).find(q) == std::string::npos)) continue;
@@ -852,28 +884,61 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
 
     svr.Get("/api/music/art", [lib, art](const httplib::Request& req, httplib::Response& res) {
         auto s = lib->snapshot();
-        std::string albumId = req.get_param_value("album"), trackId = req.get_param_value("track");
-        std::string key = albumId.empty() ? "t:" + trackId : "a:" + albumId;
+        std::string albumId = req.get_param_value("album"), trackId = req.get_param_value("track"), artistId = req.get_param_value("artist");
+        std::string key = !artistId.empty() ? "r:" + artistId : albumId.empty() ? "t:" + trackId : "a:" + albumId;
         std::string mime, bytes;
         if (!art->get(key, mime, bytes)) {
             bool ok = false;
-            if (!albumId.empty()) {
+            // local pictures first: the song's own, then cover.jpg / folder.jpg beside it
+            auto albumLocal = [&](const Album& a) {
+                for (int ti : a.tracks) if (s->tracks[ti].hasArt && lib->cover(s->tracks[ti], true, bytes, mime)) return true;
+                for (int ti : a.tracks) if (!s->tracks[ti].folderArt.empty() && lib->cover(s->tracks[ti], false, bytes, mime)) return true;
+                return false;
+            };
+            if (!artistId.empty()) {
+                auto f = s->artistById.find(artistId);
+                if (f != s->artistById.end()) {
+                    const Artist& a = s->artists[f->second];
+                    ok = musiconline::lookup("artist", a.name, "", bytes, mime);           // a photo of the artist (online art only)
+                    if (!ok) for (int ai : a.albums) if (albumLocal(s->albums[ai])) { ok = true; break; }   // else one of their covers
+                }
+            } else if (!albumId.empty()) {
                 auto f = s->albumById.find(albumId);
                 if (f != s->albumById.end()) {
                     const Album& a = s->albums[f->second];
-                    // the first song that carries its own picture, else any song with a cover.jpg beside it
-                    for (int ti : a.tracks) if (s->tracks[ti].hasArt && lib->cover(s->tracks[ti], true, bytes, mime)) { ok = true; break; }
-                    if (!ok) for (int ti : a.tracks) if (!s->tracks[ti].folderArt.empty() && lib->cover(s->tracks[ti], false, bytes, mime)) { ok = true; break; }
+                    if (isSinglesTitle(a.title)) ok = musiconline::lookup("artist", a.artist, "", bytes, mime);   // "Singles" shows the artist
+                    else {
+                        ok = albumLocal(a);
+                        if (!ok) ok = musiconline::lookup("album", a.artist, a.title, bytes, mime);
+                    }
                 }
             } else {
                 auto f = s->trackById.find(trackId);
-                if (f != s->trackById.end()) ok = lib->cover(s->tracks[f->second], true, bytes, mime);
+                if (f != s->trackById.end()) {
+                    const Track& t = s->tracks[f->second];
+                    ok = lib->cover(t, true, bytes, mime);
+                    if (!ok) {
+                        const std::string& albumArtist = !t.albumArtist.empty() ? t.albumArtist : t.rArtist;
+                        if (!isSinglesTitle(t.rAlbum)) ok = musiconline::lookup("album", albumArtist, t.rAlbum, bytes, mime);
+                        if (!ok) ok = musiconline::lookup("song", t.rArtist, t.rTitle, bytes, mime);     // a single: its own cover
+                    }
+                }
             }
             if (!ok) { notFound(res, "No artwork"); return; }
             art->put(key, mime, bytes);
         }
         res.set_header("Cache-Control", "private, max-age=3600");
         res.set_content(bytes, mime);
+    });
+
+    // Online art (artist photos, album and single covers) on / off. Off by default: names are sent to Deezer / Apple.
+    svr.Get("/api/music/online", [](const httplib::Request&, httplib::Response& res) {
+        jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");
+    });
+    svr.Post("/api/music/online", [](const httplib::Request& req, httplib::Response& res) {
+        std::string v = req.get_param_value("enabled");
+        musiconline::store().setEnabled(v == "1" || v == "true");
+        jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");
     });
 
     svr.Get(R"(/api/music/stream/([A-Za-z0-9]+))", [lib](const httplib::Request& req, httplib::Response& res) {
@@ -904,3 +969,6 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         });
     });
 }
+
+// A manual rescan forgets the pictures found online (and the "nothing found" answers), so they are looked up afresh.
+void musicOnlineClearCache() { musiconline::store().clear(); }
