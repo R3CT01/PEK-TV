@@ -931,6 +931,19 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         res.set_content(bytes, mime);
     });
 
+    // Lyrics (LRCLIB). Follows the same on / off switch as the online pictures: song names are sent to lrclib.net.
+    // Answer: {"synced":"[00:12.34] line\n...","plain":"..."}; 404 when nothing is found or online lookups are off.
+    svr.Get("/api/music/lyrics", [lib](const httplib::Request& req, httplib::Response& res) {
+        auto s = lib->snapshot();
+        auto f = s->trackById.find(req.get_param_value("track"));
+        if (f == s->trackById.end()) { notFound(res, "No such song"); return; }
+        const Track& t = s->tracks[f->second];
+        std::string synced, plain;
+        if (!musiconline::lyrics(t.rArtist, t.rTitle, t.rAlbum, t.duration, synced, plain)) { notFound(res, "No lyrics"); return; }
+        res.set_header("Cache-Control", "private, max-age=3600");
+        jsonOut(res, "{\"synced\":\"" + jsonEscape(synced) + "\",\"plain\":\"" + jsonEscape(plain) + "\"}");
+    });
+
     // Online art (artist photos, album and single covers) on / off. On by default (the user can switch it off): names are sent to Deezer / Apple.
     svr.Get("/api/music/online", [](const httplib::Request&, httplib::Response& res) {
         jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");

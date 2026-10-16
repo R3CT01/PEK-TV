@@ -1,7 +1,7 @@
 #ifndef MUSIC_ONLINE_H
 #define MUSIC_ONLINE_H
 
-// Online pictures for the Music tab: artist photos, album covers and covers for single songs.
+// Online pictures and lyrics for the Music tab: artist photos, album covers and covers for single songs.
 // Used only when the song files and their folders have no picture of their own, and only when the user turned
 // "Online art" on. Deezer's public search is asked first (no key needed), Apple's iTunes search is the fallback for
 // albums and songs. Every answer (also "nothing found") is kept in <dataDir>/music_art until the next manual rescan,
@@ -10,6 +10,8 @@
 #include "httplib.h"
 
 #include <atomic>
+#include <cmath>
+#include <cstdio>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
@@ -361,6 +363,51 @@ inline int songCover(const std::string& artist, const std::string& title, std::s
     return failed ? -1 : 0;
 }
 
+// ---------------------------------------------------------------- lyrics (LRCLIB: free, no key, time-synced "LRC" text)
+// synced = "[01:23.45] line" per line (may be empty), plain = the same words without times (may be empty).
+inline std::string lrcNum(double d) { char b[32]; std::snprintf(b, sizeof b, "%.0f", d); return b; }
+inline int lyricsFetch(const std::string& artist, const std::string& title, const std::string& album, double duration,
+                       std::string& synced, std::string& plain) {
+    bool failed = false;
+    const std::vector<std::string> names = artistNames(artist);
+    auto take = [&](const J& x) {
+        const J* a = x.get("syncedLyrics"); const J* b = x.get("plainLyrics");
+        std::string sy = a && a->t == J::Str ? a->s : std::string(), pl = b && b->t == J::Str ? b->s : std::string();
+        if (sy.empty() && pl.empty()) return false;
+        synced = sy; plain = pl;
+        return true;
+    };
+    // 1) the exact lookup (needs artist, title, album and length), the best answer when the tags are good
+    if (duration > 0 && !album.empty()) for (const auto& n : names) {
+        std::string body;
+        if (!httpsGet("lrclib.net", "/api/get?artist_name=" + enc(n) + "&track_name=" + enc(title) + "&album_name=" + enc(album) +
+                                    "&duration=" + lrcNum(duration), body, true)) continue;
+        Parser p(body); J r;
+        if (p.parse(r) && r.t == J::Obj && take(r)) return 1;
+    }
+    // 2) a search; take the closest length, and prefer one with timings
+    for (const auto& n : names) {
+        std::string body;
+        if (!httpsGet("lrclib.net", "/api/search?track_name=" + enc(title) + "&artist_name=" + enc(n), body, true)) { failed = true; continue; }
+        Parser p(body); J r;
+        if (!p.parse(r) || r.t != J::Arr) { failed = true; continue; }
+        const J* best = nullptr; double bestScore = -1e9;
+        for (const J& x : r.a) {
+            if (!similar(x.str("trackName"), title) || !similarAny(x.str("artistName"), names)) continue;
+            const J* sy = x.get("syncedLyrics"); const J* pl = x.get("plainLyrics");
+            bool hasSync = sy && sy->t == J::Str && !sy->s.empty(), hasPlain = pl && pl->t == J::Str && !pl->s.empty();
+            if (!hasSync && !hasPlain) continue;
+            const J* d = x.get("duration");
+            double gap = duration > 0 && d && d->t == J::Num ? std::abs(d->n - duration) : 0;
+            if (duration > 0 && gap > 6) continue;                       // a different version of the song
+            double score = (hasSync ? 100 : 0) - gap;
+            if (score > bestScore) { bestScore = score; best = &x; }
+        }
+        if (best && take(*best)) return 1;
+    }
+    return failed ? -1 : 0;
+}
+
 // ---------------------------------------------------------------- the on/off switch and the disk cache
 namespace fs = std::filesystem;
 
@@ -428,6 +475,27 @@ inline bool lookup(const std::string& kind, const std::string& a, const std::str
     int r = kind == "artist" ? artistPhoto(a, bytes, mime) : kind == "album" ? albumCover(a, b, bytes, mime) : songCover(a, b, bytes, mime);
     if (r == 1) { st.save(key, mime, bytes); return true; }
     if (r == 0) st.save(key, "", "");                                // remember the miss, until the next refresh
+    return false;
+}
+
+// Lyrics for one song. Returns true with the texts filled in; the answer (also "none") is kept like the pictures are.
+inline bool lyrics(const std::string& artist, const std::string& title, const std::string& album, double duration,
+                   std::string& synced, std::string& plain) {
+    Store& st = store();
+    if (!st.on || artist.empty() || title.empty()) return false;
+    const std::string key = "lyrics|" + norm(artist) + "|" + norm(title) + "|" + lrcNum(duration / 4);
+    std::string bytes, mime;
+    int c = st.load(key, bytes, mime);
+    if (c == 0) return false;
+    if (c == 1 && mime == "lyrics") {
+        size_t k = bytes.find('\x1f');
+        synced = bytes.substr(0, k); plain = k == std::string::npos ? std::string() : bytes.substr(k + 1);
+        return true;
+    }
+    Slot slot;
+    int r = lyricsFetch(artist, title, album, duration, synced, plain);
+    if (r == 1) { st.save(key, "lyrics", synced + "\x1f" + plain); return true; }
+    if (r == 0) st.save(key, "", "");
     return false;
 }
 

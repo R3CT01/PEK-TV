@@ -284,7 +284,7 @@ class MainAppMusicMethods {
         const parts = [this._renderHeader('Music'), ui.tabs(tabs, v.tab, (id) => { v.tab = id; this._mRepaint(); })];
         if (c.onlineAvail && (v.tab === 'albums' || v.tab === 'artists') && c.albums && c.albums.length) {
             parts.push(createElement('div', { className: 'pm-online' },
-                ui.button(c.online ? 'Online art: On' : 'Online art: Off', () => this._mToggleOnline(), { variant: c.online ? 'primary' : undefined })));
+                ui.button(c.online ? 'Online art & lyrics: On' : 'Online art & lyrics: Off', () => this._mToggleOnline(), { variant: c.online ? 'primary' : undefined })));
         }
         if (c.scanning) parts.push(createElement('p', { className: 'pm-note' }, 'Looking for music\u2026 ' + (c.albums ? this._mCount(c.albums.length, 'album', 'albums') + ' so far.' : '')));
         if (!c.albums) parts.push(createElement('p', { className: 'pm-note' }, 'Loading your music\u2026'));
@@ -301,7 +301,7 @@ class MainAppMusicMethods {
         fetch('/api/music/online?enabled=' + (on ? '1' : '0'), { method: 'POST' }).then(r => r.json()).then(d => {
             c.online = !!d.enabled;
             this.props.engine.ui.toast(c.online
-                ? 'Online art is on. Artist, album and song names are sent to Deezer and Apple to find pictures; they are kept until the next rescan.'
+                ? 'Online art is on. Artist, album and song names are sent to Deezer, Apple and LRCLIB to find pictures and lyrics; they are kept until the next rescan.'
                 : 'Online art is off.');
             c.albums = null; c.artists = null; c.detail = {}; c.artistDetail = {}; c.at = 0;     // reload so every picture link is refreshed
             this._mRepaint();
@@ -545,6 +545,7 @@ class MainAppMusicMethods {
                         createElement('span', { className: 'pm-time', 'data-pm-time': '' }, '0:00'), range,
                         createElement('span', { className: 'pm-time', 'data-pm-total': '' }, t.duration ? P.fmt(t.duration) : '--:--')),
                     controls, skipRow)),
+            P.lyricsPanel(),
             this._mSectionTitle('Queue (' + q.length + ')', ui.button('Clear', () => { P.clear(); this._mv.now = false; this._mRepaint(); })),
             createElement('div', { className: 'pm-list' }, ...qRows));
         setTimeout(() => { P.sync(); }, 0);       // paint the progress / button states into the freshly built screen

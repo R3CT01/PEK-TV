@@ -1920,3 +1920,20 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 .pm-artist-art .pm-art-note { font-size: 1.1rem; }
 .pm-artist-photo { border-radius: 50%; }
 .pm-online { margin: 0.25rem 0 0.5rem; }
+
+/* ---- lyrics on the Now Playing screen (time-synced, like Spotify) ---- */
+.pm-lyrics { margin: 0.5rem 0 1rem; border: 1px solid var(--sx-border); border-radius: 16px; background: var(--sx-surface); overflow: hidden; }
+.pm-lyrics-head { padding: 0.7rem 1rem 0; font-size: 0.8rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--sx-text-muted); }
+.pm-lyrics-body { position: relative; height: min(46vh, 26rem); overflow-y: auto; padding: 0 1.1rem; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 86%, transparent 100%); }
+.pm-lyrics-body::-webkit-scrollbar { display: none; }
+.pm-lyric-pad { height: 40%; }
+.pm-lyric { font-size: 1.45rem; font-weight: 700; line-height: 1.3; padding: 0.4rem 0; color: var(--sx-text-muted); opacity: 0.45; cursor: pointer; overflow-wrap: anywhere;
+    transform-origin: left center; transition: color 0.25s, opacity 0.25s, transform 0.25s; }
+.pm-lyric-past { opacity: 0.6; }
+.pm-lyric-on { color: var(--sx-text); opacity: 1; transform: scale(1.04); }
+.pm-lyric-gap { letter-spacing: 0.3em; }
+.pm-lyrics-plain { white-space: pre-wrap; padding: 1rem 0 2rem; line-height: 1.6; font-size: 1.05rem; color: var(--sx-text); }
+.pm-lyrics-msg { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--sx-text-muted); text-align: center; }
+.pm-lyrics-body:has(.pm-lyrics-msg) { -webkit-mask-image: none; mask-image: none; }
+@media (max-width: 700px) { .pm-lyric { font-size: 1.25rem; } .pm-lyrics-body { height: 44vh; } }

@@ -334,6 +334,111 @@
         return t && t.duration ? t.duration : 0;
     }
 
+    // ---------------------------------------------------------------- lyrics (time-synced, like Spotify)
+    // The backend asks LRCLIB (/api/music/lyrics). Synced lyrics light up line by line while the song plays and
+    // scroll to keep the current line in the middle; tapping a line jumps there. Songs with only plain lyrics show
+    // the text without timings. Answers are kept in memory for this session (the backend keeps them on disk).
+    var lyrCache = {};                                   // track id -> { lines: [{t, s}] | null, plain: '' } or { none: true }
+    var lyr = { el: null, body: null, id: '', lines: null, active: -2, manualUntil: 0 };
+    var clock = { pos: 0, at: 0 };                       // smooths the position between reports (libmpv reports about once a second)
+
+    function parseLrc(text) {
+        var out = [];
+        String(text || '').split(/\r?\n/).forEach(function (raw) {
+            var re = /\[(\d+):(\d+(?:[.:]\d+)?)\]/g, m, times = [], last = 0;
+            while ((m = re.exec(raw))) { times.push(parseInt(m[1], 10) * 60 + parseFloat(m[2].replace(':', '.'))); last = re.lastIndex; }
+            if (!times.length) return;                    // [ar:..] [ti:..] and other tags
+            var words = raw.slice(last).replace(/<\d+:\d+(?:[.:]\d+)?>/g, '').trim();
+            times.forEach(function (t) { out.push({ t: t, s: words }); });
+        });
+        out.sort(function (a, b) { return a.t - b.t; });
+        return out;
+    }
+    function lyricsFor(t) {
+        if (!t) return Promise.resolve({ none: true });
+        if (lyrCache[t.id]) return Promise.resolve(lyrCache[t.id]);
+        return fetch('/api/music/lyrics?track=' + encodeURIComponent(t.id)).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+            var res = { none: true };
+            if (d) {
+                var lines = d.synced ? parseLrc(d.synced) : null;
+                if (lines && lines.length) res = { lines: lines, plain: d.plain || '' };
+                else if (d.plain) res = { lines: null, plain: d.plain };
+            }
+            lyrCache[t.id] = res;
+            return res;
+        }).catch(function () { return { none: true, failed: true }; });      // a network error is not remembered
+    }
+    function lyrMessage(text) {
+        if (!lyr.body) return;
+        lyr.body.innerHTML = '';
+        var d = document.createElement('div'); d.className = 'pm-lyrics-msg'; d.textContent = text;
+        lyr.body.appendChild(d);
+    }
+    function paintLyrics(res) {
+        if (!lyr.body) return;
+        lyr.body.innerHTML = '';
+        lyr.active = -2;
+        lyr.lines = res.lines || null;
+        if (res.none) { lyrMessage(res.failed ? 'Couldn\u2019t load lyrics.' : 'No lyrics found for this song.'); return; }
+        if (!res.lines) {                                  // plain text only
+            var pre = document.createElement('div'); pre.className = 'pm-lyrics-plain'; pre.textContent = res.plain;
+            lyr.body.appendChild(pre);
+            return;
+        }
+        var pad = document.createElement('div'); pad.className = 'pm-lyric-pad'; lyr.body.appendChild(pad);
+        res.lines.forEach(function (ln, i) {
+            var d = document.createElement('div');
+            d.className = 'pm-lyric' + (ln.s ? '' : ' pm-lyric-gap');
+            d.textContent = ln.s || '\u266A';
+            d.setAttribute('data-i', i);
+            d.addEventListener('click', function () { P.seek(Math.max(0, ln.t)); lyr.manualUntil = 0; lyricsTick(true); });
+            lyr.body.appendChild(d);
+        });
+        var pad2 = document.createElement('div'); pad2.className = 'pm-lyric-pad'; lyr.body.appendChild(pad2);
+        lyricsTick(true);
+    }
+    // The panel for the Now Playing screen. Build it into the screen; it loads and follows the current song by itself.
+    P.lyricsPanel = function () {
+        var t = current();
+        var el = document.createElement('div'); el.className = 'pm-lyrics';
+        var head = document.createElement('div'); head.className = 'pm-lyrics-head'; head.textContent = 'Lyrics';
+        var body = document.createElement('div'); body.className = 'pm-lyrics-body';
+        ['wheel', 'touchmove', 'pointerdown'].forEach(function (ev) {
+            body.addEventListener(ev, function () { lyr.manualUntil = Date.now() + 4000; }, { passive: true });   // let the reader look around
+        });
+        el.appendChild(head); el.appendChild(body);
+        lyr.el = el; lyr.body = body; lyr.id = t ? t.id : ''; lyr.lines = null; lyr.active = -2;
+        if (!t) { lyrMessage(''); return el; }
+        if (lyrCache[t.id]) paintLyrics(lyrCache[t.id]);
+        else {
+            lyrMessage('Looking for lyrics\u2026');
+            var id = t.id;
+            lyricsFor(t).then(function (res) { if (lyr.id === id && lyr.body === body) paintLyrics(res); });
+        }
+        return el;
+    };
+    function lyricsTick(force) {
+        if (!lyr.el || !lyr.lines || !lyr.el.isConnected) return;
+        var pos = engine.position(), now = Date.now();
+        if (pos !== clock.pos) { clock.pos = pos; clock.at = now; }
+        else if (!engine.paused()) pos += Math.min(1.5, (now - clock.at) / 1000);
+        pos += 0.25;                                       // show a line a moment early, the way Spotify does
+        var lines = lyr.lines, lo = 0, hi = lines.length - 1, a = -1;
+        while (lo <= hi) { var mid = (lo + hi) >> 1; if (lines[mid].t <= pos) { a = mid; lo = mid + 1; } else hi = mid - 1; }
+        if (a === lyr.active && !force) return;
+        var nodes = lyr.body.querySelectorAll('.pm-lyric');
+        for (var i = 0; i < nodes.length; i++) {
+            nodes[i].classList.toggle('pm-lyric-on', i === a);
+            nodes[i].classList.toggle('pm-lyric-past', i < a);
+        }
+        lyr.active = a;
+        if (a >= 0 && nodes[a] && (force || Date.now() > lyr.manualUntil)) {
+            var n = nodes[a], box = lyr.body;
+            box.scrollTo({ top: Math.max(0, n.offsetTop - box.clientHeight / 2 + n.clientHeight / 2), behavior: force ? 'auto' : 'smooth' });
+        }
+    }
+    setInterval(function () { if (lyr.el) lyricsTick(false); }, 200);
+
     // ---------------------------------------------------------------- buttons shared by the bar and the Now Playing screen
     var ACTIONS = {
         toggle: function () { P.toggle(); }, next: function () { P.next(false); }, prev: function () { P.prev(); },
