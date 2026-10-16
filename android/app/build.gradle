@@ -22,9 +22,9 @@ android {
         // 36 = Android 16, the level Google Play requires for new apps and
         // updates from Aug 31, 2026.
         targetSdk 36
-        versionCode 11   // bump this by 1 for every release you publish
-        // CI passes -PpekVersionName=<tag>; local builds use 2.0
-        versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '2.0')
+        versionCode 12   // bump this by 1 for every release you publish
+        // CI passes -PpekVersionName=<tag>; local builds use 2.1.0
+        versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '2.1.0')
 
         ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }
         externalNativeBuild {

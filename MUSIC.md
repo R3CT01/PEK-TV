@@ -22,9 +22,12 @@ Albums are grouped by album + album artist; an album with three or more differen
 becomes **Various Artists**. Folders containing a `.nomedia` file are skipped (same as videos).
 
 ## Playback support
-The song plays in the web view's audio player, so what it can decode decides what plays: MP3, AAC / M4A, FLAC, Ogg,
-Opus and WAV are fine. WMA, APE, WavPack, AIFF and ALAC files are listed but skipped with a message when played.
-Starting a movie or episode pauses the music.
+On Android the songs play in libmpv (`MpvAudioController.kt`, separate from the video player), so every format the
+library lists plays: MP3, AAC / M4A, FLAC, Ogg, Opus, WAV, and also WMA, APE, WavPack, AIFF and ALAC. Everywhere else
+the song plays in the browser's audio player, so what it can decode decides what plays: MP3, AAC / M4A, FLAC, Ogg, Opus
+and WAV are fine; WMA, APE, WavPack, AIFF and ALAC files are listed but skipped with a message when played.
+Starting a movie or episode pauses the music. Each song opens its own mpv instance, so there is a short gap between
+songs (gapless playback is not done yet).
 
 ## Backend
 `backend/music.cpp` + `music_tags.cpp` (library, scanning, `/api/music/*`; see `music.h` for the routes), refreshed
@@ -34,7 +37,7 @@ are read. Front end: `www/music_player.js` (engine + bar) and `www/app_music.js`
 Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_test song.mp3 song.flac ...`
 
 ## Known limits
-- Playing while the app is in the background / screen off, lock-screen controls and a notification need a native
-  service on Android; not done yet.
+- Playing while the app is in the background / screen off, lock-screen controls, a notification and audio focus need a
+  native service on Android; not done yet (the music pauses when the app is left).
 - Cover pictures are sent at their original size; very large covers on a big album grid cost memory on weak devices.
 - Scanning a large library on a network share the first time can take a while (results appear as they are read).

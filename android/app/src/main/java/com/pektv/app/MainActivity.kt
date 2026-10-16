@@ -42,6 +42,7 @@ class MainActivity : Activity() {
 
     private lateinit var webView: WebView
     private lateinit var mpv: MpvController
+    private lateinit var musicMpv: MpvAudioController
     private lateinit var bridge: PekBridge
 
     // File picker for <input type="file"> in the web UI (used by "Install plugin from .zip").
@@ -74,6 +75,7 @@ class MainActivity : Activity() {
         webView.setBackgroundColor(Color.TRANSPARENT)
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         mpv = MpvController(this, surfaceView, webView)
+        musicMpv = MpvAudioController(this, webView)
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -122,7 +124,7 @@ class MainActivity : Activity() {
                 }
             }
         }
-        bridge = PekBridge(this, mpv)
+        bridge = PekBridge(this, mpv, musicMpv)
         webView.addJavascriptInterface(bridge, "PekAndroid")
         val layout = FrameLayout(this)
         layout.addView(surfaceView, FrameLayout.LayoutParams(-1, -1))
@@ -427,6 +429,7 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         mpv.onActivityStop()
+        musicMpv.onActivityStop()
         super.onStop()
     }
 
@@ -437,6 +440,7 @@ class MainActivity : Activity() {
         bridge.setMulticast(false)
         bridge.releaseNavSound()
         mpv.destroy()
+        musicMpv.destroy()
         super.onDestroy()
     }
 
@@ -474,6 +478,7 @@ class MainActivity : Activity() {
         runOnUiThread {
             try { webView.clearCache(true); webView.clearHistory() } catch (e: Throwable) { Log.w("PEK", "clearCache failed", e) }
             try { mpv.destroy() } catch (e: Throwable) { /* already gone */ }
+            try { musicMpv.destroy() } catch (e: Throwable) { /* already gone */ }
             Thread {
                 try {
                     cacheDir.listFiles()?.forEach { it.deleteRecursively() }
@@ -491,7 +496,7 @@ class MainActivity : Activity() {
 }
 
 /** Exposed to the web UI as window.PekAndroid. */
-class PekBridge(private val activity: MainActivity, private val mpv: MpvController) {
+class PekBridge(private val activity: MainActivity, private val mpv: MpvController, private val music: MpvAudioController) {
 
     // Navigation sounds, played natively so they are not tied to the page's frame rate (see NavSound.kt).
     private val nav = NavSound()
@@ -581,6 +586,13 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun mpvSetSubtitle(id: Int) { activity.runOnUiThread { mpv.setSubtitle(id) } }
     @JavascriptInterface fun mpvAddSubtitle(url: String, label: String) { activity.runOnUiThread { mpv.addSubtitle(url, label) } }
     @JavascriptInterface fun mpvDestroy() { activity.runOnUiThread { mpv.destroy() } }
+    // libmpv backend for the Music tab (music_player.js MpvEngine; see MpvAudioController.kt).
+    @JavascriptInterface fun musicLoad(url: String, startSec: Double, autoplay: Boolean) { activity.runOnUiThread { music.load(url, startSec, autoplay) } }
+    @JavascriptInterface fun musicPlay() { activity.runOnUiThread { music.play() } }
+    @JavascriptInterface fun musicPause() { activity.runOnUiThread { music.pause() } }
+    @JavascriptInterface fun musicSeek(sec: Double) { activity.runOnUiThread { music.seek(sec) } }
+    @JavascriptInterface fun musicStop() { activity.runOnUiThread { music.stop() } }
+
     @JavascriptInterface fun mpvSetLite(on: Boolean) { activity.runOnUiThread { mpv.setLite(on) } }
     @JavascriptInterface fun mpvIsLite(): Boolean = mpv.isLite()
     // Video output (Settings > Video output): refresh-rate matching and HDR.
