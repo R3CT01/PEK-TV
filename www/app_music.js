@@ -71,6 +71,7 @@ class MainAppMusicMethods {
         if (c.loading) return;
         if (!force && c.albums && Date.now() - c.at < 30000 && !c.scanning) return;
         c.loading = true;
+        if (c.onlineAvail === undefined) this._mGet('/api/music/online').then(d => { c.onlineAvail = !!d.available; c.online = !!d.enabled; this._mSoftRepaint(); }).catch(() => { c.onlineAvail = false; });
         Promise.all([this._mGet('/api/music/albums'), this._mGet('/api/music/artists')]).then(([a, r]) => {
             const changed = !c.albums || c.albums.length !== a.albums.length || !c.artists || c.artists.length !== r.artists.length || c.scanning !== !!a.scanning;
             c.albums = a.albums; c.artists = r.artists; c.scanning = !!a.scanning; c.at = Date.now(); c.loading = false; c.error = false;
@@ -104,7 +105,10 @@ class MainAppMusicMethods {
         if (c.artistDetail[id]) return Promise.resolve(c.artistDetail[id]);
         return this._mGet('/api/music/artist?id=' + encodeURIComponent(id)).then(d => { c.artistDetail[id] = d; return d; });
     }
-    _mAlbumTracks(d) { return (d.list || []).map(t => Object.assign({}, t, { album: d.title, albumId: d.id, art: d.art })); }
+    _mAlbumTracks(d) {
+        // "Singles" is a loose pile of songs: each one gets its own cover instead of one picture for all
+        return (d.list || []).map(t => Object.assign({}, t, d.singles ? { album: d.title, albumId: '', art: d.art } : { album: d.title, albumId: d.id, art: d.art }));
+    }
     _mArtistIdByName(name) {
         const list = (this._mc && this._mc.artists) || [];
         const n = String(name || '').toLowerCase();
@@ -278,6 +282,10 @@ class MainAppMusicMethods {
         const v = this._mu(), c = this._mc;
         const tabs = [{ id: 'albums', label: 'Albums' }, { id: 'artists', label: 'Artists' }, { id: 'songs', label: 'Songs' }, { id: 'playlists', label: 'Playlists' }, { id: 'search', label: 'Search' }];
         const parts = [this._renderHeader('Music'), ui.tabs(tabs, v.tab, (id) => { v.tab = id; this._mRepaint(); })];
+        if (c.onlineAvail && (v.tab === 'albums' || v.tab === 'artists') && c.albums && c.albums.length) {
+            parts.push(createElement('div', { className: 'pm-online' },
+                ui.button(c.online ? 'Online art: On' : 'Online art: Off', () => this._mToggleOnline(), { variant: c.online ? 'primary' : undefined })));
+        }
         if (c.scanning) parts.push(createElement('p', { className: 'pm-note' }, 'Looking for music\u2026 ' + (c.albums ? this._mCount(c.albums.length, 'album', 'albums') + ' so far.' : '')));
         if (!c.albums) parts.push(createElement('p', { className: 'pm-note' }, 'Loading your music\u2026'));
         else if (v.tab === 'albums') parts.push(this._mAlbumsTab());
@@ -286,6 +294,19 @@ class MainAppMusicMethods {
         else if (v.tab === 'playlists') parts.push(this._mPlaylistsTab());
         else parts.push(this._mSearchTab());
         return createElement('div', { className: 'pm-home' }, ...parts);
+    }
+    // Online art: artist photos, album covers and covers for single songs, fetched when the files have none.
+    _mToggleOnline() {
+        const c = this._mc, on = !c.online;
+        fetch('/api/music/online?enabled=' + (on ? '1' : '0'), { method: 'POST' }).then(r => r.json()).then(d => {
+            c.online = !!d.enabled;
+            this.props.engine.ui.toast(c.online
+                ? 'Online art is on. Artist, album and song names are sent to Deezer and Apple to find pictures; they are kept until the next rescan.'
+                : 'Online art is off.');
+            c.albums = null; c.artists = null; c.detail = {}; c.artistDetail = {}; c.at = 0;     // reload so every picture link is refreshed
+            this._mRepaint();
+            this._mLoadLibrary(true);
+        }).catch(() => this.props.engine.ui.toast('Could not change Online art'));
     }
     _mNothing() {
         const { ui } = this.props.engine;
@@ -313,15 +334,21 @@ class MainAppMusicMethods {
         if (list.length > shown.length) parts.push(ui.button('Show more (' + (list.length - shown.length) + ' left)', () => { v.shownAlbums += 120; this._mRepaint(); }));
         return createElement('div', {}, ...parts);
     }
+    // One row of the artist list (also used by search): a round photo when Online art is on.
+    _mArtistRow(a) {
+        const row = this.props.engine.ui.listRow(a.name, this._mCount(a.albums, 'album', 'albums') + ' \u00B7 ' + this._mCount(a.tracks, 'song', 'songs'), () => this._mNav({ artist: a.id }));
+        if (a.photo) {
+            row.classList.add('pm-artist-row');
+            row.insertBefore(this._mArt('/api/music/art?artist=' + encodeURIComponent(a.id), 'pm-artist-art'), row.firstChild);
+        }
+        return row;
+    }
     _mArtistsTab() {
         const { createElement, ui } = this.props.engine;
         const v = this._mv, c = this._mc;
         if (!c.artists.length && !c.scanning) return this._mNothing();
         const shown = c.artists.slice(0, v.shownArtists);
-        const rows = shown.map(a => {
-            const row = ui.listRow(a.name, this._mCount(a.albums, 'album', 'albums') + ' \u00B7 ' + this._mCount(a.tracks, 'song', 'songs'), () => this._mNav({ artist: a.id }));
-            return row;
-        });
+        const rows = shown.map(a => this._mArtistRow(a));
         const parts = [createElement('div', { className: 'pm-sub' }, this._mCount(c.artists.length, 'artist', 'artists')), createElement('div', { className: 'pm-list' }, ...rows)];
         if (c.artists.length > shown.length) parts.push(ui.button('Show more (' + (c.artists.length - shown.length) + ' left)', () => { v.shownArtists += 200; this._mRepaint(); }));
         return createElement('div', {}, ...parts);
@@ -386,7 +413,7 @@ class MainAppMusicMethods {
         const out = [];
         if (d.artists.length) {
             out.push(this._mSectionTitle('Artists'));
-            out.push(createElement('div', { className: 'pm-list' }, ...d.artists.map(a => ui.listRow(a.name, this._mCount(a.albums, 'album', 'albums'), () => this._mNav({ artist: a.id })))));
+            out.push(createElement('div', { className: 'pm-list' }, ...d.artists.map(a => this._mArtistRow(a))));
         }
         if (d.albums.length) {
             out.push(this._mSectionTitle('Albums'));
@@ -448,6 +475,7 @@ class MainAppMusicMethods {
         const all = () => this._mArtistTracks(id);
         return createElement('div', {}, this._mBackBar(),
             createElement('div', { className: 'pm-hero pm-hero-artist' },
+                d.photo ? this._mArt('/api/music/art?artist=' + encodeURIComponent(d.id), 'pm-hero-art pm-artist-photo') : null,
                 createElement('div', { className: 'pm-hero-info' },
                     createElement('h2', {}, d.name),
                     createElement('div', { className: 'pm-sub' }, this._mCount(d.albums.length, 'album', 'albums') + ' \u00B7 ' + this._mCount(d.tracks, 'song', 'songs')),

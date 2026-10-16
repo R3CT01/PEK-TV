@@ -1,6 +1,15 @@
 package com.pektv.app
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -21,7 +30,10 @@ import org.json.JSONObject
  *   "ended" {}                              the song played to its end
  *   "error" {}                              mpv could not open or decode the file
  *
- * Playing while the app is in the background is not done here yet (see MUSIC.md): [onActivityStop] pauses.
+ * Background play: the music keeps playing with the screen off or the app in the background. [MusicService] (a
+ * foreground service with a media notification and lock-screen controls) keeps the process alive, this class asks for
+ * audio focus (pauses for calls and other players, ducks for navigation prompts) and pauses when headphones are
+ * unplugged. Notification / lock-screen buttons come back in through the remote* functions.
  */
 class MpvAudioController(
     private val activity: Activity,
@@ -43,6 +55,46 @@ class MpvAudioController(
     private var duration = 0.0
     private var lastTimeEmit = 0L
 
+    // ---- background play: audio focus, headphones unplugged, notification
+    private val appContext: Context = activity.applicationContext
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var focusRequest: AudioFocusRequest? = null
+    private var resumeOnFocus = false      // paused by a short interruption (call, voice prompt): continue afterwards
+    private var ducked = false
+    private var noisyRegistered = false
+    private var artUrl = ""
+
+    private val noisy = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            if (i?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) pause()
+        }
+    }
+
+    private val focusListener = AudioManager.OnAudioFocusChangeListener { change ->
+        ui.post {
+            when (change) {
+                AudioManager.AUDIOFOCUS_GAIN -> {
+                    if (ducked) { ducked = false; mpv?.setPropertyString("volume", "100") }
+                    if (resumeOnFocus) { resumeOnFocus = false; mpv?.setPropertyBoolean("pause", false) }
+                }
+                AudioManager.AUDIOFOCUS_LOSS -> {          // another player took over for good
+                    resumeOnFocus = false
+                    mpv?.setPropertyBoolean("pause", true)
+                    dropFocus()
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                    if (mpv != null && !paused) { resumeOnFocus = true; mpv?.setPropertyBoolean("pause", true) }
+                }
+                AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                    ducked = true
+                    mpv?.setPropertyString("volume", "30")
+                }
+            }
+        }
+    }
+
+    init { MusicService.host = this }
+
     // ---------------- calls from the page (already on the UI thread) ----------------
 
     fun load(url: String, startSec: Double, autoplay: Boolean) {
@@ -53,6 +105,13 @@ class MpvAudioController(
         seeking = false
         position = 0.0
         duration = 0.0
+        ducked = false
+        resumeOnFocus = false
+        if (autoplay) {
+            if (!takeFocus()) paused = true            // someone else (a call) has the sound: stay paused
+            (activity as? MainActivity)?.askNotificationPermissionOnce()
+            MusicService.start(appContext)
+        }
         try {
             val m = MPVLib.create(activity) ?: throw IllegalStateException("mpv create returned null")
             // Sound only. Each option is set on its own, so one this libmpv build does not know cannot stop playback.
@@ -83,6 +142,7 @@ class MpvAudioController(
             m.observeProperty("paused-for-cache", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             m.observeProperty("seeking", MPVLib.MpvFormat.MPV_FORMAT_FLAG)
             mpv = m
+            if (paused && autoplay) m.setPropertyBoolean("pause", true)
             emitState()
             m.command(arrayOf("loadfile", url))
         } catch (t: Throwable) {
@@ -92,8 +152,18 @@ class MpvAudioController(
         }
     }
 
-    fun play() { mpv?.setPropertyBoolean("pause", false) }
-    fun pause() { mpv?.setPropertyBoolean("pause", true) }
+    fun play() {
+        val m = mpv ?: return
+        if (!takeFocus()) return
+        resumeOnFocus = false
+        MusicService.start(appContext)
+        m.setPropertyBoolean("pause", false)
+    }
+    fun pause() {
+        resumeOnFocus = false
+        mpv?.setPropertyBoolean("pause", true)
+        dropFocus()
+    }
 
     fun seek(sec: Double) {
         val m = mpv ?: return
@@ -101,12 +171,26 @@ class MpvAudioController(
     }
 
     /** Stop and release the instance (the page keeps its queue). */
-    fun stop() { stopEngine() }
+    fun stop() { stopEngine(); endSession() }
 
-    fun destroy() { stopEngine() }
+    fun destroy() { stopEngine(); endSession() }
 
-    /** Called from the activity's onStop: no background playback yet, so the music waits. */
-    fun onActivityStop() { mpv?.setPropertyBoolean("pause", true) }
+    /** The page tells us what is playing, for the notification and lock screen. [url] is an absolute cover URL or "". */
+    fun setMeta(title: String, artist: String, album: String, url: String) {
+        MusicState.title = title; MusicState.artist = artist; MusicState.album = album
+        if (url != artUrl) { artUrl = url; MusicState.art = null; fetchArt(url) }
+        MusicService.refresh()
+    }
+
+    // ---- buttons on the notification / lock screen / headset (main thread). Native first, so pause and play work even
+    // if the page is busy; then the page, which owns the queue.
+    fun remotePlay() { play(); js("window.PekMusic&&PekMusic.resume()") }
+    fun remotePause() { pause(); js("window.PekMusic&&PekMusic.pause()") }
+    fun remoteNext() { js("window.PekMusic&&PekMusic.next(false)") }
+    fun remotePrev() { js("window.PekMusic&&PekMusic.prev()") }
+    fun remoteSeek(sec: Double) { js("window.PekMusic&&PekMusic.seek(" + sec + ")") }
+    fun remoteStop() { js("window.PekMusic&&PekMusic.stop()") }
+    private fun js(code: String) { webView.post { webView.evaluateJavascript(code, null) } }
 
     // ---------------- engine ----------------
 
@@ -118,6 +202,81 @@ class MpvAudioController(
             m.removeObserver(this)
             m.destroy()
         } catch (t: Throwable) { /* already gone */ }
+        publish()
+    }
+
+    // ---------------------------------------------------------------- audio focus, notification
+
+    private fun takeFocus(): Boolean {
+        if (focusRequest != null) return true
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build())
+            .setOnAudioFocusChangeListener(focusListener, ui)
+            .build()
+        val ok = try { audioManager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED } catch (t: Throwable) { true }
+        if (ok) {
+            focusRequest = req
+            if (!noisyRegistered) {
+                try { appContext.registerReceiver(noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)); noisyRegistered = true }
+                catch (t: Throwable) { Log.w("PEK", "noisy receiver not registered", t) }
+            }
+        }
+        return ok
+    }
+
+    private fun dropFocus() {
+        focusRequest?.let { try { audioManager.abandonAudioFocusRequest(it) } catch (t: Throwable) { /* ignore */ } }
+        focusRequest = null
+        ducked = false
+        if (noisyRegistered) {
+            try { appContext.unregisterReceiver(noisy) } catch (t: Throwable) { /* ignore */ }
+            noisyRegistered = false
+        }
+    }
+
+    /** The player was closed (or the app is going away): give the sound back and remove the notification. */
+    private fun endSession() {
+        dropFocus()
+        resumeOnFocus = false
+        MusicState.title = ""; MusicState.artist = ""; MusicState.album = ""; MusicState.art = null
+        artUrl = ""
+        MusicState.active = false; MusicState.playing = false; MusicState.buffering = false
+        MusicService.stop(appContext)
+    }
+
+    /** Copies what the engine is doing into [MusicState] and tells the service. */
+    private fun publish() {
+        val s = MusicState
+        val live = mpv != null
+        s.active = live && !paused
+        s.playing = live && loaded && !paused && !pausedForCache && !seeking
+        s.buffering = live && (!loaded || seeking || pausedForCache)
+        s.positionMs = ((if (position.isNaN()) 0.0 else position) * 1000).toLong()
+        s.durationMs = ((if (duration.isNaN()) 0.0 else duration) * 1000).toLong()
+        MusicService.refresh()
+    }
+
+    private fun fetchArt(url: String) {
+        if (url.isEmpty()) return
+        Thread {
+            try {
+                val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 4000; c.readTimeout = 6000
+                val bytes = c.inputStream.use { it.readBytes() }
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                var sample = 1
+                while (bounds.outWidth / (sample * 2) >= 512 && bounds.outHeight / (sample * 2) >= 512) sample *= 2
+                val bmp: Bitmap? = BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                    BitmapFactory.Options().apply { inSampleSize = sample })
+                ui.post {
+                    if (url == artUrl && bmp != null) { MusicState.art = bmp; MusicService.refresh() }
+                }
+            } catch (t: Throwable) { Log.w("PEK", "music cover not loaded", t) }
+        }.start()
     }
 
     // ---------------- mpv events (mpv's thread) -> UI thread ----------------
@@ -136,7 +295,7 @@ class MpvAudioController(
                     val now = SystemClock.uptimeMillis()
                     if (now - lastTimeEmit >= 500) { lastTimeEmit = now; emitTime() }
                 }
-                "duration" -> { duration = value; emitTime() }
+                "duration" -> { duration = value; emitTime(); publish() }
             }
         }
     }
@@ -146,9 +305,9 @@ class MpvAudioController(
         ui.post {
             if (g != generation) return@post
             when (property) {
-                "pause" -> { paused = value; emitState() }
-                "paused-for-cache" -> { pausedForCache = value; emitState() }
-                "seeking" -> { seeking = value; emitState() }
+                "pause" -> { paused = value; emitState(); publish() }
+                "paused-for-cache" -> { pausedForCache = value; emitState(); publish() }
+                "seeking" -> { seeking = value; emitState(); publish() }
             }
         }
     }
@@ -158,7 +317,7 @@ class MpvAudioController(
         ui.post {
             if (g != generation) return@post
             when (eventId) {
-                MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> { loaded = true; emitState() }
+                MPVLib.MpvEvent.MPV_EVENT_FILE_LOADED -> { loaded = true; emitState(); publish() }
                 MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                     val finished = loaded
                     stopEngine()                    // the page loads the next song (or not) with a fresh instance

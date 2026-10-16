@@ -243,6 +243,7 @@
         if (engine.paused()) engine.play(); else engine.pause();
     };
     P.pause = function () { engine.pause(); };
+    P.resume = function () { if (queue.length && !P.isPlaying()) P.toggle(); };   // play (never pauses); used by the Android notification
     P.stop = function () {                       // the X on the bar: stop and put the bar away (the queue is kept for next time)
         engine.unload();
         loadedId = '';
@@ -431,7 +432,14 @@
     P.show = function () { P.hidden = false; updateBar(); };
 
     // ---------------------------------------------------------------- system media controls (lock screen, headset, TV remote)
+    // Android app: the notification and lock screen are native, so tell the app what is playing.
+    function setNativeMeta(t) {
+        var n = window.PekAndroid;
+        if (!n || typeof n.musicMeta !== 'function') return;
+        try { var a = artUrl(t); n.musicMeta(t.title || '', t.artist || '', t.album || '', a ? location.origin + a : ''); } catch (e) { /* ignore */ }
+    }
     function setMediaSession(t) {
+        setNativeMeta(t);
         if (!('mediaSession' in navigator) || typeof MediaMetadata === 'undefined') return;
         try {
             var art = artUrl(t);

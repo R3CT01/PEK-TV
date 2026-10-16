@@ -16,7 +16,7 @@ scan.
 Tags are read straight from the files (no ffprobe, so it works on Android and on network shares): MP3 (ID3v1 / v2.2 /
 v2.3 / v2.4), FLAC, Ogg Vorbis / Opus, M4A / M4B. Embedded covers are used; otherwise `cover.jpg`, `folder.jpg`,
 `front.jpg` or `albumart.jpg` next to the songs.
-Where tags are missing the folder layout fills in: `Artist/Album/01 - Title.mp3`, `Artist - Album/01 Title.mp3`, a
+Where tags are missing the folder layout fills in (slug-style names such as `21-savage` or `a_lot` are shown as `21 savage`, `a lot`; names with capitals or spaces like `Jay-Z` are left alone): `Artist/Album/01 - Title.mp3`, `Artist - Album/01 Title.mp3`, a
 `CD1` / `Disc 2` / `Bonus Tracks` / `Deluxe` / `Extras` sub-folder inside an album, or a loose `Artist - Title.mp3`.
 Folders are searched at any depth. A wrapper folder at the top (`Music`, `Songs`, `Audio`, `Download`) is ignored when
 working out the artist, and songs lying directly in an artist folder that also has album folders become that artist's
@@ -24,12 +24,21 @@ working out the artist, and songs lying directly in an artist folder that also h
 Albums are grouped by album + album artist; an album with three or more different artists and no album-artist tag
 becomes **Various Artists**. Folders containing a `.nomedia` file are skipped (same as videos).
 
+## Covers and photos
+Pictures come from the song's own tag, then `cover.jpg` / `folder.jpg` ... beside it. With **Online art** switched on
+(button above the Albums and Artists lists; off by default) the gaps are filled from the internet: artist photos
+(Artists list and artist page), album covers, and a cover for each single song (loose songs, "Singles"). Deezer's public
+search is asked first, Apple's iTunes search is the fallback; no key is needed. Only exact artist names are accepted for
+photos. Artist, album and song names are sent to those services. Every answer, also "nothing found", is kept in
+`music_art/` next to `music_cache.tsv` until the next manual **Rescan Library** (a startup scan keeps it). Code:
+`backend/music_online.h`.
+
 ## Playback support
 On Android the songs play in libmpv (`MpvAudioController.kt`, separate from the video player), so every format the
 library lists plays: MP3, AAC / M4A, FLAC, Ogg, Opus, WAV, and also WMA, APE, WavPack, AIFF and ALAC. Everywhere else
 the song plays in the browser's audio player, so what it can decode decides what plays: MP3, AAC / M4A, FLAC, Ogg, Opus
 and WAV are fine; WMA, APE, WavPack, AIFF and ALAC files are listed but skipped with a message when played.
-Starting a movie or episode pauses the music. Each song opens its own mpv instance, so there is a short gap between
+Music keeps playing with the screen off or the app in the background. Starting a movie or episode pauses the music. Each song opens its own mpv instance, so there is a short gap between
 songs (gapless playback is not done yet).
 
 ## Backend
@@ -40,7 +49,8 @@ are read. Front end: `www/music_player.js` (engine + bar) and `www/app_music.js`
 Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_test song.mp3 song.flac ...`
 
 ## Known limits
-- Playing while the app is in the background / screen off, lock-screen controls, a notification and audio focus need a
-  native service on Android; not done yet (the music pauses when the app is left).
+- Background play on Android uses a foreground service (`MusicService.kt`): a media notification with lock-screen
+  controls, audio focus (pauses for calls, ducks for prompts) and pause when headphones are unplugged. The service
+  stops after 10 minutes without playing.
 - Cover pictures are sent at their original size; very large covers on a big album grid cost memory on weak devices.
 - Scanning a large library on a network share the first time can take a while (results appear as they are read).

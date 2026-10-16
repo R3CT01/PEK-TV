@@ -1913,3 +1913,10 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
     .pm-home .sx-tabs { gap: 0.1rem; }
     .pm-home .sx-tab { padding: 0.6rem 0.5rem; font-size: 0.9rem; }
 }
+
+/* Music: artist photos (Online art) */
+.pm-artist-row { display: flex; align-items: center; gap: 0.75rem; }
+.pm-artist-art { width: 2.75rem; height: 2.75rem; border-radius: 50%; }
+.pm-artist-art .pm-art-note { font-size: 1.1rem; }
+.pm-artist-photo { border-radius: 50%; }
+.pm-online { margin: 0.25rem 0 0.5rem; }

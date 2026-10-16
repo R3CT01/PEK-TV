@@ -74,6 +74,9 @@ class MainActivity : Activity() {
         webView = WebView(this)
         webView.setBackgroundColor(Color.TRANSPARENT)
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        // Background music: keep the page's renderer at full priority while the app is hidden, so the queue keeps
+        // advancing with the screen off.
+        webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         mpv = MpvController(this, surfaceView, webView)
         musicMpv = MpvAudioController(this, webView)
         webView.settings.apply {
@@ -281,6 +284,16 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---- notifications (Android 13+): the music notification / lock-screen controls need it. Asked once, on first play.
+    fun askNotificationPermissionOnce() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        val prefs = getSharedPreferences("pek", MODE_PRIVATE)
+        if (prefs.getBoolean("asked_notif", false)) return
+        prefs.edit().putBoolean("asked_notif", true).apply()
+        requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4713)
+    }
+
     // ---- "All files access" (lets the in-app file browser see .zip files) ----
     // READ_MEDIA_VIDEO / READ_EXTERNAL_STORAGE only expose media files on Android 11+, so plugin and skin .zip files
     // in Downloads etc. are invisible to PEK's own browser. Android 10 and older already show everything.
@@ -429,7 +442,6 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         mpv.onActivityStop()
-        musicMpv.onActivityStop()
         super.onStop()
     }
 
@@ -592,6 +604,8 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun musicPause() { activity.runOnUiThread { music.pause() } }
     @JavascriptInterface fun musicSeek(sec: Double) { activity.runOnUiThread { music.seek(sec) } }
     @JavascriptInterface fun musicStop() { activity.runOnUiThread { music.stop() } }
+    // What is playing, for the notification and lock screen (cover is an absolute URL or "").
+    @JavascriptInterface fun musicMeta(title: String, artist: String, album: String, artUrl: String) { activity.runOnUiThread { music.setMeta(title, artist, album, artUrl) } }
 
     @JavascriptInterface fun mpvSetLite(on: Boolean) { activity.runOnUiThread { mpv.setLite(on) } }
     @JavascriptInterface fun mpvIsLite(): Boolean = mpv.isLite()
