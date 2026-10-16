@@ -472,6 +472,26 @@ class MainActivity : Activity() {
         }
     }
 
+    // Full-screen music player: landscape (either way, follows the sensor) and no status / navigation bars. Off puts both back.
+    fun setMusicFullscreen(on: Boolean) {
+        requestedOrientation = if (on) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                               else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let {
+                if (on) {
+                    it.hide(WindowInsets.Type.systemBars())
+                    it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else it.show(WindowInsets.Type.systemBars())
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = if (on)
+                (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+            else View.SYSTEM_UI_FLAG_VISIBLE
+        }
+    }
+
     private fun showNativeExitDialog() {
         AlertDialog.Builder(this)
             .setTitle("Are you sure you want to exit?")
@@ -604,6 +624,8 @@ class PekBridge(private val activity: MainActivity, private val mpv: MpvControll
     @JavascriptInterface fun musicPause() { activity.runOnUiThread { music.pause() } }
     @JavascriptInterface fun musicSeek(sec: Double) { activity.runOnUiThread { music.seek(sec) } }
     @JavascriptInterface fun musicStop() { activity.runOnUiThread { music.stop() } }
+    // Full-screen player: landscape + hidden system bars while it is open (music_fullscreen.js).
+    @JavascriptInterface fun musicFullscreen(on: Boolean) { activity.runOnUiThread { activity.setMusicFullscreen(on) } }
     // What is playing, for the notification and lock screen (cover is an absolute URL or "").
     @JavascriptInterface fun musicMeta(title: String, artist: String, album: String, artUrl: String) { activity.runOnUiThread { music.setMeta(title, artist, album, artUrl) } }
 

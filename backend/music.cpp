@@ -8,7 +8,9 @@
 #include <cstdio>
 #include <cstring>
 #include <deque>
+#include <ctime>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -171,6 +173,50 @@ private:
     std::string data_;
 };
 
+
+// ---- multi-artist strings: "Main, Guest A, Guest B", "Main feat. Guest", "Main; Guest"
+// The first name owns the song; the rest are featured / supporting. Names that contain a comma themselves
+// ("Tyler, The Creator", "Earth, Wind & Fire" is left whole because we only split on ", ") are protected.
+static std::vector<std::string> splitArtists(const std::string& in) {
+    std::vector<std::string> out;
+    std::string s = in;
+    // normalise the "featuring" markers to a ';'
+    const char* marks[] = {" feat. ", " feat ", " ft. ", " ft ", " featuring ", " Feat. ", " Ft. ", " Featuring ", " FEAT. ", " (feat. ", " (ft. "};
+    for (const char* m : marks) {
+        size_t pos = 0; std::string mk = m;
+        while ((pos = s.find(mk, pos)) != std::string::npos) { s.replace(pos, mk.size(), ";"); pos += 1; }
+    }
+    // ", " splits unless what follows is "The ..." (Tyler, The Creator) or a suffix (Jr., Sr., Inc.)
+    std::string cur;
+    auto flush = [&]() {
+        std::string t = cur;
+        size_t a = t.find_first_not_of(" \t\r\n"), b = t.find_last_not_of(" \t\r\n)");
+        if (a != std::string::npos) out.push_back(t.substr(a, b - a + 1));
+        cur.clear();
+    };
+    for (size_t i = 0; i < s.size(); ++i) {
+        char c = s[i];
+        if (c == ';') { flush(); continue; }
+        if (c == ',' && i + 1 < s.size() && s[i + 1] == ' ') {
+            std::string rest = lower(s.substr(i + 2, 8));
+            bool keep = rest.compare(0, 4, "the ") == 0 || rest.compare(0, 3, "jr.") == 0 || rest.compare(0, 3, "sr.") == 0 ||
+                        rest.compare(0, 3, "inc") == 0 || (rest.compare(0, 2, "jr") == 0 && (rest.size() == 2 || !std::isalpha((unsigned char)rest[2])));
+            if (!keep) { flush(); ++i; continue; }
+        }
+        cur += c;
+    }
+    flush();
+    // drop duplicates (case-insensitive), keep order
+    std::vector<std::string> uniq;
+    for (auto& n : out) {
+        bool dup = false;
+        for (auto& u : uniq) if (lower(u) == lower(n)) { dup = true; break; }
+        if (!dup && !n.empty()) uniq.push_back(n);
+    }
+    if (uniq.empty() && !trimmed(in).empty()) uniq.push_back(trimmed(in));
+    return uniq;
+}
+
 // ================================================================ data model
 struct Track {
     std::string id, path, filename;
@@ -187,10 +233,13 @@ struct Track {
     std::string folderArt;                  // cover.jpg / folder.jpg ... next to the file
     // resolved for display
     std::string rTitle, rArtist, rAlbum;
+    std::string rPrimary;                   // the first (owning) artist of rArtist
+    std::vector<std::string> rFeatured;     // everyone after the first artist
 };
 
 struct Album {
     std::string id, title, artist;
+    std::vector<std::string> featured;       // other artists on the album's songs
     int year = 0;
     double duration = 0;
     int64_t added = 0;
@@ -342,6 +391,7 @@ public:
         return snap_;
     }
     bool scanning() const { return scanning_.load(); }
+    std::function<void()> onScanDone;                // called (on the scan thread) when a scan has finished
 
     // Starts a background scan (several requests in a row are folded into one extra pass).
     void scanAsync() {
@@ -353,6 +403,7 @@ public:
                 try { runScan(); } catch (const std::exception& e) { std::cout << "[Music] Scan failed: " << e.what() << std::endl; }
             } while (pending_.load());
             scanning_.store(false);
+            if (onScanDone) { try { onScanDone(); } catch (...) { } }
         }).detach();
     }
     void scanOnceIfNeeded() { if (!everStarted_.load()) scanAsync(); }
@@ -589,6 +640,10 @@ private:
             t.rTitle = !t.title.empty() ? t.title : prettyName(!t.fbTitle.empty() ? t.fbTitle : stemOf(t.filename));
             t.rArtist = !t.artist.empty() ? t.artist : (!t.albumArtist.empty() ? t.albumArtist : (!t.fbArtist.empty() ? prettyName(t.fbArtist) : "Unknown Artist"));
             t.rAlbum = !t.album.empty() ? t.album : (!t.fbAlbum.empty() ? prettyName(t.fbAlbum) : "Unknown Album");
+            // The song belongs to the FIRST artist; everyone after is featured / supporting.
+            auto names = splitArtists(t.rArtist);
+            t.rPrimary = names.empty() ? t.rArtist : names[0];
+            t.rFeatured.assign(names.size() > 1 ? names.begin() + 1 : names.end(), names.end());
             if (!t.track) t.track = t.fbTrack;
             if (!t.disc) t.disc = t.fbDisc;
         }
@@ -606,7 +661,7 @@ private:
         for (const auto& t : s->tracks) {
             if (!t.albumArtist.empty()) continue;
             Group& g = groups[lower(t.rAlbum) + "|" + t.albumDir];
-            g.counts[t.rArtist]++; g.total++;
+            g.counts[t.rPrimary]++; g.total++;
         }
         std::map<std::string, std::string> groupArtist;
         for (auto& kv : groups) {
@@ -620,7 +675,9 @@ private:
         std::vector<std::string> albumTitleKey;
         for (size_t i = 0; i < s->tracks.size(); ++i) {
             const Track& t = s->tracks[i];
-            std::string aa = !t.albumArtist.empty() ? t.albumArtist : groupArtist[lower(t.rAlbum) + "|" + t.albumDir];
+            std::string aa;
+            if (!t.albumArtist.empty()) { auto an = splitArtists(t.albumArtist); aa = an.empty() ? t.albumArtist : an[0]; }
+            else aa = groupArtist[lower(t.rAlbum) + "|" + t.albumDir];
             std::string key = lower(t.rAlbum) + "|" + lower(aa);
             auto f = albumIndexByKey.find(key);
             int ai;
@@ -629,6 +686,16 @@ private:
                 ai = (int)albums.size(); albums.push_back(a); albumIndexByKey[key] = ai;
             } else ai = f->second;
             Album& a = albums[ai];
+            {
+                auto addFeat = [&](const std::string& n) {
+                    if (lower(n) == lower(a.artist)) return;
+                    for (auto& f2 : a.featured) if (lower(f2) == lower(n)) return;
+                    a.featured.push_back(n);
+                };
+                if (!t.albumArtist.empty()) { auto an = splitArtists(t.albumArtist); for (size_t k = 1; k < an.size(); ++k) addFeat(an[k]); }
+                for (auto& n : t.rFeatured) addFeat(n);
+                if (lower(t.rPrimary) != lower(a.artist) && a.artist != "Various Artists") addFeat(t.rPrimary);
+            }
             a.tracks.push_back((int)i);
             a.duration += t.duration;
             a.added = std::max(a.added, t.mtime);
@@ -727,6 +794,115 @@ struct ArtCache {
     }
 };
 
+// ---------------------------------------------------------------- offline library
+// Walks the whole library once and keeps every online extra on disk (artist photos, album and single covers, lyrics),
+// so they show instantly and keep working with no internet. Runs by itself after each scan while Online art & lyrics
+// is on, or on demand (/api/music/offline). Items already kept are skipped, so repeating it is cheap and a stopped /
+// interrupted run simply continues. Songs, albums and covers that live in the files themselves are already offline.
+bool isSinglesTitle(const std::string& title);
+struct OfflineJob {
+    struct Item { int kind; std::string a, b, c; double dur; };      // kind: 0 lyrics, 1 artist photo, 2 album cover, 3 single cover
+    std::atomic<bool> running{false}, stop{false}, again{false};
+    std::atomic<int> total{0}, done{0}, lyTotal{0}, lyDone{0}, lyFound{0}, cvTotal{0}, cvDone{0}, cvFound{0}, failed{0}, songs{0};
+    std::atomic<int64_t> finishedAt{0};
+    std::mutex m;
+    std::string phase = "idle";                                      // idle | scanning | working | done | stopped | offline | off
+
+    void setPhase(const std::string& p) { std::lock_guard<std::mutex> l(m); phase = p; }
+    std::string getPhase() { std::lock_guard<std::mutex> l(m); return phase; }
+
+    void start(const std::shared_ptr<MusicLibrary>& lib) {
+        if (!musiconline::kAvailable) return;
+        if (running.exchange(true)) { again.store(true); return; }
+        stop.store(false); again.store(false);
+        std::thread([this, lib]() {
+            try { run(lib); } catch (const std::exception& e) { std::cout << "[Music] Offline sync failed: " << e.what() << std::endl; setPhase("stopped"); }
+            running.store(false);
+            if (again.exchange(false) && !stop.load() && musiconline::store().on.load()) start(lib);
+        }).detach();
+    }
+
+    void run(const std::shared_ptr<MusicLibrary>& lib) {
+        auto& st = musiconline::store();
+        if (!st.on.load()) { setPhase("off"); return; }
+        total = done = lyTotal = lyDone = lyFound = cvTotal = cvDone = cvFound = failed = 0;
+        finishedAt = 0;
+        setPhase("scanning");
+        while (lib->scanning() && !stop.load()) std::this_thread::sleep_for(std::chrono::milliseconds(400));
+        if (stop.load()) { setPhase("stopped"); return; }
+        auto s = lib->snapshot();
+        songs = (int)s->tracks.size();
+
+        std::vector<Item> items;                                     // pictures first (they are what you see), then lyrics
+        std::set<std::string> seen;
+        for (const auto& a : s->artists) if (seen.insert("r|" + lower(a.name)).second) items.push_back({1, a.name, "", "", 0});
+        for (const auto& al : s->albums) {
+            if (isSinglesTitle(al.title)) continue;
+            bool local = al.art;
+            if (!local) for (int ti : al.tracks) if (s->tracks[ti].hasArt || !s->tracks[ti].folderArt.empty()) { local = true; break; }
+            if (!local && seen.insert("a|" + lower(al.artist) + "|" + lower(al.title)).second) items.push_back({2, al.artist, al.title, "", 0});
+        }
+        for (const auto& t : s->tracks) {
+            auto f = s->albumOfTrack.find(t.id);
+            bool singles = f != s->albumOfTrack.end() && isSinglesTitle(s->albums[f->second].title);
+            if (singles && !t.hasArt && t.folderArt.empty() && seen.insert("s|" + lower(t.rPrimary) + "|" + lower(t.rTitle)).second)
+                items.push_back({3, t.rPrimary, t.rTitle, "", 0});
+        }
+        for (const auto& it : items) ++cvTotal;
+        size_t nPics = items.size();
+        for (const auto& t : s->tracks)
+            if (seen.insert("l|" + lower(t.rPrimary) + "|" + lower(t.rTitle) + "|" + std::to_string((int)(t.duration / 4))).second)
+                items.push_back({0, t.rPrimary, t.rTitle, t.rAlbum, t.duration});
+        lyTotal = (int)(items.size() - nPics);
+        total = (int)items.size();
+        setPhase("working");
+
+        std::atomic<size_t> next{0};
+        std::atomic<int> streak{0};                                  // lookups in a row that could not reach the service
+        auto worker = [&]() {
+            for (;;) {
+                if (stop.load() || streak.load() >= 12) return;
+                size_t i = next.fetch_add(1);
+                if (i >= items.size()) return;
+                const Item& it = items[i];
+                int r;
+                std::string x, y;
+                if (it.kind == 0) r = musiconline::lyricsEx(it.a, it.b, it.c, it.dur, x, y);
+                else r = musiconline::lookupEx(it.kind == 1 ? "artist" : it.kind == 2 ? "album" : "song", it.a, it.b, x, y);
+                if (r < 0) { ++failed; ++streak; } else streak = 0;
+                if (it.kind == 0) { ++lyDone; if (r == 1) ++lyFound; } else { ++cvDone; if (r == 1) ++cvFound; }
+                ++done;
+            }
+        };
+        std::vector<std::thread> pool;
+        for (int i = 0; i < 3; ++i) pool.emplace_back(worker);
+        for (auto& th : pool) th.join();
+
+        if (stop.load()) setPhase("stopped");
+        else if (streak.load() >= 12) setPhase("offline");
+        else { setPhase("done"); finishedAt = (int64_t)std::time(nullptr); }
+        std::cout << "[Music] Offline sync: " << done.load() << "/" << total.load() << " (lyrics found " << lyFound.load()
+                  << ", covers found " << cvFound.load() << ", could not reach " << failed.load() << ")" << std::endl;
+    }
+
+    std::string json(const std::shared_ptr<MusicLibrary>& lib) {
+        std::string ph = getPhase();
+        bool scanningNow = lib->scanning();
+        int t = total.load(), d = done.load();
+        int pct = t > 0 ? (int)((long long)d * 100 / t) : (ph == "done" ? 100 : 0);
+        if (ph == "done") pct = 100;
+        auto n = [](int v) { return std::to_string(v); };
+        auto snap = lib->snapshot();
+        return std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (musiconline::store().on.load() ? "true" : "false") +
+               ",\"running\":" + (running.load() ? "true" : "false") + ",\"scanning\":" + (scanningNow ? "true" : "false") + ",\"phase\":\"" + ph + "\"" +
+               ",\"percent\":" + n(pct) + ",\"total\":" + n(t) + ",\"done\":" + n(d) + ",\"failed\":" + n(failed.load()) +
+               ",\"music\":{\"songs\":" + n((int)snap->tracks.size()) + ",\"albums\":" + n((int)snap->albums.size()) + ",\"ready\":" + (scanningNow ? "false" : "true") + "}" +
+               ",\"covers\":{\"done\":" + n(cvDone.load()) + ",\"total\":" + n(cvTotal.load()) + ",\"found\":" + n(cvFound.load()) + "}" +
+               ",\"lyrics\":{\"done\":" + n(lyDone.load()) + ",\"total\":" + n(lyTotal.load()) + ",\"found\":" + n(lyFound.load()) + "}" +
+               ",\"finishedAt\":" + std::to_string(finishedAt.load()) + "}";
+    }
+};
+
 // ---------------------------------------------------------------- JSON
 std::string num(double v) {
     char b[32];
@@ -741,10 +917,15 @@ bool isSinglesTitle(const std::string& title) {
 }
 bool onlineOn() { return musiconline::store().on.load(); }
 
+std::string strArr(const std::vector<std::string>& v) {
+    std::string j = "[";
+    for (size_t i = 0; i < v.size(); ++i) { if (i) j += ","; j += "\"" + jsonEscape(v[i]) + "\""; }
+    return j + "]";
+}
 std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     const Track& t = s.tracks[ti];
     std::string j = "{\"id\":\"" + t.id + "\",\"title\":\"" + jsonEscape(t.rTitle) + "\",\"artist\":\"" + jsonEscape(t.rArtist) +
-                    "\",\"track\":" + std::to_string(t.track) + ",\"disc\":" + std::to_string(t.disc) + ",\"duration\":" + num(t.duration);
+                    "\",\"primary\":\"" + jsonEscape(t.rPrimary) + "\",\"featured\":" + strArr(t.rFeatured) + ",\"track\":" + std::to_string(t.track) + ",\"disc\":" + std::to_string(t.disc) + ",\"duration\":" + num(t.duration);
     if (withAlbum) {
         j += ",\"album\":\"" + jsonEscape(t.rAlbum) + "\"";
         auto f = s.albumOfTrack.find(t.id);
@@ -757,7 +938,7 @@ std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     return j + ",\"ext\":\"" + jsonEscape(fileExt(t.filename)) + "\"}";
 }
 std::string albumJson(const Album& a) {
-    return "{\"id\":\"" + a.id + "\",\"title\":\"" + jsonEscape(a.title) + "\",\"artist\":\"" + jsonEscape(a.artist) + "\",\"year\":" + std::to_string(a.year) +
+    return "{\"id\":\"" + a.id + "\",\"title\":\"" + jsonEscape(a.title) + "\",\"artist\":\"" + jsonEscape(a.artist) + "\",\"featured\":" + strArr(a.featured) + ",\"year\":" + std::to_string(a.year) +
            ",\"tracks\":" + std::to_string(a.tracks.size()) + ",\"duration\":" + num(a.duration) + ",\"added\":" + std::to_string(a.added) +
            ",\"art\":" + ((a.art || onlineOn()) ? "true" : "false") + ",\"singles\":" + (isSinglesTitle(a.title) ? "true" : "false") + "}";
 }
@@ -779,6 +960,9 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
     auto lib = std::make_shared<MusicLibrary>((fs::path(dataDir) / "music_cache.tsv").string(), scanner);
     auto art = std::make_shared<ArtCache>();
     musiconline::store().init(dataDir);
+    auto offline = std::make_shared<OfflineJob>();
+    // After every scan, keep the pictures and lyrics for the (new) songs too, while Online art & lyrics is on.
+    lib->onScanDone = [lib, offline]() { if (musiconline::store().on.load()) offline->start(lib); };
 
     // Every normal scan (startup, rescan, a new source) refreshes the music too, on its own thread.
     scanner->setAfterScan([lib]() { lib->scanAsync(); });
@@ -918,9 +1102,9 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
                     const Track& t = s->tracks[f->second];
                     ok = lib->cover(t, true, bytes, mime);
                     if (!ok) {
-                        const std::string& albumArtist = !t.albumArtist.empty() ? t.albumArtist : t.rArtist;
+                        const std::string& albumArtist = !t.albumArtist.empty() ? splitArtists(t.albumArtist)[0] : t.rPrimary;
                         if (!isSinglesTitle(t.rAlbum)) ok = musiconline::lookup("album", albumArtist, t.rAlbum, bytes, mime);
-                        if (!ok) ok = musiconline::lookup("song", t.rArtist, t.rTitle, bytes, mime);     // a single: its own cover
+                        if (!ok) ok = musiconline::lookup("song", t.rPrimary, t.rTitle, bytes, mime);     // a single: its own cover
                     }
                 }
             }
@@ -939,18 +1123,35 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         if (f == s->trackById.end()) { notFound(res, "No such song"); return; }
         const Track& t = s->tracks[f->second];
         std::string synced, plain;
-        if (!musiconline::lyrics(t.rArtist, t.rTitle, t.rAlbum, t.duration, synced, plain)) { notFound(res, "No lyrics"); return; }
+        if (!musiconline::lyrics(t.rPrimary, t.rTitle, t.rAlbum, t.duration, synced, plain)) { notFound(res, "No lyrics"); return; }
         res.set_header("Cache-Control", "private, max-age=3600");
         jsonOut(res, "{\"synced\":\"" + jsonEscape(synced) + "\",\"plain\":\"" + jsonEscape(plain) + "\"}");
+    });
+
+
+    // Offline library: progress of saving covers + lyrics on disk. GET = status; POST ?action=start | stop.
+    svr.Get("/api/music/offline", [lib, offline](const httplib::Request&, httplib::Response& res) {
+        lib->scanOnceIfNeeded();
+        jsonOut(res, offline->json(lib));
+    });
+    svr.Post("/api/music/offline", [lib, offline](const httplib::Request& req, httplib::Response& res) {
+        std::string a = req.get_param_value("action");
+        if (a == "stop") offline->stop.store(true);
+        else if (a == "start") {
+            if (!musiconline::store().on.load()) offline->setPhase("off");
+            else if (!offline->running.load()) offline->start(lib);
+        }
+        jsonOut(res, offline->json(lib));
     });
 
     // Online art (artist photos, album and single covers) on / off. On by default (the user can switch it off): names are sent to Deezer / Apple.
     svr.Get("/api/music/online", [](const httplib::Request&, httplib::Response& res) {
         jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");
     });
-    svr.Post("/api/music/online", [](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/api/music/online", [lib, offline](const httplib::Request& req, httplib::Response& res) {
         std::string v = req.get_param_value("enabled");
         musiconline::store().setEnabled(v == "1" || v == "true");
+        if (musiconline::store().on.load()) offline->start(lib);
         jsonOut(res, std::string("{\"available\":") + (musiconline::kAvailable ? "true" : "false") + ",\"enabled\":" + (onlineOn() ? "true" : "false") + "}");
     });
 
