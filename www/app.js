@@ -555,7 +555,7 @@ class MainApp extends PekComponent {
                         onClick: () => this.selectTab(item.id)
                     }, item.label)))
             ] : [null, null];
-            bottomBar = createElement('div', { className: 'pek-bottombar' },
+            bottomBar = createElement('div', { className: 'pek-bottombar' + (this.state.moreOpen ? ' bb-open' : '') },
                 ...navItems.filter(i => PHONE_PRIMARY_TABS.includes(i.id)).map(tabBtn),
                 createElement('button', {
                     className: `bb-item focusable ${moreActive || this.state.moreOpen ? 'active' : ''}`,

@@ -319,9 +319,9 @@ class MainAppMusicMethods {
     _mOfflineCard() {
         const { createElement } = this.props.engine;
         const c = this._mc;
-        const btn = createElement('button', { className: 'focusable sx-btn pm-off-btn', type: 'button', 'data-off': 'btn' }, 'Save for offline');
+        const btn = createElement('button', { className: 'focusable sx-btn nav-item pm-off-btn', type: 'button', 'data-off': 'btn' }, 'Save for offline');
         btn.addEventListener('click', () => this._mOfflineAct(c.off && c.off.running ? 'stop' : 'start'));
-        const retry = createElement('button', { className: 'focusable sx-btn pm-off-btn pm-off-retry', type: 'button', 'data-off': 'retry', hidden: true }, 'Retry missing covers & lyrics');
+        const retry = createElement('button', { className: 'focusable sx-btn nav-item pm-off-btn pm-off-retry', type: 'button', 'data-off': 'retry', hidden: true }, 'Retry missing covers & lyrics');
         retry.addEventListener('click', () => this._mOfflineAct('retry'));
         const stat = (k, label) => createElement('div', { className: 'pm-off-stat' },
             createElement('span', { className: 'pm-off-k' }, label), createElement('span', { className: 'pm-off-v', 'data-off': k }, '\u2026'));

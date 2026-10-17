@@ -244,6 +244,11 @@ class MainAppLibraryMethods {
     }
 
     openPlugin(p) {
+        // Opening a plugin pauses the music (it is paused, not stopped: the player keeps its song and place).
+        // The Weather plugin is the one exception: checking the weather should not interrupt a song.
+        try {
+            if (p !== this._findWeatherPlugin() && window.PekMusic && window.PekMusic.isPlaying && window.PekMusic.isPlaying()) window.PekMusic.pause();
+        } catch (e) { /* the player is optional */ }
         const { engine } = this.props;
         const { createElement, ui } = engine;
         const app = this;
