@@ -99,6 +99,24 @@ jobs:
         if: steps.ossl.outputs.cache-hit != 'true'
         run: bash android/scripts/build-openssl.sh
 
+      - name: Cache SQLite
+        uses: actions/cache@v4
+        with:
+          path: android/sqlite
+          key: sqlite-${{ hashFiles('android/scripts/fetch-sqlite.sh') }}
+
+      # Runs EVERY build (not only on a cache miss). The script is a no-op when valid sqlite3.c/.h are already
+      # there, and re-downloads if the cache restored an empty or damaged copy.
+      - name: Ensure SQLite (library and music databases)
+        run: bash android/scripts/fetch-sqlite.sh
+
+      - name: Verify SQLite before building
+        run: |
+          for f in sqlite3.c sqlite3.h; do
+            [ -s "android/sqlite/$f" ] || { echo "::error::android/sqlite/$f is missing or empty"; exit 1; }
+          done
+          grep -m1 '#define SQLITE_VERSION ' android/sqlite/sqlite3.h
+
       - name: Clone libsmb2 (SMB shares)
         continue-on-error: true
         run: git clone --depth 1 https://github.com/sahlberg/libsmb2 android/libsmb2
