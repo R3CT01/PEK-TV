@@ -2000,6 +2000,8 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 /* While searching, the results take the place of the screen's content. */
 html.pek-searching .pek-content > div > :not(.content-head), html.pek-searching .content-head > .content-header { display: none; }
 .content-head > .sx-search-results { margin-top: 0.25rem; }
+.content-head > .sx-search-filters { margin-top: 0.25rem; margin-bottom: 0.5rem; }
+.content-head > .sx-search-filters:empty { display: none; }
 @media (max-width: 640px) {
     .hs-searchbar { max-width: none; min-height: 2.8rem; margin-bottom: 0.9rem; }
     .content-head { margin-bottom: 1.1rem; }

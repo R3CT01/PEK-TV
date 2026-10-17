@@ -763,6 +763,34 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         res.set_content(json, "application/json");
     });
 
+    // 5a. Search and browse the library by title, year, decade, genre, actor, director, studio or collection. The NFO details
+    //     (genre, people, studio ...) are read into the library database after each scan, so this is one indexed query.
+    //     GET /api/library/search?type=movies|shows&q=&genre=&actor=&director=&studio=&collection=&year=&decade=&sort=&limit=&offset=
+    //       -> {"total":N,"movies":["<id>",...]}  or  {"total":N,"shows":["<show title>",...]}
+    //     GET /api/library/facets?type=movies|shows&q=<actor name part>&limit=
+    //       -> genres, decades, actors, directors with counts, and how far the details are read ({"indexing":{"done","total"}})
+    svr.Get("/api/library/search", [scanner](const httplib::Request& req, httplib::Response& res) {
+        MediaScanner::SearchQuery sq;
+        sq.type = req.get_param_value("type") == "shows" ? "shows" : "movies";
+        sq.q = req.get_param_value("q").substr(0, 200);
+        sq.genre = req.get_param_value("genre").substr(0, 80);
+        sq.actor = req.get_param_value("actor").substr(0, 120);
+        sq.director = req.get_param_value("director").substr(0, 120);
+        sq.studio = req.get_param_value("studio").substr(0, 120);
+        sq.collection = req.get_param_value("collection").substr(0, 120);
+        sq.year = std::max(0, std::min(2200, std::atoi(req.get_param_value("year").c_str())));
+        sq.decade = std::max(0, std::min(2200, std::atoi(req.get_param_value("decade").c_str())));
+        sq.sort = req.get_param_value("sort");
+        if (req.has_param("limit")) sq.limit = std::atoi(req.get_param_value("limit").c_str());
+        if (req.has_param("offset")) sq.offset = std::atoi(req.get_param_value("offset").c_str());
+        res.set_content(scanner->searchJson(sq), "application/json");
+    });
+    svr.Get("/api/library/facets", [scanner](const httplib::Request& req, httplib::Response& res) {
+        const std::string type = req.get_param_value("type") == "shows" ? "shows" : "movies";
+        const int limit = req.has_param("limit") ? std::atoi(req.get_param_value("limit").c_str()) : 40;
+        res.set_content(scanner->facetsJson(type, req.get_param_value("q").substr(0, 120), limit), "application/json");
+    });
+
     // 5b. Duplicate finder (read-only): groups the same movie, the same
     //     episode, or byte-size-identical files that appear more than once.
     //     "wasted" = everything in a group except its largest file, i.e.

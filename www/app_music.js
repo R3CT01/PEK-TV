@@ -502,7 +502,7 @@ class MainAppMusicMethods {
         if (v.q.trim() && !c.search) setTimeout(() => this._mSearchNow(), 0);
         return createElement('div', {}, input, box);
     }
-    _mSearchSoon() { clearTimeout(this._mSearchT); this._mSearchT = setTimeout(() => this._mSearchNow(), 250); }
+    _mSearchSoon() { clearTimeout(this._mSearchT); this._mSearchT = setTimeout(() => this._mSearchNow(), 90); }
     _mSearchNow() {
         const v = this._mv, c = this._mc, q = v.q.trim();
         if (!q) { c.search = null; this._mPaintSearch(); return; }

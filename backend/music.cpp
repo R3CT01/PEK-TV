@@ -2,6 +2,7 @@
 #include "music_tags.h"
 #include "music_online.h"
 #include "vfs.h"
+#include "pekdb.h"
 
 #include <algorithm>
 #include <atomic>
@@ -234,11 +235,13 @@ struct Track {
     // resolved for display
     std::string rTitle, rArtist, rAlbum;
     std::string rPrimary;                   // the first (owning) artist of rArtist
+    std::string nTA, nAl;                   // folded (lower-case, no accents) title+artist and album, for searching
     std::vector<std::string> rFeatured;     // everyone after the first artist
 };
 
 struct Album {
     std::string id, title, artist;
+    std::string norm;                        // folded title+artist, for searching
     std::vector<std::string> featured;       // other artists on the album's songs
     int year = 0;
     double duration = 0;
@@ -248,6 +251,7 @@ struct Album {
 };
 struct Artist {
     std::string id, name;
+    std::string norm;                        // folded name, for searching
     std::vector<int> albums;
     int trackCount = 0;
 };
@@ -378,6 +382,83 @@ void inferFromTree(std::vector<Track>& tracks) {
     }
 }
 
+// ================================================================ the music database (music.db)
+// One table, `tracks`: what music_cache.tsv held (every song's tags, so a restart does not re-read the files). Saving is
+// incremental and atomic (one transaction), so a power cut can never leave a half-written cache. Searching does NOT go
+// through the database: measured at 500 and 50,000 songs, the in-memory search (see matchWords) is faster than any query,
+// so the database is only the durable copy.
+class MusicStore {
+public:
+    bool open(const std::string& path) {
+        if (!w_.open(path)) return false;
+        if (!w_.exec("CREATE TABLE IF NOT EXISTS tracks("
+                     "path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, title TEXT NOT NULL, artist TEXT NOT NULL,"
+                     "album_artist TEXT NOT NULL, album TEXT NOT NULL, genre TEXT NOT NULL, track INTEGER NOT NULL, disc INTEGER NOT NULL,"
+                     "year INTEGER NOT NULL, duration REAL NOT NULL, has_art INTEGER NOT NULL, fb_artist TEXT NOT NULL, fb_album TEXT NOT NULL,"
+                     "fb_title TEXT NOT NULL, fb_track INTEGER NOT NULL, fb_disc INTEGER NOT NULL, album_dir TEXT NOT NULL, folder_art TEXT NOT NULL)"))
+            return false;
+        // Future schema changes: add `if (v < 2) { ALTER ...; }` steps here, then raise the number.
+        if (w_.userVersion() < 1) w_.setUserVersion(1);
+        return true;
+    }
+
+    bool loadTracks(std::vector<Track>& out) {
+        pekdb::Stmt st(w_, "SELECT path,size,mtime,title,artist,album_artist,album,genre,track,disc,year,duration,has_art,"
+                           "fb_artist,fb_album,fb_title,fb_track,fb_disc,album_dir,folder_art FROM tracks");
+        if (!st.ok()) return false;
+        while (st.step()) {
+            Track t;
+            t.path = st.str(0); t.size = static_cast<uint64_t>(st.num(1)); t.mtime = st.num(2);
+            t.title = st.str(3); t.artist = st.str(4); t.albumArtist = st.str(5); t.album = st.str(6); t.genre = st.str(7);
+            t.track = static_cast<int>(st.num(8)); t.disc = static_cast<int>(st.num(9)); t.year = static_cast<int>(st.num(10));
+            t.duration = st.dbl(11); t.hasArt = st.num(12) != 0;
+            t.fbArtist = st.str(13); t.fbAlbum = st.str(14); t.fbTitle = st.str(15); t.fbTrack = static_cast<int>(st.num(16));
+            t.fbDisc = static_cast<int>(st.num(17)); t.albumDir = st.str(18); t.folderArt = st.str(19);
+            out.push_back(std::move(t));
+        }
+        return true;
+    }
+
+    // New and changed songs are saved, songs that are gone are removed: one transaction.
+    bool saveTracks(const std::vector<Track>& all) {
+        pekdb::Tx tx(w_);
+        if (!tx.ok()) return false;
+        {
+            pekdb::Stmt up(w_, "INSERT INTO tracks(path,size,mtime,title,artist,album_artist,album,genre,track,disc,year,duration,has_art,"
+                               "fb_artist,fb_album,fb_title,fb_track,fb_disc,album_dir,folder_art) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                               "ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,title=excluded.title,artist=excluded.artist,"
+                               "album_artist=excluded.album_artist,album=excluded.album,genre=excluded.genre,track=excluded.track,disc=excluded.disc,"
+                               "year=excluded.year,duration=excluded.duration,has_art=excluded.has_art,fb_artist=excluded.fb_artist,"
+                               "fb_album=excluded.fb_album,fb_title=excluded.fb_title,fb_track=excluded.fb_track,fb_disc=excluded.fb_disc,"
+                               "album_dir=excluded.album_dir,folder_art=excluded.folder_art");
+            if (!up.ok()) return false;
+            for (const auto& t : all) {
+                up.text(1, t.path).i64(2, static_cast<long long>(t.size)).i64(3, t.mtime).text(4, t.title).text(5, t.artist)
+                  .text(6, t.albumArtist).text(7, t.album).text(8, t.genre).i64(9, t.track).i64(10, t.disc).i64(11, t.year)
+                  .real(12, t.duration).i64(13, t.hasArt ? 1 : 0).text(14, t.fbArtist).text(15, t.fbAlbum).text(16, t.fbTitle)
+                  .i64(17, t.fbTrack).i64(18, t.fbDisc).text(19, t.albumDir).text(20, t.folderArt);
+                if (!up.run()) return false;
+                up.reset();
+            }
+        }
+        std::vector<std::string> gone;
+        {
+            std::set<std::string> keep;
+            for (const auto& t : all) keep.insert(t.path);
+            pekdb::Stmt sel(w_, "SELECT path FROM tracks");
+            while (sel.step()) { std::string p = sel.str(0); if (!keep.count(p)) gone.push_back(std::move(p)); }
+        }
+        if (!gone.empty()) {
+            pekdb::Stmt del(w_, "DELETE FROM tracks WHERE path=?");
+            for (const auto& p : gone) { del.text(1, p); del.run(); del.reset(); }
+        }
+        return tx.commit();
+    }
+
+private:
+    pekdb::Db w_;
+};
+
 // ================================================================ the library
 class MusicLibrary {
 public:
@@ -416,7 +497,8 @@ private:
     MediaScanner* scanner_;
     std::mutex snapMutex_;
     std::shared_ptr<const Snapshot> snap_ = std::make_shared<Snapshot>();
-    std::vector<Track> cache_;                       // what the last scan (or the cache file) knew
+    std::vector<Track> cache_;                       // what the last scan (or the cache) knew
+    std::unique_ptr<MusicStore> store_;              // music.db; null when SQLite could not be opened (then music_cache.tsv is used)
     std::atomic<bool> scanning_{false}, pending_{false}, everStarted_{false};
 
     // ---------------------------------------------------------------- cache file
@@ -436,6 +518,35 @@ private:
     static const char* header() { return "PEKMUSIC2"; }
 
     void loadCache() {
+        auto fresh = std::make_unique<MusicStore>();
+        if (fresh->open((fs::path(cacheFile_).parent_path() / "music.db").string())) {
+            store_ = std::move(fresh);
+            std::vector<Track> loaded;
+            store_->loadTracks(loaded);
+            if (loaded.empty() && fs::exists(cacheFile_)) {            // one-time move of the old cache file into the database
+                std::vector<Track> old;
+                readTsv(old);
+                if (!old.empty() && store_->saveTracks(old)) {
+                    std::error_code ec;
+                    fs::rename(cacheFile_, cacheFile_ + ".migrated", ec);
+                    std::cout << "[Music] Moved " << old.size() << " song(s) from the old cache file into the database." << std::endl;
+                    loaded = std::move(old);
+                    for (auto& t : loaded) { t.filename = leafOf(t.path); t.id = stableId(t.path); }
+                    cache_ = std::move(loaded);
+                    std::cout << "[Music] Loaded " << cache_.size() << " song(s) from the database." << std::endl;
+                    return;
+                }
+            }
+            for (auto& t : loaded) { t.filename = leafOf(t.path); t.id = stableId(t.path); }
+            cache_ = std::move(loaded);
+            std::cout << "[Music] Loaded " << cache_.size() << " song(s) from the database." << std::endl;
+            return;
+        }
+        std::cout << "[Music] The music database is unavailable: using the cache file." << std::endl;
+        readTsv(cache_);
+    }
+    // The old tab-separated cache (also the fallback when the database cannot be opened).
+    void readTsv(std::vector<Track>& out) {
         std::ifstream in(cacheFile_);
         if (!in) return;
         std::string line;
@@ -455,11 +566,15 @@ private:
             } catch (...) { continue; }
             t.filename = leafOf(t.path);
             t.id = stableId(t.path);
-            cache_.push_back(std::move(t));
+            out.push_back(std::move(t));
         }
-        std::cout << "[Music] Loaded " << cache_.size() << " song(s) from the cache." << std::endl;
+        std::cout << "[Music] Read " << out.size() << " song(s) from the cache file." << std::endl;
     }
     void saveCache(const std::vector<Track>& tracks) {
+        if (store_) {
+            if (!store_->saveTracks(tracks)) std::cout << "[Music] Could not save the song cache to the database." << std::endl;
+            return;
+        }
         std::string tmp = cacheFile_ + ".tmp";
         {
             std::ofstream out(tmp, std::ios::trunc);
@@ -646,6 +761,8 @@ private:
             t.rFeatured.assign(names.size() > 1 ? names.begin() + 1 : names.end(), names.end());
             if (!t.track) t.track = t.fbTrack;
             if (!t.disc) t.disc = t.fbDisc;
+            t.nTA = pekdb::fold(t.rTitle + " " + t.rArtist);
+            t.nAl = pekdb::fold(t.rAlbum);
         }
         std::sort(s->tracks.begin(), s->tracks.end(), [](const Track& a, const Track& b) {
             std::string ka = sortKey(a.rTitle), kb = sortKey(b.rTitle);
@@ -682,7 +799,7 @@ private:
             auto f = albumIndexByKey.find(key);
             int ai;
             if (f == albumIndexByKey.end()) {
-                Album a; a.id = stableId("album:" + key); a.title = t.rAlbum; a.artist = aa;
+                Album a; a.id = stableId("album:" + key); a.title = t.rAlbum; a.artist = aa; a.norm = pekdb::fold(a.title + " " + a.artist);
                 ai = (int)albums.size(); albums.push_back(a); albumIndexByKey[key] = ai;
             } else ai = f->second;
             Album& a = albums[ai];
@@ -726,7 +843,7 @@ private:
             std::string k = lower(a.artist);
             auto f = artistIndex.find(k);
             int ar;
-            if (f == artistIndex.end()) { Artist r; r.id = stableId("artist:" + k); r.name = a.artist; ar = (int)s->artists.size(); s->artists.push_back(r); artistIndex[k] = ar; }
+            if (f == artistIndex.end()) { Artist r; r.id = stableId("artist:" + k); r.name = a.artist; r.norm = pekdb::fold(r.name); ar = (int)s->artists.size(); s->artists.push_back(r); artistIndex[k] = ar; }
             else ar = f->second;
             s->artists[ar].albums.push_back((int)i);
             s->artists[ar].trackCount += (int)a.tracks.size();
@@ -930,6 +1047,18 @@ std::string strArr(const std::vector<std::string>& v) {
     for (size_t i = 0; i < v.size(); ++i) { if (i) j += ","; j += "\"" + jsonEscape(v[i]) + "\""; }
     return j + "]";
 }
+// Search: the query is folded the same way as the stored names (capitals and accents ignored, punctuation = space) and
+// split into words; a song, album or artist matches when EVERY word appears somewhere in its folded text. Both sides are
+// folded once (the names when the library is published, the query once per request), so a search is a few substring
+// finds per item with no allocation.
+std::vector<std::string> searchWords(const std::string& raw) { return pekdb::words(pekdb::fold(raw)); }
+
+bool matchWords(const std::vector<std::string>& words, const std::string& a, const std::string* b = nullptr) {
+    for (const auto& w : words)
+        if (a.find(w) == std::string::npos && (!b || b->find(w) == std::string::npos)) return false;
+    return true;
+}
+
 std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     const Track& t = s.tracks[ti];
     std::string j = "{\"id\":\"" + t.id + "\",\"title\":\"" + jsonEscape(t.rTitle) + "\",\"artist\":\"" + jsonEscape(t.rArtist) +
@@ -1031,14 +1160,14 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
     svr.Get("/api/music/songs", [lib](const httplib::Request& req, httplib::Response& res) {
         lib->scanOnceIfNeeded();
         auto s = lib->snapshot();
-        std::string q = lower(trimmed(req.get_param_value("q")));
+        const std::vector<std::string> qw = searchWords(req.get_param_value("q"));
         size_t offset = (size_t)std::max(0, std::atoi(req.get_param_value("offset").c_str()));
         size_t limit = (size_t)std::min(500, std::max(1, req.has_param("limit") ? std::atoi(req.get_param_value("limit").c_str()) : 200));
         size_t total = 0;
         std::string items;
         for (size_t i = 0; i < s->tracks.size(); ++i) {
             const Track& t = s->tracks[i];
-            if (!q.empty() && lower(t.rTitle).find(q) == std::string::npos && lower(t.rArtist).find(q) == std::string::npos && lower(t.rAlbum).find(q) == std::string::npos) continue;
+            if (!qw.empty() && !matchWords(qw, t.nTA, &t.nAl)) continue;     // every word in the title, artist or album
             if (total >= offset && total < offset + limit) { if (!items.empty()) items += ","; items += trackJson(*s, (int)i, true); }
             ++total;
         }
@@ -1047,29 +1176,24 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
 
     svr.Get("/api/music/search", [lib](const httplib::Request& req, httplib::Response& res) {
         auto s = lib->snapshot();
-        std::string q = lower(trimmed(req.get_param_value("q")));
+        const std::vector<std::string> qw = searchWords(req.get_param_value("q"));
         std::string ar, al, so;
         int na = 0, nl = 0, ns = 0;
-        if (!q.empty()) {
-            for (const auto& a : s->artists) {
-                if (na >= 20 || lower(a.name).find(q) == std::string::npos) continue;
+        if (!qw.empty()) {
+            std::vector<int> ia, il, is;
+            for (size_t i = 0; i < s->artists.size() && ia.size() < 20; ++i) if (matchWords(qw, s->artists[i].norm)) ia.push_back((int)i);
+            for (size_t i = 0; i < s->albums.size() && il.size() < 40; ++i) if (matchWords(qw, s->albums[i].norm)) il.push_back((int)i);
+            for (size_t i = 0; i < s->tracks.size() && is.size() < 60; ++i) if (matchWords(qw, s->tracks[i].nTA)) is.push_back((int)i);
+            for (int i : ia) {
+                const Artist& a = s->artists[i];
                 if (na++) ar += ",";
                 bool art = false;
                 for (int ai : a.albums) if (s->albums[ai].art) { art = true; break; }
                 ar += "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(a.albums.size()) + ",\"tracks\":" + std::to_string(a.trackCount) +
                       ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albumId\":\"" + (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
             }
-            for (const auto& a : s->albums) {
-                if (nl >= 40 || (lower(a.title).find(q) == std::string::npos && lower(a.artist).find(q) == std::string::npos)) continue;
-                if (nl++) al += ",";
-                al += albumJson(a);
-            }
-            for (size_t i = 0; i < s->tracks.size() && ns < 60; ++i) {
-                const Track& t = s->tracks[i];
-                if (lower(t.rTitle).find(q) == std::string::npos && lower(t.rArtist).find(q) == std::string::npos) continue;
-                if (ns++) so += ",";
-                so += trackJson(*s, (int)i, true);
-            }
+            for (int i : il) { if (nl++) al += ","; al += albumJson(s->albums[i]); }
+            for (int i : is) { if (ns++) so += ","; so += trackJson(*s, i, true); }
         }
         jsonOut(res, "{\"artists\":[" + ar + "],\"albums\":[" + al + "],\"songs\":[" + so + "]}");
     });

@@ -30,7 +30,7 @@ Pictures come from the song's own tag, then `cover.jpg` / `folder.jpg` ... besid
 (Artists list and artist page), album covers, and a cover for each single song (loose songs, "Singles"). Deezer's public
 search is asked first, Apple's iTunes search is the fallback; no key is needed. Only exact artist names are accepted for
 photos. Artist, album and song names are sent to those services. Every answer, also "nothing found", is kept in
-`music_art/` next to `music_cache.tsv` until the next manual **Rescan Library** (a startup scan keeps it). Code:
+`music_art/` next to `music.db` until the next manual **Rescan Library** (a startup scan keeps it). Code:
 `backend/music_online.h`.
 
 ## Playback support
@@ -43,9 +43,14 @@ songs (gapless playback is not done yet).
 
 ## Backend
 `backend/music.cpp` + `music_tags.cpp` (library, scanning, `/api/music/*`; see `music.h` for the routes), refreshed
-after every normal scan through `MediaScanner::setAfterScan` and once when the tab is first opened. A cache file
-(`music_cache.tsv`, next to `media_cache.tsv`) means a restart does not re-read every file; only new or changed files
-are read. Front end: `www/music_player.js` (engine + bar) and `www/app_music.js` (screens).
+after every normal scan through `MediaScanner::setAfterScan` and once when the tab is first opened. The song list is kept in
+a SQLite database (`music.db`, next to `library.db`; an old `music_cache.tsv` is moved into it once and renamed
+`.migrated`), so a restart does not re-read every file; only new or changed files are read, and a power cut cannot
+leave a half-written cache. A damaged database is set aside as `music.db.corrupt` and rebuilt by the next scan.
+Search (`/api/music/search`, `/api/music/songs?q=`) runs in memory over names that are folded once when the library is
+published: capitals and accents are ignored ("beyonce" finds Beyoncé) and every word may come from a different field
+("drake hotline"). Measured with the database as the search engine instead, it was slower at 500 and at 50,000 songs,
+so the database only keeps the data. Front end: `www/music_player.js` (engine + bar) and `www/app_music.js` (screens).
 Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_test song.mp3 song.flac ...`
 
 ## Known limits

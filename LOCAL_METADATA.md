@@ -10,7 +10,7 @@ Files are picked up by the normal scan (**Rescan** after adding or editing them)
 
 | Where | What it is |
 |---|---|
-| `Movie Name (2001).nfo` next to `Movie Name (2001).mkv` | movie: `<movie>` with `title`, `year` (or `premiered`), `plot` (or `outline`) |
+| `Movie Name (2001).nfo` next to `Movie Name (2001).mkv` | movie: `<movie>` with `title`, `year` (or `premiered`), `plot` (or `outline`), plus the search fields below |
 | `movie.nfo` in a folder that holds one video | same, for that video |
 | `Show S01E02.nfo` next to the episode | `<episodedetails>` with `title`, `showtitle`, `season`, `episode`, `plot` |
 | `tvshow.nfo` in the show folder (the parent of the `Season N` folders) | `<tvshow>` with `title`, `plot` |
@@ -20,6 +20,17 @@ Files are picked up by the normal scan (**Rescan** after adding or editing them)
 - Show name priority: the episode NFO's `showtitle`, then `tvshow.nfo`'s `title`, then tags / the file name.
 - Files holding only a link (for example a themoviedb.org address) are ignored.
 - Only the first `<episodedetails>` in a file is read.
+
+## Searching and browsing by actor, genre, year ...
+
+After every scan PEK TV also reads these fields from the movie and `tvshow.nfo` files and keeps them in its library
+database (`library.db`): `genre`, `actor` (`name`, `role`), `director`, `studio`, `rating` (or `ratings`), `runtime`,
+`mpaa` and `set` (collection). Only titles that have an NFO have them; the title and year work for every file. The
+library **Search** has Genre, Year and Actor buttons next to the box, and typing "tom hanks", "drama 1995" or
+"nolan" finds titles by cast, genre, year, director, studio or collection (accents and capitals ignored). Details are
+read once per title and again only when its NFO changes (local folders) or the video changes (network sources), so a
+rescan stays quick; while the first read is running the Genre / Actor lists say how far it is.
+API: `GET /api/library/search` and `GET /api/library/facets` (see `server.cpp`).
 
 ## Artwork (images)
 

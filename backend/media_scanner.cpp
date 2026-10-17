@@ -1,6 +1,9 @@
 #include "media_scanner.h"
 #include "vfs.h"
 #include "nfo.h"
+#include "pekdb.h"
+#include <unordered_set>
+#include <map>
 #include <set>
 #include <filesystem>
 #include <fstream>
@@ -513,6 +516,163 @@ std::string showDirOfEpisode(const MediaEntry& e) {
 }
 
 
+// ---- helpers for the library database (library.db) ----
+std::string jsonEsc(const std::string& in) {
+    std::string o;
+    o.reserve(in.size() + 2);
+    for (unsigned char c : in) {
+        switch (c) {
+            case '"': o += "\\\""; break;
+            case '\\': o += "\\\\"; break;
+            case '\n': o += "\\n"; break;
+            case '\r': o += "\\r"; break;
+            case '\t': o += "\\t"; break;
+            default:
+                if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+                else o += static_cast<char>(c);
+        }
+    }
+    return o;
+}
+
+// The modification times of the NFO files that describe a title (local files only): changes when one is edited, so the
+// database re-reads it. Network sources are only re-read when the video itself changed (a stat per NFO over a network
+// share, for thousands of titles at every scan, is not worth it).
+std::string nfoStampLocal(const std::vector<fs::path>& paths) {
+    std::string out;
+    for (const auto& p : paths) {
+        std::error_code ec;
+        if (!fs::is_regular_file(p, ec) || ec) continue;
+        const auto t = fs::last_write_time(p, ec);
+        if (ec) continue;
+        out += std::to_string(static_cast<long long>(t.time_since_epoch().count())) + ",";
+    }
+    return out;
+}
+
+// The NFO of one movie: "<video>.nfo", else "movie.nfo" when the movie is alone in its folder (same rules as resolveVideo).
+bool readMovieNfo(FileIo& io, const MediaEntry& e, nfo::Info& out) {
+    const std::string dir = FileIo::parent(e.path);
+    std::vector<std::string> names;
+    if (dir.empty() || !io.list(dir, names)) return false;
+    const std::string stem = toLower(fs::path(e.filename).stem().string());
+    const std::string own = pickName(names, {stem + ".nfo"});
+    nfo::Info info;
+    bool have = readNfoFrom(io, dir, own, info) && info.root == "movie";
+    if (!have && own.empty() && videoCount(names) <= 1)
+        have = readNfoFrom(io, dir, pickName(names, {"movie.nfo"}), info) && info.root == "movie";
+    if (have) out = info;
+    return have;
+}
+
+// The show's tvshow.nfo, found from one of its episodes.
+bool readShowNfo(FileIo& io, const MediaEntry& episode, nfo::Info& out) {
+    const std::string dir = showDirOfEpisode(episode);
+    std::vector<std::string> names;
+    if (dir.empty() || !io.list(dir, names)) return false;
+    nfo::Info info;
+    if (readNfoFrom(io, dir, pickName(names, {"tvshow.nfo"}), info) && info.root == "tvshow") { out = info; return true; }
+    return false;
+}
+
+const int kDbVersion = 1;
+
+// Tables:
+//   media        every video file found (what media_cache.tsv held) plus a folded title for searching
+//   title_meta   one row per movie ('m:<media id>') and per show ('s:<folded show title>') whose NFO was looked at;
+//                `stamp` says what it was read from, so only new or edited NFOs are read again
+//   title_genre / title_person   genres, and actors (kind 0) / directors (kind 1) of those titles
+const char* const kSchema = R"SQL(
+CREATE TABLE IF NOT EXISTS media(
+  id TEXT PRIMARY KEY, path TEXT NOT NULL, filename TEXT NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL,
+  kind INTEGER NOT NULL, title TEXT NOT NULL, year INTEGER NOT NULL, show_title TEXT NOT NULL,
+  season INTEGER NOT NULL, episode INTEGER NOT NULL, norm TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS media_kind ON media(kind, year);
+CREATE INDEX IF NOT EXISTS media_norm ON media(norm);
+CREATE TABLE IF NOT EXISTS title_meta(
+  key TEXT PRIMARY KEY, stamp TEXT NOT NULL, name TEXT NOT NULL, year INTEGER NOT NULL, rating REAL NOT NULL,
+  runtime INTEGER NOT NULL, mpaa TEXT NOT NULL, studio TEXT NOT NULL, studio_norm TEXT NOT NULL,
+  collection TEXT NOT NULL, collection_norm TEXT NOT NULL, has_nfo INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS title_genre(
+  key TEXT NOT NULL, genre TEXT NOT NULL COLLATE NOCASE, PRIMARY KEY(key, genre)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS genre_idx ON title_genre(genre);
+CREATE TABLE IF NOT EXISTS title_person(
+  key TEXT NOT NULL, kind INTEGER NOT NULL, norm TEXT NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, ord INTEGER NOT NULL,
+  PRIMARY KEY(key, kind, norm)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS person_idx ON title_person(kind, norm);
+)SQL";
+
+std::string normOf(const MediaEntry& e) {
+    if (e.kind == MediaKind::Movie) return pekdb::fold(e.title);
+    if (e.kind == MediaKind::Episode) return pekdb::fold(e.show_title);
+    return pekdb::fold(fs::path(e.filename).stem().string());
+}
+
+// Writes the whole entry list: new and changed rows are saved, rows for files that are gone are removed. One
+// transaction, so an interruption leaves the previous state.
+bool writeEntries(pekdb::Db& db, const std::vector<MediaEntry>& all) {
+    pekdb::Tx tx(db);
+    if (!tx.ok()) return false;
+    {
+        pekdb::Stmt up(db,
+            "INSERT INTO media(id,path,filename,size,mtime,kind,title,year,show_title,season,episode,norm) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(id) DO UPDATE SET path=excluded.path,filename=excluded.filename,size=excluded.size,mtime=excluded.mtime,"
+            "kind=excluded.kind,title=excluded.title,year=excluded.year,show_title=excluded.show_title,season=excluded.season,"
+            "episode=excluded.episode,norm=excluded.norm");
+        if (!up.ok()) return false;
+        for (const auto& e : all) {
+            up.text(1, e.id).text(2, e.path).text(3, e.filename).i64(4, static_cast<long long>(e.size_bytes)).i64(5, e.mtime)
+              .i64(6, static_cast<int>(e.kind)).text(7, e.title).i64(8, e.year).text(9, e.show_title).i64(10, e.season)
+              .i64(11, e.episode).text(12, normOf(e));
+            if (!up.run()) return false;
+            up.reset();
+        }
+    }
+    std::vector<std::string> gone;
+    {
+        std::unordered_set<std::string> keep;
+        keep.reserve(all.size() * 2);
+        for (const auto& e : all) keep.insert(e.id);
+        pekdb::Stmt sel(db, "SELECT id FROM media");
+        while (sel.step()) { std::string id = sel.str(0); if (!keep.count(id)) gone.push_back(std::move(id)); }
+    }
+    if (!gone.empty()) {
+        pekdb::Stmt del(db, "DELETE FROM media WHERE id=?");
+        for (const auto& id : gone) { del.text(1, id); del.run(); del.reset(); }
+    }
+    return tx.commit();
+}
+
+// The old tab-separated cache (media_cache.tsv): read once, to carry its classifications into the database.
+std::vector<MediaEntry> readLegacyCache(const std::string& path) {
+    std::vector<MediaEntry> loaded;
+    std::ifstream in(path);
+    if (!in.is_open()) return loaded;
+    std::string line;
+    if (!std::getline(in, line) || line != kCacheHeader) return loaded;      // an older layout: a fresh scan is better
+    while (std::getline(in, line)) {
+        std::istringstream iss(line);
+        MediaEntry e;
+        std::string size_str, mtime_str, kind_str, year_str, season_str, episode_str;
+        if (std::getline(iss, e.id, '\t') && std::getline(iss, e.path, '\t') && std::getline(iss, e.filename, '\t') &&
+            std::getline(iss, size_str, '\t') && std::getline(iss, mtime_str, '\t') && std::getline(iss, kind_str, '\t') &&
+            std::getline(iss, e.title, '\t') && std::getline(iss, year_str, '\t') && std::getline(iss, e.show_title, '\t') &&
+            std::getline(iss, season_str, '\t') && std::getline(iss, episode_str)) {
+            try {
+                e.size_bytes = std::stoull(size_str);
+                e.mtime = std::stoll(mtime_str);
+                const int k = std::stoi(kind_str);
+                e.kind = (k == 0) ? MediaKind::Movie : (k == 1) ? MediaKind::Episode : MediaKind::Unclassified;
+                e.year = std::stoi(year_str);
+                e.season = std::stoi(season_str);
+                e.episode = std::stoi(episode_str);
+            } catch (...) { continue; }
+            loaded.push_back(std::move(e));
+        }
+    }
+    return loaded;
+}
+
 } // namespace
 
 MediaScanner::MediaScanner(std::string sources_file_path, std::string cache_file_path)
@@ -897,7 +1057,7 @@ void MediaScanner::scan() {
     }
 
     std::cout << "[MediaScanner] Scan complete. " << indexed << " file(s) indexed." << std::endl;
-    persistCacheToDisk();
+    persistToDb();
 
     std::function<void()> after;
     {
@@ -905,6 +1065,7 @@ void MediaScanner::scan() {
         after = after_scan_;
     }
     if (after) { try { after(); } catch (...) {} }
+    try { indexMetadata(); } catch (const std::exception& ex) { std::cout << "[MediaScanner] Reading details failed: " << ex.what() << std::endl; }
 }
 
 void MediaScanner::setAfterScan(std::function<void()> callback) {
@@ -1013,24 +1174,260 @@ bool MediaScanner::readArtwork(const std::string& art, std::string& bytes, std::
     return io.read(art, kMaxArtBytes, bytes);
 }
 
-// Tab-delimited cache — internal only, never served directly.
-// First line is kCacheHeader. Columns: id, path, filename, size, mtime, kind(0=Movie/1=Episode/2=Unclassified),
-// title, year, show_title, season, episode
-void MediaScanner::persistCacheToDisk() {
-    std::ofstream out(cache_file_path_, std::ios::trunc);
-    if (!out.is_open()) {
-        std::cout << "[MediaScanner] Could not write cache to " << cache_file_path_ << std::endl;
+// ================================================================ the library database
+MediaScanner::~MediaScanner() = default;
+
+void MediaScanner::openDb() {
+    db_path_ = (fs::path(cache_file_path_).parent_path() / "library.db").string();
+    auto db = std::make_unique<pekdb::Db>();
+    if (!db->open(db_path_) || !db->exec(kSchema)) {
+        std::cout << "[MediaScanner] The library database is unavailable (" << db_path_ << "): files will be re-scanned at every start." << std::endl;
         return;
     }
-    std::lock_guard<std::mutex> lock(mutex_);
-    out << kCacheHeader << '\n';
-    for (const auto& e : entries_) {
-        out << e.id << '\t' << sanitizeField(e.path) << '\t' << sanitizeField(e.filename) << '\t'
-            << e.size_bytes << '\t' << e.mtime << '\t'
-            << static_cast<int>(e.kind) << '\t'
-            << sanitizeField(e.title) << '\t' << e.year << '\t'
-            << sanitizeField(e.show_title) << '\t' << e.season << '\t' << e.episode << '\n';
+    // Future schema changes: add `if (v < 2) { ALTER ...; }` steps here, then raise kDbVersion.
+    if (db->userVersion() < kDbVersion) db->setUserVersion(kDbVersion);
+    db_ = std::move(db);
+}
+
+void MediaScanner::persistToDb() {
+    if (!db_) return;
+    std::vector<MediaEntry> snapshot;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        snapshot = entries_;
     }
+    if (!writeEntries(*db_, snapshot)) std::cout << "[MediaScanner] Could not save the library: " << db_->lastError() << std::endl;
+}
+
+void MediaScanner::indexMetadata() {
+    if (!db_) return;
+    std::vector<MediaEntry> all;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        all = entries_;
+    }
+    std::unordered_map<std::string, std::string> have;                    // key -> stamp already stored
+    {
+        pekdb::Stmt st(*db_, "SELECT key, stamp FROM title_meta");
+        while (st.step()) have[st.str(0)] = st.str(1);
+    }
+
+    struct Job {
+        std::string key, stamp, name;
+        bool show = false;
+        MediaEntry first;
+        std::vector<MediaEntry> more;          // other folders of the same show
+    };
+    std::vector<Job> jobs;
+    std::set<std::string> valid;
+    std::map<std::string, Job> shows;          // folded show title -> job
+    for (const auto& e : all) {
+        if (e.kind == MediaKind::Movie) {
+            Job j;
+            j.key = "m:" + e.id; j.name = e.title; j.first = e;
+            j.stamp = std::to_string(e.size_bytes) + ":" + std::to_string(e.mtime);
+            if (!vfs::isRemote(e.path)) {
+                const fs::path v(e.path);
+                j.stamp += "|" + nfoStampLocal({fs::path(v).replace_extension(".nfo"), v.parent_path() / "movie.nfo"});
+            }
+            valid.insert(j.key);
+            const auto it = have.find(j.key);
+            if (it == have.end() || it->second != j.stamp) jobs.push_back(std::move(j));
+        } else if (e.kind == MediaKind::Episode) {
+            const std::string norm = pekdb::fold(e.show_title);
+            if (norm.empty()) continue;
+            Job& j = shows[norm];
+            if (j.key.empty()) { j.key = "s:" + norm; j.show = true; j.name = e.show_title; j.first = e; continue; }
+            const std::string dir = showDirOfEpisode(e);
+            if (j.more.size() >= 2 || dir == showDirOfEpisode(j.first)) continue;
+            bool seen = false;
+            for (const auto& m : j.more) if (showDirOfEpisode(m) == dir) seen = true;
+            if (!seen) j.more.push_back(e);
+        }
+    }
+    for (auto& kv : shows) {
+        Job& j = kv.second;
+        j.stamp = "r";
+        if (!vfs::isRemote(j.first.path)) {
+            std::vector<fs::path> nf{fs::path(showDirOfEpisode(j.first)) / "tvshow.nfo"};
+            for (const auto& m : j.more) nf.push_back(fs::path(showDirOfEpisode(m)) / "tvshow.nfo");
+            j.stamp = "l|" + nfoStampLocal(nf);
+        }
+        valid.insert(j.key);
+        const auto it = have.find(j.key);
+        if (it == have.end() || it->second != j.stamp) jobs.push_back(j);
+    }
+
+    // Titles that left the library take their rows with them.
+    std::vector<std::string> stale;
+    for (const auto& kv : have) if (!valid.count(kv.first)) stale.push_back(kv.first);
+    if (!stale.empty()) {
+        pekdb::Tx tx(*db_);
+        if (tx.ok()) {
+            {
+                pekdb::Stmt a(*db_, "DELETE FROM title_meta WHERE key=?"), g(*db_, "DELETE FROM title_genre WHERE key=?"),
+                            p(*db_, "DELETE FROM title_person WHERE key=?");
+                for (const auto& k : stale) { a.text(1, k).run(); a.reset(); g.text(1, k).run(); g.reset(); p.text(1, k).run(); p.reset(); }
+            }
+            tx.commit();
+        }
+    }
+
+    index_total_ = static_cast<int>(jobs.size());
+    index_done_ = 0;
+    if (jobs.empty()) return;
+    std::cout << "[MediaScanner] Reading details for " << jobs.size() << " title(s)..." << std::endl;
+
+    FileIo io;
+    const size_t kBatch = 100;       // titles per transaction (each commit is synced to disk)
+    for (size_t b = 0; b < jobs.size(); b += kBatch) {
+        const size_t end = std::min(jobs.size(), b + kBatch);
+        std::vector<std::pair<bool, nfo::Info>> read;          // slow part (files, maybe over the network) outside the transaction
+        for (size_t i = b; i < end; ++i) {
+            const Job& j = jobs[i];
+            nfo::Info info;
+            bool has = false;
+            try {
+                if (!j.show) has = readMovieNfo(io, j.first, info);
+                else {
+                    has = readShowNfo(io, j.first, info);
+                    for (size_t m = 0; !has && m < j.more.size(); ++m) has = readShowNfo(io, j.more[m], info);
+                }
+            } catch (...) { has = false; }
+            read.emplace_back(has, std::move(info));
+        }
+        pekdb::Tx tx(*db_);
+        if (!tx.ok()) continue;
+        {
+            pekdb::Stmt meta(*db_, "INSERT OR REPLACE INTO title_meta(key,stamp,name,year,rating,runtime,mpaa,studio,studio_norm,collection,collection_norm,has_nfo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+            pekdb::Stmt delG(*db_, "DELETE FROM title_genre WHERE key=?"), delP(*db_, "DELETE FROM title_person WHERE key=?");
+            pekdb::Stmt insG(*db_, "INSERT OR IGNORE INTO title_genre(key,genre) VALUES(?,?)");
+            pekdb::Stmt insP(*db_, "INSERT OR IGNORE INTO title_person(key,kind,norm,name,role,ord) VALUES(?,?,?,?,?,?)");
+            for (size_t i = b; i < end; ++i) {
+                const Job& j = jobs[i];
+                const bool has = read[i - b].first;
+                const nfo::Info& n = read[i - b].second;
+                const std::string studio = n.studios.empty() ? std::string() : n.studios[0];
+                meta.text(1, j.key).text(2, j.stamp).text(3, has && !n.title.empty() ? n.title : j.name).i64(4, n.year)
+                    .real(5, n.rating).i64(6, n.runtime).text(7, n.mpaa).text(8, studio).text(9, pekdb::fold(studio))
+                    .text(10, n.collection).text(11, pekdb::fold(n.collection)).i64(12, has ? 1 : 0);
+                meta.run(); meta.reset();
+                delG.text(1, j.key).run(); delG.reset();
+                delP.text(1, j.key).run(); delP.reset();
+                for (const auto& g : n.genres) { insG.text(1, j.key).text(2, g).run(); insG.reset(); }
+                int ord = 0;
+                for (const auto& a : n.actors) {
+                    const std::string norm = pekdb::fold(a.name);
+                    if (norm.empty()) continue;
+                    insP.text(1, j.key).i64(2, 0).text(3, norm).text(4, a.name).text(5, a.role).i64(6, ord++).run(); insP.reset();
+                }
+                ord = 0;
+                for (const auto& d : n.directors) {
+                    const std::string norm = pekdb::fold(d);
+                    if (norm.empty()) continue;
+                    insP.text(1, j.key).i64(2, 1).text(3, norm).text(4, d).text(5, "").i64(6, ord++).run(); insP.reset();
+                }
+            }
+        }
+        tx.commit();
+        index_done_ = static_cast<int>(end);
+    }
+    std::cout << "[MediaScanner] Details read." << std::endl;
+}
+
+std::string MediaScanner::searchJson(const SearchQuery& sq) {
+    const bool shows = sq.type == "shows";
+    const std::string field = shows ? "shows" : "movies";
+    if (!db_) return "{\"total\":0,\"" + field + "\":[]}";
+
+    const std::string from = shows
+        ? " FROM (SELECT norm, MIN(show_title) AS name, MAX(mtime) AS added FROM media WHERE kind=1 GROUP BY norm) m"
+          " LEFT JOIN title_meta t ON t.key = 's:' || m.norm WHERE 1=1"
+        : " FROM media m LEFT JOIN title_meta t ON t.key = 'm:' || m.id WHERE m.kind=0";
+    const std::string key = shows ? "('s:' || m.norm)" : "('m:' || m.id)";
+    const std::string year = shows ? "COALESCE(t.year,0)" : "m.year";
+    const std::string added = shows ? "m.added" : "m.mtime";
+
+    std::string where;
+    std::vector<std::string> binds;
+    auto like = [](const std::string& w) { return "%" + pekdb::likeEscape(w) + "%"; };
+    for (const auto& w : pekdb::words(pekdb::fold(sq.q))) {
+        where += " AND (m.norm LIKE ? ESCAPE '\\' OR CAST(" + year + " AS TEXT) = ?"
+                 " OR EXISTS (SELECT 1 FROM title_genre g WHERE g.key = " + key + " AND g.genre LIKE ? ESCAPE '\\')"
+                 " OR EXISTS (SELECT 1 FROM title_person p WHERE p.key = " + key + " AND p.norm LIKE ? ESCAPE '\\')"
+                 " OR t.studio_norm LIKE ? ESCAPE '\\' OR t.collection_norm LIKE ? ESCAPE '\\')";
+        binds.insert(binds.end(), {like(w), w, like(w), like(w), like(w), like(w)});
+    }
+    if (!sq.genre.empty()) {
+        where += " AND EXISTS (SELECT 1 FROM title_genre g WHERE g.key = " + key + " AND g.genre = ?)";
+        binds.push_back(sq.genre);
+    }
+    auto person = [&](const std::string& who, int kind) {
+        const std::string n = pekdb::fold(who);
+        if (n.empty()) return;
+        where += " AND EXISTS (SELECT 1 FROM title_person p WHERE p.key = " + key + " AND p.kind = " + std::to_string(kind) + " AND p.norm = ?)";
+        binds.push_back(n);
+    };
+    person(sq.actor, 0);
+    person(sq.director, 1);
+    if (!sq.studio.empty()) { where += " AND t.studio_norm LIKE ? ESCAPE '\\'"; binds.push_back(like(pekdb::fold(sq.studio))); }
+    if (!sq.collection.empty()) { where += " AND t.collection_norm = ?"; binds.push_back(pekdb::fold(sq.collection)); }
+    if (sq.year > 0) { where += " AND " + year + " = ?"; binds.push_back(std::to_string(sq.year)); }
+    if (sq.decade > 0) { where += " AND " + year + " BETWEEN ? AND ?"; binds.push_back(std::to_string(sq.decade)); binds.push_back(std::to_string(sq.decade + 9)); }
+
+    std::string order = " ORDER BY m.norm";
+    if (sq.sort == "year") order = " ORDER BY " + year + " DESC, m.norm";
+    else if (sq.sort == "added") order = " ORDER BY " + added + " DESC, m.norm";
+    else if (sq.sort == "rating") order = " ORDER BY COALESCE(t.rating,0) DESC, m.norm";
+
+    auto bindAll = [&](pekdb::Stmt& st) { for (size_t i = 0; i < binds.size(); ++i) st.text(static_cast<int>(i + 1), binds[i]); };
+
+    long long total = 0;
+    {
+        pekdb::Stmt c(*db_, "SELECT count(*)" + from + where);
+        bindAll(c);
+        if (c.step()) total = c.num(0);
+    }
+    const int limit = std::max(1, std::min(sq.limit, 5000));
+    pekdb::Stmt st(*db_, std::string("SELECT ") + (shows ? "m.name" : "m.id") + from + where + order + " LIMIT ? OFFSET ?");
+    bindAll(st);
+    st.i64(static_cast<int>(binds.size() + 1), limit).i64(static_cast<int>(binds.size() + 2), std::max(0, sq.offset));
+    std::string items;
+    while (st.step()) {
+        if (!items.empty()) items += ",";
+        items += "\"" + jsonEsc(st.str(0)) + "\"";
+    }
+    return "{\"total\":" + std::to_string(total) + ",\"" + field + "\":[" + items + "]}";
+}
+
+std::string MediaScanner::facetsJson(const std::string& type, const std::string& actorPrefix, int limit) {
+    const bool shows = type == "shows";
+    const std::string prefix = shows ? "s:%" : "m:%";
+    std::string out = "{\"indexing\":{\"done\":" + std::to_string(index_done_.load()) + ",\"total\":" + std::to_string(index_total_.load()) + "}";
+    if (!db_) return out + ",\"genres\":[],\"decades\":[],\"actors\":[],\"directors\":[]}";
+    limit = std::max(1, std::min(limit, 500));
+
+    auto list = [&](const std::string& name, const std::string& sql, const std::vector<std::string>& binds, bool numeric) {
+        pekdb::Stmt st(*db_, sql);
+        for (size_t i = 0; i < binds.size(); ++i) st.text(static_cast<int>(i + 1), binds[i]);
+        std::string items;
+        while (st.step()) {
+            if (!items.empty()) items += ",";
+            items += numeric ? "{\"decade\":" + std::to_string(st.num(0)) + ",\"count\":" + std::to_string(st.num(1)) + "}"
+                             : "{\"name\":\"" + jsonEsc(st.str(0)) + "\",\"count\":" + std::to_string(st.num(1)) + "}";
+        }
+        out += ",\"" + name + "\":[" + items + "]";
+    };
+    const std::string lim = " LIMIT " + std::to_string(limit);
+    list("genres", "SELECT MIN(genre), count(*) c FROM title_genre WHERE key LIKE ? GROUP BY genre ORDER BY c DESC, genre" + lim, {prefix}, false);
+    list("decades", shows
+        ? "SELECT (year/10)*10 d, count(*) FROM title_meta WHERE key LIKE ? AND year>0 GROUP BY d ORDER BY d DESC"
+        : "SELECT (year/10)*10 d, count(*) FROM media WHERE kind=0 AND year>0 AND ? LIKE 'm:%' GROUP BY d ORDER BY d DESC", {prefix}, true);
+    const std::string fp = pekdb::likeEscape(pekdb::fold(actorPrefix));
+    list("actors", "SELECT MIN(name), count(*) c FROM title_person WHERE kind=0 AND key LIKE ? AND norm LIKE ? ESCAPE '\\' GROUP BY norm ORDER BY c DESC, norm" + lim,
+         {prefix, "%" + fp + "%"}, false);
+    list("directors", "SELECT MIN(name), count(*) c FROM title_person WHERE kind=1 AND key LIKE ? GROUP BY norm ORDER BY c DESC, norm" + lim, {prefix}, false);
+    return out + "}";
 }
 
 // One folder path per line. NOTE: assumes the caller already holds
@@ -1059,51 +1456,33 @@ void MediaScanner::loadFromDisk() {
         std::cout << "[MediaScanner] Loaded " << media_dirs_.size() << " source folder(s)." << std::endl;
     }
 
-    // Then the classified-file cache.
-    std::ifstream in(cache_file_path_);
-    if (!in.is_open()) return;
-
-    std::vector<MediaEntry> loaded;
-    std::string line;
-
-    // A cache written before the filename/folder fallback existed (no
-    // version header) holds every untagged file as Unclassified. Drop it
-    // so the next scan re-identifies those files instead of reusing the
-    // stale "Unknown" result.
-    if (!std::getline(in, line) || line != kCacheHeader) {
-        std::cout << "[MediaScanner] Cache is from an older version; re-scanning all files." << std::endl;
-        return;
+    // Then the classified-file library (SQLite; an old media_cache.tsv is imported once).
+    openDb();
+    if (!db_) return;
+    if (db_->scalar("SELECT count(*) FROM media") == 0 && fs::exists(cache_file_path_)) {
+        std::vector<MediaEntry> old = readLegacyCache(cache_file_path_);
+        if (!old.empty() && writeEntries(*db_, old)) {
+            std::error_code ec;
+            fs::rename(cache_file_path_, cache_file_path_ + ".migrated", ec);
+            std::cout << "[MediaScanner] Moved " << old.size() << " entries from the old cache file into the database." << std::endl;
+        } else if (old.empty()) {
+            std::cout << "[MediaScanner] The old cache file is from an older version; re-scanning all files." << std::endl;
+        }
     }
-
-    while (std::getline(in, line)) {
-        std::istringstream iss(line);
-        MediaEntry e;
-        std::string size_str, mtime_str, kind_str, year_str, season_str, episode_str;
-
-        if (std::getline(iss, e.id, '\t') &&
-            std::getline(iss, e.path, '\t') &&
-            std::getline(iss, e.filename, '\t') &&
-            std::getline(iss, size_str, '\t') &&
-            std::getline(iss, mtime_str, '\t') &&
-            std::getline(iss, kind_str, '\t') &&
-            std::getline(iss, e.title, '\t') &&
-            std::getline(iss, year_str, '\t') &&
-            std::getline(iss, e.show_title, '\t') &&
-            std::getline(iss, season_str, '\t') &&
-            std::getline(iss, episode_str)) {
-            try {
-                e.size_bytes = std::stoull(size_str);
-                e.mtime = std::stoll(mtime_str);
-                int k = std::stoi(kind_str);
-                e.kind = (k == 0) ? MediaKind::Movie : (k == 1) ? MediaKind::Episode : MediaKind::Unclassified;
-                e.year = std::stoi(year_str);
-                e.season = std::stoi(season_str);
-                e.episode = std::stoi(episode_str);
-            } catch (...) { continue; }
+    std::vector<MediaEntry> loaded;
+    {
+        pekdb::Stmt st(*db_, "SELECT id,path,filename,size,mtime,kind,title,year,show_title,season,episode FROM media");
+        while (st.step()) {
+            MediaEntry e;
+            e.id = st.str(0); e.path = st.str(1); e.filename = st.str(2);
+            e.size_bytes = static_cast<uint64_t>(st.num(3)); e.mtime = st.num(4);
+            const int k = static_cast<int>(st.num(5));
+            e.kind = (k == 0) ? MediaKind::Movie : (k == 1) ? MediaKind::Episode : MediaKind::Unclassified;
+            e.title = st.str(6); e.year = static_cast<int>(st.num(7)); e.show_title = st.str(8);
+            e.season = static_cast<int>(st.num(9)); e.episode = static_cast<int>(st.num(10));
             loaded.push_back(std::move(e));
         }
     }
-
     std::lock_guard<std::mutex> lock(mutex_);
     entries_ = std::move(loaded);
     std::cout << "[MediaScanner] Loaded " << entries_.size() << " entries from cache." << std::endl;
