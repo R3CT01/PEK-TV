@@ -59,19 +59,34 @@
     function draw() {
         timer = null;
         if (!el) return;
-        var list = Object.keys(items).map(function (k) { return items[k]; })
+        var list = Object.keys(items).map(function (k) { items[k]._id = k; return items[k]; })
             .filter(function (it) { return visible(it) && (it.done || Date.now() - it.t < 90000); })   // a stuck item fades out
             .sort(function (a, b) { return a.order - b.order; }).slice(-MAX_LINES);
         el.style.display = (hidden || level === 'off' || !list.length) ? 'none' : 'flex';
-        el.textContent = '';
+        // Lines are reused and only their text changes, so a counting-down message ("12 left", "11 left" ...) never
+        // rebuilds the line - rebuilding restarted the pulsing dot every time, which looked like blinking.
+        var existing = {};
+        Array.prototype.forEach.call(el.children, function (c) { existing[c.getAttribute('data-id')] = c; });
+        var prev = null;
         list.forEach(function (it) {
-            var line = document.createElement('div');
-            line.className = 'ha-line' + (it.done ? ' ha-done' : '');
-            var dot = document.createElement('span'); dot.className = 'ha-dot';
-            var t = document.createElement('span'); t.className = 'ha-txt'; t.textContent = it.text;
-            line.appendChild(dot); line.appendChild(t);
-            el.appendChild(line);
+            var line = existing[it._id];
+            delete existing[it._id];
+            if (!line) {
+                line = document.createElement('div');
+                line.setAttribute('data-id', it._id);
+                var dot = document.createElement('span'); dot.className = 'ha-dot';
+                var t0 = document.createElement('span'); t0.className = 'ha-txt';
+                line.appendChild(dot); line.appendChild(t0);
+            }
+            var cls = 'ha-line' + (it.done ? ' ha-done' : '');
+            if (line.className !== cls) line.className = cls;
+            var t = line.lastChild;
+            if (t.textContent !== it.text) t.textContent = it.text;
+            var want = prev ? prev.nextSibling : el.firstChild;
+            if (line !== want) el.insertBefore(line, want);
+            prev = line;
         });
+        Object.keys(existing).forEach(function (k) { el.removeChild(existing[k]); });
     }
 
     function redraw() { if (!timer) timer = setTimeout(draw, 120); }      // batch bursts of updates

@@ -245,6 +245,8 @@ class MainAppSourcesMethods {
 
     // Manual refresh: rate limited to once per 10 seconds (the server enforces
     // the same limit), then waits for the scan to finish and reloads the list.
+    // The seconds are counted down by rewriting the button text in place (see _paintCooldown): the screen is
+    // repainted only when the countdown starts and when it ends, so nothing on it flickers while it runs.
     _startCooldown(seconds) {
         clearInterval(this._cooldownTimer);
         this.setState({ refreshCooldown: seconds });
@@ -252,11 +254,22 @@ class MainAppSourcesMethods {
             const left = this.state.refreshCooldown - 1;
             if (left <= 0) {
                 clearInterval(this._cooldownTimer);
-                this.setState({ refreshCooldown: 0 });
+                this.setState({ refreshCooldown: 0 });       // one repaint: the buttons switch back on
             } else {
-                this.setState({ refreshCooldown: left });
+                this.state = { ...this.state, refreshCooldown: left };   // quiet update, no repaint
+                this._paintCooldown();
             }
         }, 1000);
+    }
+
+    // Rewrites the label of every button marked data-cd (its value is the label without the countdown).
+    _paintCooldown() {
+        const s = this.state.refreshCooldown;
+        document.querySelectorAll('[data-cd]').forEach(n => {
+            const base = n.getAttribute('data-cd');
+            const text = s > 0 ? `${base} (${s}s)` : base;
+            if (n.textContent !== text) n.textContent = text;
+        });
     }
 
     // ---------------- Loading ring ----------------

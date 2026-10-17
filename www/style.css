@@ -1962,3 +1962,103 @@ html, body { max-width: 100%; overflow-x: hidden; overscroll-behavior: none; tou
 
 .pm-off-btns { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 .pm-off-retry[hidden] { display: none; }
+
+
+/* ============================================================
+   Search bar (top of the library screens)
+   ============================================================ */
+.content-head { margin-bottom: 1.5rem; }
+.content-head > .content-header { margin-bottom: 0; }
+.hs-searchbar {
+    position: relative; display: flex; align-items: center; gap: 0.6rem;
+    width: 100%; max-width: 46rem; box-sizing: border-box; min-height: 2.9rem;
+    margin: 0 0 1.1rem; padding: 0 0.5rem 0 1rem;
+    background: var(--sx-surface); color: var(--sx-text);
+    border: 1px solid var(--sx-border); border-radius: 999px; cursor: text;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.hs-searchbar:focus-within, .hs-searchbar.focused {
+    border-color: var(--sx-border-focus); background: var(--sx-surface-focused);
+    box-shadow: 0 0 0 3px var(--sx-accent-glow);
+}
+.hs-search-icon { display: flex; flex: none; color: var(--sx-text-muted); transition: color 0.15s ease; }
+.hs-searchbar:focus-within .hs-search-icon, .hs-searchbar.focused .hs-search-icon { color: var(--sx-accent); }
+.hs-search-input {
+    flex: 1; min-width: 0; height: 2.7rem; padding: 0; margin: 0;
+    background: transparent; border: 0; outline: 0; box-shadow: none; border-radius: 0;
+    color: inherit; font: inherit; font-size: 1rem; -webkit-appearance: none; appearance: none;
+}
+.hs-search-input::placeholder { color: var(--sx-text-muted); opacity: 0.9; }
+.hs-search-clear {
+    display: none; flex: none; align-items: center; justify-content: center;
+    width: 2.1rem; height: 2.1rem; padding: 0; border: 0; border-radius: 50%;
+    background: transparent; color: var(--sx-text-muted); cursor: pointer; font-size: 0.95rem;
+    -webkit-tap-highlight-color: transparent; transition: background-color 0.12s ease, color 0.12s ease;
+}
+.hs-search-clear:active { background: var(--sx-border); color: var(--sx-text); }
+.hs-searchbar.has-text .hs-search-clear, html.pek-searching .hs-search-clear { display: flex; }
+/* While searching, the results take the place of the screen's content. */
+html.pek-searching .pek-content > div > :not(.content-head), html.pek-searching .content-head > .content-header { display: none; }
+.content-head > .sx-search-results { margin-top: 0.25rem; }
+@media (max-width: 640px) {
+    .hs-searchbar { max-width: none; min-height: 2.8rem; margin-bottom: 0.9rem; }
+    .content-head { margin-bottom: 1.1rem; }
+}
+html.pek-tv .hs-searchbar { min-height: 3.2rem; }
+html.pek-tv .hs-searchbar.focused { box-shadow: 0 0 0 0.2rem var(--sx-border-focus); }
+
+/* Music mini bar: glides up and fades in when the big Now Playing page is closed. */
+@keyframes pm-bar-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.pm-bar.pm-bar-in { animation: pm-bar-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+html.pek-lite .pm-bar.pm-bar-in { animation: none; }
+
+/* ============================================================
+   Button polish
+   One look for every button in the app shell and its dialogs: same shape, weight and press feedback.
+   Colours come from the --sx-* tokens, so every skin still applies. (Plugin windows keep their own look.)
+   ============================================================ */
+.pek-shell .sx-btn, .pek-shell .theme-launch-btn, .pek-shell .refresh-btn {
+    justify-content: center; min-height: 2.75rem; padding: 0.6rem 1.25rem; box-sizing: border-box;
+    border-radius: 12px; font-size: 0.95rem; font-weight: 600; line-height: 1.2; letter-spacing: 0.01em;
+    -webkit-tap-highlight-color: transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.12s ease, filter 0.15s ease;
+}
+.pek-shell .refresh-btn { min-height: 2.5rem; padding: 0.45rem 1rem; }
+/* Main action (ui.button with the primary variant): filled with the accent colour. */
+.pek-shell .sx-btn.theme-launch-btn {
+    background: var(--sx-accent); color: var(--sx-bg); border-color: transparent;
+}
+.pek-shell .sx-btn.theme-launch-btn:hover { background: var(--sx-accent); border-color: transparent; filter: brightness(1.08); }
+.pek-shell .sx-btn.sx-selected { background: var(--sx-surface-focused); border-color: var(--sx-accent); }
+.pek-shell .sx-btn:active, .pek-shell .theme-launch-btn:active, .pek-shell .refresh-btn:active { transform: scale(0.97); }
+.pek-shell button:disabled, .pek-shell .sx-btn[disabled] { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: none; filter: none; }
+html:not(.pek-tv):not(.pek-lite) .pek-shell .sx-btn:not(.sx-btn.theme-launch-btn):not(:disabled),
+html:not(.pek-tv):not(.pek-lite) .pek-shell .refresh-btn:not(:disabled) { box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18); }
+html:not(.pek-tv):not(.pek-lite) .pek-shell .sx-btn.theme-launch-btn:not(:disabled) { box-shadow: 0 4px 14px var(--sx-accent-glow); }
+@media (hover: hover) {
+    html:not(.pek-tv) .pek-shell .sx-btn:not(:disabled):hover, html:not(.pek-tv) .pek-shell .refresh-btn:not(:disabled):hover { transform: translateY(-1px); }
+}
+html.pek-tv .pek-shell .sx-btn:active, html.pek-tv .pek-shell .refresh-btn:active { transform: none; }
+
+/* Sidebar tabs */
+.pek-sidebar .nav-item { position: relative; border-radius: 12px; padding: 0.7rem 1rem; font-weight: 500; color: var(--sx-text-muted);
+    transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { .pek-sidebar .nav-item:hover { background: var(--sx-surface); color: var(--sx-text); } }
+.pek-sidebar .nav-item.active { background: var(--sx-surface-focused); color: var(--sx-text); font-weight: 600; border-color: var(--sx-border); }
+.pek-sidebar .nav-item.active::before { content: ''; position: absolute; left: 0; top: 24%; bottom: 24%; width: 3px; border-radius: 0 3px 3px 0; background: var(--sx-accent); }
+
+/* Phone tab bar: an accent tab at the top of the active item, softer text for the others */
+.pek-bottombar .bb-item { position: relative; border-top-color: transparent !important; font-weight: 500; letter-spacing: 0.01em;
+    -webkit-tap-highlight-color: transparent; transition: color 0.15s ease, background-color 0.12s ease; }
+.pek-bottombar .bb-item::before { content: ''; position: absolute; top: 0; left: 50%; width: 0; height: 3px; border-radius: 0 0 3px 3px;
+    background: var(--sx-accent); -webkit-transform: translateX(-50%); transform: translateX(-50%); transition: width 0.2s ease; }
+.pek-bottombar .bb-item.active { font-weight: 600; }
+.pek-bottombar .bb-item.active::before { width: 2rem; }
+.pek-bottombar .bb-item:active { background: var(--sx-surface); }
+
+/* Rows, toggles and tiles share the same corner radius and press feedback */
+.pek-shell .plugin-row, .pek-shell .sx-list-row, .pek-shell .sx-toggle-row { border-radius: 14px; -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.12s ease; }
+.pek-shell .plugin-row:active, .pek-shell .sx-list-row:active, .pek-shell .sx-toggle-row:active { transform: scale(0.99); }
+html.pek-tv .pek-shell .plugin-row:active, html.pek-tv .pek-shell .sx-list-row:active, html.pek-tv .pek-shell .sx-toggle-row:active { transform: none; }
+.pek-shell .weather-badge, .pek-shell .clock-badge { -webkit-tap-highlight-color: transparent; transition: border-color 0.15s ease, background-color 0.15s ease; }

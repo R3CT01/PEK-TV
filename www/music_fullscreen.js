@@ -50,6 +50,8 @@
         '.pmfs { position: fixed; inset: 0; z-index: 9000; background: #07070a; color: #fff; overflow: hidden; display: none; font-family: inherit; -webkit-user-select: none; user-select: none; }',
         '.pmfs.open { display: block; animation: pmfs-in .28s ease both; }',
         '@keyframes pmfs-in { from { opacity: 0; transform: translateY(2.5vh); } to { opacity: 1; transform: none; } }',
+        '.pmfs.closing { display: block; pointer-events: none; animation: pmfs-out .24s ease both; }',
+        '@keyframes pmfs-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(2.5vh); } }',
         /* backdrop */
         '.pmfs-bg { position: absolute; inset: -6%; background: radial-gradient(120% 90% at 20% 10%, #3a2a20 0%, #0d0b0b 70%); transition: filter .6s ease; }',
         '.pmfs-bgl { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity .8s ease; }',
@@ -600,11 +602,14 @@
     });
 
     // ---------------------------------------------------------------- public
+    var closeT = 0;
     FS.open = function () {
         if (!P.current()) return;
         build();
         if (FS.isOpen) return;
         FS.isOpen = true;
+        clearTimeout(closeT);
+        root.classList.remove('closing');
         root.classList.add('open');
         root.classList.toggle('lyr', lyricsOn);
         lyrBtn.classList.toggle('on', lyricsOn);
@@ -621,8 +626,14 @@
         if (!FS.isOpen) return;
         FS.isOpen = false;
         if (panel.open) togglePanel(false);
+        // Fade out instead of vanishing: the screen stays up for the length of its fade, then is cleared.
         root.classList.remove('open', 'panel');
-        lyrHost.innerHTML = '';
+        root.classList.add('closing');
+        clearTimeout(closeT);
+        closeT = setTimeout(function () {
+            root.classList.remove('closing');
+            if (!FS.isOpen) lyrHost.innerHTML = '';
+        }, 260);
         bgToken++;
         setNative(false);
         P.sync();

@@ -658,16 +658,36 @@ class PekWindow {
             kept.set(el.dataset.keepScroll, [el.scrollLeft, el.scrollTop]);
         });
         const next = this.render();
-        if (this.#engine.gsap && !document.documentElement.classList.contains('pek-lite')) {   // a whole-screen fade on every repaint is costly on weak GPUs
-            this.#engine.gsap.fromTo(next, { opacity: 0 }, { opacity: 1, duration: 0.2, ease: 'power1.out' });
-        }
-        this.#rootElement.replaceWith(next);
+        const prev = this.#rootElement;
+        // A repaint rebuilds every element, so anything that fades or animates in on its own would flash again on
+        // each tick (a countdown, a progress update ...). Two rules keep a repaint invisible:
+        //  1. Entrance animations (dialog fade, detail hero) only run for things that were NOT already on screen.
+        //  2. Only the content pane fades, and only when it now shows a different screen (tab / drill-down level).
+        //     The sidebar, tab bar and buttons never fade, so they never blink.
+        PekWindow.#calmRepaint(prev, next);
+        const screenKey = (root) => { const c = root.querySelector('[data-keep-scroll^="content:"]'); return c ? c.dataset.keepScroll : null; };
+        const oldKey = screenKey(prev), newKey = screenKey(next);
+        prev.replaceWith(next);
         this.#rootElement = next;
+        if (newKey !== null && newKey !== oldKey && this.#engine.gsap && !document.documentElement.classList.contains('pek-lite')) {
+            const pane = next.querySelector('[data-keep-scroll^="content:"]');
+            if (pane) this.#engine.gsap.fromTo(pane, { opacity: 0 }, { opacity: 1, duration: 0.18, ease: 'power1.out', clearProps: 'opacity' });
+        }
         next.querySelectorAll('[data-keep-scroll]').forEach(el => {
             const pos = kept.get(el.dataset.keepScroll);
             if (pos) { el.scrollLeft = pos[0]; el.scrollTop = pos[1]; }
         });
         this.#engine.refreshFocusList();
+    }
+
+    // Turns off the CSS entrance animation of an element that already existed in the previous paint (matched by
+    // position among elements with the same class), so rebuilding it does not replay the animation.
+    static #calmRepaint(prev, next) {
+        for (const sel of ['.theme-panel-overlay', '.hero', '.glass-panel', '.sx-toast']) {
+            const before = prev.querySelectorAll(sel).length;
+            if (!before) continue;
+            next.querySelectorAll(sel).forEach((el, i) => { if (i < before) el.style.animation = 'none'; });
+        }
     }
 
     // Prefixed with _ as a convention signal ("protected — window

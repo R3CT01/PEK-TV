@@ -112,6 +112,7 @@ class MainApp extends PekComponent {
         }
         // Tapping "TV Shows" always returns to the top-level show folders.
         const showNav = id === 'shows' ? { show: null, season: null } : this.state.showNav;
+        if (this.state.searchOpen) this.closeSearch();     // the search bar belongs to the screen being left
         if (id === 'favorites' && window.PekFavorites) this.state.favorites = window.PekFavorites.list();
         this.setState({ activeTab: id, showNav, moreOpen: false, dashEdit: false });
         this.loadLibrary(id);
@@ -350,7 +351,11 @@ class MainApp extends PekComponent {
                     createElement('div', { className: 'section-actions' },
                         ui.button('Add Source Folder', () => this.openPicker(), { variant: 'primary' }),
                         ui.button('Add Network Folder', () => this.openNetPicker()),
-                        ui.button(this.state.refreshing ? 'Scanning\u2026' : this.state.refreshCooldown > 0 ? `Rescan Library (${this.state.refreshCooldown}s)` : 'Rescan Library', () => this.rescan())
+                        (() => {
+                            const b = ui.button(this.state.refreshing ? 'Scanning\u2026' : this.state.refreshCooldown > 0 ? `Rescan Library (${this.state.refreshCooldown}s)` : 'Rescan Library', () => this.rescan());
+                            if (!this.state.refreshing) b.setAttribute('data-cd', 'Rescan Library');   // the countdown rewrites the text in place
+                            return b;
+                        })()
                     )
                 ),
                 this._renderProfileSettings(),
