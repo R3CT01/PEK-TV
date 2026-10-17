@@ -87,7 +87,7 @@ def run():
 
 <h2 id="more">More APIs</h2>
 <h3>Torrent streaming</h3>
-<p>With <code>"torrent": true</code>, a plugin can call <code>pek.torrent.info()</code>, <code>pek.torrent.search({kind, title, year, season, episode})</code> and <code>pek.torrent.play({source, title, kind, name, season, episode, year, image})</code>. PEK TV shows its own buffering box and opens the player when enough is downloaded. The plugin never sees the provider's address or key, which the user sets under <b>Settings &rarr; Torrents</b>. PEK TV ships with no search provider; the user supplies their own Torznab provider.</p>
+<p>With <code>"torrent": true</code>, a plugin can call <code>pek.torrent.info()</code> and <code>pek.torrent.play({source, title, kind, name, season, episode, year, image})</code>. PEK TV shows its own buffering box and opens the player when enough is downloaded. PEK TV has no torrent search of its own: the plugin supplies the magnet link.</p>
 <h3>Up next</h3>
 <pre><code>pek.onNextEpisode(function (req) {
   // req = { phase: 'check' | 'play', showTitle, season, episode }

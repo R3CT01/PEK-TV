@@ -2,13 +2,11 @@
 // PekTorrent: the web side of torrent playback.
 //
 // The C++ backend does the real work (/api/torrent/*). This file:
-//   - reads/saves the search-provider settings (Settings > Torrents),
-//   - searches for releases of a movie / episode,
 //   - starts a torrent, shows a "Buffering" box with live progress, and hands the stream
 //     URL to PEK TV's player once enough is downloaded,
 //   - stops the torrent (and deletes its temporary data) when the player closes.
-// Plugins never touch this directly: plugin_sandbox.js calls it for plugins that declare
-// "torrent": true in plugin.json.
+// PEK TV has no torrent search of its own. Plugins never touch this directly: plugin_sandbox.js calls it
+// for plugins that declare "torrent": true in plugin.json and hand it a magnet link to play.
 // ============================================================
 (function () {
     'use strict';
@@ -119,24 +117,10 @@
         isStarting() { return !!cancelActive; },
         cancelStarting() { if (!cancelActive) return false; cancelActive(); return true; },
         info() { return call(API + '/info'); },
-        getSettings() { return call(API + '/settings'); },
-        saveSettings(url, key) { return post(API + '/settings', { url: url || '', key: key || '' }); },
         // Lets the server download this .torrent link when it is started (called by plugin_sandbox.js only).
         allowLink(url) { return post(API + '/allow', { url: String(url || '') }); },
 
-        // q: { kind: 'movie'|'episode', title, year, season, episode }  ->  [{title, source, sizeText, seeders, quality, pack}]
-        async search(q) {
-            const p = new URLSearchParams();
-            p.set('kind', q.kind === 'episode' ? 'episode' : 'movie');
-            p.set(q.kind === 'episode' ? 'show' : 'title', String(q.title || '').slice(0, 200));
-            if (q.year > 0) p.set('year', String(q.year | 0));
-            if (q.season > 0) p.set('season', String(q.season | 0));
-            if (q.episode > 0) p.set('episode', String(q.episode | 0));
-            const d = await call(API + '/search?' + p.toString());
-            return d.results || [];
-        },
-
-        // Starts `source` (a magnet link or a link from a search result), shows the buffering box and
+        // Starts `source` (a magnet link, or a .torrent link a plugin vouched for), shows the buffering box and
         // opens the player when it is ready. Resolves once the player is open; rejects if it failed
         // or the user cancelled.
         //   opts: { source, title, season, episode, track?: { meta }, startSec? }
