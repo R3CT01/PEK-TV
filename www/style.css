@@ -596,6 +596,9 @@ html[data-sx-glow] .pek-content {
         padding-bottom: env(safe-area-inset-bottom, 0px);
     }
     html.hp-typing .pek-bottombar { display: none; }
+    /* While the More sheet is open the bar rises above the docked mini player (z-index 40), so the sheet's
+       options are never covered by it. */
+    .pek-bottombar.bb-open { z-index: 50; }
 
     .bb-item {
         position: relative;
