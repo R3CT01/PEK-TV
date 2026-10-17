@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(pek CXX)
+project(pek C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +9,18 @@ set(BACKEND ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../backend)
 
 # Static OpenSSL built by android/scripts/build-openssl.sh (one folder per ABI)
 set(OPENSSL_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/../../../../openssl/${ANDROID_ABI})
+
+# SQLite (the library and music databases). The amalgamation (sqlite3.c + sqlite3.h) lives in android/sqlite; the CI
+# workflow fetches it with android/scripts/fetch-sqlite.sh (run that once for a local Android Studio build). It is
+# compiled into the app, so nothing depends on the SQLite version of the phone or TV box.
+set(SQLITE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../sqlite)
+if(NOT EXISTS ${SQLITE_DIR}/sqlite3.c)
+    message(FATAL_ERROR "SQLite is missing: run android/scripts/fetch-sqlite.sh (it unpacks sqlite3.c and sqlite3.h into android/sqlite).")
+endif()
+add_library(pek_sqlite STATIC ${SQLITE_DIR}/sqlite3.c)
+target_include_directories(pek_sqlite PUBLIC ${SQLITE_DIR})
+target_compile_definitions(pek_sqlite PRIVATE SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION=1 SQLITE_DEFAULT_MEMSTATUS=0)
+set_target_properties(pek_sqlite PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 add_library(pek SHARED
     jni_entry.cpp
@@ -50,9 +62,10 @@ else()
     message(STATUS "PEK: SMB support OFF (android/libsmb2 not found)")
 endif()
 
-target_include_directories(pek PRIVATE ${BACKEND} ${OPENSSL_ROOT}/include)
+target_include_directories(pek PRIVATE ${BACKEND} ${OPENSSL_ROOT}/include ${SQLITE_DIR})
 target_compile_definitions(pek PRIVATE CPPHTTPLIB_OPENSSL_SUPPORT)
 target_link_libraries(pek
+    pek_sqlite
     ${OPENSSL_ROOT}/lib/libssl.a
     ${OPENSSL_ROOT}/lib/libcrypto.a
     log)

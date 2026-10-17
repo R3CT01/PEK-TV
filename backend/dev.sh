@@ -15,7 +15,7 @@
 #   PEK_SMB=1 PEK_NFS=1 bash dev.sh   (both)
 # Without them the app says "no SMB support" / "no NFS support" for those types.
 #
-# Needs (Termux): pkg install clang python openssl, and httplib.h in the
+# Needs (Termux): pkg install clang python openssl sqlite, and httplib.h in the
 # source folder. For TMDb: export TMDB_API_KEY=your_key (before running).
 #
 # Search sites: this version adds /api/torrent/sites, /site, /allow and /fetch (torrent_routes.cpp).
@@ -43,6 +43,7 @@ if [ "$1" != "--run" ]; then
     [ -f httplib.h ] || { echo "!! httplib.h is missing from $SRC_DIR"; exit 1; }
     command -v python3-config >/dev/null 2>&1 || { echo "!! python3-config not found (pkg install python)"; exit 1; }
     echo "#include <openssl/ssl.h>" | g++ -x c++ -fsyntax-only - >/dev/null 2>&1 || { echo "!! OpenSSL headers not found (pkg install openssl). Search sites need HTTPS."; exit 1; }
+    echo "#include <sqlite3.h>" | g++ -x c++ -fsyntax-only - >/dev/null 2>&1 || { echo "!! SQLite headers not found (pkg install sqlite). The library and music databases need it."; exit 1; }
     SMB_FLAGS=""
     SMB_SRC=""
     if [ "$PEK_SMB" = "1" ]; then
@@ -64,7 +65,7 @@ if [ "$1" != "--run" ]; then
         -o "$ROOT/bin/pek" \
         $(python3-config --cflags --embed) \
         $(python3-config --ldflags --embed) \
-        -lssl -lcrypto -lpthread $SMB_FLAGS $TORRENT_FLAGS
+        -lssl -lcrypto -lsqlite3 -lpthread $SMB_FLAGS $TORRENT_FLAGS
 fi
 
 # Android blocks executing files on shared storage (/storage/emulated/0,

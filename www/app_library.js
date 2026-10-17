@@ -304,22 +304,30 @@ class MainAppLibraryMethods {
         this._searchQ = (document.querySelector('.hs-search-input') || {}).value || '';
         this._searchCache = null;
         this._searchSeq = 0;
+        this._searchFilter = { genre: '', decade: 0, actor: '' };      // narrowing by Genre / Year / Actor
+        this._searchPick = '';                                         // which list of choices is open: genre | decade | actor
+        this._actorQ = '';
         this.state = { ...this.state, searchOpen: true, moreOpen: false };
         document.documentElement.classList.add('pek-searching');
+        const filters = this.props.engine.createElement('div', { className: 'section-actions sx-search-filters' });
+        head.appendChild(filters);
+        this._searchBar = filters;
         const box = this.props.engine.createElement('div', { className: 'sx-search-results' });
         head.appendChild(box);
         this._searchBox = box;
+        this._fillSearchBar();
         this._fillSearch(box);
     }
 
     closeSearch() {
         clearTimeout(this._searchT);
         this._searchBox = null;
+        this._searchBar = null;
         this._searchFocused = false;
         this._searchQ = '';
         this.state = { ...this.state, searchOpen: false };
         document.documentElement.classList.remove('pek-searching');
-        document.querySelectorAll('.sx-search-results').forEach(n => n.remove());
+        document.querySelectorAll('.sx-search-results, .sx-search-filters').forEach(n => n.remove());
         const input = document.querySelector('.hs-search-input');
         if (input) { input.value = ''; if (input.blur) input.blur(); }
         const bar = document.querySelector('.hs-searchbar');
@@ -333,7 +341,7 @@ class MainAppLibraryMethods {
         const icon = createElement('span', { className: 'hs-search-icon', 'aria-hidden': 'true' });
         icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line></svg>';
         const input = createElement('input', {
-            className: 'hs-search-input', type: 'text', placeholder: 'Search movies, shows and episodes',
+            className: 'hs-search-input', type: 'text', placeholder: 'Search titles, actors, genres, years',
             enterkeyhint: 'search', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false',
             'aria-label': 'Search your library'
         });
@@ -376,30 +384,131 @@ class MainAppLibraryMethods {
 
     _onSearchInput(v) {
         this._searchQ = v;
+        if (this._searchPick && this._searchPick !== 'actor') { this._searchPick = ''; this._fillSearchBar(); }   // typing leaves the genre / year list
         clearTimeout(this._searchT);
         this._searchT = setTimeout(() => {
             if (this._searchBox && this._searchBox.isConnected) this._fillSearch(this._searchBox);
         }, 140);
     }
 
+    // Folds a name the way the server does (capitals and accents ignored), so "amelie" finds "Amélie".
+    _searchFold(t) {
+        return String(t == null ? '' : t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\u0080-\uffff]+/g, ' ').trim();
+    }
+
+    // The library database knows more than titles: year, genre, actors, directors, studio ... (read from the NFO files).
+    // Returns { movies: [ids], shows: [titles] } or null when the server could not answer.
+    async _searchMeta(q, f) {
+        const qs = (type) => '/api/library/search?type=' + type + '&limit=60&q=' + encodeURIComponent(q || '') +
+            (f.genre ? '&genre=' + encodeURIComponent(f.genre) : '') + (f.decade ? '&decade=' + f.decade : '') +
+            (f.actor ? '&actor=' + encodeURIComponent(f.actor) : '');
+        try {
+            const [m, s] = await Promise.all([fetch(qs('movies')).then(r => r.json()), fetch(qs('shows')).then(r => r.json())]);
+            return { movies: m.movies || [], shows: s.shows || [] };
+        } catch (e) { return null; }
+    }
+
+    // Genres, decades and actors found in the library (movies and shows together).
+    async _searchFacets(actorQ) {
+        try {
+            const url = (type) => '/api/library/facets?type=' + type + '&limit=60&q=' + encodeURIComponent(actorQ || '');
+            const [m, s] = await Promise.all([fetch(url('movies')).then(r => r.json()), fetch(url('shows')).then(r => r.json())]);
+            const sum = (a, b, key) => { const map = new Map(); [...(a || []), ...(b || [])].forEach(x => map.set(x[key], (map.get(x[key]) || 0) + x.count)); return map; };
+            const top = (map, by) => [...map.entries()].sort(by).slice(0, 60);
+            return {
+                genres: top(sum(m.genres, s.genres, 'name'), (x, y) => y[1] - x[1] || String(x[0]).localeCompare(y[0])),
+                decades: top(sum(m.decades, s.decades, 'decade'), (x, y) => y[0] - x[0]),
+                actors: top(sum(m.actors, s.actors, 'name'), (x, y) => y[1] - x[1] || String(x[0]).localeCompare(y[0])),
+                indexing: (m.indexing && m.indexing.total ? m.indexing : null) || (s.indexing && s.indexing.total ? s.indexing : null)
+            };
+        } catch (e) { return null; }
+    }
+
+    // The Genre / Year / Actor buttons, and a button for every filter that is on (tap it to turn it off).
+    _fillSearchBar() {
+        const bar = this._searchBar;
+        if (!bar || !bar.isConnected) return;
+        const { ui } = this.props.engine;
+        const f = this._searchFilter;
+        while (bar.firstChild) bar.removeChild(bar.firstChild);
+        const pick = (what) => { this._searchPick = this._searchPick === what ? '' : what; this._actorQ = ''; this._fillSearchBar(); if (this._searchBox) this._fillSearch(this._searchBox); };
+        const off = (key) => { f[key] = key === 'decade' ? 0 : ''; this._searchPick = ''; this._fillSearchBar(); if (this._searchBox) this._fillSearch(this._searchBox); };
+        bar.appendChild(ui.button('Genre', () => pick('genre'), { variant: this._searchPick === 'genre' ? 'primary' : undefined }));
+        bar.appendChild(ui.button('Year', () => pick('decade'), { variant: this._searchPick === 'decade' ? 'primary' : undefined }));
+        bar.appendChild(ui.button('Actor', () => pick('actor'), { variant: this._searchPick === 'actor' ? 'primary' : undefined }));
+        if (f.genre) bar.appendChild(ui.button(f.genre + ' \u2715', () => off('genre'), { variant: 'primary' }));
+        if (f.decade) bar.appendChild(ui.button(f.decade + 's \u2715', () => off('decade'), { variant: 'primary' }));
+        if (f.actor) bar.appendChild(ui.button(f.actor + ' \u2715', () => off('actor'), { variant: 'primary' }));
+        this.props.engine.refreshFocusList();
+    }
+
+    // The list of genres / decades / actors to choose from, drawn into the results box.
+    async _fillSearchPicker(box, seq) {
+        const { createElement, ui } = this.props.engine;
+        const f = this._searchFilter, what = this._searchPick;
+        const facets = await this._searchFacets(what === 'actor' ? this._searchQ : '');
+        if (seq !== this._searchSeq || !box.isConnected) return;
+        while (box.firstChild) box.removeChild(box.firstChild);
+        const say = (t) => box.appendChild(createElement('p', { className: 'sub' }, t));
+        if (!facets) { say('Could not reach your library. Is the server running?'); this.props.engine.refreshFocusList(); return; }
+        const choose = (key, value) => {
+            f[key] = value; this._searchPick = ''; this._searchQ = '';
+            const inp = document.querySelector('.hs-search-input');
+            if (inp) inp.value = '';
+            this._fillSearchBar(); this._fillSearch(box);
+        };
+        const items = what === 'genre' ? facets.genres.map(([n, c]) => [n + ' (' + c + ')', () => choose('genre', n)])
+            : what === 'decade' ? facets.decades.map(([d, c]) => [d + 's (' + c + ')', () => choose('decade', d)])
+            : facets.actors.map(([n, c]) => [n + ' (' + c + ')', () => choose('actor', n)]);
+        if (facets.indexing && facets.indexing.done < facets.indexing.total) say('Reading details from your files\u2026 ' + facets.indexing.done + ' of ' + facets.indexing.total + '. More will appear as it goes.');
+        if (!items.length) say(what === 'decade' ? 'No release years found yet.'
+            : 'Nothing here yet. PEK TV reads genres and actors from .nfo files (the Kodi kind) saved next to your movies and shows, after a scan.');
+        else {
+            if (what === 'actor') say('Type part of a name above to narrow the list.');
+            box.appendChild(createElement('div', { className: 'section-actions' }, ...items.map(([label, fn]) => ui.button(label, fn))));
+        }
+        this.props.engine.refreshFocusList();
+    }
+
     async _fillSearch(box) {
         const { createElement, ui } = this.props.engine;
         const clear = () => { while (box.firstChild) box.removeChild(box.firstChild); };
         const say = (text) => { clear(); box.appendChild(createElement('p', { className: 'sub' }, text)); };
-        const norm = (t) => String(t == null ? '' : t).toLowerCase().replace(/[^a-z0-9\u00c0-\uffff]+/g, ' ').trim();
+        const norm = (t) => this._searchFold(t);        // capitals and accents ignored, like the server
         const words = norm(this._searchQ).split(' ').filter(Boolean);
         const seq = ++this._searchSeq;
-        if (!words.length) { say('Type a title to search your library.'); this.props.engine.refreshFocusList(); return; }
+        const f = this._searchFilter || { genre: '', decade: 0, actor: '' };
+        const filtering = !!(f.genre || f.decade || f.actor);
+        if (this._searchPick) { await this._fillSearchPicker(box, seq); return; }
+        if (!words.length && !filtering) { say('Type a title, an actor, a genre or a year \u2014 or use the buttons above.'); this.props.engine.refreshFocusList(); return; }
         const data = await this._searchData();
         if (seq !== this._searchSeq || !box.isConnected) return;
         if (data.error) { say('Could not reach your library. Is the server running?'); this.props.engine.refreshFocusList(); return; }
+        const meta = await this._searchMeta(this._searchQ.trim(), f);
+        if (seq !== this._searchSeq || !box.isConnected) return;
+        if (filtering && !meta) { say('Could not reach your library. Is the server running?'); this.props.engine.refreshFocusList(); return; }
 
         const hit = (hay) => { const h = norm(hay); return words.every(w => h.indexOf(w) >= 0); };
         const pad = (n) => (n < 10 ? '0' : '') + n;
-        const movies = data.movies.filter(m => hit(m.title + ' ' + (m.year || '') + ' ' + (m.filename || ''))).slice(0, 24);
-        const shows = data.shows.filter(s => hit(s.showTitle)).slice(0, 24);
+        // With a filter on, only the database's answer counts (it applies the filter). Without one, titles and file names
+        // found on this device come first, then whatever the database matched by actor, genre, year, studio ...
+        const byId = new Map(data.movies.map(m => [m.id, m]));
+        const showsByFold = new Map();
+        data.shows.forEach(s => { const k = this._searchFold(s.showTitle); if (!showsByFold.has(k)) showsByFold.set(k, []); showsByFold.get(k).push(s); });
+        const metaMovies = meta ? meta.movies.map(id => byId.get(id)).filter(Boolean) : [];
+        const metaShows = meta ? meta.shows.flatMap(t => showsByFold.get(this._searchFold(t)) || []) : [];
+        let movies, shows;
+        if (filtering) { movies = metaMovies; shows = metaShows; }
+        else {
+            const own = data.movies.filter(m => hit(m.title + ' ' + (m.year || '') + ' ' + (m.filename || '')));
+            const ownShows = data.shows.filter(s => hit(s.showTitle));
+            movies = [...own, ...metaMovies.filter(m => !own.includes(m))];
+            shows = [...ownShows, ...metaShows.filter(s => !ownShows.includes(s))];
+        }
+        movies = movies.slice(0, 48);
+        shows = shows.slice(0, 48);
         const eps = [];
-        data.shows.forEach(sh => (sh.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
+        if (!filtering) data.shows.forEach(sh => (sh.seasons || []).forEach(se => (se.episodes || []).forEach(e => {
             if (eps.length < 30 && hit(sh.showTitle + ' season ' + se.season + ' episode ' + e.episode + ' s' + pad(se.season) + 'e' + pad(e.episode) + ' ' + (e.filename || ''))) eps.push({ show: sh.showTitle, e: e });
         })));
 
@@ -433,7 +542,7 @@ class MainAppLibraryMethods {
                     this.openEpisodeDetail(x.show, x.e);
                 }))));
         }
-        if (!movies.length && !shows.length && !eps.length) say('Nothing in your library matches \u201c' + this._searchQ.trim() + '\u201d.');
+        if (!movies.length && !shows.length && !eps.length) say(filtering ? 'Nothing in your library matches these filters.' : 'Nothing in your library matches \u201c' + this._searchQ.trim() + '\u201d.');
         this.props.engine.refreshFocusList();
     }
 
@@ -483,9 +592,13 @@ class MainAppLibraryMethods {
         // rest of the screen is hidden by CSS (html.pek-searching).
         const head = createElement('div', { className: 'content-head' }, searchBar, row);
         if (searchBar && this.state.searchOpen) {
+            const filters = createElement('div', { className: 'section-actions sx-search-filters' });
+            head.appendChild(filters);
+            this._searchBar = filters;
             const box = createElement('div', { className: 'sx-search-results' });
             head.appendChild(box);
             this._searchBox = box;
+            this._fillSearchBar();
             this._fillSearch(box);
             document.documentElement.classList.add('pek-searching');
         }

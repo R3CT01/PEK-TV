@@ -1,6 +1,7 @@
 // g++ -std=c++17 -o /tmp/nfo_test nfo_test.cpp && /tmp/nfo_test
 #include "nfo.h"
 #include <cstdio>
+#include <string>
 static int fails = 0;
 #define CHECK(c) do { if (!(c)) { std::printf("FAIL line %d: %s\n", __LINE__, #c); ++fails; } } while (0)
 
@@ -21,6 +22,32 @@ int main() {
 
     auto t = nfo::parse("<!-- c --><tvshow><title>Seinfeld</title><year>1989</year><plot>Nothing.</plot><episodeguide><url>x</url></episodeguide></tvshow>");
     CHECK(t.ok && t.root == "tvshow" && t.title == "Seinfeld" && t.year == 1989);
+
+    // people / genres / rating (search and browse)
+    auto r = nfo::parse("<movie><title>Heat</title><year>1995</year><genre>Crime / Drama</genre><genre>Thriller</genre><genre>drama</genre>"
+        "<director>Michael Mann</director><studio>Warner Bros.</studio><mpaa>Rated R</mpaa><runtime>170</runtime>"
+        "<ratings><rating name=\"imdb\" max=\"10\"><value>8.3</value><votes>1</votes></rating></ratings>"
+        "<set><name>Mann Collection</name><overview>x</overview></set>"
+        "<actor><name>Al Pacino</name><role>Vincent Hanna</role><order>0</order></actor>"
+        "<actor><name>Robert &amp; De Niro</name><role><![CDATA[Neil McCauley]]></role></actor><actor><role>no name</role></actor></movie>");
+    CHECK(r.ok && r.title == "Heat");
+    CHECK(r.genres.size() == 3 && r.genres[0] == "Crime" && r.genres[1] == "Drama" && r.genres[2] == "Thriller");   // split, de-duplicated
+    CHECK(r.directors.size() == 1 && r.directors[0] == "Michael Mann");
+    CHECK(r.studios.size() == 1 && r.studios[0] == "Warner Bros.");
+    CHECK(r.mpaa == "Rated R" && r.runtime == 170 && r.rating > 8.29 && r.rating < 8.31);
+    CHECK(r.collection == "Mann Collection");
+    CHECK(r.actors.size() == 2 && r.actors[0].name == "Al Pacino" && r.actors[0].role == "Vincent Hanna");
+    CHECK(r.actors[1].name == "Robert & De Niro" && r.actors[1].role == "Neil McCauley");
+    auto r2 = nfo::parse("<movie><title>Old</title><rating>7.25</rating><actor><name>A</name></actor></movie>");   // the older Kodi layout
+    CHECK(r2.rating > 7.2 && r2.rating < 7.3 && r2.actors.size() == 1 && r2.actors[0].role.empty());
+    CHECK(nfo::parse("<movie><title>X</title><rating>99</rating></movie>").rating == 0);                            // out of range: ignored
+    CHECK(nfo::parse("<tvshow><title>S</title><genre>Sci-Fi &amp; Fantasy</genre></tvshow>").genres[0] == "Sci-Fi & Fantasy");
+    {   // a hostile file with thousands of actors stays small
+        std::string big = "<movie><title>B</title>";
+        for (int i = 0; i < 5000; ++i) big += "<actor><name>N" + std::to_string(i) + "</name></actor>";
+        big += "</movie>";
+        CHECK(nfo::parse(big).actors.size() == 60);
+    }
 
     CHECK(!nfo::parse("https://www.themoviedb.org/movie/603").ok);          // link-only nfo
     CHECK(!nfo::parse("<html><title>x</title></html>").ok);                  // other xml

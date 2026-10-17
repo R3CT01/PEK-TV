@@ -3,19 +3,26 @@
 
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 // Reads the small XML "NFO" files that Kodi, Radarr, Sonarr, tinyMediaManager and friends write next to
 // a movie / episode / show:
 //
-//   <movie>           title, originaltitle, year (or premiered / releasedate), plot (or outline)
+//   <movie>           title, originaltitle, year (or premiered / releasedate), plot (or outline),
+//                     genre, director, studio, actor (name, role), rating (or ratings/rating/value), runtime, mpaa, set (name)
 //   <episodedetails>  title, showtitle, season, episode, plot (or outline)
-//   <tvshow>          title, originaltitle, year (or premiered), plot (or outline)
+//   <tvshow>          title, originaltitle, year (or premiered), plot (or outline), and the same people / genre fields as a movie
 //
 // Only the direct children of the root element are read (so an <actor><name> or a <set><name> can never
 // be mistaken for the title). Unknown tags are ignored, CDATA and the usual XML entities are decoded, and
 // a file that is not XML at all (for example a text file holding only a link) simply gives ok = false.
 // No XML library: the files are tiny and the few fields needed do not justify a dependency.
 namespace nfo {
+
+struct Actor {
+    std::string name;
+    std::string role;
+};
 
 struct Info {
     bool ok = false;
@@ -27,6 +34,15 @@ struct Info {
     int year = 0;
     int season = 0;
     int episode = 0;
+    // For searching and browsing (Kodi's "genre", "actor", ... tags). Each list is capped so a hostile file stays small.
+    std::vector<std::string> genres;
+    std::vector<std::string> directors;
+    std::vector<std::string> studios;
+    std::vector<Actor> actors;
+    std::string collection;      // <set><name>: the movie collection this belongs to
+    std::string mpaa;            // "PG-13" ...
+    double rating = 0;           // 0 = none; otherwise 0..10
+    int runtime = 0;             // minutes; 0 = none
 };
 
 namespace detail {
@@ -97,6 +113,54 @@ inline std::string decodeText(const std::string& raw) {
         out += raw[i++];
     }
     return trim(out);
+}
+
+// The text of the first <tag>...</tag> inside raw (a child element's body), decoded; "" when absent.
+inline std::string innerText(const std::string& raw, const std::string& tag) {
+    const std::string open = "<" + tag;
+    const std::string close = "</" + tag;
+    size_t from = 0;
+    for (;;) {
+        size_t a = raw.find('<', from);
+        if (a == std::string::npos) return std::string();
+        if (lower(raw.substr(a, open.size())) == open && a + open.size() < raw.size() &&
+            (raw[a + open.size()] == '>' || raw[a + open.size()] == ' ' || raw[a + open.size()] == '/')) {
+            size_t gt = raw.find('>', a);
+            if (gt == std::string::npos || raw[gt - 1] == '/') return std::string();
+            for (size_t c = raw.find("</", gt); c != std::string::npos; c = raw.find("</", c + 2)) {
+                if (lower(raw.substr(c, close.size())) == close) return decodeText(raw.substr(gt + 1, c - (gt + 1)));
+            }
+            return std::string();
+        }
+        from = a + 1;
+    }
+}
+
+inline void addUnique(std::vector<std::string>& list, const std::string& value, size_t cap) {
+    const std::string v = trim(value);
+    if (v.empty() || list.size() >= cap) return;
+    const std::string lv = lower(v);
+    for (const auto& x : list) if (lower(x) == lv) return;
+    list.push_back(v);
+}
+
+// "Action / Adventure", "Comedy, Drama" -> separate names (a lot of NFOs write all the genres in one tag).
+inline void addSplit(std::vector<std::string>& list, const std::string& value, size_t cap) {
+    size_t i = 0;
+    while (i <= value.size()) {
+        size_t j = value.find_first_of("/,", i);
+        if (j == std::string::npos) j = value.size();
+        addUnique(list, value.substr(i, j - i), cap);
+        i = j + 1;
+    }
+}
+
+inline double leadingNumber(const std::string& s) {
+    const std::string t = trim(s);
+    if (t.empty()) return 0;
+    char* endp = nullptr;
+    const double v = std::strtod(t.c_str(), &endp);
+    return (endp && endp != t.c_str() && v > 0 && v <= 10.0) ? v : 0;
 }
 
 inline int leadingInt(const std::string& s) {
@@ -183,7 +247,9 @@ inline Info parse(const std::string& text) {
         if (depth == 1) {                                    // a direct child of the root
             const bool wanted = name == "title" || name == "originaltitle" || name == "showtitle" ||
                                 name == "plot" || name == "outline" || name == "year" || name == "premiered" ||
-                                name == "releasedate" || name == "season" || name == "episode";
+                                name == "releasedate" || name == "season" || name == "episode" ||
+                                name == "genre" || name == "director" || name == "studio" || name == "actor" ||
+                                name == "rating" || name == "ratings" || name == "runtime" || name == "mpaa" || name == "set";
             if (wanted && !selfClosing) {
                 std::string closer = "</" + name;
                 size_t from = gt + 1;
@@ -195,7 +261,8 @@ inline Info parse(const std::string& text) {
                     from = c + 2;
                 }
                 if (e == std::string::npos) { i = gt + 1; ++depth; continue; }
-                std::string value = decodeText(text.substr(gt + 1, e - (gt + 1)));
+                const std::string rawInner = text.substr(gt + 1, e - (gt + 1));
+                std::string value = decodeText(rawInner);
                 size_t after = text.find('>', e);
                 i = after == std::string::npos ? n : after + 1;
                 if (name == "title" && info.title.empty()) info.title = value;
@@ -207,6 +274,22 @@ inline Info parse(const std::string& text) {
                 else if ((name == "premiered" || name == "releasedate") && premiered.empty()) premiered = value;
                 else if (name == "season" && info.season == 0) info.season = leadingInt(value);
                 else if (name == "episode" && info.episode == 0) info.episode = leadingInt(value);
+                else if (name == "genre") addSplit(info.genres, value, 12);
+                else if (name == "director") addSplit(info.directors, value, 8);
+                else if (name == "studio") addUnique(info.studios, value, 6);
+                else if (name == "mpaa" && info.mpaa.empty()) info.mpaa = value.substr(0, 24);
+                else if (name == "runtime" && info.runtime == 0) info.runtime = leadingInt(value);
+                else if (name == "rating" && info.rating == 0) info.rating = leadingNumber(value);
+                else if (name == "ratings" && info.rating == 0) info.rating = leadingNumber(innerText(rawInner, "value"));
+                else if (name == "set" && info.collection.empty()) {
+                    std::string nm = innerText(rawInner, "name");
+                    info.collection = nm.empty() ? value.substr(0, 120) : nm;
+                } else if (name == "actor" && info.actors.size() < 60) {
+                    Actor a;
+                    a.name = innerText(rawInner, "name");
+                    a.role = innerText(rawInner, "role");
+                    if (!a.name.empty()) info.actors.push_back(std::move(a));
+                }
                 continue;                                    // the whole element was consumed
             }
         }

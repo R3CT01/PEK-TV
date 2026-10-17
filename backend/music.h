@@ -21,7 +21,7 @@
 // Scanning runs after every normal scan (MediaScanner::setAfterScan) and once when the Music tab is first used.
 // Needs no ffprobe: see music_tags.h.
 //
-// dataDir: a writable folder for the cache (music_cache.tsv), so a restart does not re-read every file.
+// dataDir: a writable folder for the song database (music.db; an old music_cache.tsv is moved into it), so a restart does not re-read every file.
 void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std::string& dataDir);
 
 // Online art (artist photos, album and single covers; music_online.h) is kept on disk until a manual rescan:

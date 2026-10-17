@@ -360,16 +360,17 @@ def build_host_module(plugin_id, folder, manifest):
     def read_json(name):
         return json.loads(read_text(name))
 
-    def _library_cache_path():
-        """The library scanner's saved list (media_cache.tsv). Its place depends on the build:
+    def _library_file(name, env_names):
+        """A file of the library scanner (library.db, or the old media_cache.tsv). Its place depends on the build:
         Android keeps it next to the plugins folder, Termux one level further up."""
         plugins_dir = os.path.dirname(os.path.normpath(folder))
         candidates = []
-        env = os.environ.get("PEK_LIBRARY_CACHE") or os.environ.get("HESPER_LIBRARY_CACHE")   # old name still honoured
-        if env:
-            candidates.append(env)
-        candidates.append(os.path.join(plugins_dir, "..", "media_cache.tsv"))
-        candidates.append(os.path.join(plugins_dir, "..", "..", "media_cache.tsv"))
+        for env_name in env_names:
+            env = os.environ.get(env_name)
+            if env:
+                candidates.append(env)
+        candidates.append(os.path.join(plugins_dir, "..", name))
+        candidates.append(os.path.join(plugins_dir, "..", "..", name))
         for c in candidates:
             c = os.path.normpath(c)
             if os.path.isfile(c):
@@ -382,6 +383,22 @@ def build_host_module(plugin_id, folder, manifest):
         except ValueError:
             return 0
 
+    def _titles_from_db(path):
+        """Movies and shows from library.db (opened read-only), or None when it cannot be read."""
+        import sqlite3
+        import urllib.parse
+        try:
+            con = sqlite3.connect("file:" + urllib.parse.quote(path) + "?mode=ro", uri=True, timeout=5)
+        except sqlite3.Error:
+            return None
+        try:
+            rows = con.execute("SELECT kind, title, year, show_title FROM media WHERE kind IN (0, 1)").fetchall()
+        except sqlite3.Error:
+            return None
+        finally:
+            con.close()
+        return rows
+
     def library_titles():
         """Titles and years from the user's library: [{"title", "year", "kind": "movie"|"tv"}].
         Needs "library": true in plugin.json. Never returns file names or folders. The list is
@@ -389,30 +406,33 @@ def build_host_module(plugin_id, folder, manifest):
         if not library_ok:
             raise PermissionError("plugin.json does not request the 'library' permission")
         with _Privileged():
-            path = _library_cache_path()
-            if not path:
-                return []
+            rows = []                       # (kind 0 = movie / 1 = episode, movie title, year, show title)
+            db_path = _library_file("library.db", ("PEK_LIBRARY_DB",))
+            found = _titles_from_db(db_path) if db_path else None
+            if found is not None:
+                rows = found
+            else:                           # an older install that has not moved to the database yet
+                tsv = _library_file("media_cache.tsv", ("PEK_LIBRARY_CACHE", "HESPER_LIBRARY_CACHE"))   # old name still honoured
+                if tsv:
+                    with open(tsv, "r", encoding="utf-8", errors="replace") as f:
+                        if f.readline().startswith("#hesper-cache-"):
+                            for line in f:
+                                cols = line.rstrip("\n").split("\t")
+                                if len(cols) >= 11 and cols[5] in ("0", "1"):
+                                    rows.append((int(cols[5]), cols[6], _as_int(cols[7]), cols[8]))
             out = []
             seen = set()
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                if not f.readline().startswith("#hesper-cache-"):
-                    return []
-                for line in f:
-                    cols = line.rstrip("\n").split("\t")
-                    if len(cols) < 11:
-                        continue
-                    if cols[5] == "0":
-                        title, year, kind = cols[6].strip(), _as_int(cols[7]), "movie"
-                    elif cols[5] == "1":
-                        title, year, kind = cols[8].strip(), 0, "tv"
-                    else:
-                        continue
-                    key = (kind, title.lower(), year)
-                    if title and key not in seen:
-                        seen.add(key)
-                        out.append({"title": title, "year": year, "kind": kind})
-                    if len(out) >= 20000:
-                        break
+            for kind_code, movie_title, movie_year, show_title in rows:
+                if kind_code == 0:
+                    title, year, kind = (movie_title or "").strip(), int(movie_year or 0), "movie"
+                else:
+                    title, year, kind = (show_title or "").strip(), 0, "tv"
+                key = (kind, title.lower(), year)
+                if title and key not in seen:
+                    seen.add(key)
+                    out.append({"title": title, "year": year, "kind": kind})
+                if len(out) >= 20000:
+                    break
             return out
 
     def log(*parts):

@@ -8,7 +8,11 @@
 #include <functional>
 #include <map>
 #include <chrono>
+#include <atomic>
+#include <memory>
 #include "vfs.h"
+
+namespace pekdb { class Db; }
 
 enum class MediaKind {
     Movie,
@@ -57,7 +61,10 @@ struct MediaEntry {
 // restart.
 class MediaScanner {
 public:
+    // cache_file_path is where the old tab-separated cache lived (media_cache.tsv). The library now lives in a SQLite
+    // database named library.db in the same folder; an old cache file is imported once, then renamed *.migrated.
     MediaScanner(std::string sources_file_path, std::string cache_file_path);
+    ~MediaScanner();
 
     // Loads both the source folder list and the classified-file
     // cache from disk. Call once at startup.
@@ -120,6 +127,26 @@ public:
     // Reads the image named by Local::art (local or network). False = too big / unreadable.
     static bool readArtwork(const std::string& art, std::string& bytes, std::string& mime);
 
+    // --- Searching and browsing the library (SQLite) ---
+    // What the NFO files say (genre, actors, directors, studio, collection, rating) is read after every scan and kept in
+    // the database, so a search by actor, genre, year ... is one indexed query instead of a pass over every title.
+    // Only titles with an NFO have those fields; the year and the title always work.
+    struct SearchQuery {
+        std::string type = "movies";       // "movies" or "shows"
+        std::string q;                     // free text: every word must match a title, year, genre, actor, director, studio or collection
+        std::string genre, actor, director, studio, collection;   // exact (case and accent insensitive) filters
+        int year = 0;                      // exactly this year
+        int decade = 0;                    // 1990 = 1990..1999
+        std::string sort = "title";        // title | year | added | rating
+        int limit = 500;
+        int offset = 0;
+    };
+    // {"total":N,"movies":["<id>",...]}  or  {"total":N,"shows":["<show title>",...]}
+    std::string searchJson(const SearchQuery& query);
+    // {"indexing":{"done":a,"total":b},"genres":[{"name","count"}],"decades":[{"decade","count"}],
+    //  "actors":[...],"directors":[...],"studios":[...]}   actorPrefix narrows the actor list (the picker's own search box).
+    std::string facetsJson(const std::string& type, const std::string& actorPrefix, int limit);
+
 private:
     std::string sources_file_path_;
     std::string cache_file_path_;
@@ -159,8 +186,15 @@ private:
     static void classifyFromFilename(MediaEntry& entry, const std::vector<std::string>& media_roots);
 
     static std::string makeId(const std::string& path);
-    void persistCacheToDisk();
     void persistSourcesToDisk();
+
+    // ---- the library database (library.db) ----
+    std::unique_ptr<pekdb::Db> db_;            // null = could not be opened: the app still works, it just rescans at every start
+    std::string db_path_;
+    std::atomic<int> index_done_{0}, index_total_{0};
+    void openDb();                             // opens, creates the tables, imports an old media_cache.tsv once
+    void persistToDb();                        // brings the media table in line with entries_ (one transaction)
+    void indexMetadata();                      // reads NFO genres / people for titles that are new or whose NFO changed
 };
 
 #endif
