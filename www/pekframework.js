@@ -798,6 +798,14 @@ class PekWindowManager {
    element in that direction using getBoundingClientRect(), instead
    of the flat array walk PekEngine's own .focusable list uses.
    ============================================================ */
+/* How long OK is held before a long press fires, and which keys count as OK (Android TV remotes differ: some send
+   key "Enter", some only keyCode 23 / 66 or key "Select"). */
+const PEK_HOLD_MS = 450;
+function PekEngine_isOkKey(e) {
+    const k = e.key, c = e.keyCode;
+    return k === 'Enter' || k === 'Select' || c === 13 || c === 23 || c === 66;
+}
+
 class PekNav {
     #groups = new Map();
 
@@ -1625,11 +1633,20 @@ class PekEngine {
                 if (!stepped && window.PekNavSound && (!hasFocus || this.currentIndex !== beforeIdx)) window.PekNavSound.tick();
                 if (!stepped) this._applyFocus();
                 e.preventDefault();
-            } else if (e.key === 'Enter') {
+            } else if (PekEngine_isOkKey(e)) {
                 // Holding OK makes the remote repeat the key. A repeat must never click anything: once a long
                 // press opens a dialog, the repeats would otherwise press its buttons (closing or confirming it).
                 if (e.repeat) {
-                    if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) this._fireKeyLongPress();
+                    if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= PEK_HOLD_MS) this._fireKeyLongPress();
+                    else if (!this._lpTarget && !this._lpFiredByKey) {
+                        // The first key-down of this press never reached us (some TV remotes / WebViews start with a repeat):
+                        // start the hold clock now so holding OK still reaches the long press.
+                        const a0 = this.focusableElements[this.currentIndex];
+                        if (a0 && a0._pekLongPress) {
+                            this._lpTarget = a0; this._lpStart = Date.now();
+                            this._lpTimer = setTimeout(() => this._fireKeyLongPress(), PEK_HOLD_MS);
+                        }
+                    }
                     e.preventDefault();
                     return;
                 }
@@ -1645,8 +1662,8 @@ class PekEngine {
                             this._lpFiredByKey = false;
                             this._lpTarget = active;
                             this._lpStart = Date.now();
-                            this._lpTimer = setTimeout(() => this._fireKeyLongPress(), 500);
-                        } else if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= 500) {
+                            this._lpTimer = setTimeout(() => this._fireKeyLongPress(), PEK_HOLD_MS);
+                        } else if (this._lpTarget && this._lpTimer == null && !this._lpFiredByKey && Date.now() - this._lpStart >= PEK_HOLD_MS) {
                             this._fireKeyLongPress();
                         }
                     } else { if (!e.repeat && window.PekNavSound) window.PekNavSound.select(); active.click(); }
@@ -1663,12 +1680,14 @@ class PekEngine {
         });
 
         window.addEventListener('keyup', (e) => {
-            if (e.key !== 'Enter') return;
+            if (!PekEngine_isOkKey(e)) return;
             this._lpFiredByKey = false;
             if (this._lpTimer) {
                 clearTimeout(this._lpTimer);
                 this._lpTimer = null;
                 const t = this._lpTarget; this._lpTarget = null;
+                // Held long enough but the hold timer was late (a busy TV box runs the key-up first): that is still a hold.
+                if (t && t.isConnected && Date.now() - this._lpStart >= PEK_HOLD_MS && t._pekLongPress) { this._lpFiredByKey = false; PekUIKit._lpGuard = Date.now() + 400; t._pekLongPress(); return; }
                 if (t && t.isConnected) { if (window.PekNavSound) window.PekNavSound.select(); t.click(); }
             }
         });
