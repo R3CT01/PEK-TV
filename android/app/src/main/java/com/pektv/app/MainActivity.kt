@@ -25,6 +25,8 @@ import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
 import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
@@ -144,6 +146,7 @@ class MainActivity : Activity() {
             }
         }
         setContentView(layout)
+        hideStatusBar()
 
         // Splash on top of everything. The app keeps loading below it (server start, page load).
         val overlay = SplashOverlay(this) { splashVideoDone = true; dismissSplashIfReady() }
@@ -221,8 +224,29 @@ class MainActivity : Activity() {
     override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean =
         if (splash != null) true else super.dispatchGenericMotionEvent(ev)
 
+    // The status bar (clock, notification icons, battery) stays hidden: it sat on top of the app's own header.
+    // Swiping down from the top edge still shows it for a moment. The navigation bar is left alone.
+    private fun hideStatusBar() {
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.insetsController?.let {
+                it.hide(WindowInsets.Type.statusBars())
+                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+        }
+    }
+
+    // Android may bring the bar back after a dialog, the keyboard or the notification shade: hide it again.
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideStatusBar()
+    }
+
     override fun onResume() {
         super.onResume()
+        hideStatusBar()
         splash?.resumeIfNeeded()
         // Back from Android's "All files access" screen: tell the web UI so the open file browser can refresh.
         if (waitingForAllFiles) {
@@ -481,7 +505,10 @@ class MainActivity : Activity() {
                 if (on) {
                     it.hide(WindowInsets.Type.systemBars())
                     it.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-                } else it.show(WindowInsets.Type.systemBars())
+                } else {
+                    it.show(WindowInsets.Type.navigationBars())   // the status bar stays hidden everywhere in the app
+                    hideStatusBar()
+                }
             }
         } else {
             @Suppress("DEPRECATION")

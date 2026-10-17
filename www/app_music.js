@@ -286,9 +286,19 @@ class MainAppMusicMethods {
         const P = window.PekMusic;
         if (!P) return null;
         this._mu();                                  // makes sure the bar's buttons are wired to this screen
-        document.documentElement.classList.toggle('pm-hide-bar', !!(this.state.activeTab === 'music' && this._mv && this._mv.now));
-        if (!P.hasQueue()) { document.documentElement.classList.remove('pm-has-bar'); return null; }
-        return P.bar();
+        const html = document.documentElement;
+        const wasHidden = html.classList.contains('pm-hide-bar');
+        const hide = !!(this.state.activeTab === 'music' && this._mv && this._mv.now);
+        html.classList.toggle('pm-hide-bar', hide);
+        if (!P.hasQueue()) { html.classList.remove('pm-has-bar'); return null; }
+        const bar = P.bar();
+        // Closing the big Now Playing page: the mini bar glides up and fades in instead of popping into place.
+        if (bar && wasHidden && !hide) {
+            bar.classList.add('pm-bar-in');
+            clearTimeout(this._barInT);
+            this._barInT = setTimeout(() => bar.classList.remove('pm-bar-in'), 420);
+        }
+        return bar;
     }
 
     // ---------------------------------------------------------------- home (tabs)

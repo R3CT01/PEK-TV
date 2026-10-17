@@ -288,18 +288,77 @@ class MainAppLibraryMethods {
     // One box that looks through movies, shows and episodes on this device. The results are drawn straight into
     // their own box (not through setState) so typing never repaints the screen and the keyboard stays open.
 
+    // The search bar sits at the top of the library screens (see _buildSearchBar). Opening and closing the results
+    // changes the page directly instead of repainting it, so the keyboard never closes while the person types.
+
     openSearch() {
-        this._searchQ = '';
+        const input = document.querySelector('.hs-search-input');
+        if (input) input.focus();
+    }
+
+    // Called when the bar gets focus or the first letter: swaps the screen's content for the results.
+    _searchActivate() {
+        if (this.state.searchOpen) return;
+        const head = document.querySelector('.content-head');
+        if (!head) return;
+        this._searchQ = (document.querySelector('.hs-search-input') || {}).value || '';
         this._searchCache = null;
         this._searchSeq = 0;
-        this._searchFocusPending = true;
-        this.setState({ searchOpen: true, moreOpen: false });
+        this.state = { ...this.state, searchOpen: true, moreOpen: false };
+        document.documentElement.classList.add('pek-searching');
+        const box = this.props.engine.createElement('div', { className: 'sx-search-results' });
+        head.appendChild(box);
+        this._searchBox = box;
+        this._fillSearch(box);
     }
 
     closeSearch() {
         clearTimeout(this._searchT);
         this._searchBox = null;
-        this.setState({ searchOpen: false });
+        this._searchFocused = false;
+        this._searchQ = '';
+        this.state = { ...this.state, searchOpen: false };
+        document.documentElement.classList.remove('pek-searching');
+        document.querySelectorAll('.sx-search-results').forEach(n => n.remove());
+        const input = document.querySelector('.hs-search-input');
+        if (input) { input.value = ''; if (input.blur) input.blur(); }
+        const bar = document.querySelector('.hs-searchbar');
+        if (bar) bar.classList.remove('has-text');
+        this.props.engine.refreshFocusList();
+    }
+
+    // The bar itself: a rounded field with a magnifier and a clear button.
+    _buildSearchBar() {
+        const { createElement } = this.props.engine;
+        const icon = createElement('span', { className: 'hs-search-icon', 'aria-hidden': 'true' });
+        icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line></svg>';
+        const input = createElement('input', {
+            className: 'hs-search-input', type: 'text', placeholder: 'Search movies, shows and episodes',
+            enterkeyhint: 'search', autocomplete: 'off', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false',
+            'aria-label': 'Search your library'
+        });
+        input.value = this._searchQ || '';
+        const clear = createElement('button', { className: 'hs-search-clear', type: 'button', tabindex: '-1', title: 'Clear search', 'aria-label': 'Clear search' }, '\u2715');
+        // The whole bar is the focusable thing, so a remote highlights it as one piece; OK on it opens the keyboard.
+        const bar = createElement('div', { className: 'focusable hs-searchbar' + (input.value ? ' has-text' : '') }, icon, input, clear);
+        bar.addEventListener('click', (e) => { if (e.target !== input && !clear.contains(e.target)) input.focus(); });
+        input.addEventListener('focus', () => { this._searchFocused = true; this._searchActivate(); });
+        input.addEventListener('blur', () => { this._searchFocused = false; });
+        input.addEventListener('input', () => {
+            this._searchActivate();
+            bar.classList.toggle('has-text', !!input.value);
+            this._onSearchInput(input.value);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); if (input.blur) input.blur(); }     // closes the keyboard, results stay
+            else if (e.key === 'Escape') { e.preventDefault(); this.closeSearch(); }
+        });
+        clear.addEventListener('click', () => this.closeSearch());
+        // A repaint while searching (a background update) rebuilds the bar: put the cursor back where it was.
+        if (this.state.searchOpen && this._searchFocused) setTimeout(() => {
+            if (input.isConnected) { input.focus(); try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {} }
+        }, 0);
+        return bar;
     }
 
     async _searchData() {
@@ -378,23 +437,8 @@ class MainAppLibraryMethods {
         this.props.engine.refreshFocusList();
     }
 
-    _renderSearchModal() {
-        if (!this.state.searchOpen) return null;
-        const { createElement, ui } = this.props.engine;
-        const results = createElement('div', { className: 'sx-search-results' });
-        this._searchBox = results;
-        const input = ui.textInput('', this._searchQ || '', (v) => this._onSearchInput(v), { placeholder: 'Search movies, shows and episodes' });
-        const body = createElement('div', {}, input, results);
-        const modal = ui.modal('Search your library', body, () => this.closeSearch());
-        const panel = modal.firstChild;
-        if (panel && panel.classList) panel.classList.add('sx-search-panel');
-        this._fillSearch(results);
-        if (this._searchFocusPending) {
-            this._searchFocusPending = false;
-            setTimeout(() => { const f = input.querySelector('input'); if (f && f.isConnected) f.focus(); }, 60);
-        }
-        return modal;
-    }
+    // The results used to open in a dialog; they now replace the screen's content under the search bar.
+    _renderSearchModal() { return null; }
 
     // ---------------- Rendering ----------------
 
@@ -403,14 +447,7 @@ class MainAppLibraryMethods {
         const weatherPlugin = this._findWeatherPlugin();
         const { refreshCooldown, refreshing } = this.state;
 
-        let searchBtn = null;
-        if (showSearch) {
-            searchBtn = createElement('button', {
-                className: 'theme-launch-btn refresh-btn focusable',
-                title: 'Search your library',
-                onClick: () => this.openSearch()
-            }, createElement('span', {}, 'Search'));
-        }
+        const searchBar = showSearch ? this._buildSearchBar() : null;
 
         let refreshBtn = null;
         if (showRefresh) {
@@ -426,14 +463,13 @@ class MainAppLibraryMethods {
             if (blocked) attrs.disabled = 'disabled';   // never pass disabled: false (it would still disable)
             refreshBtn = createElement('button', attrs,
                 createElement('span', { className: `refresh-icon${refreshing ? ' spinning' : ''}` }, '\u21bb'),
-                createElement('span', {}, label)
+                createElement('span', refreshing ? {} : { 'data-cd': 'Refresh' }, label)   // data-cd: the countdown rewrites this text in place
             );
         }
 
-        return createElement('div', { className: 'content-header' },
+        const row = createElement('div', { className: 'content-header' },
             createElement('h1', { className: 'content-title' }, title),
             createElement('div', { className: 'header-actions' },
-                searchBtn,
                 refreshBtn,
                 this._renderClockBadge(),
                 createElement('button', {
@@ -443,6 +479,17 @@ class MainAppLibraryMethods {
                 }, this.state.weatherText)
             )
         );
+        // Search bar on top, then the title row. While a search is open the results hang under the bar and the
+        // rest of the screen is hidden by CSS (html.pek-searching).
+        const head = createElement('div', { className: 'content-head' }, searchBar, row);
+        if (searchBar && this.state.searchOpen) {
+            const box = createElement('div', { className: 'sx-search-results' });
+            head.appendChild(box);
+            this._searchBox = box;
+            this._fillSearch(box);
+            document.documentElement.classList.add('pek-searching');
+        }
+        return head;
     }
 
     _renderEmptyLibrary(what) {

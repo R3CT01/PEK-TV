@@ -277,6 +277,20 @@ html.hp-mini-on::before { content: ''; position: fixed; left: 0; right: 0; top: 
     background: #090d16; background: var(--sx-bg, #090d16); z-index: -1; }
 html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: var(--hp-mini-h); }
 
+/* Going to / coming from the mini player: the picture glides (see _glide), the page and the bar fade. */
+@-webkit-keyframes hp-mini-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes hp-mini-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@-webkit-keyframes hp-mini-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes hp-mini-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@-webkit-keyframes hp-mini-rise { from { opacity: 0; -webkit-transform: translateY(14px); } to { opacity: 1; -webkit-transform: none; } }
+@keyframes hp-mini-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+html.hp-mini-in .pek-shell, html.hp-mini-in::before {
+    -webkit-animation: hp-mini-fade-in 0.32s ease-out both; animation: hp-mini-fade-in 0.32s ease-out both; }
+html.hp-mini-in .hp-mini-rest, html.hp-mini-in .hp-mini-progress {
+    -webkit-animation: hp-mini-rise 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation: hp-mini-rise 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+html.hp-mini-out .pek-shell, html.hp-mini-out::before, html.hp-mini-out .hp-mini {
+    -webkit-animation: hp-mini-fade-out 0.26s ease-in both; animation: hp-mini-fade-out 0.26s ease-in both; }
+
 @media (max-width: 640px) {
     .hp-top { padding: 14px 14px 46px; }
     .hp-bottom { padding: 46px 14px 12px; }
@@ -742,42 +756,102 @@ html.hp-mini-on .theme-panel-overlay, html.hp-mini-on .plugin-window { bottom: v
             this._closeMenu(true);
             clearTimeout(this._hideTimer);
             this.mode = 'hidden';
-            this.root.classList.remove('hp-show');
+            this.root.classList.remove('hp-show');       // the controls fade out (CSS transition)
             this.mini = true;
             // the remote / keyboard belong to the app again while minimized
             window.removeEventListener('keydown', this._onKey, true);
             window.removeEventListener('keyup', this._onKeyUp, true);
-            this.root.style.display = 'none';
+            // Hide the control layer only once its fade is over (and let touches through meanwhile).
+            this.root.style.pointerEvents = 'none';
+            clearTimeout(this._miniHideT);
+            this._miniHideT = setTimeout(() => { if (this.mini) this.root.style.display = 'none'; }, 240);
             const html = document.documentElement;
             html.classList.remove('hp-mpv');
-            html.classList.add('hp-mini-on');
+            html.classList.remove('hp-mini-out');
+            html.classList.add('hp-mini-on', 'hp-mini-in');   // -in: the page and the bar fade in
             if (!this.miniEl) this._buildMini();
             document.body.appendChild(this.miniEl);
             html.style.setProperty('--hp-mini-h', this.miniEl.offsetHeight + 'px');
             this._updateMini();
-            this._onResize = () => this._sendMiniRect();
+            this._onResize = () => { if (!this._gliding) this._sendMiniRect(); };
             window.addEventListener('resize', this._onResize);
-            // wait for the page to re-flow around the bar, then park the picture in its thumbnail cell
+            // Wait for the page to re-flow around the bar, then let the picture glide from full screen into its
+            // thumbnail cell (a lite / weak device just jumps there).
             const raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
-            raf(() => raf(() => { if (this.mini) this._sendMiniRect(); }));
+            raf(() => raf(() => {
+                if (!this.mini) return;
+                const to = this._miniThumbRect();
+                const done = () => { html.classList.remove('hp-mini-in'); this._sendMiniRect(); };
+                if (!to) { done(); return; }
+                this._glide({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, to, 320, done);
+            }));
+        }
+
+        // Where the picture belongs while minimized (the see-through cell of the bar), or null if not measurable.
+        _miniThumbRect() {
+            if (!this.miniThumb) return null;
+            const r = this.miniThumb.getBoundingClientRect();
+            return (r.width > 0 && r.height > 0) ? { left: r.left, top: r.top, width: r.width, height: r.height } : null;
+        }
+
+        // Moves the native picture from one rectangle to another over `ms`, one step per screen refresh.
+        // done() runs at the end, or at once when there is nothing to animate. A newer glide (or leaving the
+        // mini layout) cancels this one.
+        _glide(from, to, ms, done) {
+            const id = this._glideId = (this._glideId || 0) + 1;
+            const raf = window.requestAnimationFrame || function (f) { return setTimeout(function () { f(Date.now()); }, 16); };
+            const now = () => (window.performance && performance.now) ? performance.now() : Date.now();
+            if (!ms || isLiteDevice()) { this._gliding = false; this.backend.setMiniRect(to); if (done) done(); return; }
+            this._gliding = true;
+            const t0 = now();
+            const ease = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;      // easeInOutCubic
+            const mix = (a, b, k) => a + (b - a) * k;
+            const step = () => {
+                if (id !== this._glideId || this._closed) return;
+                const t = Math.min(1, (now() - t0) / ms), k = ease(t);
+                this.backend.setMiniRect({ left: mix(from.left, to.left, k), top: mix(from.top, to.top, k),
+                                           width: mix(from.width, to.width, k), height: mix(from.height, to.height, k) });
+                if (t < 1) raf(step);
+                else { this._gliding = false; if (done) done(); }
+            };
+            this.backend.setMiniRect(from);
+            raf(step);
         }
 
         // Mini bar -> full screen again.
         expand() {
-            if (!this.mini || this._closed) return;
-            this._leaveMiniLayout();
-            if (this.backend.drawsBehindPage) document.documentElement.classList.add('hp-mpv');
-            this.backend.setMiniRect(null);
-            this.root.style.display = '';
-            window.addEventListener('keydown', this._onKey, true);
-            window.addEventListener('keyup', this._onKeyUp, true);
-            this.mode = 'hidden';
-            this._show();
+            if (!this.mini || this._closed || this._expanding) return;
+            const html = document.documentElement;
+            const finish = () => {
+                this._expanding = false;
+                this._leaveMiniLayout();
+                html.classList.remove('hp-mini-out');
+                if (this.backend.drawsBehindPage) html.classList.add('hp-mpv');
+                this.backend.setMiniRect(null);
+                this.root.style.display = '';
+                this.root.style.pointerEvents = '';
+                window.addEventListener('keydown', this._onKey, true);
+                window.addEventListener('keyup', this._onKeyUp, true);
+                this.mode = 'hidden';
+                this._show();
+            };
+            const from = this._miniThumbRect();
+            if (!from) { finish(); return; }
+            // The picture grows back to full screen while the page and the bar fade away, then the controls return.
+            this._expanding = true;
+            clearTimeout(this._miniHideT);
+            html.classList.remove('hp-mini-in');
+            html.classList.add('hp-mini-out');
+            this._glide(from, { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight }, 300, finish);
         }
 
         _leaveMiniLayout() {
             if (!this.mini) return;
             this.mini = false;
+            this._glideId = (this._glideId || 0) + 1;      // cancels a glide that is still running
+            this._gliding = false; this._expanding = false;
+            clearTimeout(this._miniHideT);
+            document.documentElement.classList.remove('hp-mini-in', 'hp-mini-out');
             if (this._onResize) { window.removeEventListener('resize', this._onResize); this._onResize = null; }
             if (this.miniEl && this.miniEl.parentNode) this.miniEl.parentNode.removeChild(this.miniEl);
             const html = document.documentElement;
