@@ -438,7 +438,6 @@ class MainApp extends PekComponent {
                             ui.listRow(name, null, () => { window.PekTV.setSafe(pct); this.setState({}); }, { statusDot: window.PekTV.safe() === pct }))
                     )
                 ),
-                this._renderTorrentSettings(),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Background activity'),
                     createElement('p', { className: 'sub' }, 'A small status line in the corner showing what PEK TV is doing. Hidden while a video plays.', more('Detailed also lists plugin network requests.')),
@@ -600,7 +599,6 @@ class MainApp extends PekComponent {
             this._renderSkinInstallModal(),
             this._renderSkinRemoveModal(),
             this._renderPluginInstallModal(),
-            this._renderTorrentModal(),
             this._renderPluginRemoveModal(),
             this._renderFavoriteRemoveModal(),
             this._renderSignOutModal(),

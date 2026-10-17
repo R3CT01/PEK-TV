@@ -5,15 +5,14 @@
 #include <string>
 
 // Registers the torrent API:
-//   GET  /api/torrent/info                 {available, configured}
-//   GET  /api/torrent/settings             {url, hasKey}            (the key is never sent back)
-//   POST /api/torrent/settings             url=..&key=..            (key optional: blank keeps the old one)
-//   GET  /api/torrent/search               kind, title, year, show, season, episode  -> ranked releases
-//   POST /api/torrent/start                source (magnet or a link from a search result), season, episode
+//   GET  /api/torrent/info                 {available}
+//   POST /api/torrent/allow                url=..                   (a plugin vouches for a https .torrent link)
+//   GET  /api/torrent/fetch                url=..                   (CORS-free page fetch for plugins)
+//   POST /api/torrent/start                source (magnet, or a link vouched for via /allow), season, episode
 //   GET  /api/torrent/<hash>/status
 //   GET  /api/torrent/<hash>/stream        Range-capable video stream
 //   POST /api/torrent/<hash>/stop
-// The data dir holds torrent.json (the provider settings) and the temporary download cache.
+// The data dir holds the temporary download cache.
 // Call setTorrentDataDir() once at startup, before the server starts.
 void setTorrentDataDir(const std::string& dir);
 void registerTorrentRoutes(httplib::Server& svr);

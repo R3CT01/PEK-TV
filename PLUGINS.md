@@ -119,9 +119,7 @@ removing a plugin on one device only stops it being offered on the others.
 
 A plugin with `"torrent": true` may call, from its UI code:
 
-- `pek.torrent.info()` -> `{available, configured}` (is the engine built in, is a provider set)
-- `pek.torrent.search({kind: 'movie' | 'episode', title, year, season, episode})` -> array of
-  `{title, source, sizeText, seeders, quality, pack}`, best first
+- `pek.torrent.info()` -> `{available}` (is the engine built in)
 - `pek.torrent.play({source, title, season, episode, kind, name, year, image})` -> resolves once the player is open.
   Optional `kind` (`'movie'` or `'episode'`) plus `name` (the movie title, or the show name for an episode; episodes also need `season` and `episode`) and `year` (movies) make PEK TV keep the position under Resume Watching. Resuming starts the same release again at that spot. `image` is an optional https poster URL from a host in the plugin's `network` list. PEK TV itself records which plugin started the stream (the plugin cannot set or change this) and shows it on the Resume Watching card. A plugin that gives no `kind`/`name` is still remembered, under the `title` it passed.
   PEK TV shows its own buffering box (with Cancel) and opens the player when enough is downloaded.

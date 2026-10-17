@@ -9,9 +9,8 @@
 // The only way out is postMessage to this file, which enforces plugin.json:
 //   permissions.network  list of https host names the plugin may fetch from
 //   permissions.storage  true => small private key/value store + its own data/ files
-//   permissions.torrent  true => the plugin's UI may call pek.torrent.search / .play: PEK TV looks up
-//                        releases with the provider YOU set in Settings and streams the one picked.
-//                        The plugin never sees the provider address or key, only the results.
+//   permissions.torrent  true => the plugin's UI may call pek.torrent.info / .play: PEK TV streams the
+//                        release (magnet link) the plugin hands it. PEK TV has no torrent search of its own.
 //                        A plugin with this permission may also (a) play a https .torrent link from a host it
 //                        listed under network, and (b) have PEK TV's server fetch its allow-listed network
 //                        hosts when the browser blocks the request (CORS).
@@ -252,15 +251,9 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
             set: function (k, v) { return request('storageSet', { key: str(k), value: str(v) }); },
             remove: function (k) { return request('storageRemove', { key: str(k) }); }
         },
-        // Needs "torrent": true in plugin.json. search -> [{title, source, sizeText, seeders, quality, pack}];
-        // play opens PEK TV's buffering box and then the player, and resolves once the player is open.
+        // Needs "torrent": true in plugin.json. play opens PEK TV's buffering box and then the player, and resolves once the player is open.
         torrent: {
             info: function () { return request('torrentInfo', {}, 20000).then(JSON.parse); },
-            search: function (q) {
-                q = q || {};
-                return request('torrentSearch', { kind: str(q.kind), title: str(q.title), year: Number(q.year) || 0,
-                    season: Number(q.season) || 0, episode: Number(q.episode) || 0 }, 45000).then(JSON.parse);
-            },
             play: function (o) {
                 o = o || {};
                 return request('torrentPlay', { source: str(o.source), title: str(o.title),
@@ -604,7 +597,6 @@ class PekSandbox {
                 case 'storageSet': reply(true, this._storageSet(a.key, a.value)); break;
                 case 'storageRemove': reply(true, this._storageRemove(a.key)); break;
                 case 'torrentInfo': reply(true, await this._torrentInfo()); break;
-                case 'torrentSearch': reply(true, await this._torrentSearch(a)); break;
                 case 'torrentPlay': reply(true, await this._torrentPlay(a)); break;
                 case 'favList': this._need('favorites'); reply(true, JSON.stringify(window.PekFavorites.keys())); break;
                 case 'favAdd': reply(true, this._favAdd(a)); break;
@@ -659,7 +651,7 @@ class PekSandbox {
     }
 
     // ---------------- torrent (permission "torrent") ----------------
-    // PEK TV does the work; the plugin only gets search results and the result of play().
+    // PEK TV does the work; the plugin only gets the result of play().
 
     _torrentGuard() {
         if (!this.manifest.permissions.torrent) throw new Error("plugin.json does not request the 'torrent' permission");
@@ -669,22 +661,6 @@ class PekSandbox {
     async _torrentInfo() {
         this._torrentGuard();
         return JSON.stringify(await window.PekTorrent.info());
-    }
-
-    async _torrentSearch(a) {
-        this._torrentGuard();
-        const kind = a.kind === 'episode' ? 'episode' : 'movie';
-        const title = typeof a.title === 'string' ? a.title.trim().slice(0, 200) : '';
-        if (!title) throw new Error('missing title');
-        const int = (v, max) => { const n = Math.floor(Number(v)); return n > 0 && n <= max ? n : 0; };
-        const results = await window.PekTorrent.search({
-            kind, title, year: int(a.year, 2200), season: int(a.season, 200), episode: int(a.episode, 2000)
-        });
-        // Only plain data goes back to the plugin.
-        return JSON.stringify(results.slice(0, 25).map(r => ({
-            title: String(r.title || '').slice(0, 300), source: String(r.source || '').slice(0, 4000),
-            sizeText: String(r.sizeText || ''), seeders: r.seeders | 0, quality: r.quality | 0, pack: r.pack === true
-        })));
     }
 
     async _torrentPlay(a) {
