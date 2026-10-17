@@ -29,7 +29,9 @@
     }
     function isTv() { return root.classList.contains('pek-tv'); }
     function on() { var m = mode(); return m === 'on' || (m === 'auto' && (isTv() || lowSpec())); }
-    function noVideo() { var m = mode(); return m === 'on' || (m === 'auto' && lowSpec()); }
+    // Trailers are skipped only when performance mode is switched On by hand. A TV box that reports 2 GB / 2 cores used to be
+    // auto-detected as low-spec and lost its billboard trailer (it still played on the detail page, which is why it seemed random).
+    function noVideo() { return mode() === 'on'; }
     function apply() { root.classList.toggle('pek-lite', on()); }
 
     window.PekLite = {

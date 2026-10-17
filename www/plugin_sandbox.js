@@ -242,6 +242,8 @@ const PEK_SANDBOX_BOOTSTRAP = `<!doctype html><html><head><meta charset="utf-8">
         readBundled: function (name) { return request('readBundled', { name: str(name) }, 20000); },
         render: function (fn) { renderFn = fn; requestRender(); },
         requestRender: requestRender,
+        // Swaps just the billboard of a Netflix-style screen in place (no rebuild of the rows). node = ui.billboard({...}).
+        patchBillboard: function (node) { post({ t: 'bbpatch', node: node }); },
         fetchText: function (url) { return request('fetch', { url: str(url) }); },
         fetchJSON: function (url) { return request('fetch', { url: str(url) }).then(JSON.parse); },
         readData: function (name) { return request('readData', { name: str(name) }); },
@@ -572,6 +574,7 @@ class PekSandbox {
                 this._flushLaunch();
                 break;
             case 'view': this.tree = m.tree; this._renderTree(); break;
+            case 'bbpatch': this._patchBillboard(m.node); break;
             case 'canBack': this.canBack = m.v === true; break;
             case 'scrollTop':
                 if (this.container && this.container.isConnected) this.container.scrollIntoView({ block: 'start' });
@@ -950,7 +953,11 @@ class PekSandbox {
         const i = eng.focusableElements.indexOf(target);
         if (i < 0) return;
         eng.currentIndex = i;
+        // A redraw builds brand-new cards: giving the focused one its highlight must not replay the pop-up animation
+        // (that read as the card jumping every time the page was redrawn). Transitions are off for this one frame.
+        if (!moved) target.style.transition = 'none';
         eng._applyFocus(false);
+        if (!moved) { void target.offsetWidth; requestAnimationFrame(() => { target.style.transition = ''; }); }
         if (moved) target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 
@@ -1383,6 +1390,26 @@ class PekSandbox {
                 sp.scrollTop = 0;
             }
         });
+    }
+
+    // Replaces only the billboard element. Rows, cards and the row scroll positions are untouched, so nothing bounces.
+    _patchBillboard(node) {
+        const c = this.container;
+        const old = c && c.isConnected ? c.querySelector('.nf-bb') : null;
+        if (!old || !node || node.t !== 'billboard') { this._renderTree(); return; }
+        const budget = { nodes: 0, inputs: 0, scrolls: 0, video: null, af: null, nf: true, bb: null };
+        let el = null;
+        try { el = this._build(node, 0, budget); } catch (e) { el = null; }
+        if (!el) { this._renderTree(); return; }
+        const eng = this.engine, fo = c.querySelector('.focused');
+        old.replaceWith(el);
+        this._bbSync(budget.bb);
+        this._tagFocus();
+        if (eng.refreshFocusList) eng.refreshFocusList();
+        if (fo && fo.isConnected && eng.focusableElements) {
+            const i = eng.focusableElements.indexOf(fo);
+            if (i >= 0) { eng.currentIndex = i; eng._applyFocus(false); }
+        }
     }
 
     _renderTree() {
