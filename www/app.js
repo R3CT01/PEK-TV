@@ -378,11 +378,11 @@ class MainApp extends PekComponent {
                 ),
                 createElement('div', { className: 'settings-section' },
                     createElement('h2', {}, 'Skins'),
-                    createElement('p', { className: 'sub' }, 'Add a skin from a .zip. Hold a row to remove one you added.'),
+                    createElement('p', { className: 'sub' }, 'Get a skin from the PEK Store, a .zip or GitHub. Hold a row to remove one you added.'),
                     createElement('div', { className: 'plugin-list' },
                         ...this.state.skins.map(s => ui.listRow(
                             s.name,
-                            [s.version ? `v${s.version}` : '', s.author ? `by ${s.author}` : '', s.description || ''].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
+                            [s.version ? `v${s.version}` : '', s.author ? `by ${s.author}` : '', s.description || '', (() => { const gs = PekSkinSources.get(s.id); return gs && gs.type === 'github' ? 'unverified \u00b7 from GitHub ' + gs.owner + '/' + gs.repo : ''; })()].filter(Boolean).join(' \u00b7 ') || 'Tap to apply',
                             () => this.applySkin(s.id),
                             Object.assign({ statusDot: s.id === this.state.activeSkin },
                                 PekSkinInstaller.isBuiltin(s.id) ? {} : { onLongPress: () => this.askRemoveSkin(s) })
@@ -390,7 +390,8 @@ class MainApp extends PekComponent {
                     ),
                     createElement('div', { className: 'section-actions' },
                         ui.button('PEK Store', () => this.openPluginStore('skin'), { variant: 'primary' }),
-                        ui.button('Install skin from .zip', () => this.startSkinInstall())
+                        ui.button('Install skin from .zip', () => this.startSkinInstall()),
+                        this._githubEnabled() ? ui.button('Install skin from GitHub', () => this.openGithubInstall('skin')) : null
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
@@ -452,9 +453,9 @@ class MainApp extends PekComponent {
                     )
                 ),
                 createElement('div', { className: 'settings-section' },
-                    createElement('h2', {}, 'Plugin installs'),
+                    createElement('h2', {}, 'GitHub installs'),
                     ui.toggle('Allow installs from GitHub', this._githubEnabled(), (on) => this._setGithubEnabled(on)),
-                    createElement('p', { className: 'sub' }, 'Install a plugin straight from a GitHub repository by typing its name. Unverified: PEK TV does not review these plugins and their developers are responsible for them.')
+                    createElement('p', { className: 'sub' }, 'Install a plugin or a skin straight from a GitHub repository by typing its name. Unverified: PEK TV does not review these and their developers are responsible for them.')
                 )
                     ) : null
                 )

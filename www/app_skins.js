@@ -29,6 +29,8 @@ class MainAppSkinsMethods {
         this.setState({ skinInstall: Object.assign({}, si, { stage: 'installing' }) });
         try {
             await PekSkinInstaller.install(si.prep);
+            // Remember where it came from (GitHub); any other way of installing clears an old label.
+            if (si.prep.source) PekSkinSources.set(si.prep.id, si.prep.source); else PekSkinSources.remove(si.prep.id);
             await this.loadSkins();
             // A skin that was updated while it was in use is re-applied so the new look shows at once.
             if (this.state.activeSkin === si.prep.id) this.applySkin(si.prep.id);
@@ -60,6 +62,7 @@ class MainAppSkinsMethods {
 
         const p = si.prep;
         const lines = [
+            ...this._githubNotice(si, 'skin'),
             [p.version ? `Version ${p.version}` : null, p.author ? `by ${p.author}` : null].filter(Boolean).join(' \u00b7 '),
             p.description,
             p.tokenCount ? `Sets ${p.tokenCount} colours and sizes` + (p.hasCss ? ' and adds its own styling.' : '.') : (p.hasCss ? 'Adds its own styling.' : null),
@@ -98,6 +101,7 @@ class MainAppSkinsMethods {
         this.setState({ skinRemove: Object.assign({}, sr, { busy: true, error: '' }) });
         try {
             await PekSkinInstaller.remove(sr.id);
+            PekSkinSources.remove(sr.id);
             // If it was the skin in use, go back to the default look first.
             if (this.state.activeSkin === sr.id) this.applySkin('default');
             await this.loadSkins();

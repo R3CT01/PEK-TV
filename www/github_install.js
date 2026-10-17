@@ -1,5 +1,5 @@
 // ============================================================
-// Install a plugin from GitHub by name (owner/repo), for plugins that are NOT in the PEK Store.
+// Install a plugin or a skin from GitHub by name (owner/repo), for ones that are NOT in the PEK Store.
 //
 //   PekGithub        parseRepo(), findRelease(), download()   (data side)
 //   PekPluginSources remembers where each plugin came from (device level)
@@ -19,6 +19,7 @@
 const GITHUB_ON_KEY = 'pek_github_enabled';          // '0' = switched off (anything else = on)
 const GITHUB_WARNED_KEY = 'pek_github_warned';       // '1' = the first-time warning was accepted
 const PLUGIN_SOURCES_KEY = 'pek_plugin_sources_v1';  // { folder: { type, ... } }
+const SKIN_SOURCES_KEY = 'pek_skin_sources_v1';      // { skinId: { type, ... } }
 
 const PekPluginSources = (() => {
     function read() {
@@ -35,6 +36,23 @@ const PekPluginSources = (() => {
     };
 })();
 window.PekPluginSources = PekPluginSources;
+
+// Same idea for skins: remembers which installed skins came from GitHub, so the Skins list can say so.
+const PekSkinSources = (() => {
+    function read() {
+        try {
+            const o = JSON.parse(localStorage.getItem(SKIN_SOURCES_KEY) || '{}');
+            return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+        } catch (e) { return {}; }
+    }
+    function write(o) { try { localStorage.setItem(SKIN_SOURCES_KEY, JSON.stringify(o)); } catch (e) { /* not saved */ } }
+    return {
+        get: (id) => read()[id] || null,
+        set: (id, src) => { const o = read(); o[id] = src; write(o); },
+        remove: (id) => { const o = read(); if (o[id]) { delete o[id]; write(o); } }
+    };
+})();
+window.PekSkinSources = PekSkinSources;
 
 const PekGithub = (() => {
     const OWNER_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -107,7 +125,8 @@ const PekGithub = (() => {
     }
 
     // Downloads one option through the server and prepares it like a picked .zip.
-    async function download(owner, repo, opt) {
+    async function download(owner, repo, opt, target) {
+        const isSkin = target === 'skin';
         let res;
         try {
             res = await fetch('/api/plugins/github-zip', { method: 'POST', body: new URLSearchParams({ owner, repo, url: opt.url }) });
@@ -122,10 +141,16 @@ const PekGithub = (() => {
         }
         const buf = await res.arrayBuffer();
         const file = { name: opt.kind === 'asset' ? opt.label : repo + '.zip', size: buf.byteLength, arrayBuffer: () => Promise.resolve(buf) };
-        const prep = await PekPluginInstaller.prepare(file);
+        const prep = isSkin ? await PekSkinInstaller.prepare(file) : await PekPluginInstaller.prepare(file);
         // A source zip unpacks into a folder named after the commit, which changes every time:
-        // use the repository name so a later update replaces the same plugin.
-        if (opt.kind === 'source') prep.id = PekPluginInstaller.slug(repo) || prep.id;
+        // use the repository name so a later update replaces the same plugin or skin.
+        if (opt.kind === 'source') {
+            const id = (isSkin ? PekSkinInstaller.slug(repo) : PekPluginInstaller.slug(repo)) || prep.id;
+            if (isSkin && PekSkinInstaller.isBuiltin(id)) {
+                throw new Error('\u201c' + id + '\u201d is the id of a skin that ships with PEK TV, so this repository\u2019s source can\u2019t be installed as a skin.');
+            }
+            prep.id = id;
+        }
         prep.source = { type: 'github', owner, repo, tag: opt.tag || '', kind: opt.kind, size: buf.byteLength };
         return prep;
     }
@@ -161,14 +186,15 @@ class MainAppGithubMethods {
         this.setState({ githubFlow: Object.assign({}, cur, patch) });
     }
 
-    openGithubInstall() {
+    // target: 'plugin' (default) or 'skin'
+    openGithubInstall(target) {
         const { ui } = this.props.engine;
         if (!this._githubEnabled()) { ui.toast('Installing from GitHub is switched off in Settings.'); return; }
         if (this.state.pluginInstall || this.state.skinInstall || this.state.pluginPick || this.state.pluginStore || this.state.githubFlow) return;
         let warned = false;
         try { warned = localStorage.getItem(GITHUB_WARNED_KEY) === '1'; } catch (e) { /* ask every time */ }
         this._ghText = '';
-        this.setState({ githubFlow: { stage: warned ? 'enter' : 'warn', busy: false, error: '', note: '', release: null } });
+        this.setState({ githubFlow: { target: target === 'skin' ? 'skin' : 'plugin', stage: warned ? 'enter' : 'warn', busy: false, error: '', note: '', release: null } });
     }
 
     githubAccept() {
@@ -187,7 +213,7 @@ class MainAppGithubMethods {
         const gf = this.state.githubFlow;
         if (!gf || gf.busy) return;
         const parsed = PekGithub.parseRepo(this._ghText || '');
-        if (!parsed) { this._gh({ error: 'Type it like owner/repo, for example someone/my-plugin.' }); return; }
+        if (!parsed) { this._gh({ error: 'Type it like owner/repo, for example someone/my-' + (gf.target === 'skin' ? 'skin' : 'plugin') + '.' }); return; }
         this._gh({ stage: 'enter', busy: true, error: '', note: 'Looking up ' + parsed.owner + '/' + parsed.repo + '\u2026' });
         try {
             const rel = await PekGithub.findRelease(parsed.owner, parsed.repo);
@@ -203,10 +229,16 @@ class MainAppGithubMethods {
     async _githubDownload(rel, opt) {
         this._gh({ busy: true, error: '', note: 'Downloading from ' + rel.owner + '/' + rel.repo + '\u2026' });
         try {
-            const prep = await PekGithub.download(rel.owner, rel.repo, Object.assign({ tag: rel.tag }, opt));
-            const verdict = await PekPluginInstaller.check(prep);
-            // Hand over to the normal install screens (permissions, then confirm).
-            this.setState({ githubFlow: null, pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
+            const isSkin = (this.state.githubFlow && this.state.githubFlow.target) === 'skin';
+            const prep = await PekGithub.download(rel.owner, rel.repo, Object.assign({ tag: rel.tag }, opt), isSkin ? 'skin' : 'plugin');
+            // Hand over to the normal install screens (a skin: details then confirm; a plugin: permissions then confirm).
+            if (isSkin) {
+                const verdict = await PekSkinInstaller.check(prep);
+                this.setState({ githubFlow: null, skinInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
+            } else {
+                const verdict = await PekPluginInstaller.check(prep);
+                this.setState({ githubFlow: null, pluginInstall: { stage: 'confirm', prep, replaced: !!verdict.replaced } });
+            }
         } catch (err) {
             this._gh({ busy: false, note: '', stage: (rel.options || []).length > 1 ? 'pick' : 'enter', error: String((err && err.message) || err) });
         }
@@ -223,20 +255,21 @@ class MainAppGithubMethods {
     }
 
     // Extra lines at the top of the install screen for a plugin that came from GitHub.
-    _githubNotice(pi) {
+    _githubNotice(pi, kind) {
+        const noun = kind === 'skin' ? 'skin' : 'plugin';
         const p = pi && pi.prep;
         const s = p && p.source;
         if (!s || s.type !== 'github') return [];
         const kb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
         const out = [
-            'Unverified plugin from GitHub: ' + s.owner + '/' + s.repo + (s.tag ? ' \u00b7 ' + s.tag : '') + (s.size ? ' \u00b7 ' + kb(s.size) : ''),
+            'Unverified ' + noun + ' from GitHub: ' + s.owner + '/' + s.repo + (s.tag ? ' \u00b7 ' + s.tag : '') + (s.size ? ' \u00b7 ' + kb(s.size) : ''),
             'PEK TV did not make, review or approve it. It is published by its developer, who is responsible for it.'
         ];
         if (s.kind === 'source') out.push('This is the repository\u2019s source code, not a packaged release.');
         if (pi.replaced) {
-            const prev = PekPluginSources.get(p.id);
+            const prev = (kind === 'skin' ? PekSkinSources : PekPluginSources).get(p.id);
             const same = prev && prev.type === 'github' && (prev.owner + '/' + prev.repo).toLowerCase() === (s.owner + '/' + s.repo).toLowerCase();
-            if (!same) out.push('Careful: this replaces a plugin with the same name that you installed from somewhere else.');
+            if (!same) out.push('Careful: this replaces a ' + noun + ' with the same name that you installed from somewhere else.');
         }
         return out;
     }
@@ -250,14 +283,18 @@ class MainAppGithubMethods {
         const err = gf.error ? createElement('p', { className: 'browse-error' }, gf.error) : null;
         const note = gf.note ? createElement('p', { className: 'sub' }, gf.note) : null;
         const busy = gf.busy ? this._loadingBlock('Please wait\u2026') : null;
+        const isSkin = gf.target === 'skin';
+        const noun = isSkin ? 'skin' : 'plugin';
 
         if (gf.stage === 'warn') {
             return ui.modal('Before you install from GitHub', createElement('div', {},
                 createElement('div', { className: 'glass-panel' },
-                    createElement('p', {}, 'This installs a plugin straight from a GitHub repository that you name.'),
-                    createElement('p', {}, 'PEK TV did not make, review or approve these plugins, and they are not part of the PEK Store. Each one is published by its own developer, who is responsible for it.'),
-                    createElement('p', {}, 'PEK TV still runs it in a sandbox and shows you what it asks for before anything is installed, but it cannot check what the plugin really does. Only install plugins from developers you trust.'),
-                    createElement('p', {}, 'Make sure you have the right to use whatever the plugin gives you access to.')
+                    createElement('p', {}, 'This installs a ' + noun + ' straight from a GitHub repository that you name.'),
+                    createElement('p', {}, 'PEK TV did not make, review or approve these ' + noun + 's, and they are not part of the PEK Store. Each one is published by its own developer, who is responsible for it.'),
+                    isSkin
+                        ? createElement('p', {}, 'A skin can only change how PEK TV looks: it can\u2019t run code or reach the network, and PEK TV shows you its details before anything is installed. Only install skins from developers you trust.')
+                        : createElement('p', {}, 'PEK TV still runs it in a sandbox and shows you what it asks for before anything is installed, but it cannot check what the plugin really does. Only install plugins from developers you trust.'),
+                    isSkin ? null : createElement('p', {}, 'Make sure you have the right to use whatever the plugin gives you access to.')
                 ),
                 ui.button('I understand, continue', () => this.githubAccept(), { variant: 'primary' })
             ), back);
@@ -288,14 +325,14 @@ class MainAppGithubMethods {
             onInput: (e) => { this._ghText = e.target.value; },
             onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); this.githubFind(); } }
         });
-        return ui.modal('Install from GitHub', createElement('div', {},
-            createElement('p', { className: 'sub' }, 'Type the developer\u2019s GitHub name, a slash, and the plugin\u2019s repository name, like someone/my-plugin. Pasting a github.com link works too.'),
+        return ui.modal(isSkin ? 'Install skin from GitHub' : 'Install from GitHub', createElement('div', {},
+            createElement('p', { className: 'sub' }, 'Type the developer\u2019s GitHub name, a slash, and the ' + noun + '\u2019s repository name, like someone/my-' + noun + '. Pasting a github.com link works too.'),
             createElement('div', { className: 'sx-field' },
                 createElement('label', { className: 'sx-field-label' }, 'GitHub repository'),
                 input),
-            createElement('p', { className: 'sub' }, 'These plugins are unverified: PEK TV does not review them.'),
+            createElement('p', { className: 'sub' }, 'These ' + noun + 's are unverified: PEK TV does not review them.'),
             err, note, busy,
-            ui.button(gf.busy ? 'Working\u2026' : 'Find plugin', () => this.githubFind(), { variant: 'primary' })
+            ui.button(gf.busy ? 'Working\u2026' : 'Find ' + noun, () => this.githubFind(), { variant: 'primary' })
         ), back);
     }
 }
