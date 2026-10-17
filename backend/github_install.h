@@ -1,5 +1,5 @@
 // ============================================================
-// Install a plugin from GitHub: the download half (header-only).
+// Install a plugin or a skin from GitHub: the download half (header-only).
 //
 //   POST /api/plugins/github-zip   owner=<user>  repo=<name>  url=<release or source zip link>
 //
@@ -143,7 +143,7 @@ inline void registerGithubRoutes(httplib::Server& svr) {
         }
         std::string host, path;
         if (!allowedUrl(url, owner, repo, host, path)) {
-            jsonError(res, 400, "That is not a plugin download link for this repository.");
+            jsonError(res, 400, "That is not a download link for this repository.");
             return;
         }
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
@@ -161,14 +161,14 @@ inline void registerGithubRoutes(httplib::Server& svr) {
         };
         auto r = cli.Get(path, hdrs, progress);
         if (!r) {
-            if (r.error() == httplib::Error::Canceled) jsonError(res, 413, "That file is too large to be a plugin (limit 8 MB).");
+            if (r.error() == httplib::Error::Canceled) jsonError(res, 413, "That file is too large to be a plugin or skin (limit 8 MB).");
             else jsonError(res, 502, "Couldn't reach GitHub (" + httplib::to_string(r.error()) + ").");
             return;
         }
         if (r->status == 404) { jsonError(res, 404, "GitHub could not find that file."); return; }
         if (r->status == 403 || r->status == 429) { jsonError(res, 429, "GitHub is limiting requests from this connection. Try again in a few minutes."); return; }
         if (r->status != 200) { jsonError(res, 502, "GitHub answered HTTP " + std::to_string(r->status) + "."); return; }
-        if (r->body.size() > kMaxZipBytes) { jsonError(res, 413, "That file is too large to be a plugin (limit 8 MB)."); return; }
+        if (r->body.size() > kMaxZipBytes) { jsonError(res, 413, "That file is too large to be a plugin or skin (limit 8 MB)."); return; }
         res.set_content(r->body, "application/zip");
 #else
         jsonError(res, 501, "This build has no HTTPS support, so it can't install from GitHub.");

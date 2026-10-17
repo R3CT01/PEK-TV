@@ -7,6 +7,11 @@ A skin can't run code and can't reach the network.
 
 - **Install:** Settings → Skins → *Install skin from .zip*, then pick the .zip.
   PEK TV shows the skin's name, author, version and description before it installs anything.
+- **From GitHub:** Settings → Skins → *Install skin from GitHub*, then type `owner/repo` (a pasted github.com link
+  works too). PEK TV uses the repository's latest release `.zip` (up to 8 MB), or its source code if it has no
+  release, and then shows the same details and confirm screen as a .zip install. A skin that came from GitHub is
+  labelled "unverified" in the Skins list. The same *Allow installs from GitHub* switch (Settings) turns it off.
+  The repository must hold a skin (`skin.json`), the same layout as the zip below.
 - **Use it:** tap the skin in the Skins list.
 - **Remove:** hold the skin's row (OK on a remote, or a long press on a phone), then confirm.
   The skins that ship with PEK TV (PEK Ember, Green, Neon) can't be removed.
