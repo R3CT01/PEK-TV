@@ -27,6 +27,31 @@ class Api {
     return false;
   }
 
+  /// POST /api/rescan. Returns null when the scan started, or the seconds to wait when the server said "too soon" (429).
+  static Future<int?> rescan() async {
+    final r = await _client.post(Uri.parse('$base/api/rescan')).timeout(const Duration(seconds: 20));
+    if (r.statusCode == 429) {
+      try {
+        return ((jsonDecode(r.body) as Map)['retry_after'] as num?)?.toInt() ?? 10;
+      } catch (_) {
+        return 10;
+      }
+    }
+    return null;
+  }
+
+  static Future<bool> scanning() async {
+    try {
+      final j = await _get('/api/scan-status');
+      return j['scanning'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// A rescan changes what the library holds, so cached lookups and lists are dropped.
+  static void forgetLibrary() => _details.clear();
+
   static Future<List<Movie>> movies() async {
     final j = await _get('/api/movies');
     final list = (j['movies'] as List?) ?? const [];

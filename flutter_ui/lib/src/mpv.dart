@@ -81,6 +81,15 @@ class PekPlayer {
   }
 
   // Host actions (MainActivity / FlutterHostActivity).
+  /// Same test the web UI used for html.pek-tv: false on Android TV / leanback boxes.
+  static Future<bool> isPhone() async {
+    try {
+      return (await _host.invokeMethod<bool>('isPhone').timeout(const Duration(seconds: 2))) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
   static Future<void> classicUi() => _host.invokeMethod('classicUi');
   static Future<void> exitApp() => _host.invokeMethod('exit');
 }

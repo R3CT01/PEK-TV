@@ -188,6 +188,9 @@ class MainActivity : Activity() {
      * Without the Flutter class, or on any error, the web UI loads as before.
      */
     private fun launchFlutterUi(): Boolean {
+        // "Switch to classic UI" in the Flutter menu opens this activity with pek_classic for that one session only;
+        // the next normal launch goes back to the Flutter UI.
+        if (intent?.getBooleanExtra("pek_classic", false) == true) return false
         if (getSharedPreferences("pek_player", Context.MODE_PRIVATE).getBoolean("web_ui", false)) return false
         return try {
             val cls = Class.forName("com.pektv.app.flutter.FlutterHostActivity")

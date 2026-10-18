@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
-import 'home.dart' show PosterImage;
+import 'widgets.dart' show PosterImage;
 import 'player.dart';
 import 'theme.dart';
 

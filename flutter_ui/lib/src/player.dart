@@ -180,7 +180,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: AnimatedOpacity(
                   opacity: _controls ? 1 : 0,
                   duration: const Duration(milliseconds: 180),
-                  child: _overlay(),
+                  child: Theme(data: ThemeData.dark(useMaterial3: true), child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: _overlay())),
                 ),
               ),
             ],

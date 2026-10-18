@@ -1,7 +1,10 @@
 package com.pektv.app.flutter
 
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
@@ -113,11 +116,18 @@ class FlutterHostActivity : FlutterActivity() {
 
         MethodChannel(messenger, "pek/host").setMethodCallHandler { call, result ->
             when (call.method) {
+                // The same test as MainActivity.phone: false on Android TV / leanback boxes (html.pek-tv in the web UI).
+                "isPhone" -> {
+                    val ui = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+                    val isTv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                    result.success(!isTv && packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN))
+                }
                 "classicUi" -> {
-                    // Escape hatch while the Flutter UI is still being filled in: go back to the web UI and stay there.
-                    getSharedPreferences("pek_player", Context.MODE_PRIVATE).edit().putBoolean("web_ui", true).apply()
+                    // Escape hatch while the Flutter UI is still being filled in: open the web UI for this session only
+                    // (add sources, plugins, settings there). The next normal launch starts the Flutter UI again.
                     mpv?.destroy()
-                    startActivity(Intent(this, MainActivity::class.java))
+                    startActivity(Intent(this, MainActivity::class.java).putExtra("pek_classic", true))
                     finish()
                     result.success(null)
                 }

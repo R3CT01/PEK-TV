@@ -1,25 +1,30 @@
 import 'package:flutter/material.dart';
 
-/// PEK Ember (the app's default dark skin). Skins become a token file later; for now these are the defaults.
+import 'tokens.dart';
+
+/// Static copies of the default tokens for the screens that have not moved to PekScope yet (detail, player).
 class Pek {
-  static const bg = Color(0xFF14100D);
-  static const surface = Color(0xFF1E1813);
-  static const accent = Color(0xFFFF7A2F);
-  static const text = Color(0xFFF3EBE3);
-  static const muted = Color(0xFFA8998C);
-  static const radius = 14.0;
+  static const bg = Color(0xFFE9E2DA);
+  static const surface = Color(0xFFF8F4EE);
+  static const accent = Color(0xFF2B2622);
+  static const text = Color(0xFF2B2622);
+  static const muted = Color(0xFF7A6F66);
+  static const radius = 16.0;
 }
 
 ThemeData pekTheme() {
-  final base = ThemeData.dark(useMaterial3: true);
+  const t = PekTokens.light;
+  final base = ThemeData.light(useMaterial3: true);
   return base.copyWith(
-    scaffoldBackgroundColor: Pek.bg,
+    scaffoldBackgroundColor: t.bg,
+    canvasColor: t.bg,
     colorScheme: base.colorScheme.copyWith(
-      primary: Pek.accent,
-      surface: Pek.surface,
-      onSurface: Pek.text,
+      primary: t.accent,
+      onPrimary: t.bg,
+      surface: t.surface,
+      onSurface: t.text,
     ),
-    textTheme: base.textTheme.apply(bodyColor: Pek.text, displayColor: Pek.text),
-    focusColor: Pek.accent.withOpacity(0.25),
+    textTheme: base.textTheme.apply(bodyColor: t.text, displayColor: t.text),
+    focusColor: t.surfaceFocused,
   );
 }
