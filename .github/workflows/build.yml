@@ -90,6 +90,12 @@ jobs:
         working-directory: flutter_ui
         run: flutter pub get
 
+      - name: Patch plugins using removed flutter.compileSdkVersion
+        if: ${{ hashFiles('flutter_ui/pubspec.yaml') != '' }}
+        run: |
+          grep -rl "flutter.compileSdkVersion" "$PUB_CACHE/hosted" --include=build.gradle.kts --include=build.gradle 2>/dev/null \
+            | xargs -r sed -i 's/flutter\.compileSdkVersion/36/g'
+
       # ---- Bundle the web UI, plugins and skins into the apk -------------
       - name: Stage app assets
         run: |
