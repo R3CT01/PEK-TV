@@ -72,7 +72,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             V="${GITHUB_REF_NAME#v}"
           else
-            V="$(grep -oP "versionName '\K[^']+" android/app/build.gradle)-dev.${GITHUB_RUN_NUMBER}"
+            V="$(grep -oP "versionName.*: '\K[^']+" android/app/build.gradle)-dev.${GITHUB_RUN_NUMBER}"
           fi
           echo "VERSION_NAME=$V" >> "$GITHUB_ENV"
           echo "Version: $V  (type: $BUILD_TYPE)"
