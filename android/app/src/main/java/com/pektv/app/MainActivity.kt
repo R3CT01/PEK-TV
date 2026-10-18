@@ -174,12 +174,33 @@ class MainActivity : Activity() {
                 }
             }
             runOnUiThread {
+                if (ready && launchFlutterUi()) return@runOnUiThread
                 if (ready) webView.loadUrl("http://127.0.0.1:8080/")
                 else webView.loadData("Server failed to start", "text/plain", "utf-8")
             }
         }.start()
     }
 
+
+    /**
+     * Flutter UI: when this build contains it (flutter_ui/ generated, see FLUTTER.md) and the user has not
+     * switched back to the classic UI, the server is already up, so open the Flutter screen and leave.
+     * Without the Flutter class, or on any error, the web UI loads as before.
+     */
+    private fun launchFlutterUi(): Boolean {
+        if (getSharedPreferences("pek_player", Context.MODE_PRIVATE).getBoolean("web_ui", false)) return false
+        return try {
+            val cls = Class.forName("com.pektv.app.flutter.FlutterHostActivity")
+            startActivity(Intent(this, cls))
+            finish()
+            true
+        } catch (e: ClassNotFoundException) {
+            false
+        } catch (e: Throwable) {
+            Log.w("PEK", "Flutter UI failed to start, using the web UI", e)
+            false
+        }
+    }
 
     // The splash is gone only when its video has finished AND the page has loaded underneath it. If the page is
     // slow, the last video frame is held (at most 8 s) instead of showing a blank screen.

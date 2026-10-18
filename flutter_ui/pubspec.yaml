@@ -1,0 +1,19 @@
+name: pek_tv_ui
+description: PEK TV Flutter UI (Android first). Talks to the existing C++ server on 127.0.0.1:8080 and drives libmpv through platform channels.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+
+flutter:
+  uses-material-design: true
+  module:
+    androidX: true
+    androidPackage: com.pektv.app.flutterui
+    iosBundleIdentifier: com.pektv.app.flutterui

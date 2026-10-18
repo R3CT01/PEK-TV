@@ -45,7 +45,7 @@ import kotlin.math.roundToInt
 class MpvController(
     private val activity: Activity,
     private val surfaceView: SurfaceView,
-    private val webView: WebView
+    private val webView: WebView?
 ) : SurfaceHolder.Callback, MPVLib.EventObserver {
 
     private val ui = Handler(Looper.getMainLooper())
@@ -685,8 +685,17 @@ class MpvController(
         return JSONObject().put("audio", audio).put("subtitles", subs).put("chapters", chapters)
     }
 
+    /** Flutter UI: when set, player events go here (on the main thread) instead of to the web page. */
+    var eventSink: ((String, JSONObject) -> Unit)? = null
+
     private fun emit(event: String, data: JSONObject) {
+        val sink = eventSink
+        if (sink != null) {
+            ui.post { sink(event, data) }
+            return
+        }
+        val wv = webView ?: return
         val js = "window.__pekMpv && window.__pekMpv('" + event + "'," + data.toString() + ")"
-        webView.post { webView.evaluateJavascript(js, null) }
+        wv.post { wv.evaluateJavascript(js, null) }
     }
 }

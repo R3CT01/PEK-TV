@@ -87,7 +87,16 @@ chaquopy {
     }
 }
 
+// Flutter UI: only wired in when the module has been generated (see settings.gradle).
+def flutterOn = new File(rootDir, '../flutter_ui/.android/include_flutter.groovy').exists()
+if (flutterOn) {
+    android.sourceSets.main.java.srcDir 'src/flutter/java'
+}
+
 dependencies {
+    if (flutterOn) {
+        implementation project(':flutter')
+    }
     // mpv engine: the app's only video player (decoding + rendering)
     implementation 'dev.jdtech.mpv:libmpv:1.0.0'
 }

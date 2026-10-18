@@ -6,11 +6,20 @@ pluginManagement {
     }
 }
 dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
     repositories {
         google()
         mavenCentral()
+        maven { url 'https://storage.googleapis.com/download.flutter.io' }
     }
 }
 rootProject.name = "PEK"
 include ':app'
+
+// Flutter UI (flutter_ui/). `flutter pub get` inside flutter_ui generates .android/include_flutter.groovy; until that
+// file exists nothing below runs and the app builds exactly as before (web UI only).
+def flutterInclude = new File(settingsDir, '../flutter_ui/.android/include_flutter.groovy')
+if (flutterInclude.exists()) {
+    setBinding(new Binding([gradle: this]))
+    evaluate(flutterInclude)
+}

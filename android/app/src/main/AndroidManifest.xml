@@ -87,6 +87,17 @@
             </intent-filter>
         </activity>
 
+        <!-- Flutter UI host. Its Kotlin class is only compiled in when flutter_ui/ has been generated; without it
+             this entry is harmless and MainActivity falls back to the web UI. -->
+        <activity
+            android:name=".flutter.FlutterHostActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.PEK.Launch" />
+
         <service
             android:name=".MusicService"
             android:exported="false"
