@@ -46,7 +46,7 @@ jobs:
       # The repo has no Gradle wrapper, so install Gradle here (AGP 8.7 needs >= 8.9).
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.14.3'
 
       - name: Install SDK pieces
         run: |
