@@ -114,7 +114,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               const Padding(padding: EdgeInsets.fromLTRB(24, 4, 24, 4), child: Text('Audio', style: TextStyle(color: Pek.muted))),
               for (final t in audio)
                 SimpleDialogOption(
-                  autofocus: t.selected,
                   onPressed: () {
                     _player.setAudio(t.id);
                     Navigator.pop(c);

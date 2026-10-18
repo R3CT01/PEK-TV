@@ -23,7 +23,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (c) => SimpleDialog(
         title: const Text('PEK TV'),
         children: [
-          SimpleDialogOption(autofocus: true, onPressed: () => Navigator.pop(c, 'refresh'), child: const Text('Refresh library')),
+          SimpleDialogOption(onPressed: () => Navigator.pop(c, 'refresh'), child: const Text('Refresh library')),
           SimpleDialogOption(onPressed: () => Navigator.pop(c, 'classic'), child: const Text('Switch to classic UI')),
           SimpleDialogOption(onPressed: () => Navigator.pop(c, 'exit'), child: const Text('Exit')),
         ],
