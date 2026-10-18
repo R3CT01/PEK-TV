@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'mpv.dart';
+import 'music_controller.dart';
+import 'store.dart';
 import 'theme.dart';
 
 /// Full-screen player. The picture is a native libmpv surface behind Flutter, so this screen is transparent and only
@@ -12,17 +14,21 @@ import 'theme.dart';
 /// Remote / D-pad:  Select = play / pause   Left / Right = -10 s / +10 s   Up = show controls
 ///                  Down = audio and subtitles   Back = close
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0});
+  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume});
   final String url;
   final String title;
   final double startSec;
+
+  /// What to record for Resume Watching (null = do not track).
+  final Progress? resume;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  final PekPlayer _player = PekPlayer();
+  final PekPlayer _player = PekPlayer.shared;
+  Timer? _save;
   bool _controls = true;
   Timer? _hide;
   double? _seekBase;
@@ -32,6 +38,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    MusicController.instance.suspend();
+    _player.reset();
+    _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
     _player.load(widget.url, startSec: widget.startSec, title: widget.title);
     _player.ended.addListener(_onEnded);
     _poke();
@@ -39,12 +48,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _record(notify: true);
+    _save?.cancel();
     _hide?.cancel();
     _seekReset?.cancel();
     _player.ended.removeListener(_onEnded);
     unawaited(_player.destroy());
-    _player.dispose();
+    _player.reset();
     super.dispose();
+  }
+
+  /// _saveProgress() in app_watch.js: every ~10 s and when the player closes.
+  void _record({bool notify = false}) {
+    final r = widget.resume;
+    if (r == null) return;
+    final pos = _player.position.value, dur = _player.duration.value;
+    if (dur <= 0 && pos <= 0) return;
+    Store.saveProgress(r.at(pos, dur), notify: notify);
   }
 
   void _onEnded() {

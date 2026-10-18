@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'detail.dart';
-import 'mpv.dart';
+import 'common.dart';
+import 'pages.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -150,7 +151,7 @@ class _LibraryPageState extends State<LibraryPage> {
     );
   }
 
-  /// _renderEmptyLibrary(): "No movies yet" + the add-source buttons. The pickers are still in the classic UI.
+  /// _renderEmptyLibrary(): "No movies yet" + the add-source button (Settings > Media sources).
   Widget _empty(BuildContext context) {
     final rem = context.pek.rem;
     final what = widget.tab == 'movies' ? 'movies' : 'shows';
@@ -162,7 +163,11 @@ class _LibraryPageState extends State<LibraryPage> {
           children: [
             PekCard(title: 'No $what yet', subtitle: 'Add a media folder and PEK TV will scan it and sort your videos here.'),
             SizedBox(height: 1.25 * rem),
-            PekButton(label: 'Add a source (classic UI)', primary: true, onTap: PekPlayer.classicUi),
+            PekButton(
+              label: 'Add a source',
+              primary: true,
+              onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (c) => SubScreen(title: 'Settings', body: SettingsPage(padding: c.pek.pagePad)))),
+            ),
           ],
         ),
       ),

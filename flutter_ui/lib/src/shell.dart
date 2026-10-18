@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 
+import 'common.dart';
+import 'dashboard.dart';
 import 'library.dart';
 import 'mpv.dart';
+import 'music.dart';
+import 'pages.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
-/// NAV_ITEMS in app_config.js. "Resume Watching" and "Watch History" are inserted by the web UI once there is something to show;
-/// they come with those screens.
+/// NAV_ITEMS in app_config.js, plus Resume Watching (the web UI only inserts it once there is something to resume).
 const _navItems = <(String, String)>[
   ('dashboard', 'Dashboard'),
   ('movies', 'Movies'),
   ('shows', 'TV Shows'),
   ('music', 'Music'),
+  ('resume', 'Resume Watching'),
   ('favorites', 'Favorites'),
   ('duplicates', 'Duplicates'),
   ('unknown', 'Unknown'),
@@ -19,11 +23,18 @@ const _navItems = <(String, String)>[
   ('settings', 'Settings'),
 ];
 
-/// PHONE_PRIMARY_TABS and BB_LABEL in app.js / app_config.js.
-const _phonePrimary = ['dashboard', 'movies', 'shows', 'music'];
-const _bbLabel = {'dashboard': 'Home', 'shows': 'Shows'};
+/// The pages you swipe between on a phone, in order. "More" is a page of its own (not a pop-up sheet): it holds every
+/// other screen as a tile, and a tap opens that screen on top.
+const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
+const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
 
-/// `.pek-shell`: sidebar + content on wide screens (TVs, tablets), content + bottom tab bar on phones (width <= 720).
+/// Everything that is not a swipe page.
+const _moreIds = ['resume', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
+
+String _titleOf(String id) => _navItems.firstWhere((e) => e.$1 == id, orElse: () => ('', 'PEK TV')).$2;
+
+/// `.pek-shell`: on phones and tablets the pages sit side by side in a PageView (swipe left / right, or tap the bottom
+/// bar); on a TV the left sidebar switches the content, because a remote has no swipe.
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
   @override
@@ -31,15 +42,36 @@ class AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<AppShell> {
-  String _tab = 'dashboard';
-  bool _moreOpen = false;
+  final PageController _pager = PageController();
+  int _page = 0; // phone: index into _swipePages
+  String _tab = 'dashboard'; // TV: sidebar selection
 
-  void _select(String id) => setState(() {
-        _tab = id;
-        _moreOpen = false;
-      });
+  @override
+  void dispose() {
+    _pager.dispose();
+    super.dispose();
+  }
 
-  String get _label => _navItems.firstWhere((e) => e.$1 == _tab, orElse: () => ('', 'PEK TV')).$2;
+  /// Opens a screen: on a TV it replaces the content, on a phone swipe pages scroll to it and the rest open on top.
+  void _open(String id) {
+    final p = context.pek;
+    if (p.isTv) {
+      setState(() => _tab = id);
+      return;
+    }
+    final i = _swipePages.indexOf(id);
+    if (i >= 0) {
+      _goTo(i);
+      return;
+    }
+    Navigator.push(context, MaterialPageRoute<void>(builder: (c) => SubScreen(title: _titleOf(id), body: _body(c, id))));
+  }
+
+  void _goTo(int i) {
+    if (_pager.hasClients) {
+      _pager.animateToPage(i, duration: const Duration(milliseconds: 260), curve: Curves.easeOutCubic);
+    }
+  }
 
   Future<void> _askExit() async {
     final p = context.pek;
@@ -80,30 +112,93 @@ class _AppShellState extends State<AppShell> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (_moreOpen) {
-          setState(() => _moreOpen = false);
-        } else if (_tab != 'dashboard') {
-          _select('dashboard');
+        // Back: leave a secondary screen / any other page for the first page, then ask before exiting.
+        if (p.isTv ? _tab != 'dashboard' : _page != 0) {
+          if (p.isTv) {
+            setState(() => _tab = 'dashboard');
+          } else {
+            _goTo(0);
+          }
         } else {
           _askExit();
         }
       },
-      child: Material(
-        color: p.tokens.bg,
-        child: p.narrow ? _phone(context) : _wide(context),
-      ),
+      child: Material(color: p.tokens.bg, child: p.isTv ? _tv(context) : _phone(context)),
     );
   }
 
-  // ---------------------------------------------------------------- wide: sidebar + content
+  // ---------------------------------------------------------------- the content of one screen
 
-  Widget _wide(BuildContext context) {
+  Widget _body(BuildContext context, String id) {
+    final pad = context.pek.pagePad;
+    switch (id) {
+      case 'dashboard':
+        return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'));
+      case 'movies':
+      case 'shows':
+        return LibraryPage(key: ValueKey(id), tab: id, title: _titleOf(id), padding: pad);
+      case 'music':
+        return MusicPage(padding: pad);
+      case 'more':
+        return _MorePage(padding: pad, onOpen: _open);
+      case 'resume':
+        return ResumePage(padding: pad);
+      case 'favorites':
+        return FavoritesPage(padding: pad);
+      case 'duplicates':
+        return DuplicatesPage(padding: pad);
+      case 'unknown':
+        return UnknownPage(padding: pad);
+      case 'plugins':
+        return PluginsPage(padding: pad);
+      case 'settings':
+        return SettingsPage(padding: pad);
+    }
+    return const SizedBox.shrink();
+  }
+
+  // ---------------------------------------------------------------- phone / tablet: swipe pages + bottom bar
+
+  Widget _phone(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final bottom = MediaQuery.paddingOf(context).bottom;
+    final bar = Container(
+      padding: EdgeInsets.only(bottom: bottom),
+      decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < _swipePages.length; i++)
+              Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, active: i == _page, onTap: () => _goTo(i))),
+          ],
+        ),
+      ),
+    );
+    return Column(
+      children: [
+        Expanded(
+          child: PageView(
+            controller: _pager,
+            onPageChanged: (i) => setState(() => _page = i),
+            children: [for (final id in _swipePages) _KeepAlive(child: _body(context, id))],
+          ),
+        ),
+        const MiniPlayer(),
+        bar,
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------------- TV: sidebar + content
+
+  Widget _tv(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
     final rem = p.rem;
-    // style.css: .pek-sidebar 260px / 14rem on TV, padding 1.5rem 1rem; the TV adds the safe margins.
     final sidebar = Container(
-      width: p.isTv ? 14 * rem : 260,
+      width: 14 * rem,
       padding: EdgeInsets.fromLTRB(rem + p.safeX, 1.5 * rem + p.safeY, rem, 1.5 * rem + p.safeY),
       decoration: BoxDecoration(color: t.bgElevated, border: Border(right: BorderSide(color: t.border))),
       child: Column(
@@ -121,8 +216,8 @@ class _AppShellState extends State<AppShell> {
               itemBuilder: (_, i) => _NavItem(
                 label: _navItems[i].$2,
                 active: _navItems[i].$1 == _tab,
-                autofocus: p.isTv && _navItems[i].$1 == _tab,
-                onTap: () => _select(_navItems[i].$1),
+                autofocus: _navItems[i].$1 == _tab,
+                onTap: () => setState(() => _tab = _navItems[i].$1),
               ),
             ),
           ),
@@ -134,90 +229,76 @@ class _AppShellState extends State<AppShell> {
         ],
       ),
     );
-    return Row(children: [sidebar, Expanded(child: _content(context))]);
+    return Row(children: [
+      sidebar,
+      Expanded(child: Column(children: [Expanded(child: KeyedSubtree(key: ValueKey(_tab), child: _body(context, _tab))), const MiniPlayer()])),
+    ]);
   }
+}
 
-  // ---------------------------------------------------------------- phone: content + bottom bar
+/// Keeps a swipe page built while it is off screen, so scroll position and loaded posters survive a swipe away and back.
+class _KeepAlive extends StatefulWidget {
+  const _KeepAlive({required this.child});
+  final Widget child;
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
 
-  Widget _phone(BuildContext context) {
-    final p = context.pek;
-    final t = p.tokens;
-    final bottom = MediaQuery.paddingOf(context).bottom;
-    final more = _navItems.where((e) => !_phonePrimary.contains(e.$1)).toList();
-    final moreActive = more.any((e) => e.$1 == _tab);
-    final bar = Container(
-      padding: EdgeInsets.only(bottom: bottom),
-      decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
-      child: IntrinsicHeight(
-       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          for (final id in _phonePrimary)
-            Expanded(
-              child: _BarItem(
-                label: _bbLabel[id] ?? _navItems.firstWhere((e) => e.$1 == id).$2,
-                active: id == _tab && !_moreOpen,
-                onTap: () => _select(id),
-              ),
-            ),
-          Expanded(
-            child: _BarItem(label: 'More', active: moreActive || _moreOpen, onTap: () => setState(() => _moreOpen = !_moreOpen)),
-          ),
-        ],
-       ),
-      ),
-    );
-    return Stack(
-      children: [
-        Column(children: [Expanded(child: _content(context)), bar]),
-        if (_moreOpen) ...[
-          Positioned.fill(
-            child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: () => setState(() => _moreOpen = false), child: ColoredBox(color: t.overlay)),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 56 + bottom,
-            child: Container(
-              padding: EdgeInsets.all(0.75 * p.rem),
-              decoration: BoxDecoration(
-                color: t.bgElevated,
-                border: Border(top: BorderSide(color: t.border)),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
-              ),
-              child: Wrap(
-                spacing: 0.5 * p.rem,
-                runSpacing: 0.5 * p.rem,
-                children: [
-                  for (final e in more)
-                    SizedBox(
-                      width: (p.size.width - 1.5 * p.rem - 0.5 * p.rem) / 2,
-                      child: _NavItem(label: e.$2, active: e.$1 == _tab, center: true, onTap: () => _select(e.$1)),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ],
-    );
+class _KeepAliveState extends State<_KeepAlive> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
+}
 
-  // ---------------------------------------------------------------- content pane
+/// The "More" page: every screen that is not a swipe page, as tiles.
+class _MorePage extends StatelessWidget {
+  const _MorePage({required this.padding, required this.onOpen});
+  final EdgeInsets padding;
+  final void Function(String id) onOpen;
 
-  Widget _content(BuildContext context) {
+  static const _hint = {
+    'resume': 'Pick up where you stopped',
+    'favorites': 'Your saved movies and shows',
+    'duplicates': 'Files that appear twice',
+    'unknown': 'Files PEK TV could not sort',
+    'plugins': 'Installed plugins',
+    'settings': 'Sources and app options',
+  };
+
+  @override
+  Widget build(BuildContext context) {
     final p = context.pek;
     final rem = p.rem;
-    // .pek-content: padding 2.5rem; 1rem on phones; the TV adds the safe margins (top/bottom 2rem + safe-y, right 2.5rem + safe-x).
-    final EdgeInsets pad = p.narrow
-        ? EdgeInsets.all(rem)
-        : p.isTv
-            ? EdgeInsets.fromLTRB(2.5 * rem, 2 * rem + p.safeY, 2.5 * rem + p.safeX, 2 * rem + p.safeY)
-            : EdgeInsets.all(2.5 * rem);
-    if (_tab == 'movies' || _tab == 'shows') {
-      return LibraryPage(key: ValueKey(_tab), tab: _tab, title: _label, padding: pad);
-    }
-    return _Placeholder(key: ValueKey(_tab), title: _label, padding: pad);
+    final cols = p.size.width >= 600 ? 3 : 2;
+    final gap = 0.75 * rem;
+    final rows = (_moreIds.length / cols).ceil();
+    return ListView(
+      padding: padding,
+      children: [
+        const Heading('More'),
+        for (var r = 0; r < rows; r++)
+          Padding(
+            padding: EdgeInsets.only(bottom: gap),
+            child: IntrinsicHeight(
+              child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                for (var c = 0; c < cols; c++) ...[
+                  if (c > 0) SizedBox(width: gap),
+                  Expanded(
+                    child: r * cols + c < _moreIds.length
+                        ? PekCard(title: _titleOf(_moreIds[r * cols + c]), subtitle: _hint[_moreIds[r * cols + c]], onTap: () => onOpen(_moreIds[r * cols + c]))
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ]),
+            ),
+          ),
+      ],
+    );
   }
 }
 
@@ -311,30 +392,6 @@ class _BarItem extends StatelessWidget {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Screens that are not in the Flutter UI yet. The web UI still has them: one tap opens it for this session.
-class _Placeholder extends StatelessWidget {
-  const _Placeholder({super.key, required this.title, required this.padding});
-  final String title;
-  final EdgeInsets padding;
-
-  @override
-  Widget build(BuildContext context) {
-    final rem = context.pek.rem;
-    return SingleChildScrollView(
-      padding: padding,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          PageTitle(title),
-          const PekCard(title: 'Not in the Flutter UI yet', subtitle: 'This screen is still in the classic UI.'),
-          SizedBox(height: 1.25 * rem),
-          PekButton(label: 'Open classic UI', primary: true, onTap: PekPlayer.classicUi),
         ],
       ),
     );

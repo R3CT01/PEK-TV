@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import 'src/api.dart';
 import 'src/mpv.dart';
 import 'src/shell.dart';
+import 'src/store.dart';
 import 'src/theme.dart';
 import 'src/tokens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Store.init();
   // The same phone / TV test the web UI used for html.pek-tv (bigger text, TV safe margins, bold focus ring).
   final phone = await PekPlayer.isPhone();
   runApp(PekApp(isPhone: phone));

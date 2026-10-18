@@ -13,9 +13,13 @@ class TrackInfo {
 /// The libmpv player. It lives in Kotlin (MpvController, unchanged engine); this is the Dart side of the channels.
 /// Video is drawn on a native surface BEHIND Flutter, so the player screen just has a transparent background.
 class PekPlayer {
-  PekPlayer() {
+  PekPlayer._() {
     _sub = _events.receiveBroadcastStream().listen(_onEvent, onError: (_) {});
   }
+
+  /// The host forwards events to ONE listener, so the video screen and the music player share this instance
+  /// (one libmpv engine anyway).
+  static final PekPlayer shared = PekPlayer._();
 
   static const _method = MethodChannel('pek/mpv');
   static const _events = EventChannel('pek/mpv/events');
@@ -69,15 +73,15 @@ class PekPlayer {
 
   Future<void> togglePause() => playing.value ? pause() : play();
 
-  void dispose() {
-    _sub.cancel();
-    position.dispose();
-    duration.dispose();
-    playing.dispose();
-    buffering.dispose();
-    audio.dispose();
-    subtitles.dispose();
-    ended.dispose();
+  /// Forget the finished item (the shared instance itself lives for the whole app).
+  void reset() {
+    position.value = 0;
+    duration.value = 0;
+    playing.value = true;
+    buffering.value = true;
+    audio.value = const [];
+    subtitles.value = const [];
+    ended.value = false;
   }
 
   // Host actions (MainActivity / FlutterHostActivity).

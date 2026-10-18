@@ -1,0 +1,365 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import 'api.dart';
+import 'common.dart';
+import 'detail.dart';
+import 'mpv.dart';
+import 'store.dart';
+import 'tokens.dart';
+import 'widgets.dart';
+
+// ====================================================================== Resume Watching
+
+class ResumePage extends StatelessWidget {
+  const ResumePage({super.key, required this.padding});
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    return ValueListenableBuilder<int>(
+      valueListenable: Store.changed,
+      builder: (context, _, __) {
+        final items = Store.resumeItems();
+        return ListView(padding: padding, children: [
+          const Heading('Resume Watching'),
+          if (items.isEmpty) const PekCard(title: 'Nothing to resume', subtitle: 'Anything you stop partway through shows up here.'),
+          for (final it in items)
+            ListRow(
+              title: it.title,
+              subtitle: it.duration > 0 ? '${formatTime(it.position)} of ${formatTime(it.duration)}' : 'Stopped at ${formatTime(it.position)}',
+              onTap: () => playMedia(context, it, startSec: it.position),
+              trailing: IconButton(tooltip: 'Remove', onPressed: () => Store.removeProgress(it.id), icon: Icon(Icons.close, color: p.tokens.textMuted)),
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+// ====================================================================== Favorites
+
+class FavoritesPage extends StatefulWidget {
+  const FavoritesPage({super.key, required this.padding});
+  final EdgeInsets padding;
+  @override
+  State<FavoritesPage> createState() => _FavoritesPageState();
+}
+
+class _FavoritesPageState extends State<FavoritesPage> {
+  late final Future<(List<Movie>, List<Show>)> _lib = _load();
+
+  Future<(List<Movie>, List<Show>)> _load() async {
+    final m = await Api.movies().catchError((_) => <Movie>[]);
+    final s = await Api.shows().catchError((_) => <Show>[]);
+    return (m, s);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final rem = p.rem;
+    return ValueListenableBuilder<int>(
+      valueListenable: Store.changed,
+      builder: (context, _, __) {
+        final favs = Store.favorites();
+        return ListView(padding: widget.padding, children: [
+          const Heading('Favorites'),
+          if (favs.isEmpty)
+            const PekCard(title: 'No favorites yet', subtitle: 'Open a movie or show and tap \u2661 Favorite. It will show up here.')
+          else
+            FutureBuilder<(List<Movie>, List<Show>)>(
+              future: _lib,
+              builder: (context, snap) {
+                if (!snap.hasData) return Text('Loading\u2026', style: TextStyle(color: p.tokens.textMuted));
+                final (movies, shows) = snap.data!;
+                final cells = <Widget>[];
+                for (final f in favs) {
+                  if (f.kind == 'movie') {
+                    final m = movies.where((e) => e.id == f.ref).firstOrNull;
+                    cells.add(PosterCard(
+                      title: f.title,
+                      subtitle: f.year > 0 ? '${f.year}' : '',
+                      poster: m == null ? Future.value(const Details(overview: '', poster: '')) : Api.movieDetails(m.id),
+                      onTap: m == null ? () => _gone(context) : () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: m))),
+                      onLongPress: () => Store.toggleFavorite(f),
+                    ));
+                  } else {
+                    final s = shows.where((e) => e.title == f.ref).firstOrNull;
+                    cells.add(PosterCard(
+                      title: f.title,
+                      subtitle: s == null ? '' : '${s.episodeCount} episodes',
+                      poster: s == null ? Future.value(const Details(overview: '', poster: '')) : Api.showDetails(s.title),
+                      onTap: s == null ? () => _gone(context) : () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShowScreen(show: s))),
+                      onLongPress: () => Store.toggleFavorite(f),
+                    ));
+                  }
+                }
+                return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  CustomScrollView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    slivers: [PekGridSliver(count: cells.length, minWidth: p.compact ? 110 : 200, gap: p.compact ? 0.6 * rem : rem, builder: (_, i) => cells[i])],
+                  ),
+                  SizedBox(height: 0.5 * rem),
+                  Text('Long-press a poster to remove it.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.8 * rem)),
+                ]);
+              },
+            ),
+        ]);
+      },
+    );
+  }
+
+  void _gone(BuildContext c) => ScaffoldMessenger.maybeOf(c)?.showSnackBar(const SnackBar(content: Text('That title is no longer in your library.')));
+}
+
+// ====================================================================== Duplicates / Unknown
+
+class DuplicatesPage extends StatelessWidget {
+  const DuplicatesPage({super.key, required this.padding});
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final rem = context.pek.rem;
+    const kind = {'movie': 'Same movie', 'episode': 'Same episode', 'size': 'Same size, different names'};
+    String plural(int n, String w) => '$n $w${n == 1 ? '' : 's'}';
+    return ListView(padding: padding, children: [
+      const Heading('Duplicates'),
+      Async<DuplicatesResult>(
+        future: Api.duplicates(),
+        builder: (context, d) {
+          if (d.groups.isEmpty) return const PekCard(title: 'No duplicates found', subtitle: 'Every movie and episode in your library appears only once.');
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            PekCard(title: '${plural(d.groups.length, 'duplicate group')} found', subtitle: 'Keeping one copy of each would free up to ${formatBytes(d.wastedTotal)}. PEK TV only lists duplicates; delete files from your file manager.'),
+            SizedBox(height: 1.25 * rem),
+            for (final g in d.groups)
+              Section(
+                title: g.kind == 'size' && g.files.isNotEmpty ? '${g.label}: ${formatBytes(g.files.first.size)}' : g.label,
+                hint: '${kind[g.kind] ?? 'Duplicate'} \u00b7 ${plural(g.files.length, 'copy')} \u00b7 up to ${formatBytes(g.wasted)} to free',
+                children: [for (final f in g.files) ListRow(title: f.filename, subtitle: '${formatBytes(f.size)} \u00b7 ${f.path}')],
+              ),
+          ]);
+        },
+      ),
+    ]);
+  }
+}
+
+class UnknownPage extends StatelessWidget {
+  const UnknownPage({super.key, required this.padding});
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(padding: padding, children: [
+      const Heading('Unknown'),
+      Async<List<FileRow>>(
+        future: Api.unknown(),
+        builder: (context, files) {
+          if (files.isEmpty) return const PekCard(title: 'Nothing here', subtitle: 'Every scanned file was classified as a movie or TV episode.');
+          return Column(children: [for (final f in files) ListRow(title: f.filename, subtitle: f.path)]);
+        },
+      ),
+    ]);
+  }
+}
+
+// ====================================================================== Plugins
+
+/// Lists the installed plugins and removes them. A plugin's own screen is JavaScript that runs in the web UI's sandbox,
+/// so opening one goes through the classic UI.
+class PluginsPage extends StatefulWidget {
+  const PluginsPage({super.key, required this.padding});
+  final EdgeInsets padding;
+  @override
+  State<PluginsPage> createState() => _PluginsPageState();
+}
+
+class _PluginsPageState extends State<PluginsPage> {
+  late Future<List<PluginInfo>> _list = Api.plugins();
+
+  Future<void> _remove(PluginInfo pl) async {
+    final p = context.pek;
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierColor: p.tokens.overlay,
+      builder: (c) => AlertDialog(
+        backgroundColor: p.tokens.glassStrong,
+        title: Text('Remove \u201c${pl.name}\u201d?'),
+        content: const Text('Its files are deleted from this device. You can install it again from the plugin store.'),
+        actions: [
+          TextButton(autofocus: true, onPressed: () => Navigator.pop(c, false), child: const Text('Keep')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (yes != true) return;
+    final ok = await Api.uninstallPlugin(pl.folder).catchError((_) => false);
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(ok ? 'Removed ${pl.name}' : 'Could not remove ${pl.name}')));
+    setState(() => _list = Api.plugins());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rem = context.pek.rem;
+    return ListView(padding: widget.padding, children: [
+      const Heading('Plugins'),
+      Async<List<PluginInfo>>(
+        future: _list,
+        builder: (context, list) {
+          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Install plugins from the plugin store in the classic UI.');
+          return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            for (final pl in list)
+              ListRow(
+                title: pl.version.isEmpty ? pl.name : '${pl.name}  v${pl.version}',
+                subtitle: pl.description,
+                trailing: PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
+              ),
+            SizedBox(height: rem),
+            PekButton(label: 'Open plugins & store (classic UI)', primary: true, onTap: PekPlayer.classicUi),
+          ]);
+        },
+      ),
+    ]);
+  }
+}
+
+// ====================================================================== Settings
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key, required this.padding});
+  final EdgeInsets padding;
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late Future<List<String>> _sources = Api.sources();
+
+  Future<void> _addFolder() async {
+    final path = await Navigator.push<String>(context, MaterialPageRoute<String>(builder: (_) => const FolderPicker()));
+    if (path == null) return;
+    final ok = await Api.addSource(path).catchError((_) => false);
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(ok ? 'Added. Scanning in the background\u2026' : 'Could not add that folder.')));
+    setState(() => _sources = Api.sources());
+  }
+
+  Future<void> _removeSource(String path) async {
+    await Api.removeSource(path).catchError((_) {});
+    if (mounted) setState(() => _sources = Api.sources());
+  }
+
+  Future<void> _exit() async {
+    final p = context.pek;
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierColor: p.tokens.overlay,
+      builder: (c) => AlertDialog(
+        backgroundColor: p.tokens.glassStrong,
+        title: const Text('Are you sure you want to exit?'),
+        content: const Text('PEK TV will stop running and its temporary cache will be cleared.'),
+        actions: [
+          TextButton(autofocus: true, onPressed: () => Navigator.pop(c, false), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes, exit')),
+        ],
+      ),
+    );
+    if (yes == true) await PekPlayer.exitApp();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return ListView(padding: widget.padding, children: [
+      const Heading('Settings'),
+      Section(
+        title: 'Media sources',
+        hint: 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',
+        children: [
+          Async<List<String>>(
+            future: _sources,
+            builder: (context, list) => Column(children: [
+              if (list.isEmpty) const PekCard(title: 'No sources yet', subtitle: 'Add a folder to get started.'),
+              for (final s in list) ListRow(title: s, trailing: IconButton(onPressed: () => _removeSource(s), icon: Icon(Icons.close, color: t.textMuted))),
+            ]),
+          ),
+          SizedBox(height: 0.5 * rem),
+          Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Add source folder', primary: true, onTap: _addFolder)),
+        ],
+      ),
+      Section(
+        title: 'Not in the Flutter UI yet',
+        hint: 'Profiles and sync, subtitles, video / audio output (Dolby, HDR, frame rate), skins and layouts, network folders and the plugin store still live in the classic UI.',
+        children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))],
+      ),
+      Section(title: 'App', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
+    ]);
+  }
+}
+
+/// The in-app folder picker (`openPicker` in app_sources.js) on top of GET /api/browse.
+class FolderPicker extends StatefulWidget {
+  const FolderPicker({super.key});
+  @override
+  State<FolderPicker> createState() => _FolderPickerState();
+}
+
+class _FolderPickerState extends State<FolderPicker> {
+  String _path = '';
+  String _parent = '';
+  List<Map<String, dynamic>> _dirs = const [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _go('');
+  }
+
+  Future<void> _go(String path) async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final d = await Api.browse(path);
+      _path = '${d['path'] ?? path}';
+      _parent = '${d['parent'] ?? ''}';
+      _dirs = ((d['directories'] as List?) ?? const []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    } catch (_) {
+      _error = 'Could not reach the server.';
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final rem = p.rem;
+    return SubScreen(
+      title: 'Choose a folder',
+      body: ListView(padding: p.pagePad, children: [
+        Text(_path, style: TextStyle(color: p.tokens.textMuted)),
+        SizedBox(height: 0.75 * rem),
+        Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
+          PekButton(compact: true, label: 'Up', onTap: _path.isEmpty || _parent == _path ? null : () => _go(_parent)),
+          PekButton(compact: true, primary: true, label: 'Use this folder', onTap: _path.isEmpty ? null : () => Navigator.pop(context, _path)),
+        ]),
+        SizedBox(height: rem),
+        if (_error != null) Text(_error!),
+        if (_loading) Text('Loading\u2026', style: TextStyle(color: p.tokens.textMuted)),
+        if (!_loading && _dirs.isEmpty && _error == null) Text('No folders here.', style: TextStyle(color: p.tokens.textMuted)),
+        for (final d in _dirs) ListRow(title: '${d['name']}', onTap: () => _go('${d['path']}')),
+      ]),
+    );
+  }
+}
