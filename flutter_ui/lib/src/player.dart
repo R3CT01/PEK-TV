@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'api.dart';
+import 'cloud.dart';
 import 'mpv.dart';
 import 'music_controller.dart';
 import 'skip.dart';
@@ -11,6 +12,7 @@ import 'store.dart';
 import 'subtitles.dart';
 import 'theme.dart';
 import 'tokens.dart';
+import 'torrent.dart';
 
 /// Full-screen player. The picture is a native libmpv surface behind Flutter, so this screen is transparent and only
 /// draws the controls.
@@ -18,7 +20,7 @@ import 'tokens.dart';
 /// Remote / D-pad:  Select = play / pause   Left / Right = -10 s / +10 s   Up = show controls
 ///                  Down = audio and subtitles   Back = close
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume, this.nextFor});
+  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume, this.nextFor, this.torrentHash, this.onClose});
   final String url;
   final String title;
   final double startSec;
@@ -28,6 +30,12 @@ class PlayerScreen extends StatefulWidget {
 
   /// Which episode comes next ("Up next"); null = nothing to offer.
   final Progress? Function(Progress current)? nextFor;
+
+  /// A torrent stream: while it buffers the player shows how far the loading is (peers, speed).
+  final String? torrentHash;
+
+  /// Called when the player closes for good (a torrent is stopped and its temporary data deleted).
+  final VoidCallback? onClose;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -98,6 +106,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       unawaited(_player.destroy());
       _player.reset();
     }
+    widget.onClose?.call();
+    if (Cloud.linked) Timer(const Duration(milliseconds: 800), () => Cloud.sync(light: true)); // push the new resume point
     super.dispose();
   }
 
@@ -343,7 +353,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Center(
                 child: ValueListenableBuilder<bool>(
                   valueListenable: _player.buffering,
-                  builder: (_, b, __) => b ? const CircularProgressIndicator() : const SizedBox.shrink(),
+                  builder: (_, b, __) => b ? (widget.torrentHash == null ? const CircularProgressIndicator() : TorrentBufferCard(hash: widget.torrentHash!)) : const SizedBox.shrink(),
                 ),
               ),
               AnimatedPositioned(

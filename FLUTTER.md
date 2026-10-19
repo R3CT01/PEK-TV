@@ -61,5 +61,12 @@ there are no lock-screen controls yet (those need native channel methods).
   when it ends) in the player. Settings > Skip intro and recap.
 - Lyrics on Now Playing (`lyrics.dart`) and Settings > Music > Online art & lyrics.
 
+## Added in phase 3
+- **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (same hash as the web UI), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Like the web UI, profiles need a signed-in account.
+- **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign up / sign in with the emailed 6-digit code, forgot password, sign out (asks first), delete account. Watch history and resume points sync per profile through the existing worker; the profile list syncs too. Library favorites stay on the device (the worker only accepts TMDb favorites).
+- **Torrents** (`torrent.dart`): More > Torrents plays a magnet / .torrent link with a loading screen (peers, speed, progress), a loading card inside the player while it buffers or scrubs, and Resume Watching that restarts the same release (also from other devices).
+- **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance).
+- HDR output and refresh-rate matching were already in Settings > Video output.
+
 ## Still only in the classic UI
-Profiles and cloud sync, skins and layouts, the plugin store and plugins.
+Plugins and their screens (JavaScript in the web sandbox), the plugin store, layouts, Clock / Weather / plugin dashboard tiles.

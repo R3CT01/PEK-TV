@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'account_pages.dart';
 import 'api.dart';
 import 'common.dart';
 import 'detail.dart';
@@ -307,16 +308,14 @@ class _SettingsPageState extends State<SettingsPage> {
           ]),
         ],
       ),
+      const AccountSection(),
+      const AppearanceSection(),
       const SubtitleSection(),
       const SkipSection(),
       const MusicOnlineSection(),
       const VideoOutputSection(),
       const AudioOutputSection(),
-      Section(
-        title: 'Not in the Flutter UI yet',
-        hint: 'Profiles and sync, skins and layouts, and the plugin store still live in the classic UI.',
-        children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))],
-      ),
+      Section(title: 'Classic UI', hint: 'Plugins and their screens, the plugin store and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
       Section(title: 'App', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
     ]);
   }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'common.dart';
 import 'mpv.dart';
+import 'skins.dart';
 import 'store.dart';
 import 'subtitles.dart';
 import 'tokens.dart';
@@ -293,6 +294,33 @@ class _MusicOnlineSectionState extends State<MusicOnlineSection> {
       title: 'Music',
       hint: 'Artist, album and song names are sent to Deezer, Apple and LRCLIB to find pictures and lyrics; they are kept until the next rescan.',
       children: [ToggleRow(title: 'Online art & lyrics', subtitle: _on ? 'On' : 'Off', on: _on, onTap: _flip)],
+    );
+  }
+}
+
+// ====================================================================== Settings > Appearance (skins)
+
+class AppearanceSection extends StatelessWidget {
+  const AppearanceSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.pek.tokens;
+    return ListenableBuilder(
+      listenable: Skins.changes,
+      builder: (context, _) => Section(
+        title: 'Appearance',
+        hint: 'The look of the app. Each profile keeps its own.',
+        children: [
+          for (final s in Skins.all)
+            ListRow(
+              title: s.name,
+              subtitle: s.description,
+              onTap: () => Skins.set(s.id),
+              trailing: Icon(s.id == Skins.currentId ? Icons.check_circle : Icons.circle_outlined, color: s.id == Skins.currentId ? t.accent : t.textMuted),
+            ),
+        ],
+      ),
     );
   }
 }

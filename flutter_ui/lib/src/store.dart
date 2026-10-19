@@ -21,6 +21,72 @@ class Store {
 
   static void _bump() => changed.value++;
 
+  // ---------------------------------------------------------------- profiles (scoping)
+
+  /// The active profile. The first profile, "p1", keeps using the original keys (so nothing has to be moved when profiles are
+  /// switched on, exactly like the web UI); every other profile stores the same keys under `p/<id>/`.
+  static String _pid = 'p1';
+  static String get profileId => _pid;
+
+  /// Changes whenever another profile becomes active.
+  static final ValueNotifier<String> profile = ValueNotifier('p1');
+
+  static void setProfile(String id) {
+    _pid = id.isEmpty ? 'p1' : id;
+    profile.value = _pid;
+    _bump();
+  }
+
+  static String _sc(String key) => _pid == 'p1' ? key : 'p/$_pid/$key';
+
+  /// Scoped (per profile) or device-wide JSON / string values for the cloud and profile code.
+  static String? strGet(String key, {bool scoped = true}) => _p.getString(scoped ? _sc(key) : key);
+  static Future<void> strSet(String key, String v, {bool scoped = true}) => _p.setString(scoped ? _sc(key) : key, v);
+  static Future<void> strDel(String key, {bool scoped = true}) => _p.remove(scoped ? _sc(key) : key);
+
+  static Map<String, dynamic> jsonMap(String key, {bool scoped = true}) => _map(scoped ? _sc(key) : key);
+  static Future<void> setJsonMap(String key, Map<String, dynamic> v, {bool scoped = true}) => _p.setString(scoped ? _sc(key) : key, jsonEncode(v));
+
+  /// Removes everything one profile owns (the removal reached us from the cloud, or the person deleted it).
+  /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
+  static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
+    if (id == 'p1') {
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending']) {
+        if (keepFavorites && k == 'pek_favorites_v1') continue;
+        await _p.remove(k);
+      }
+    } else {
+      for (final k in _p.getKeys().where((k) => k.startsWith('p/$id/')).toList()) {
+        if (keepFavorites && k.endsWith('/pek_favorites_v1')) continue;
+        await _p.remove(k);
+      }
+    }
+    _bump();
+  }
+
+  /// Signing out of the account: every profile's data, the profile list and the sign-in leave this device (the cloud keeps them).
+  static Future<void> wipeAccountData() async {
+    for (final k in _p.getKeys().toList()) {
+      if (k.startsWith('pek_sync_') || k.startsWith('pek_profiles')) {
+        await _p.remove(k);
+      } else if (k.startsWith('p/') && !k.endsWith('/pek_favorites_v1')) {
+        await _p.remove(k);
+      }
+    }
+    await removeProfileData('p1', keepFavorites: true);
+    _pid = 'p1';
+    _bump();
+  }
+
+  /// Forgets what the cloud already has, for every profile (a new sign-in gets a full two-way merge).
+  static Future<void> clearSyncState(Iterable<String> profileIds) async {
+    for (final id in profileIds) {
+      for (final k in const ['pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending']) {
+        await _p.remove(id == 'p1' ? k : 'p/$id/$k');
+      }
+    }
+  }
+
   static Map<String, dynamic> _map(String key) {
     try {
       final o = jsonDecode(_p.getString(key) ?? '{}');
@@ -62,18 +128,18 @@ class Store {
   // ---------------------------------------------------------------- skip intro / lyrics preferences
 
   /// hesper_skip_auto: jump past intros and recaps without asking (default off).
-  static bool get skipAuto => _p.getBool('pek_skip_auto') ?? false;
+  static bool get skipAuto => _p.getBool(_sc('pek_skip_auto')) ?? false;
 
   /// hesper_skip_online: look the times up in the online database for TV episodes (default on).
-  static bool get skipOnline => _p.getBool('pek_skip_online') ?? true;
+  static bool get skipOnline => _p.getBool(_sc('pek_skip_online')) ?? true;
 
   static Future<void> setSkipAuto(bool on) async {
-    await _p.setBool('pek_skip_auto', on);
+    await _p.setBool(_sc('pek_skip_auto'), on);
     _bump();
   }
 
   static Future<void> setSkipOnline(bool on) async {
-    await _p.setBool('pek_skip_online', on);
+    await _p.setBool(_sc('pek_skip_online'), on);
     _bump();
   }
 
@@ -83,7 +149,7 @@ class Store {
 
   // ---------------------------------------------------------------- watch history (a permanent "watched" record)
 
-  static const _historyKey = 'pek_history_v1';
+  static String get _historyKey => _sc('pek_history_v1');
 
   /// Finishing the same thing again within 12 hours counts as one watch.
   static const rewatchWindowMs = 12 * 60 * 60 * 1000;
@@ -91,9 +157,7 @@ class Store {
   static String _norm(String s) => s.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
 
   static String? historyKey(Progress p) {
-    if (p.kind == 'movie') return _norm(p.title).isEmpty ? null : 'm|${_norm(p.title)}|${p.year}';
-    if (p.kind == 'episode') return _norm(p.showTitle).isEmpty ? null : 'e|${_norm(p.showTitle)}|${p.season}|${p.episode}';
-    return null;
+    return keyFor(kind: p.kind, title: p.title, showTitle: p.showTitle, year: p.year, season: p.season, episode: p.episode);
   }
 
   /// Most recently watched first.
@@ -109,7 +173,7 @@ class Store {
     final map = _map(_historyKey);
     final now = DateTime.now().millisecondsSinceEpoch;
     final old = map[key];
-    if (old is Map) {
+    if (old is Map && old['deleted'] == null) {
       final e = HistoryEntry.fromJson(Map<String, dynamic>.from(old));
       if (now - e.at < rewatchWindowMs) {
         map[key] = e.copyWith(at: now).toJson(); // the same watch, seen again
@@ -117,26 +181,51 @@ class Store {
         map[key] = e.copyWith(at: now, count: e.count + 1).toJson();
       }
     } else {
-      map[key] = HistoryEntry(key: key, kind: p.kind, title: p.kind == 'episode' ? p.showTitle : p.title, year: p.year, season: p.season, episode: p.episode, at: now, count: 1).toJson();
+      map[key] = HistoryEntry(key: key, kind: p.kind, title: p.kind == 'episode' ? p.showTitle : p.title, year: p.year, season: p.season, episode: p.episode, at: now, count: 1, updated: now).toJson();
     }
     await _p.setString(_historyKey, jsonEncode(map));
     _bump();
   }
 
+  /// A removed item stays as `{deleted, updated}` so the removal syncs too.
   static Future<void> removeHistory(String key) async {
-    final map = _map(_historyKey)..remove(key);
+    final map = _map(_historyKey);
+    if (map[key] is! Map || (map[key] as Map)['deleted'] != null) return;
+    map[key] = {'deleted': 1, 'updated': DateTime.now().millisecondsSinceEpoch};
     await _p.setString(_historyKey, jsonEncode(map));
     _bump();
   }
 
   static Future<void> clearHistory() async {
-    await _p.remove(_historyKey);
+    final map = _map(_historyKey);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final k in map.keys.toList()) {
+      final v = map[k];
+      if (v is Map && v['deleted'] == null) map[k] = {'deleted': 1, 'updated': now};
+    }
+    await _p.setString(_historyKey, jsonEncode(map));
     _bump();
   }
 
+  /// Raw maps for cloud sync (history items, resume points).
+  static Map<String, dynamic> historyRaw() => _map(_historyKey);
+  static Map<String, dynamic> progressRaw() => _map(_progressKey);
+  static Future<void> writeHistoryRaw(Map<String, dynamic> m) => _p.setString(_historyKey, jsonEncode(m));
+  static Future<void> writeProgressRaw(Map<String, dynamic> m) => _p.setString(_progressKey, jsonEncode(m));
+  static void notifyChanged() => _bump();
+
+  /// The cross-device identity of a movie / episode (same text as histKey() in sync.js). Null for anything else.
+  static String? keyFor({required String kind, String title = '', String showTitle = '', int year = 0, int season = 0, int episode = 0}) {
+    if (kind == 'movie') return _norm(title).isEmpty ? null : 'm|${_norm(title)}|$year';
+    if (kind == 'episode') return _norm(showTitle).isEmpty ? null : 'e|${_norm(showTitle)}|$season|$episode';
+    return null;
+  }
+
+  static String normalize(String s) => _norm(s);
+
   // ---------------------------------------------------------------- progress (Resume Watching)
 
-  static const _progressKey = 'pek_progress_v1';
+  static String get _progressKey => _sc('pek_progress_v1');
 
   /// Items with something worth resuming, most recently watched first.
   static List<Progress> resumeItems() {
@@ -174,7 +263,7 @@ class Store {
 
   // ---------------------------------------------------------------- favorites
 
-  static const _favKey = 'pek_favorites_v1';
+  static String get _favKey => _sc('pek_favorites_v1');
 
   static List<Favorite> favorites() => _list(_favKey).map(Favorite.fromJson).toList();
 
@@ -194,7 +283,7 @@ class Store {
 
   // ---------------------------------------------------------------- dashboard widgets
 
-  static const _dashKey = 'pek_dashboard_v1';
+  static String get _dashKey => _sc('pek_dashboard_v1');
   static const dashTypes = <String, (String, String)>{
     'continue': ('Continue Watching', 'Pick up where you left off'),
     'recent': ('Recently Added', 'Newest movies in your library'),
@@ -223,10 +312,24 @@ class Store {
 }
 
 class Progress {
-  const Progress({required this.id, required this.title, required this.kind, required this.position, required this.duration, required this.updated, this.showTitle = '', this.year = 0, this.season = 0, this.episode = 0});
-  final String id; // library file id (the /api/stream/<id> id)
+  const Progress({
+    required this.id,
+    required this.title,
+    required this.kind,
+    required this.position,
+    required this.duration,
+    required this.updated,
+    this.showTitle = '',
+    this.year = 0,
+    this.season = 0,
+    this.episode = 0,
+    this.torrent,
+    this.image = '',
+    this.origin = '',
+  });
+  final String id; // library file id (the /api/stream/<id> id), or "tor:<key>" for a torrent stream
   final String title; // what the player shows
-  final String kind; // 'movie' | 'episode'
+  final String kind; // 'movie' | 'episode' | 'other' (a torrent with no movie / episode identity)
   final double position;
   final double duration;
   final int updated;
@@ -235,13 +338,20 @@ class Progress {
   final int season; // episodes only (subtitle look-up needs them)
   final int episode;
 
+  /// Set for a torrent stream: `{source, title, season, episode}` is everything needed to start the same release again.
+  final Map<String, dynamic>? torrent;
+  final String image; // artwork address when one was known
+  final String origin; // where the watch was started ('' = the library, otherwise a name such as "Torrent")
+
+  bool get isTorrent => torrent != null;
+
   factory Progress.fromJson(Map<String, dynamic> j) => _withNumbers(Progress._raw(j));
 
   static Progress _withNumbers(Progress p) {
     if (p.kind != 'episode' || (p.season > 0 && p.episode > 0)) return p;
     final m = RegExp(r'\bS(\d{1,2})E(\d{1,3})\b', caseSensitive: false).firstMatch(p.title);
     if (m == null) return p;
-    return Progress(id: p.id, title: p.title, kind: p.kind, position: p.position, duration: p.duration, updated: p.updated, showTitle: p.showTitle, year: p.year, season: int.parse(m.group(1)!), episode: int.parse(m.group(2)!));
+    return p._copy(season: int.parse(m.group(1)!), episode: int.parse(m.group(2)!));
   }
 
   factory Progress._raw(Map<String, dynamic> j) => Progress(
@@ -255,11 +365,44 @@ class Progress {
         year: (j['year'] as num?)?.toInt() ?? 0,
         season: (j['season'] as num?)?.toInt() ?? 0,
         episode: (j['episode'] as num?)?.toInt() ?? 0,
+        torrent: j['torrent'] is Map ? Map<String, dynamic>.from(j['torrent'] as Map) : null,
+        image: '${j['image'] ?? ''}',
+        origin: '${j['origin'] ?? ''}',
       );
 
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'kind': kind, 'position': position, 'duration': duration, 'updated': updated, 'showTitle': showTitle, 'year': year, 'season': season, 'episode': episode};
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'kind': kind,
+        'position': position,
+        'duration': duration,
+        'updated': updated,
+        'showTitle': showTitle,
+        'year': year,
+        'season': season,
+        'episode': episode,
+        if (torrent != null) 'torrent': torrent,
+        if (image.isNotEmpty) 'image': image,
+        if (origin.isNotEmpty) 'origin': origin,
+      };
 
-  Progress at(double pos, double dur) => Progress(id: id, title: title, kind: kind, position: pos, duration: dur, updated: DateTime.now().millisecondsSinceEpoch, showTitle: showTitle, year: year, season: season, episode: episode);
+  Progress _copy({double? position, double? duration, int? updated, int? season, int? episode}) => Progress(
+        id: id,
+        title: title,
+        kind: kind,
+        position: position ?? this.position,
+        duration: duration ?? this.duration,
+        updated: updated ?? this.updated,
+        showTitle: showTitle,
+        year: year,
+        season: season ?? this.season,
+        episode: episode ?? this.episode,
+        torrent: torrent,
+        image: image,
+        origin: origin,
+      );
+
+  Progress at(double pos, double dur) => _copy(position: pos, duration: dur, updated: DateTime.now().millisecondsSinceEpoch);
 }
 
 /// A saved library title. [kind] is 'movie' (key = file id) or 'show' (key = show title).
@@ -282,7 +425,7 @@ class Favorite {
 
 /// One finished movie or episode in Watch History.
 class HistoryEntry {
-  const HistoryEntry({required this.key, required this.kind, required this.title, required this.year, required this.season, required this.episode, required this.at, required this.count});
+  const HistoryEntry({required this.key, required this.kind, required this.title, required this.year, required this.season, required this.episode, required this.at, required this.count, this.updated = 0});
   final String key;
   final String kind; // 'movie' | 'episode'
   final String title; // movie title, or the show's title for an episode
@@ -291,6 +434,7 @@ class HistoryEntry {
   final int episode;
   final int at; // when it was last finished (ms since epoch)
   final int count; // how many separate watches
+  final int updated; // last change (sync); 0 = same as [at]
 
   factory HistoryEntry.fromJson(Map<String, dynamic> j) => HistoryEntry(
         key: '${j['key'] ?? ''}',
@@ -301,12 +445,13 @@ class HistoryEntry {
         episode: (j['episode'] as num?)?.toInt() ?? 0,
         at: (j['at'] as num?)?.toInt() ?? 0,
         count: (j['count'] as num?)?.toInt() ?? 1,
+        updated: (j['updated'] as num?)?.toInt() ?? 0,
       );
 
-  Map<String, dynamic> toJson() => {'key': key, 'kind': kind, 'title': title, 'year': year, 'season': season, 'episode': episode, 'at': at, 'count': count};
+  Map<String, dynamic> toJson() => {'key': key, 'kind': kind, 'title': title, 'year': year, 'season': season, 'episode': episode, 'at': at, 'count': count, 'updated': updated > 0 ? updated : at};
 
   HistoryEntry copyWith({int? at, int? count}) =>
-      HistoryEntry(key: key, kind: kind, title: title, year: year, season: season, episode: episode, at: at ?? this.at, count: count ?? this.count);
+      HistoryEntry(key: key, kind: kind, title: title, year: year, season: season, episode: episode, at: at ?? this.at, count: count ?? this.count, updated: DateTime.now().millisecondsSinceEpoch);
 
   String get label {
     if (kind == 'episode') {

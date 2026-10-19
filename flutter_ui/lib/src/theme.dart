@@ -12,18 +12,13 @@ class Pek {
   static const radius = 16.0;
 }
 
-ThemeData pekTheme() {
-  const t = PekTokens.light;
-  final base = ThemeData.light(useMaterial3: true);
+ThemeData pekTheme([PekTokens t = PekTokens.light]) {
+  final dark = t.bg.computeLuminance() < 0.5;
+  final base = dark ? ThemeData.dark(useMaterial3: true) : ThemeData.light(useMaterial3: true);
   return base.copyWith(
     scaffoldBackgroundColor: t.bg,
     canvasColor: t.bg,
-    colorScheme: base.colorScheme.copyWith(
-      primary: t.accent,
-      onPrimary: t.bg,
-      surface: t.surface,
-      onSurface: t.text,
-    ),
+    colorScheme: base.colorScheme.copyWith(primary: t.accent, onPrimary: t.bg, surface: t.surface, onSurface: t.text),
     textTheme: base.textTheme.apply(bodyColor: t.text, displayColor: t.text),
     focusColor: t.surfaceFocused,
   );

@@ -4,6 +4,7 @@ import 'api.dart';
 import 'player.dart';
 import 'store.dart';
 import 'tokens.dart';
+import 'torrent.dart';
 import 'widgets.dart';
 
 /// Opens the player. [resume] makes the player record progress for Resume Watching.
@@ -11,6 +12,11 @@ import 'widgets.dart';
 /// For an episode the player also offers the next one near the end ("Up next"): [nextFor] says which, and when it is left out the
 /// show is looked up here from the item's show title.
 Future<void> playMedia(BuildContext context, Progress item, {double startSec = 0, Progress? Function(Progress current)? nextFor}) async {
+  // A resume point that came from a torrent (here or on another device) starts the same release again.
+  if (item.isTorrent) {
+    await playTorrent(context, track: item, startSec: startSec);
+    return;
+  }
   var resolver = nextFor;
   if (resolver == null && item.kind == 'episode' && item.showTitle.isNotEmpty) {
     try {

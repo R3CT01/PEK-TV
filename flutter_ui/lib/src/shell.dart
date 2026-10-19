@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'cloud.dart';
 import 'common.dart';
 import 'dashboard.dart';
 import 'library.dart';
@@ -8,6 +11,7 @@ import 'mpv.dart';
 import 'music.dart';
 import 'pages.dart';
 import 'tokens.dart';
+import 'torrent.dart';
 import 'widgets.dart';
 
 /// NAV_ITEMS in app_config.js, plus Resume Watching (the web UI only inserts it once there is something to resume).
@@ -22,6 +26,7 @@ const _navItems = <(String, String)>[
   ('favorites', 'Favorites'),
   ('duplicates', 'Duplicates'),
   ('unknown', 'Unknown'),
+  ('torrents', 'Torrents'),
   ('plugins', 'Plugins'),
   ('settings', 'Settings'),
 ];
@@ -32,7 +37,7 @@ const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
 const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
 
 /// Everything that is not a swipe page.
-const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
+const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'torrents', 'plugins', 'settings'];
 
 String _titleOf(String id) => _navItems.firstWhere((e) => e.$1 == id, orElse: () => ('', 'PEK TV')).$2;
 
@@ -48,9 +53,21 @@ class _AppShellState extends State<AppShell> {
   final PageController _pager = PageController();
   int _page = 0; // phone: index into _swipePages
   String _tab = 'dashboard'; // TV: sidebar selection
+  Timer? _syncTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
+    if (Cloud.linked) unawaited(Cloud.sync());
+    _syncTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      if (Cloud.linked) unawaited(Cloud.sync(light: !Cloud.hasLocalChanges()));
+    });
+  }
 
   @override
   void dispose() {
+    _syncTimer?.cancel();
     _pager.dispose();
     super.dispose();
   }
@@ -156,6 +173,8 @@ class _AppShellState extends State<AppShell> {
         return DuplicatesPage(padding: pad);
       case 'unknown':
         return UnknownPage(padding: pad);
+      case 'torrents':
+        return TorrentsPage(padding: pad);
       case 'plugins':
         return PluginsPage(padding: pad);
       case 'settings':
@@ -275,6 +294,7 @@ class _MorePage extends StatelessWidget {
     'favorites': 'Your saved movies and shows',
     'duplicates': 'Files that appear twice',
     'unknown': 'Files PEK TV could not sort',
+    'torrents': 'Play a magnet or .torrent link',
     'plugins': 'Installed plugins',
     'settings': 'Sources and app options',
   };
