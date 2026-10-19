@@ -51,13 +51,13 @@ class Store {
   /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
   static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
     if (id == 'p1') {
-      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending']) {
-        if (keepFavorites && k == 'pek_favorites_v1') continue;
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_fav_tombs']) {
+        if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs')) continue;
         await _p.remove(k);
       }
     } else {
       for (final k in _p.getKeys().where((k) => k.startsWith('p/$id/')).toList()) {
-        if (keepFavorites && k.endsWith('/pek_favorites_v1')) continue;
+        if (keepFavorites && (k.endsWith('/pek_favorites_v1') || k.endsWith('/pek_fav_tombs'))) continue;
         await _p.remove(k);
       }
     }
@@ -69,7 +69,7 @@ class Store {
     for (final k in _p.getKeys().toList()) {
       if (k.startsWith('pek_sync_') || k.startsWith('pek_profiles')) {
         await _p.remove(k);
-      } else if (k.startsWith('p/') && !k.endsWith('/pek_favorites_v1')) {
+      } else if (k.startsWith('p/') && !k.endsWith('/pek_favorites_v1') && !k.endsWith('/pek_fav_tombs')) {
         await _p.remove(k);
       }
     }
@@ -272,32 +272,55 @@ class Store {
   static Future<void> toggleFavorite(Favorite f) async {
     final l = _list(_favKey);
     final i = l.indexWhere((e) => e['key'] == f.key);
+    final now = DateTime.now().millisecondsSinceEpoch;
     if (i >= 0) {
-      l.removeAt(i);
+      final gone = l.removeAt(i);
+      final tm = (gone['tmdb'] as num?)?.toInt() ?? 0;
+      if (tm > 0) {
+        // The removal is told to the cloud on the next sync.
+        final tb = _map(_sc('pek_fav_tombs'));
+        tb['${gone['type'] ?? (gone['kind'] == 'show' ? 'tv' : 'movie')}:$tm'] = now;
+        await _p.setString(_sc('pek_fav_tombs'), jsonEncode(tb));
+      }
     } else {
-      l.insert(0, f.toJson());
+      final j = f.toJson();
+      j['added'] = now;
+      j['updated'] = now;
+      l.insert(0, j);
     }
     await _p.setString(_favKey, jsonEncode(l));
     _bump();
   }
 
+  /// Raw favorites and removal markers for the cloud sync.
+  static List<Map<String, dynamic>> favRaw() => _list(_favKey);
+  static Future<void> writeFavRaw(List<Map<String, dynamic>> l) => _p.setString(_favKey, jsonEncode(l));
+  static Map<String, dynamic> favTombs() => _map(_sc('pek_fav_tombs'));
+  static Future<void> writeFavTombs(Map<String, dynamic> m) => _p.setString(_sc('pek_fav_tombs'), jsonEncode(m));
+
   // ---------------------------------------------------------------- dashboard widgets
 
   static String get _dashKey => _sc('pek_dashboard_v1');
   static const dashTypes = <String, (String, String)>{
+    'clock': ('Clock', 'The time and date'),
+    'weather': ('Weather', 'Conditions for your city'),
     'continue': ('Continue Watching', 'Pick up where you left off'),
     'recent': ('Recently Added', 'Newest movies in your library'),
     'favorites': ('Favorites', 'Your saved movies and shows'),
   };
-  static const dashDefault = ['continue', 'recent', 'favorites'];
+  static const dashDefault = ['clock', 'weather', 'continue', 'recent', 'favorites'];
 
   static List<String> dashboard() {
     final raw = _p.getStringList(_dashKey);
     if (raw == null) return List.of(dashDefault);
-    return raw.where(dashTypes.containsKey).toList();
+    var l = raw.where(dashTypes.containsKey).toList();
+    // A dashboard saved before the clock became a widget keeps showing it (it was always on top).
+    if (!(_p.getBool(_sc('pek_dash_v2')) ?? false) && !l.contains('clock')) l = ['clock', ...l];
+    return l;
   }
 
   static Future<void> setDashboard(List<String> l) async {
+    await _p.setBool(_sc('pek_dash_v2'), true);
     await _p.setStringList(_dashKey, l);
     _bump();
   }
@@ -407,11 +430,18 @@ class Progress {
 
 /// A saved library title. [kind] is 'movie' (key = file id) or 'show' (key = show title).
 class Favorite {
-  const Favorite({required this.kind, required this.key, required this.title, this.year = 0});
+  const Favorite({required this.kind, required this.key, required this.title, this.year = 0, this.tmdb = 0, this.type = '', this.poster = '', this.added = 0, this.updated = 0});
   final String kind;
   final String key;
   final String title;
   final int year;
+
+  /// The TMDb id the cloud knows this title by (0 = not looked up yet, -1 = TMDb has no match). Filled in by the sync.
+  final int tmdb;
+  final String type; // 'movie' | 'tv'
+  final String poster; // TMDb poster path
+  final int added;
+  final int updated;
 
   static Favorite movie(String id, String title, int year) => Favorite(kind: 'movie', key: 'm:$id', title: title, year: year);
   static Favorite show(String title) => Favorite(kind: 'show', key: 's:$title', title: title);
@@ -419,8 +449,28 @@ class Favorite {
   /// The id for movies, the title for shows.
   String get ref => key.substring(2);
 
-  factory Favorite.fromJson(Map<String, dynamic> j) => Favorite(kind: '${j['kind'] ?? 'movie'}', key: '${j['key'] ?? ''}', title: '${j['title'] ?? ''}', year: (j['year'] as num?)?.toInt() ?? 0);
-  Map<String, dynamic> toJson() => {'kind': kind, 'key': key, 'title': title, 'year': year};
+  factory Favorite.fromJson(Map<String, dynamic> j) => Favorite(
+        kind: '${j['kind'] ?? 'movie'}',
+        key: '${j['key'] ?? ''}',
+        title: '${j['title'] ?? ''}',
+        year: (j['year'] as num?)?.toInt() ?? 0,
+        tmdb: (j['tmdb'] as num?)?.toInt() ?? 0,
+        type: '${j['type'] ?? ''}',
+        poster: '${j['poster'] ?? ''}',
+        added: (j['added'] as num?)?.toInt() ?? 0,
+        updated: (j['updated'] as num?)?.toInt() ?? 0,
+      );
+  Map<String, dynamic> toJson() => {
+        'kind': kind,
+        'key': key,
+        'title': title,
+        'year': year,
+        if (tmdb != 0) 'tmdb': tmdb,
+        if (type.isNotEmpty) 'type': type,
+        if (poster.isNotEmpty) 'poster': poster,
+        if (added > 0) 'added': added,
+        if (updated > 0) 'updated': updated,
+      };
 }
 
 /// One finished movie or episode in Watch History.

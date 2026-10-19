@@ -10,6 +10,7 @@ import 'fields.dart';
 import 'player.dart';
 import 'store.dart';
 import 'tokens.dart';
+import 'torrent_search.dart';
 import 'widgets.dart';
 
 /// What the C++ server says about one running torrent (GET /api/torrent/<hash>/status).
@@ -366,7 +367,7 @@ class _TorrentBufferCardState extends State<TorrentBufferCard> {
 
 // ====================================================================== More > Torrents
 
-/// Paste a magnet link (or an https .torrent link) and play it. PEK TV has no torrent search of its own; a release you paste
+/// Search the sites you added (or a Torznab provider), or paste a magnet link / https .torrent link, and play it. A release
 /// streams through the built-in engine, shows a loading screen, and is remembered in Resume Watching like anything else.
 class TorrentsPage extends StatefulWidget {
   const TorrentsPage({super.key, required this.padding});
@@ -419,6 +420,7 @@ class _TorrentsPageState extends State<TorrentsPage> {
           return Padding(padding: EdgeInsets.only(bottom: rem), child: Text(text, style: TextStyle(color: t.textMuted)));
         },
       ),
+      const TorrentSearchSections(),
       Section(
         title: 'Play a release',
         hint: 'Paste a magnet link or a .torrent link. It shows how far it has loaded, plays when enough is downloaded, and appears in Resume Watching.',

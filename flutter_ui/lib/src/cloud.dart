@@ -24,8 +24,9 @@ class CloudResult {
 /// Port of www/sync.js: the household account (email + password) of the PEK Cloud worker (cloud/worker.js) and the
 /// two-way sync of watch history and resume points. Each profile syncs its own data under the account.
 ///
-/// Library favorites are not synced: the cloud only keeps favorites with a TMDb id (`f|movie:603`), and the Flutter UI's
-/// favorites are library items. They stay on the device (per profile).
+/// Library favorites sync too. The cloud keys favorites by TMDb id (`f|movie:603`), so each favorite is looked up once through
+/// the same TMDb worker the backend uses and the id is kept with it. A favorite that comes from another device (or from a plugin
+/// in the web UI) shows up here when the same title is in this device's library.
 class Cloud {
   static const api = 'https://pek-sync.aquariusibeats.workers.dev';
 
@@ -294,7 +295,7 @@ class Cloud {
   static bool hasLocalChanges() {
     if (!linked) return false;
     final a = _collectPush();
-    return a.history.length + a.progress.length > 0;
+    return a.history.length + a.progress.length + a.favorites.length > 0 || _hasUnresolvedFavorites;
   }
 
   /// [light] skips the profile round trip (a stop-of-playback sync only needs to push what changed).
@@ -325,14 +326,15 @@ class Cloud {
           if (pid != 'p1') return CloudResult(ok: false, error: pr.status == 404 ? 'cloud_outdated' : pr.error);
         }
       }
+      await _resolveFavorites();
       final all = _collectPush();
-      final pushed = all.history.length + all.progress.length;
+      final pushed = all.history.length + all.progress.length + all.favorites.length;
       var anyChange = false;
       CloudResult? fail;
       for (var n = 1; n <= _maxRounds; n++) {
         final chunk = all.take(_chunk);
         final cursor = int.tryParse(Store.strGet('pek_sync_cursor') ?? '') ?? 0;
-        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': <dynamic>[]}, withToken: true);
+        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites}, withToken: true);
         if (r.status == 404 && r.body['error'] == 'unknown_profile') {
           fail = const CloudResult(ok: false, error: 'unknown_profile');
           break;
@@ -364,6 +366,71 @@ class Cloud {
       return fail;
     }
   }
+
+  // ---------------------------------------------------------------- favorites (TMDb ids from the existing TMDb proxy)
+
+  /// The same Cloudflare TMDb worker the C++ backend uses (backend/server.cpp tmdbProxyUrl()). It holds the key.
+  static const _tmdb = 'https://hesper-tmdb.aquariusibeats.workers.dev';
+
+  /// null = could not ask (offline); id 0 = TMDb has no match.
+  static Future<({int id, String poster})?> _tmdbLookup(bool tv, String title, int year) async {
+    try {
+      final q = Uri.encodeQueryComponent(title);
+      final url = tv ? '$_tmdb/search/tv?query=$q' : '$_tmdb/search/movie?query=$q${year > 0 ? '&year=$year' : ''}';
+      final r = await _c.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
+      if (r.statusCode != 200) return null;
+      final o = jsonDecode(utf8.decode(r.bodyBytes));
+      final res = o is Map && o['results'] is List ? (o['results'] as List).whereType<Map>().toList() : <Map>[];
+      if (res.isEmpty) return (id: 0, poster: '');
+      Map pick = res.first;
+      if (!tv && year > 0) {
+        for (final m in res) {
+          if ('${m['release_date'] ?? ''}'.startsWith('$year')) {
+            pick = m;
+            break;
+          }
+        }
+      }
+      return (id: _int(pick['id']), poster: '${pick['poster_path'] ?? ''}');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool get _hasUnresolvedFavorites => Store.favRaw().any((f) => _int(f['tmdb']) == 0);
+
+  /// Gives every favorite a TMDb id (the cloud keys favorites by it) and a change stamp. Runs before a sync.
+  static Future<void> _resolveFavorites() async {
+    final favs = Store.favRaw();
+    final tombs = Store.favTombs();
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var changed = false;
+    var tombsChanged = false;
+    for (final f in favs) {
+      if (_int(f['updated']) <= 0) {
+        f['updated'] = _int(f['added']) > 0 ? _int(f['added']) : now;
+        changed = true;
+      }
+      if (_int(f['tmdb']) != 0) continue;
+      final tv = f['kind'] == 'show';
+      final hit = await _tmdbLookup(tv, '${f['title'] ?? ''}', _int(f['year']));
+      if (hit == null) continue; // try again next time
+      f['type'] = tv ? 'tv' : 'movie';
+      f['tmdb'] = hit.id > 0 ? hit.id : -1;
+      if (hit.poster.isNotEmpty) f['poster'] = hit.poster;
+      changed = true;
+      // Favorited again after having been removed: the new favorite wins over the old removal.
+      final tk = '${f['type']}:${hit.id}';
+      if (hit.id > 0 && tombs.containsKey(tk) && _int(tombs[tk]) <= _int(f['updated'])) {
+        tombs.remove(tk);
+        tombsChanged = true;
+      }
+    }
+    if (changed) await Store.writeFavRaw(favs);
+    if (tombsChanged) await Store.writeFavTombs(tombs);
+  }
+
+  static String _cleanPoster(String p) => RegExp(r'^/[A-Za-z0-9_-]{5,80}\.(jpg|jpeg|png|webp)$').hasMatch(p) ? p : '';
 
   // ---------------------------------------------------------------- what to push
 
@@ -478,7 +545,29 @@ class Cloud {
       // finished or removed here: tell the cloud
       if (v is Map && _int(v['d']) == 0 && !local.containsKey(k)) progress.add({'key': k, 'data': <String, dynamic>{}, 'updated': now, 'deleted': 1});
     });
-    return _All(history, progress);
+    final favorites = <Map<String, dynamic>>[];
+    final sf = seen['f'] is Map ? Map<String, dynamic>.from(seen['f'] as Map) : <String, dynamic>{};
+    for (final f in Store.favRaw()) {
+      final id = _int(f['tmdb']);
+      if (id <= 0) continue;
+      final type = '${f['type'] ?? ''}' == 'tv' ? 'tv' : 'movie';
+      final key = 'f|$type:$id';
+      final updated = _int(f['updated']);
+      if (updated <= 0 || _int(sf[key]) == updated) continue;
+      final added = _int(f['added']) > 0 ? _int(f['added']) : updated;
+      favorites.add({
+        'key': key,
+        'data': {'key': '$type:$id', 'type': type, 'id': id, 'title': '${f['title'] ?? ''}', 'year': _int(f['year']), 'posterPath': _cleanPoster('${f['poster'] ?? ''}'), 'from': <String>[], 'added': added, 'updated': updated},
+        'updated': updated,
+        'deleted': 0,
+      });
+    }
+    Store.favTombs().forEach((k, v) {
+      final key = 'f|$k';
+      final u = _int(v);
+      if (u > 0 && _int(sf[key]) != u) favorites.add({'key': key, 'data': <String, dynamic>{}, 'updated': u, 'deleted': 1});
+    });
+    return _All(history, progress, favorites);
   }
 
   static void _markPushed(_Chunk chunk) {
@@ -491,6 +580,11 @@ class Cloud {
     for (final it in chunk.progress) {
       sp['${it['key']}'] = {'u': it['updated'], 'd': it['deleted'] == 1 ? 1 : 0};
     }
+    final sf = seen['f'] is Map ? Map<String, dynamic>.from(seen['f'] as Map) : <String, dynamic>{};
+    for (final it in chunk.favorites) {
+      sf['${it['key']}'] = it['updated'];
+    }
+    seen['f'] = sf;
     Store.setJsonMap('pek_sync_seen', seen);
   }
 
@@ -535,6 +629,24 @@ class Cloud {
     return null;
   }
 
+  /// A favorite entry for a title that is in this device's library, or null.
+  static Future<Map<String, dynamic>?> _libraryFavorite(bool tv, String title, int year) async {
+    final t = Store.normalize(title);
+    if (t.isEmpty) return null;
+    try {
+      if (tv) {
+        _shows ??= await Api.shows();
+        final s = _shows!.where((s) => Store.normalize(s.title) == t).firstOrNull;
+        return s == null ? null : {'kind': 'show', 'key': 's:${s.title}', 'title': s.title, 'year': 0};
+      }
+      _movies ??= await Api.movies();
+      final m = _movies!.where((m) => Store.normalize(m.title) == t && (year == 0 || m.year == 0 || m.year == year)).firstOrNull;
+      return m == null ? null : {'kind': 'movie', 'key': 'm:${m.id}', 'title': m.title, 'year': m.year};
+    } catch (_) {
+      return null;
+    }
+  }
+
   static Future<bool> _applyRemote(Map<String, dynamic> resp) async {
     final pending = Store.jsonMap('pek_sync_pending');
     List<Map<String, dynamic>> listOf(dynamic v) => v is List ? v.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : <Map<String, dynamic>>[];
@@ -542,6 +654,12 @@ class Cloud {
     final remoteP = listOf(resp['progress']);
     pending.forEach((k, v) {
       if (v is Map && !remoteP.any((r) => r['key'] == k)) remoteP.add(Map<String, dynamic>.from(v));
+    });
+
+    final remoteF = listOf(resp['favorites']);
+    final pendingF = Store.jsonMap('pek_sync_pendingf');
+    pendingF.forEach((k, v) {
+      if (v is Map && !remoteF.any((r) => r['key'] == k)) remoteF.add(Map<String, dynamic>.from(v));
     });
 
     // 1) look up local files (async) for live resume points we do not have yet
@@ -554,6 +672,20 @@ class Cloud {
       final data = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
       final p = await _resolve(data);
       if (p != null) resolved[key] = p;
+    }
+
+    // ... and for favorites that came from the cloud (TMDb id + title) but are not in this device's favorites yet
+    final haveFavs = Store.favRaw();
+    final resolvedF = <String, Map<String, dynamic>>{};
+    for (final r in remoteF) {
+      if (_truthy(r['deleted'])) continue;
+      final key = '${r['key']}';
+      final m = RegExp(r'^f\|(movie|tv):(\d+)$').firstMatch(key);
+      if (m == null) continue;
+      if (haveFavs.any((f) => _int(f['tmdb']) == int.parse(m.group(2)!) && '${f['type']}' == m.group(1))) continue;
+      final d = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
+      final lib = await _libraryFavorite(m.group(1) == 'tv', '${d['title'] ?? ''}', _int(d['year']));
+      if (lib != null) resolvedF[key] = lib;
     }
 
     // 2) apply everything in one synchronous step (the player may have written progress meanwhile)
@@ -659,6 +791,65 @@ class Cloud {
       }
       newPending[key] = r;
     }
+    // favorites: the newest change per title wins; a title this library does not have stays pending
+    final favs = Store.favRaw();
+    final tombs = Store.favTombs();
+    final sf = seen['f'] is Map ? Map<String, dynamic>.from(seen['f'] as Map) : <String, dynamic>{};
+    final newPendingF = <String, dynamic>{};
+    var favChanged = false;
+    var tombChanged = false;
+    for (final r in remoteF) {
+      final key = '${r['key']}';
+      final m = RegExp(r'^f\|(movie|tv):(\d+)$').firstMatch(key);
+      if (m == null) continue;
+      final type = m.group(1)!;
+      final id = int.parse(m.group(2)!);
+      final ru = _int(r['updated']);
+      final tk = '$type:$id';
+      final idx = favs.indexWhere((f) => _int(f['tmdb']) == id && '${f['type']}' == type);
+      if (_truthy(r['deleted'])) {
+        if (idx >= 0) {
+          if (_int(favs[idx]['updated']) > ru) continue; // favorited again here: ours wins
+          favs.removeAt(idx);
+          favChanged = true;
+        } else if (tombs[tk] != null && _int(tombs[tk]) <= ru) {
+          tombs.remove(tk);
+          tombChanged = true;
+        }
+        sf[key] = ru;
+        continue;
+      }
+      if (idx >= 0) {
+        final lu = _int(favs[idx]['updated']);
+        if (ru > lu) {
+          favs[idx]['updated'] = ru;
+          sf[key] = ru;
+          favChanged = true;
+        } else if (ru == lu) {
+          sf[key] = ru;
+        }
+        continue;
+      }
+      if (tombs[tk] != null && _int(tombs[tk]) >= ru) continue; // removed here after that
+      final lib = resolvedF[key];
+      if (lib != null) {
+        final d = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
+        final poster = _cleanPoster('${d['posterPath'] ?? ''}');
+        favs.insert(0, {...lib, 'tmdb': id, 'type': type, if (poster.isNotEmpty) 'poster': poster, 'added': _int(d['added']) > 0 ? _int(d['added']) : ru, 'updated': ru});
+        sf[key] = ru;
+        favChanged = true;
+      } else {
+        newPendingF[key] = r;
+      }
+    }
+    seen['f'] = sf;
+    if (favChanged) {
+      await Store.writeFavRaw(favs);
+      changed = true;
+    }
+    if (tombChanged) await Store.writeFavTombs(tombs);
+    await Store.setJsonMap('pek_sync_pendingf', newPendingF);
+
     await Store.writeHistoryRaw(hmap);
     await Store.writeProgressRaw(pmap);
     await Store.setJsonMap('pek_sync_seen', seen);
@@ -675,17 +866,19 @@ class _P {
 }
 
 class _Chunk {
-  _Chunk(this.history, this.progress);
+  _Chunk(this.history, this.progress, this.favorites);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
+  final List<Map<String, dynamic>> favorites;
 }
 
 class _All {
-  _All(this.history, this.progress);
+  _All(this.history, this.progress, this.favorites);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
+  final List<Map<String, dynamic>> favorites;
 
-  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty;
+  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty;
 
   /// Up to [max] items (history first), removed from this list.
   _Chunk take(int max) {
@@ -693,6 +886,8 @@ class _All {
     history.removeRange(0, h.length);
     final p = progress.take(max - h.length).toList();
     progress.removeRange(0, p.length);
-    return _Chunk(h, p);
+    final f = favorites.take(max - h.length - p.length).toList();
+    favorites.removeRange(0, f.length);
+    return _Chunk(h, p, f);
   }
 }

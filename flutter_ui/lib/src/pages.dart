@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'account_pages.dart';
+import 'layouts.dart';
 import 'api.dart';
 import 'common.dart';
 import 'detail.dart';
@@ -310,6 +311,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       const AccountSection(),
       const AppearanceSection(),
+      const LayoutSection(),
       const SubtitleSection(),
       const SkipSection(),
       const MusicOnlineSection(),

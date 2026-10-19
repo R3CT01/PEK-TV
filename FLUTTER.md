@@ -63,10 +63,14 @@ there are no lock-screen controls yet (those need native channel methods).
 
 ## Added in phase 3
 - **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (same hash as the web UI), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Like the web UI, profiles need a signed-in account.
-- **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign up / sign in with the emailed 6-digit code, forgot password, sign out (asks first), delete account. Watch history and resume points sync per profile through the existing worker; the profile list syncs too. Library favorites stay on the device (the worker only accepts TMDb favorites).
+- **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign up / sign in with the emailed 6-digit code, forgot password, sign out (asks first), delete account. Watch history, resume points and favorites sync per profile through the existing worker; the profile list syncs too. Favorites are keyed by TMDb id, looked up once through the same TMDb worker the backend uses.
+- **Layouts** (`layouts.dart`): Classic, Top bar, Wall, Compact (menu position and poster size, TV/tablet) plus a poster-size setting that phones also get. Per profile.
+- **Torrent search** (`torrent_search.dart`): search the https sites you list (address with `{q}`), fetched through the existing `/api/torrent/fetch` route, plus an optional Torznab provider; results are filtered and ranked like the web engine.
 - **Torrents** (`torrent.dart`): More > Torrents plays a magnet / .torrent link with a loading screen (peers, speed, progress), a loading card inside the player while it buffers or scrubs, and Resume Watching that restarts the same release (also from other devices).
 - **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance).
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
+- **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
+
 ## Still only in the classic UI
-Plugins and their screens (JavaScript in the web sandbox), the plugin store, layouts, Clock / Weather / plugin dashboard tiles.
+Plugins and their screens (JavaScript in the web sandbox), the plugin store, installable skin packages, plugin dashboard tiles.

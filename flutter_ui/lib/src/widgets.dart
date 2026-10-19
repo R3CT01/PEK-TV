@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart' show Details;
+import 'layouts.dart';
 import 'tokens.dart';
 
 /// The `.focusable` of the web UI. On a remote / keyboard (focus highlight on) it gets `.focused`:
@@ -300,10 +301,16 @@ class PekGridSliver extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // The poster size from Settings > Layout scales every grid; a change repaints it.
+    return ListenableBuilder(listenable: Layouts.changes, builder: (context, _) => _grid(context));
+  }
+
+  Widget _grid(BuildContext context) {
+    final minW = minWidth * Layouts.posterScale;
     return SliverLayoutBuilder(
       builder: (context, c) {
         final w = c.crossAxisExtent;
-        final cols = ((w + gap) / (minWidth + gap)).floor().clamp(1, 1000);
+        final cols = ((w + gap) / (minW + gap)).floor().clamp(1, 1000);
         final rows = (count / cols).ceil();
         return SliverList(
           delegate: SliverChildBuilderDelegate(

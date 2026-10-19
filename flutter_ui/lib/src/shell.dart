@@ -6,6 +6,7 @@ import 'cloud.dart';
 import 'common.dart';
 import 'dashboard.dart';
 import 'library.dart';
+import 'layouts.dart';
 import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
@@ -219,12 +220,43 @@ class _AppShellState extends State<AppShell> {
 
   // ---------------------------------------------------------------- TV: sidebar + content
 
-  Widget _tv(BuildContext context) {
+  Widget _tv(BuildContext context) => ListenableBuilder(listenable: Layouts.changes, builder: (context, _) => _tvLayout(context));
+
+  Widget _tvLayout(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
     final rem = p.rem;
+    final content = Expanded(child: Column(children: [Expanded(child: KeyedSubtree(key: ValueKey(_tab), child: _body(context, _tab))), const MiniPlayer()]));
+    if (Layouts.id == 'topbar') {
+      // Menu across the top, like Arctic.
+      final bar = Container(
+        padding: EdgeInsets.fromLTRB(rem + p.safeX, 0.75 * rem + p.safeY, rem + p.safeX, 0.75 * rem),
+        decoration: BoxDecoration(color: t.bgElevated, border: Border(bottom: BorderSide(color: t.border))),
+        child: Row(children: [
+          Padding(padding: EdgeInsets.only(right: 1.5 * rem), child: Text('PEK TV', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.accent))),
+          Expanded(
+            child: SizedBox(
+              height: 3 * rem,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _navItems.length,
+                separatorBuilder: (_, __) => SizedBox(width: 0.5 * rem),
+                itemBuilder: (_, i) => _NavItem(
+                  label: _navItems[i].$2,
+                  active: _navItems[i].$1 == _tab,
+                  autofocus: _navItems[i].$1 == _tab,
+                  onTap: () => setState(() => _tab = _navItems[i].$1),
+                ),
+              ),
+            ),
+          ),
+        ]),
+      );
+      return Column(children: [bar, content]);
+    }
+    final slim = Layouts.id == 'wall' || Layouts.id == 'compact';
     final sidebar = Container(
-      width: 14 * rem,
+      width: (slim ? 11 : 14) * rem,
       padding: EdgeInsets.fromLTRB(rem + p.safeX, 1.5 * rem + p.safeY, rem, 1.5 * rem + p.safeY),
       decoration: BoxDecoration(color: t.bgElevated, border: Border(right: BorderSide(color: t.border))),
       child: Column(
@@ -238,7 +270,7 @@ class _AppShellState extends State<AppShell> {
             child: ListView.separated(
               padding: const EdgeInsets.all(4),
               itemCount: _navItems.length,
-              separatorBuilder: (_, __) => SizedBox(height: 0.5 * rem),
+              separatorBuilder: (_, __) => SizedBox(height: (Layouts.id == 'compact' ? 0.3 : 0.5) * rem),
               itemBuilder: (_, i) => _NavItem(
                 label: _navItems[i].$2,
                 active: _navItems[i].$1 == _tab,
@@ -255,10 +287,7 @@ class _AppShellState extends State<AppShell> {
         ],
       ),
     );
-    return Row(children: [
-      sidebar,
-      Expanded(child: Column(children: [Expanded(child: KeyedSubtree(key: ValueKey(_tab), child: _body(context, _tab))), const MiniPlayer()])),
-    ]);
+    return Row(children: [sidebar, content]);
   }
 }
 

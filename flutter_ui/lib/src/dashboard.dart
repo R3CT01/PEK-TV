@@ -7,11 +7,12 @@ import 'common.dart';
 import 'detail.dart';
 import 'store.dart';
 import 'tokens.dart';
+import 'weather.dart';
 import 'widgets.dart';
 
 /// The Dashboard tab (app_dashboard.js): a clock and a stack of widgets, each one a row of posters.
 /// Widgets here: Continue Watching, Recently Added, Favorites. Which ones show (and their order) is saved on the device.
-/// Clock / Weather / plugin shortcut tiles need the plugin runtime, so they stay in the classic UI.
+/// Clock and Weather are widgets too (Weather: Open-Meteo, like plugins/weather). Plugin shortcut tiles need the plugin runtime.
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key, required this.padding, required this.onOpenResume, required this.onOpenFavorites});
   final EdgeInsets padding;
@@ -79,8 +80,6 @@ class _DashboardPageState extends State<DashboardPage> {
           padding: widget.padding,
           children: [
             Heading('Dashboard', trailing: PekButton(compact: true, label: 'Customize', onTap: _customize)),
-            PekCard(title: _time, subtitle: _date),
-            SizedBox(height: 1.25 * rem),
             FutureBuilder<(List<Movie>, List<Show>)>(
               future: _lib,
               builder: (context, snap) {
@@ -92,8 +91,6 @@ class _DashboardPageState extends State<DashboardPage> {
                 ]);
               },
             ),
-            SizedBox(height: rem),
-            Text('Clock, Weather and plugin tiles are in the classic UI (More \u2192 Settings).', style: TextStyle(color: t.textMuted, fontSize: 0.8 * rem)),
           ],
         );
       },
@@ -102,6 +99,10 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _widget(BuildContext context, String type, List<Movie> movies, List<Show> shows) {
     switch (type) {
+      case 'clock':
+        return Padding(padding: EdgeInsets.only(bottom: 1.25 * context.pek.rem), child: PekCard(title: _time, subtitle: _date));
+      case 'weather':
+        return Padding(padding: EdgeInsets.only(bottom: 1.25 * context.pek.rem), child: const WeatherTile());
       case 'continue':
         final items = Store.resumeItems().take(12).toList();
         return _row(context, 'Continue Watching', 'Nothing to resume yet.', widget.onOpenResume, [
