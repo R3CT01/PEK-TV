@@ -7,18 +7,41 @@ import 'tokens.dart';
 import 'widgets.dart';
 
 /// Opens the player. [resume] makes the player record progress for Resume Watching.
-Future<void> playMedia(BuildContext context, Progress item, {double startSec = 0}) {
-  return Navigator.push(
+///
+/// For an episode the player also offers the next one near the end ("Up next"): [nextFor] says which, and when it is left out the
+/// show is looked up here from the item's show title.
+Future<void> playMedia(BuildContext context, Progress item, {double startSec = 0, Progress? Function(Progress current)? nextFor}) async {
+  var resolver = nextFor;
+  if (resolver == null && item.kind == 'episode' && item.showTitle.isNotEmpty) {
+    try {
+      final shows = await Api.shows();
+      final show = shows.where((s) => s.title == item.showTitle).firstOrNull;
+      if (show != null) resolver = (cur) => nextEpisodeItem(show, cur.id);
+    } catch (_) {}
+  }
+  if (!context.mounted) return;
+  await Navigator.push(
     context,
-    MaterialPageRoute<void>(builder: (_) => PlayerScreen(url: Api.streamUrl(item.id), title: item.title, startSec: startSec, resume: item)),
+    MaterialPageRoute<void>(builder: (_) => PlayerScreen(url: Api.streamUrl(item.id), title: item.title, startSec: startSec, resume: item, nextFor: resolver)),
   );
+}
+
+/// The episode after [currentId] in [show]: the rest of the season, then the next season. Specials never come "next".
+Progress? nextEpisodeItem(Show show, String currentId) {
+  final flat = <Episode>[
+    for (final s in show.seasons)
+      if (s.number > 0) ...s.episodes,
+  ]..sort((a, b) => a.season != b.season ? a.season - b.season : a.episode - b.episode);
+  final i = flat.indexWhere((e) => e.id == currentId);
+  if (i < 0 || i + 1 >= flat.length) return null;
+  return episodeItem(show, flat[i + 1]);
 }
 
 Progress movieItem(Movie m) => Progress(id: m.id, title: m.title, kind: 'movie', position: 0, duration: 0, updated: 0, year: m.year);
 
 Progress episodeItem(Show s, Episode e) {
   final label = 'S${e.season.toString().padLeft(2, '0')}E${e.episode.toString().padLeft(2, '0')}';
-  return Progress(id: e.id, title: '${s.title} $label', kind: 'episode', position: 0, duration: 0, updated: 0, showTitle: s.title);
+  return Progress(id: e.id, title: '${s.title} $label', kind: 'episode', position: 0, duration: 0, updated: 0, showTitle: s.title, season: e.season, episode: e.episode);
 }
 
 class MovieScreen extends StatelessWidget {
@@ -153,7 +176,7 @@ class _ShowScreenState extends State<ShowScreen> {
         background: t.surface,
         borderColor: t.border,
         padding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.7 * rem),
-        onTap: () => playMedia(context, episodeItem(show, e), startSec: saved?.position ?? 0),
+        onTap: () => playMedia(context, episodeItem(show, e), startSec: saved?.position ?? 0, nextFor: (cur) => nextEpisodeItem(show, cur.id)),
         child: Row(children: [
           Icon(Icons.play_circle_outline, color: t.accent, size: 1.5 * rem),
           SizedBox(width: 0.75 * rem),

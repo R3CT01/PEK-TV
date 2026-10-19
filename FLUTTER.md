@@ -28,6 +28,9 @@ Settings; a tap opens that screen on top and Back returns. On a TV the sidebar l
 - Resume Watching, Favorites (long-press a poster to remove)
 - Music: Albums / Artists / Songs, search, album and artist pages, queue, shuffle / repeat, mini player, Now Playing
 - Duplicates, Unknown, Plugins (list + remove), Settings (media sources + folder picker)
+- Settings > Subtitles (automatic look-up on / off, language, Test), Video output (match refresh rate, HDR) and Audio output
+  (Dolby / DTS passthrough). Subtitles are also found automatically while a library movie / episode plays, and the player's
+  audio / subtitle menu has a "Find subtitles online" list (`subtitles.dart`, port of `www/subtitles.js`).
 
 Resume progress, favorites and the dashboard layout are stored on the device with `shared_preferences` (`store.dart`). The web
 UI kept these in the WebView's localStorage, which Flutter cannot read, so they start empty in the Flutter UI.
@@ -35,15 +38,28 @@ UI kept these in the WebView's localStorage, which Flutter cannot read, so they 
 ## Not ported yet (still in the classic UI)
 Profiles and sync / sign-in, Watch History, global search, plugin screens (they are JavaScript that runs in the web UI's
 sandbox), the plugin store, skins and layouts, Clock / Weather / plugin tiles on the dashboard, network folders (SMB, NFS, FTP,
-DLNA), video / audio output settings (Dolby passthrough, HDR, match frame rate), skip intro / next episode, torrent loading
+DLNA), skip intro / next episode, torrent loading
 display, lyrics. Music plays through the same libmpv engine as video, so it stops when the app goes to the background and
 there are no lock-screen controls yet (those need native channel methods).
 
 ## Files
 - `flutter_ui/lib/src/api.dart` - HTTP client for the existing routes
+- `flutter_ui/lib/src/subtitles.dart`, `settings_extra.dart` - online subtitles; Subtitles / Video output / Audio output settings
+  (the last two talk to MpvController over the `pek/output` channel in `FlutterHostActivity.kt`)
 - `flutter_ui/lib/src/mpv.dart` - Dart side of the player channels (one shared player for video and music)
 - `flutter_ui/lib/src/shell.dart` - swipe pages, bottom bar, More page, TV sidebar
 - `flutter_ui/lib/src/store.dart` - on-device progress, favorites, dashboard layout
 - `flutter_ui/lib/src/{dashboard,music,music_controller,pages,common}.dart` - the screens above
 - `android/app/src/main/java/com/pektv/app/MpvController.kt` - events can now go to a Flutter sink (webView is optional)
 - `android/settings.gradle`, `android/app/build.gradle` - conditional Flutter module include, Flutter maven repo
+
+## Added later
+- Network folders (SMB / NFS / FTP / WebDAV / DLNA): Settings > Add network folder (`net_folders.dart`; the Wi-Fi multicast lock
+  is the `setMulticast` call on `pek/host`).
+- Search (title, actor, genre, year; `library_pages.dart`) and Watch History (a permanent "finished" record kept in `Store`), both under More.
+- Skip Intro / Skip Recap (`skip.dart`: file chapters, then the online database) and Up next (last 5 minutes of an episode, 5 s countdown
+  when it ends) in the player. Settings > Skip intro and recap.
+- Lyrics on Now Playing (`lyrics.dart`) and Settings > Music > Online art & lyrics.
+
+## Still only in the classic UI
+Profiles and cloud sync, skins and layouts, the plugin store and plugins.

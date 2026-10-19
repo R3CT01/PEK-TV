@@ -4,7 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'common.dart';
+import 'lyrics.dart';
 import 'music_controller.dart';
+import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -364,6 +366,7 @@ class NowPlayingScreen extends StatefulWidget {
 
 class _NowPlayingState extends State<NowPlayingScreen> {
   double? _drag;
+  bool _lyrics = Store.musicLyrics;
 
   @override
   void initState() {
@@ -434,7 +437,19 @@ class _NowPlayingState extends State<NowPlayingScreen> {
                   IconButton(iconSize: 2.2 * rem, onPressed: () => _mc.next(), icon: const Icon(Icons.skip_next)),
                   ValueListenableBuilder<bool>(valueListenable: _mc.repeat, builder: (_, on, __) => IconButton(onPressed: _mc.toggleRepeat, icon: Icon(Icons.repeat, color: on ? t.accent : t.textMuted))),
                 ]),
-                TextButton(onPressed: _mc.stop, child: const Text('Stop')),
+                Row(mainAxisSize: MainAxisSize.min, children: [
+                  TextButton(onPressed: _mc.stop, child: const Text('Stop')),
+                  SizedBox(width: rem),
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() => _lyrics = !_lyrics);
+                      Store.setMusicLyrics(_lyrics);
+                    },
+                    icon: Icon(Icons.lyrics_outlined, color: _lyrics ? t.accent : t.textMuted),
+                    label: Text('Lyrics', style: TextStyle(color: _lyrics ? t.accent : t.textMuted)),
+                  ),
+                ]),
+                if (_lyrics) SizedBox(width: side, height: 13 * rem, child: LyricsPanel(trackId: cur.id, position: _mc.position, onSeek: _mc.seek)),
               ]),
             ),
           );

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'common.dart';
 import 'dashboard.dart';
 import 'library.dart';
+import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
 import 'pages.dart';
@@ -15,7 +16,9 @@ const _navItems = <(String, String)>[
   ('movies', 'Movies'),
   ('shows', 'TV Shows'),
   ('music', 'Music'),
+  ('search', 'Search'),
   ('resume', 'Resume Watching'),
+  ('history', 'Watch History'),
   ('favorites', 'Favorites'),
   ('duplicates', 'Duplicates'),
   ('unknown', 'Unknown'),
@@ -29,7 +32,7 @@ const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
 const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
 
 /// Everything that is not a swipe page.
-const _moreIds = ['resume', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
+const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
 
 String _titleOf(String id) => _navItems.firstWhere((e) => e.$1 == id, orElse: () => ('', 'PEK TV')).$2;
 
@@ -141,6 +144,10 @@ class _AppShellState extends State<AppShell> {
         return MusicPage(padding: pad);
       case 'more':
         return _MorePage(padding: pad, onOpen: _open);
+      case 'search':
+        return SearchPage(padding: pad);
+      case 'history':
+        return HistoryPage(padding: pad);
       case 'resume':
         return ResumePage(padding: pad);
       case 'favorites':
@@ -262,6 +269,8 @@ class _MorePage extends StatelessWidget {
   final void Function(String id) onOpen;
 
   static const _hint = {
+    'search': 'Titles, actors, genres, years',
+    'history': 'Everything you finished watching',
     'resume': 'Pick up where you stopped',
     'favorites': 'Your saved movies and shows',
     'duplicates': 'Files that appear twice',

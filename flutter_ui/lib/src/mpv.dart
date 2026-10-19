@@ -3,6 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+class Chapter {
+  const Chapter(this.title, this.time);
+  final String title;
+  final double time; // seconds
+}
+
 class TrackInfo {
   const TrackInfo(this.id, this.label, this.selected);
   final int id;
@@ -34,6 +40,7 @@ class PekPlayer {
   final audio = ValueNotifier<List<TrackInfo>>(const []);
   final subtitles = ValueNotifier<List<TrackInfo>>(const []);
   final ended = ValueNotifier<bool>(false);
+  final chapters = ValueNotifier<List<Chapter>>(const []);
 
   void _onEvent(dynamic e) {
     if (e is! Map) return;
@@ -50,6 +57,10 @@ class PekPlayer {
       case 'tracks':
         audio.value = _tracks(data['audio']);
         subtitles.value = _tracks(data['subtitles']);
+        final ch = data['chapters'];
+        if (ch is List && ch.isNotEmpty) {
+          chapters.value = ch.whereType<Map>().map((c) => Chapter('${c['title'] ?? ''}', (c['time'] as num?)?.toDouble() ?? 0)).toList();
+        }
         break;
       case 'ended':
         ended.value = true;
@@ -69,6 +80,8 @@ class PekPlayer {
   Future<void> seek(double sec) => _method.invokeMethod('seek', {'sec': sec < 0 ? 0.0 : sec});
   Future<void> setAudio(int id) => _method.invokeMethod('setAudio', {'id': id});
   Future<void> setSubtitle(int id) => _method.invokeMethod('setSubtitle', {'id': id});
+  /// An extra subtitle file at [url] (loaded and switched on at once).
+  Future<void> addSubtitle(String url, String label) => _method.invokeMethod('addSubtitle', {'url': url, 'label': label});
   Future<void> destroy() => _method.invokeMethod('destroy');
 
   Future<void> togglePause() => playing.value ? pause() : play();
@@ -81,6 +94,7 @@ class PekPlayer {
     buffering.value = true;
     audio.value = const [];
     subtitles.value = const [];
+    chapters.value = const [];
     ended.value = false;
   }
 
@@ -94,6 +108,49 @@ class PekPlayer {
     }
   }
 
+  /// Lets Wi-Fi multicast through while searching the network for shared folders.
+  static Future<void> setMulticast(bool on) async {
+    try {
+      await _host.invokeMethod('setMulticast', {'on': on});
+    } catch (_) {}
+  }
+
   static Future<void> classicUi() => _host.invokeMethod('classicUi');
   static Future<void> exitApp() => _host.invokeMethod('exit');
+}
+
+/// What the screen / TV / receiver can do, and the switches for it (Settings > Video output / Audio output).
+/// Lives in Kotlin (MpvController); every call can fail on a host without the player, so callers treat errors as "not available".
+class VideoOutput {
+  const VideoOutput({required this.matchRate, required this.hdr, required this.displayHdr});
+  final bool matchRate;
+  final bool hdr;
+  final bool displayHdr;
+}
+
+class AudioOutput {
+  const AudioOutput({required this.on, required this.known, required this.formats});
+  final Set<String> on; // codecs switched on
+  final bool known; // false = the device did not say what it supports
+  final Set<String> formats; // codecs the device reports it can take untouched
+}
+
+class PekOutput {
+  static const _c = MethodChannel('pek/output');
+
+  static Future<VideoOutput> video() async {
+    final m = Map<String, dynamic>.from(await _c.invokeMethod<Map>('video') ?? const {});
+    return VideoOutput(matchRate: m['matchRate'] == true, hdr: m['hdr'] == true, displayHdr: m['displayHdr'] == true);
+  }
+
+  static Future<void> setMatchRate(bool on) => _c.invokeMethod('setMatchRate', {'on': on});
+  static Future<void> setHdr(bool on) => _c.invokeMethod('setHdr', {'on': on});
+
+  static Future<AudioOutput> audio() async {
+    final m = Map<String, dynamic>.from(await _c.invokeMethod<Map>('audio') ?? const {});
+    Set<String> strs(dynamic v) => v is List ? v.map((e) => '$e').toSet() : <String>{};
+    return AudioOutput(on: strs(m['on']), known: m['known'] == true, formats: strs(m['formats']));
+  }
+
+  static Future<void> setPassthrough(String codec, bool on) => _c.invokeMethod('setPassthrough', {'codec': codec, 'on': on});
 }

@@ -6,6 +6,8 @@ import 'api.dart';
 import 'common.dart';
 import 'detail.dart';
 import 'mpv.dart';
+import 'net_folders.dart';
+import 'settings_extra.dart';
 import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -250,6 +252,13 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _sources = Api.sources());
   }
 
+  Future<void> _addNetFolder() async {
+    final added = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) => const NetFolderPage()));
+    if (added != true || !mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Added. The first scan of a network folder takes a little longer\u2026')));
+    setState(() => _sources = Api.sources());
+  }
+
   Future<void> _removeSource(String path) async {
     await Api.removeSource(path).catchError((_) {});
     if (mounted) setState(() => _sources = Api.sources());
@@ -292,12 +301,20 @@ class _SettingsPageState extends State<SettingsPage> {
             ]),
           ),
           SizedBox(height: 0.5 * rem),
-          Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Add source folder', primary: true, onTap: _addFolder)),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            PekButton(label: 'Add source folder', primary: true, onTap: _addFolder),
+            PekButton(label: 'Add network folder', onTap: _addNetFolder),
+          ]),
         ],
       ),
+      const SubtitleSection(),
+      const SkipSection(),
+      const MusicOnlineSection(),
+      const VideoOutputSection(),
+      const AudioOutputSection(),
       Section(
         title: 'Not in the Flutter UI yet',
-        hint: 'Profiles and sync, subtitles, video / audio output (Dolby, HDR, frame rate), skins and layouts, network folders and the plugin store still live in the classic UI.',
+        hint: 'Profiles and sync, skins and layouts, and the plugin store still live in the classic UI.',
         children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))],
       ),
       Section(title: 'App', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),

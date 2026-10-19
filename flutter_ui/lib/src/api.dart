@@ -15,6 +15,25 @@ class Api {
     return jsonDecode(utf8.decode(r.bodyBytes));
   }
 
+  /// POST a form and return the JSON object. The backend answers `{ok:false, error}` on failure; that text is what the person sees.
+  static Future<Map<String, dynamic>> postForm(String path, Map<String, String> body) async {
+    http.Response r;
+    try {
+      r = await _client.post(Uri.parse('$base$path'), headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body).timeout(const Duration(seconds: 30));
+    } catch (_) {
+      throw ApiError('Could not reach the app. Check your connection.');
+    }
+    Map<String, dynamic>? j;
+    try {
+      final o = jsonDecode(utf8.decode(r.bodyBytes));
+      if (o is Map) j = Map<String, dynamic>.from(o);
+    } catch (_) {}
+    if (r.statusCode != 200 || j == null || j['ok'] == false) {
+      throw ApiError(j?['error'] != null ? '${j!['error']}' : 'Subtitle lookup failed (HTTP ${r.statusCode}).');
+    }
+    return j;
+  }
+
   /// MainActivity starts the server before opening this screen, so this normally succeeds on the first try.
   static Future<bool> waitForServer() async {
     for (var i = 0; i < 60; i++) {
@@ -96,6 +115,136 @@ class Api {
   static Future<List<String>> sources() async {
     final j = await _get('/api/sources');
     return ((j['sources'] as List?) ?? const []).map((e) => '$e').toList();
+  }
+
+  // ---------------------------------------------------------------- network folders (SMB / NFS / FTP / WebDAV / DLNA)
+
+  static Future<void> discoverStart() async {
+    try {
+      await _client.post(Uri.parse('$base/api/discover')).timeout(const Duration(seconds: 10));
+    } catch (_) {}
+  }
+
+  static Future<NetDiscovery> discoverPoll() async {
+    final j = await _get('/api/discover');
+    return NetDiscovery(
+      scanning: j['scanning'] == true,
+      unsupported: ((j['unsupported'] as List?) ?? const []).map((e) => '$e').toList(),
+      hosts: ((j['hosts'] as List?) ?? const []).whereType<Map>().map((e) => NetHost.fromJson(Map<String, dynamic>.from(e))).toList(),
+    );
+  }
+
+  /// POST /api/net/browse. The reply is `{ok, ...}`; `auth` asks for a login, `canTypeShare` for a typed share name.
+  static Future<Map<String, dynamic>> netBrowse(String url, {String? user, String? pass}) async {
+    final r = await _client
+        .post(Uri.parse('$base/api/net/browse'), body: {'url': url, if (user != null) 'user': user, if (pass != null) 'pass': pass})
+        .timeout(const Duration(seconds: 60));
+    final o = jsonDecode(utf8.decode(r.bodyBytes));
+    return o is Map ? Map<String, dynamic>.from(o) : <String, dynamic>{'ok': false, 'error': 'Could not open that location.'};
+  }
+
+  /// Adds a network location as a media source. Returns null on success, or the text to show.
+  static Future<String?> addNetSource(String url, {String user = '', String pass = ''}) async {
+    try {
+      final r = await _client
+          .post(Uri.parse('$base/api/sources'), body: {'path': url, if (user.isNotEmpty) 'user': user, if (user.isNotEmpty) 'pass': pass})
+          .timeout(const Duration(seconds: 60));
+      if (r.statusCode == 200) return null;
+      try {
+        final o = jsonDecode(utf8.decode(r.bodyBytes));
+        if (o is Map && o['message'] != null) return '${o['message']}';
+      } catch (_) {}
+      return 'Could not add that folder.';
+    } catch (_) {
+      return 'Could not reach the PEK TV server.';
+    }
+  }
+
+  // ---------------------------------------------------------------- library search (the NFO database: genre, actor, year ...)
+
+  /// {movies: [file ids], shows: [show titles]} or null when the server could not answer.
+  static Future<({List<String> movies, List<String> shows})?> librarySearch(String q, {String genre = '', int decade = 0, String actor = ''}) async {
+    String qs(String type) =>
+        '/api/library/search?type=$type&limit=60&q=${Uri.encodeQueryComponent(q)}${genre.isNotEmpty ? '&genre=${Uri.encodeQueryComponent(genre)}' : ''}'
+        '${decade > 0 ? '&decade=$decade' : ''}${actor.isNotEmpty ? '&actor=${Uri.encodeQueryComponent(actor)}' : ''}';
+    try {
+      final r = await Future.wait([_get(qs('movies')), _get(qs('shows'))]);
+      return (
+        movies: ((r[0]['movies'] as List?) ?? const []).map((e) => '$e').toList(),
+        shows: ((r[1]['shows'] as List?) ?? const []).map((e) => '$e').toList(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Genres, decades and actors found in the library (movies and shows together).
+  static Future<Facets?> libraryFacets(String actorQ) async {
+    String u(String type) => '/api/library/facets?type=$type&limit=60&q=${Uri.encodeQueryComponent(actorQ)}';
+    try {
+      final r = await Future.wait([_get(u('movies')), _get(u('shows'))]);
+      Map<String, int> sum(String key, String nameKey) {
+        final out = <String, int>{};
+        for (final j in r) {
+          for (final x in ((j[key] as List?) ?? const []).whereType<Map>()) {
+            out['${x[nameKey]}'] = (out['${x[nameKey]}'] ?? 0) + ((x['count'] as num?)?.toInt() ?? 0);
+          }
+        }
+        return out;
+      }
+
+      List<MapEntry<String, int>> top(Map<String, int> m, int Function(MapEntry<String, int>, MapEntry<String, int>) by) =>
+          (m.entries.toList()..sort(by)).take(60).toList();
+      int byCount(MapEntry<String, int> a, MapEntry<String, int> b) => b.value != a.value ? b.value - a.value : a.key.compareTo(b.key);
+      Map? idx;
+      for (final j in r) {
+        final i = j['indexing'];
+        if (i is Map && ((i['total'] as num?) ?? 0) > 0) {
+          idx = i;
+          break;
+        }
+      }
+      return Facets(
+        genres: top(sum('genres', 'name'), byCount),
+        decades: top(sum('decades', 'decade'), (a, b) => (int.tryParse(b.key) ?? 0) - (int.tryParse(a.key) ?? 0)),
+        actors: top(sum('actors', 'name'), byCount),
+        indexingDone: (idx?['done'] as num?)?.toInt() ?? 0,
+        indexingTotal: (idx?['total'] as num?)?.toInt() ?? 0,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------- skip intro / recap, lyrics, online art
+
+  /// GET /api/skip-segments: {found, imdb, data}. Throws on a network error so the caller can retry.
+  static Future<Map<String, dynamic>> skipSegments(String show, int season, int episode) async {
+    final j = await _get('/api/skip-segments?show=${Uri.encodeQueryComponent(show)}&season=$season&episode=$episode');
+    return j is Map ? Map<String, dynamic>.from(j) : <String, dynamic>{};
+  }
+
+  /// {synced, plain} or null when there are no lyrics (404) or online lookups are off.
+  static Future<({String synced, String plain})?> lyrics(String trackId) async {
+    try {
+      final r = await _client.get(Uri.parse('$base/api/music/lyrics?track=${Uri.encodeQueryComponent(trackId)}')).timeout(const Duration(seconds: 20));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(utf8.decode(r.bodyBytes));
+      if (j is! Map) return null;
+      return (synced: '${j['synced'] ?? ''}', plain: '${j['plain'] ?? ''}');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// {available, enabled} for "Online art & lyrics".
+  static Future<({bool available, bool enabled})> musicOnline() async {
+    final j = await _get('/api/music/online');
+    return (available: j['available'] == true, enabled: j['enabled'] == true);
+  }
+
+  static Future<void> setMusicOnline(bool on) async {
+    await _client.post(Uri.parse('$base/api/music/online?enabled=${on ? 1 : 0}')).timeout(const Duration(seconds: 20));
   }
 
   /// DELETE /api/sources?path=... (the folder is only forgotten, never deleted).
@@ -364,4 +513,38 @@ class MusicSearch {
   final List<Artist> artists;
   final List<Album> albums;
   final List<Track> songs;
+}
+
+/// An error whose text is fit to show as it is.
+class ApiError implements Exception {
+  ApiError(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+class NetHost {
+  const NetHost({required this.name, required this.address, required this.label, required this.url});
+  final String name;
+  final String address;
+  final String label; // "SMB share", "FTP server" ...
+  final String url;
+
+  factory NetHost.fromJson(Map<String, dynamic> j) => NetHost(name: '${j['name'] ?? ''}', address: '${j['address'] ?? ''}', label: '${j['label'] ?? ''}', url: '${j['url'] ?? ''}');
+}
+
+class NetDiscovery {
+  const NetDiscovery({required this.scanning, required this.unsupported, required this.hosts});
+  final bool scanning;
+  final List<String> unsupported; // protocols this build can find but not open
+  final List<NetHost> hosts;
+}
+
+class Facets {
+  const Facets({required this.genres, required this.decades, required this.actors, required this.indexingDone, required this.indexingTotal});
+  final List<MapEntry<String, int>> genres;
+  final List<MapEntry<String, int>> decades; // key = the decade year (1990)
+  final List<MapEntry<String, int>> actors;
+  final int indexingDone;
+  final int indexingTotal;
 }

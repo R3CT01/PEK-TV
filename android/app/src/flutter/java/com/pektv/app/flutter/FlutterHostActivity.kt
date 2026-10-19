@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -37,12 +38,31 @@ import org.json.JSONObject
  *   pek/mpv         (MethodChannel)  load, play, pause, seek, setAudio, setSubtitle, addSubtitle, setMiniRect,
  *                                    fullscreen, destroy
  *   pek/mpv/events  (EventChannel)   {event: time|state|tracks|ended, data: {...}}  - same payloads the web UI got
- *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit
+ *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit, isPhone, setMulticast
+ *   pek/output      (MethodChannel)  Settings > Video / Audio output: video, setMatchRate, setHdr, audio, setPassthrough
  */
 class FlutterHostActivity : FlutterActivity() {
 
     private var mpv: MpvController? = null
     private var events: EventChannel.EventSink? = null
+    private var multicastLock: WifiManager.MulticastLock? = null
+
+    // Wi-Fi drops multicast packets unless Android is told to let them through; held only while searching the network.
+    private fun setMulticast(on: Boolean) {
+        try {
+            if (on) {
+                if (multicastLock == null) {
+                    val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                    multicastLock = wifi?.createMulticastLock("pek-discovery")?.apply { setReferenceCounted(false) }
+                }
+                multicastLock?.let { if (!it.isHeld) it.acquire() }
+            } else {
+                multicastLock?.let { if (it.isHeld) it.release() }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("PEK", "multicast lock failed", e)   // the port scan still finds hosts without it
+        }
+    }
 
     override fun getBackgroundMode(): BackgroundMode = BackgroundMode.transparent
 
@@ -109,6 +129,41 @@ class FlutterHostActivity : FlutterActivity() {
             }
         }
 
+        // Settings > Video output / Audio output: the same MpvController switches the web UI's PekAndroid.mpv* methods used.
+        MethodChannel(messenger, "pek/output").setMethodCallHandler { call, result ->
+            val c = mpv
+            if (c == null) {
+                result.error("no_player", "The player is not ready yet", null)
+                return@setMethodCallHandler
+            }
+            try {
+                when (call.method) {
+                    "video" -> result.success(mapOf(
+                        "matchRate" to c.isMatchRate(),
+                        "hdr" to c.isHdrOut(),
+                        "displayHdr" to c.displayHdr()
+                    ))
+                    "setMatchRate" -> { c.setMatchRate(call.argument<Boolean>("on") ?: false); result.success(null) }
+                    "setHdr" -> { c.setHdr(call.argument<Boolean>("on") ?: false); result.success(null) }
+                    "audio" -> {
+                        val support = JSONObject(c.passthroughSupportJson())
+                        result.success(mapOf(
+                            "on" to toPlain(JSONArray(c.passthroughJson())),
+                            "known" to support.optBoolean("known", false),
+                            "formats" to toPlain(support.optJSONArray("formats") ?: JSONArray())
+                        ))
+                    }
+                    "setPassthrough" -> {
+                        c.setPassthrough(call.argument<String>("codec") ?: "", call.argument<Boolean>("on") ?: false)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            } catch (t: Throwable) {
+                result.error("output_error", t.message, null)
+            }
+        }
+
         EventChannel(messenger, "pek/mpv/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) { events = sink }
             override fun onCancel(arguments: Any?) { events = null }
@@ -122,6 +177,10 @@ class FlutterHostActivity : FlutterActivity() {
                     val isTv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
                         packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
                     result.success(!isTv && packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN))
+                }
+                "setMulticast" -> {
+                    setMulticast(call.argument<Boolean>("on") ?: false)
+                    result.success(null)
                 }
                 "classicUi" -> {
                     // Escape hatch while the Flutter UI is still being filled in: open the web UI for this session only
@@ -150,6 +209,7 @@ class FlutterHostActivity : FlutterActivity() {
 
     override fun onDestroy() {
         events = null
+        setMulticast(false)
         mpv?.destroy()
         super.onDestroy()
     }

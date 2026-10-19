@@ -3,10 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'api.dart';
 import 'mpv.dart';
 import 'music_controller.dart';
+import 'skip.dart';
 import 'store.dart';
+import 'subtitles.dart';
 import 'theme.dart';
+import 'tokens.dart';
 
 /// Full-screen player. The picture is a native libmpv surface behind Flutter, so this screen is transparent and only
 /// draws the controls.
@@ -14,13 +18,16 @@ import 'theme.dart';
 /// Remote / D-pad:  Select = play / pause   Left / Right = -10 s / +10 s   Up = show controls
 ///                  Down = audio and subtitles   Back = close
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume});
+  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume, this.nextFor});
   final String url;
   final String title;
   final double startSec;
 
   /// What to record for Resume Watching (null = do not track).
   final Progress? resume;
+
+  /// Which episode comes next ("Up next"); null = nothing to offer.
+  final Progress? Function(Progress current)? nextFor;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -34,6 +41,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _seekBase;
   Timer? _seekReset;
   double? _drag;
+  late final SubsController _subs;
+  late final SkipController _skip;
+
+  // Up next: the next episode is offered for the last 5 minutes; if this one ends while the card is up it starts after a countdown.
+  static const _nextShowLeft = 300.0; // seconds left when the card appears
+  static const _nextMinLength = 300.0; // clips shorter than this never get a card
+  static const _countdownFrom = 5;
+  Progress? _next;
+  bool _nextDismissed = false;
+  bool _nextEverShown = false;
+  bool _leaving = false; // replaced by the next episode: the shared player must not be torn down
+  final ValueNotifier<bool> _nextVisible = ValueNotifier(false);
+  final ValueNotifier<int?> _countdown = ValueNotifier(null);
+  Timer? _countTimer;
+  String? _toastText;
+  Timer? _toastTimer;
 
   @override
   void initState() {
@@ -43,19 +66,93 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
     _player.load(widget.url, startSec: widget.startSec, title: widget.title);
     _player.ended.addListener(_onEnded);
+    _subs = SubsController(player: _player, meta: widget.resume, fileName: widget.title, toast: _toast);
+    _player.subtitles.addListener(_subs.onTracks);
+    _subs.onTracks(); // also once at the start, in case the file never reports a track list
+    _skip = SkipController(player: _player, meta: widget.resume);
+    _player.chapters.addListener(_onChapters);
+    _player.position.addListener(_onPos);
+    unawaited(_skip.fetchRemote());
+    final r = widget.resume;
+    _next = r == null ? null : widget.nextFor?.call(r);
     _poke();
   }
 
   @override
   void dispose() {
-    _record(notify: true);
+    if (!_leaving) _record(notify: true); // when the next episode took over, this one was recorded as finished already
     _save?.cancel();
     _hide?.cancel();
     _seekReset?.cancel();
+    _countTimer?.cancel();
     _player.ended.removeListener(_onEnded);
-    unawaited(_player.destroy());
-    _player.reset();
+    _player.subtitles.removeListener(_subs.onTracks);
+    _player.chapters.removeListener(_onChapters);
+    _player.position.removeListener(_onPos);
+    _subs.dispose();
+    _skip.dispose();
+    _nextVisible.dispose();
+    _countdown.dispose();
+    _toastTimer?.cancel();
+    if (!_leaving) {
+      unawaited(_player.destroy());
+      _player.reset();
+    }
     super.dispose();
+  }
+
+  void _onChapters() => _skip.setChapters(_player.chapters.value, _player.duration.value);
+
+  void _onPos() {
+    _skip.tick(_player.position.value);
+    final n = _next;
+    if (n == null || _nextDismissed || _leaving) {
+      if (_nextVisible.value) _nextVisible.value = false;
+      return;
+    }
+    final dur = _player.duration.value, pos = _player.position.value;
+    final show = dur >= _nextMinLength && dur - pos <= _nextShowLeft;
+    if (show) _nextEverShown = true;
+    if (show != _nextVisible.value) _nextVisible.value = show;
+  }
+
+  void _startCountdown() {
+    if (_countTimer != null) return;
+    _nextVisible.value = true;
+    _countdown.value = _countdownFrom;
+    _countTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      final left = (_countdown.value ?? 1) - 1;
+      if (left <= 0) {
+        t.cancel();
+        _playNext();
+      } else {
+        _countdown.value = left;
+      }
+    });
+  }
+
+  void _cancelNext() {
+    _countTimer?.cancel();
+    _countTimer = null;
+    _nextDismissed = true;
+    _countdown.value = null;
+    _nextVisible.value = false;
+    if (_player.ended.value && mounted) Navigator.of(context).maybePop();
+  }
+
+  void _playNext() {
+    final n = _next;
+    if (n == null || _leaving || !mounted) return;
+    _leaving = true;
+    _countTimer?.cancel();
+    final r = widget.resume;
+    if (r != null) {
+      final dur = _player.duration.value > 0 ? _player.duration.value : r.duration;
+      Store.saveProgress(r.at(dur, dur), notify: true); // finished
+    }
+    Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
+      builder: (_) => PlayerScreen(url: Api.streamUrl(n.id), title: n.title, resume: n, nextFor: widget.nextFor),
+    ));
   }
 
   /// _saveProgress() in app_watch.js: every ~10 s and when the player closes.
@@ -67,8 +164,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
     Store.saveProgress(r.at(pos, dur), notify: notify);
   }
 
+  void _toast(String text) {
+    if (!mounted) return;
+    setState(() => _toastText = text);
+    _toastTimer?.cancel();
+    _toastTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _toastText = null);
+    });
+  }
+
+  /// The "Find subtitles online" rows of the audio / subtitle menu (menuItems() in subtitles.js).
+  List<Widget> _onlineRows(BuildContext c) {
+    Widget note(String text) => SimpleDialogOption(child: Text(text, style: const TextStyle(color: Pek.muted)));
+    Widget retry() => SimpleDialogOption(onPressed: () => _subs.find(auto: false), child: const Text('Try again'));
+    switch (_subs.status) {
+      case SubsStatus.idle:
+        return const [];
+      case SubsStatus.searching:
+        return [note('Searching\u2026')];
+      case SubsStatus.error:
+        return [note(_subs.error.isEmpty ? 'Subtitle lookup failed' : _subs.error), retry()];
+      case SubsStatus.none:
+        return [note('No subtitles found'), retry()];
+      case SubsStatus.results:
+        return [
+          for (final r in _subs.results.take(SubsController.menuResults))
+            SimpleDialogOption(
+              onPressed: () {
+                Navigator.pop(c);
+                _subs.apply(r);
+              },
+              child: Text('${_subs.applied?.id == r.id ? '\u25cf ' : ''}${r.label}'),
+            ),
+        ];
+    }
+  }
+
   void _onEnded() {
-    if (_player.ended.value && mounted) Navigator.of(context).maybePop();
+    if (!_player.ended.value || !mounted || _leaving) return;
+    if (_next != null && !_nextDismissed && _nextEverShown) {
+      _startCountdown();
+    } else {
+      Navigator.of(context).maybePop();
+    }
   }
 
   void _poke() {
@@ -94,6 +232,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     if (k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.gameButtonA || k == LogicalKeyboardKey.mediaPlayPause) {
+      if (e is KeyDownEvent && context.pek.isTv && _skip.cur != null && k != LogicalKeyboardKey.mediaPlayPause) {
+        _skip.skip(); // on a TV the button is already "highlighted": OK skips
+        _poke();
+        return KeyEventResult.handled;
+      }
       if (e is KeyDownEvent) _player.togglePause();
       _poke();
       return KeyEventResult.handled;
@@ -122,9 +265,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _tracks() async {
     _hide?.cancel();
     setState(() => _controls = true);
+    _subs.openList();
     await showDialog<void>(
       context: context,
-      builder: (c) => ValueListenableBuilder<List<TrackInfo>>(
+      builder: (c) => AnimatedBuilder(
+        animation: _subs,
+        builder: (c, _) => ValueListenableBuilder<List<TrackInfo>>(
         valueListenable: _player.audio,
         builder: (_, audio, __) => ValueListenableBuilder<List<TrackInfo>>(
           valueListenable: _player.subtitles,
@@ -156,8 +302,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   },
                   child: Text('${t.selected ? '● ' : ''}${t.label}'),
                 ),
+              if (_subs.available) ...[
+                const Padding(padding: EdgeInsets.fromLTRB(24, 12, 24, 4), child: Text('Find subtitles online', style: TextStyle(color: Pek.muted))),
+                ..._onlineRows(c),
+              ],
             ],
           ),
+        ),
         ),
       ),
     );
@@ -195,6 +346,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   builder: (_, b, __) => b ? const CircularProgressIndicator() : const SizedBox.shrink(),
                 ),
               ),
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                right: 16,
+                bottom: _controls ? 100 : 28,
+                child: AnimatedBuilder(
+                  animation: _skip,
+                  builder: (_, __) {
+                    final c = _skip.cur;
+                    if (c == null) return const SizedBox.shrink();
+                    return Theme(
+                      data: ThemeData.dark(useMaterial3: true),
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          _skip.skip();
+                          _poke();
+                        },
+                        icon: const Icon(Icons.skip_next),
+                        label: Text(c.label),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Positioned(right: 16, top: 0, bottom: 0, child: Center(child: _nextCard())),
+              if (_toastText != null)
+                Positioned(
+                  left: 24,
+                  right: 24,
+                  bottom: 110,
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(color: const Color(0xCC000000), borderRadius: BorderRadius.circular(10)),
+                        child: Text(_toastText!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 15)),
+                      ),
+                    ),
+                  ),
+                ),
               IgnorePointer(
                 ignoring: !_controls,
                 child: AnimatedOpacity(
@@ -207,6 +397,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  /// The "Up next" card on the right: Play now / Dismiss, or a countdown once this episode has ended.
+  Widget _nextCard() {
+    return ValueListenableBuilder<bool>(
+      valueListenable: _nextVisible,
+      builder: (_, visible, __) {
+        final n = _next;
+        if (!visible || n == null) return const SizedBox.shrink();
+        return ValueListenableBuilder<int?>(
+          valueListenable: _countdown,
+          builder: (_, left, __) => Container(
+            width: 260,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xE61C1815), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0x38F6F2EC))),
+            child: Theme(
+              data: ThemeData.dark(useMaterial3: true),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('UP NEXT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1.6, color: Colors.white70)),
+                const SizedBox(height: 4),
+                Text(n.title, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Colors.white)),
+                if (left != null) Padding(padding: const EdgeInsets.only(top: 4), child: Text('Playing in $left\u2026', style: const TextStyle(color: Colors.white70))),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: FilledButton(onPressed: _playNext, child: const Text('Play now'))),
+                  const SizedBox(width: 8),
+                  TextButton(onPressed: _cancelNext, child: Text(left != null ? 'Cancel' : 'Dismiss')),
+                ]),
+              ]),
+            ),
+          ),
+        );
+      },
     );
   }
 
