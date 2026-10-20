@@ -115,10 +115,9 @@ class PekButton extends StatelessWidget {
         autofocus: autofocus,
         enabled: onTap != null,
         onTap: onTap,
-        radius: 12,
+        radius: 999,
         background: bg,
         focusBackground: primary ? t.accent : null,
-        borderColor: primary ? Colors.transparent : t.border,
         minHeight: (compact ? 2.5 : 2.75) * rem,
         alignment: Alignment.center,
         padding: EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.25) * rem, vertical: (compact ? 0.45 : 0.6) * rem),
@@ -128,7 +127,7 @@ class PekButton extends StatelessWidget {
           children: [
             if (leading != null) ...[leading!, SizedBox(width: 0.5 * rem)],
             Flexible(
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, fontWeight: FontWeight.w600, color: fg, letterSpacing: 0.15, height: 1.2)),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.9 * rem, fontWeight: FontWeight.w600, color: fg, height: 1.2)),
             ),
           ],
         ),
@@ -157,7 +156,6 @@ class PekCard extends StatelessWidget {
       onTap: onTap,
       radius: t.radius,
       background: t.surface,
-      borderColor: t.border,
       padding: EdgeInsets.all(pad),
       child: SizedBox(
         width: double.infinity,
@@ -165,10 +163,10 @@ class PekCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(title, style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700)),
+            Text(title, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
             if (subtitle != null && subtitle!.isNotEmpty) ...[
-              SizedBox(height: 1.25 * rem),
-              Text(subtitle!, style: TextStyle(fontSize: rem, color: t.textMuted)),
+              SizedBox(height: 0.5 * rem),
+              Text(subtitle!, style: TextStyle(fontSize: 0.92 * rem, color: t.textMuted, height: 1.35)),
             ],
           ],
         ),
@@ -211,51 +209,35 @@ class _PosterCardState extends State<PosterCard> {
           autofocus: widget.autofocus,
           onTap: widget.onTap,
           onLongPress: widget.onLongPress,
-          radius: p.compact ? 10 : 0,
-          background: t.surface,
-          focusScale: p.isTv ? 1.07 : 1.04,
-          child: AspectRatio(
-            aspectRatio: 2 / 3,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Image.network(
-                  url,
-                  fit: BoxFit.cover,
-                  cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) {
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted && !_failed) setState(() => _failed = true);
-                    });
-                    return const SizedBox.shrink();
-                  },
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(10, 30, 10, 10),
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Color.fromRGBO(5, 8, 14, 0.92), Color.fromRGBO(5, 8, 14, 0)]),
-                    ),
-                    child: Text(
-                      widget.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 0.9 * rem,
-                        fontWeight: FontWeight.w600,
-                        height: 1.25,
-                        color: const Color(0xFFF7F3EE),
-                        shadows: const [Shadow(color: Color.fromRGBO(0, 0, 0, 0.6), offset: Offset(0, 1), blurRadius: 3)],
-                      ),
+          focusScale: p.isTv ? 1.07 : 1.03,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AspectRatio(
+                aspectRatio: 2 / 3,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(p.compact ? 12 : 14),
+                  child: ColoredBox(
+                    color: t.surface,
+                    child: Image.network(
+                      url,
+                      fit: BoxFit.cover,
+                      cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (mounted && !_failed) setState(() => _failed = true);
+                        });
+                        return const SizedBox.shrink();
+                      },
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              SizedBox(height: 0.45 * rem),
+              Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.85 * rem, fontWeight: FontWeight.w500, height: 1.2)),
+              if (widget.subtitle.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.1 * rem), child: Text(widget.subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.75 * rem, color: t.textMuted))),
+            ],
           ),
         );
       },
@@ -384,12 +366,44 @@ class ScanLine extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(2),
-          child: LinearProgressIndicator(minHeight: 3, color: t.accent, backgroundColor: t.border),
+          child: LinearProgressIndicator(minHeight: 2, color: t.accent, backgroundColor: t.border),
         ),
         if (label != null) ...[
           SizedBox(height: 0.35 * rem),
           Text(label!, style: TextStyle(color: t.textMuted, fontSize: 0.8 * rem)),
         ],
+      ]),
+    );
+  }
+}
+
+/// A quiet segmented control: one rounded track, the selected item lifted. Replaces rows of outlined buttons.
+class PekTabs extends StatelessWidget {
+  const PekTabs({super.key, required this.labels, required this.selected, required this.onChanged});
+  final List<String> labels;
+  final int selected;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(999)),
+      child: Row(children: [
+        for (var i = 0; i < labels.length; i++)
+          Expanded(
+            child: PekFocusable(
+              onTap: () => onChanged(i),
+              radius: 999,
+              background: i == selected ? t.surfaceFocused : null,
+              alignment: Alignment.center,
+              minHeight: 2.2 * rem,
+              child: Text(labels[i], maxLines: 1, style: TextStyle(fontSize: 0.88 * rem, fontWeight: i == selected ? FontWeight.w600 : FontWeight.w500, color: i == selected ? t.text : t.textMuted)),
+            ),
+          ),
       ]),
     );
   }

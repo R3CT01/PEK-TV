@@ -17,7 +17,7 @@ class PekField extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
-    OutlineInputBorder border(Color c) => OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: c));
+    OutlineInputBorder border(Color c) => OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: c == Colors.transparent ? BorderSide.none : BorderSide(color: c));
     return Padding(
       padding: EdgeInsets.only(bottom: 0.75 * p.rem),
       child: TextField(
@@ -36,9 +36,9 @@ class PekField extends StatelessWidget {
           hintStyle: TextStyle(color: t.textMuted.withAlpha(180)),
           filled: true,
           fillColor: t.surface,
-          enabledBorder: border(t.border),
-          focusedBorder: border(t.borderFocus),
-          border: border(t.border),
+          enabledBorder: border(Colors.transparent),
+          focusedBorder: border(t.text.withAlpha(70)),
+          border: border(Colors.transparent),
         ),
       ),
     );

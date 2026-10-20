@@ -6,7 +6,7 @@ import 'widgets.dart';
 extension PekPad on PekScope {
   /// `.pek-content` padding: 2.5rem; 1rem on phones; the TV adds the safe margins.
   EdgeInsets get pagePad => narrow
-      ? EdgeInsets.all(rem)
+      ? EdgeInsets.fromLTRB(1.25 * rem, rem, 1.25 * rem, rem)
       : isTv
           ? EdgeInsets.fromLTRB(2.5 * rem, 2 * rem + safeY, 2.5 * rem + safeX, 2 * rem + safeY)
           : EdgeInsets.all(2.5 * rem);
@@ -24,7 +24,7 @@ class Heading extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: (p.isTv ? 2 : 1.5) * p.rem),
       child: Row(children: [
-        Expanded(child: Text(title, style: TextStyle(fontSize: (p.narrow ? 1.6 : 2) * p.rem, fontWeight: FontWeight.w700))),
+        Expanded(child: Text(title, style: TextStyle(fontSize: (p.narrow ? 1.9 : 2.2) * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1))),
         if (trailing != null) trailing!,
       ]),
     );
@@ -40,17 +40,20 @@ class SubScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
-    return Scaffold(
-      backgroundColor: p.tokens.bg,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.2 * p.rem, fontWeight: FontWeight.w700))),
+    return PekBackdrop(
+      tokens: p.tokens,
+      child: Scaffold(
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600))),
       body: body,
-    );
+    ));
   }
 }
 
 /// `ui.listRow(title, subtitle, onTap)`.
 class ListRow extends StatelessWidget {
-  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.trailing, this.autofocus = false});
+  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.trailing, this.autofocus = false, this.highlight = false});
+  final bool highlight;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
@@ -63,19 +66,17 @@ class ListRow extends StatelessWidget {
     final t = p.tokens;
     final rem = p.rem;
     return Padding(
-      padding: EdgeInsets.only(bottom: 0.5 * rem),
+      padding: EdgeInsets.only(bottom: 0.1 * rem),
       child: PekFocusable(
         autofocus: autofocus,
-        radius: 12,
-        background: t.surface,
-        borderColor: t.border,
-        padding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.75 * rem),
+        radius: 14,
+        padding: EdgeInsets.symmetric(horizontal: 0.5 * rem, vertical: 0.7 * rem),
         onTap: onTap,
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w600, fontSize: rem)),
-              if (subtitle.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.2 * rem), child: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.85 * rem))),
+              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, fontSize: rem, color: highlight ? t.accent : null)),
+              if (subtitle.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.15 * rem), child: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.82 * rem))),
             ]),
           ),
           if (trailing != null) ...[SizedBox(width: rem), trailing!],
@@ -99,7 +100,7 @@ class Section extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: 1.5 * rem),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(title, style: TextStyle(fontSize: 1.2 * rem, fontWeight: FontWeight.w700)),
+        Text(title, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
         if (hint != null) Padding(padding: EdgeInsets.only(top: 0.25 * rem), child: Text(hint!, style: TextStyle(color: p.tokens.textMuted, fontSize: 0.9 * rem))),
         SizedBox(height: 0.75 * rem),
         ...children,

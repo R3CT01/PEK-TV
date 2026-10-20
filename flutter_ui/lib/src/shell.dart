@@ -35,6 +35,7 @@ const _navItems = <(String, String)>[
 /// The pages you swipe between on a phone, in order. "More" is a page of its own (not a pop-up sheet): it holds every
 /// other screen as a tile, and a tap opens that screen on top.
 const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
+const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outlined, 'shows': Icons.tv_outlined, 'music': Icons.music_note_outlined, 'more': Icons.more_horiz};
 const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
 
 /// Everything that is not a swipe page.
@@ -194,7 +195,7 @@ class _AppShellState extends State<AppShell> {
     final bottom = MediaQuery.paddingOf(context).bottom;
     final bar = Container(
       padding: EdgeInsets.only(bottom: bottom),
-      decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
+      decoration: BoxDecoration(color: t.glow.isEmpty ? t.bgElevated : Colors.transparent, border: Border(top: BorderSide(color: t.border))),
       child: IntrinsicHeight(
         child: ValueListenableBuilder<int>(
           valueListenable: _pageN,
@@ -202,7 +203,7 @@ class _AppShellState extends State<AppShell> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (var i = 0; i < _swipePages.length; i++)
-                Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, active: i == page, onTap: () => _goTo(i))),
+                Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, icon: _swipeIcon[_swipePages[i]]!, active: i == page, onTap: () => _goTo(i))),
             ],
           ),
         ),
@@ -389,7 +390,6 @@ class _NavItem extends StatelessWidget {
       onTap: onTap,
       radius: 12,
       background: active ? t.surfaceFocused : null,
-      borderColor: active ? t.border : Colors.transparent,
       child: Stack(
         children: [
           Padding(
@@ -424,10 +424,11 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// `.bb-item` in the phone tab bar: an accent tab on top of the active item.
+/// `.bb-item` in the phone tab bar: an icon over a small label; the active item is bright, the rest are muted.
 class _BarItem extends StatelessWidget {
-  const _BarItem({required this.label, required this.active, required this.onTap});
+  const _BarItem({required this.label, required this.icon, required this.active, required this.onTap});
   final String label;
+  final IconData icon;
   final bool active;
   final VoidCallback onTap;
 
@@ -435,31 +436,16 @@ class _BarItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
+    final c = active ? t.text : t.textMuted;
     return PekFocusable(
       onTap: onTap,
-      minHeight: 56,
-      child: Stack(
-        alignment: Alignment.topCenter,
+      minHeight: 58,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: active ? 2 * p.rem : 0,
-            height: 3,
-            decoration: BoxDecoration(color: t.accent, borderRadius: const BorderRadius.vertical(bottom: Radius.circular(3))),
-          ),
-          Positioned.fill(
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2.4),
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 0.72 * p.rem, fontWeight: active ? FontWeight.w600 : FontWeight.w500, color: active ? t.accent : t.textMuted, letterSpacing: 0.01 * 0.72 * p.rem),
-                ),
-              ),
-            ),
-          ),
+          Icon(icon, size: 22, color: c),
+          const SizedBox(height: 3),
+          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.68 * p.rem, fontWeight: active ? FontWeight.w600 : FontWeight.w500, color: c)),
         ],
       ),
     );
@@ -476,7 +462,7 @@ class PageTitle extends StatelessWidget {
     final p = context.pek;
     return Padding(
       padding: EdgeInsets.only(bottom: (p.isTv ? 2 : 1.5) * p.rem),
-      child: Text(title, style: TextStyle(fontSize: 2 * p.rem, fontWeight: FontWeight.w700)),
+      child: Text(title, style: TextStyle(fontSize: 2.1 * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1)),
     );
   }
 }

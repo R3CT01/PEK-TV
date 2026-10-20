@@ -210,29 +210,21 @@ class _MusicPageState extends State<MusicPage> {
                 controller: _search,
                 onChanged: _onSearch,
                 decoration: InputDecoration(
-                  hintText: 'Search songs, albums, artists',
-                  prefixIcon: const Icon(Icons.search),
-                  filled: true,
-                  fillColor: t.surface,
+                  hintText: 'Search',
+                  prefixIcon: const Icon(Icons.search, size: 20),
                   contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
                 ),
               ),
               SizedBox(height: rem),
               if (_q.isEmpty) ...[
-                Wrap(spacing: 0.5 * rem, children: [
-                  for (var i = 0; i < tabs.length; i++)
-                    PekButton(
-                      compact: true,
-                      primary: i == _tab,
-                      label: tabs[i],
-                      onTap: () {
-                        setState(() => _tab = i);
-                        if (i == 2 && _songs.isEmpty) _moreSongs();
-                      },
-                    ),
-                ]),
+                PekTabs(
+                  labels: tabs,
+                  selected: _tab,
+                  onChanged: (i) {
+                    setState(() => _tab = i);
+                    if (i == 2 && _songs.isEmpty) _moreSongs();
+                  },
+                ),
                 SizedBox(height: rem),
               ],
               if (_scanning) ScanLine(label: _scanned > 0 ? 'Reading your music\u2026 $_scanned songs so far' : 'Reading your music\u2026'),
@@ -381,7 +373,8 @@ class TrackRow extends StatelessWidget {
       builder: (context, cur, _) {
         final on = cur?.id == track.id;
         return ListRow(
-          title: '${on ? '\u25b6 ' : ''}${number != null ? '$number. ' : ''}${track.title}',
+          title: '${number != null ? '$number. ' : ''}${track.title}',
+          highlight: on,
           subtitle: [track.artist, if (track.album.isNotEmpty && number == null) track.album].where((e) => e.isNotEmpty).join(' \u00b7 '),
           onTap: onTap,
           trailing: Text(track.duration > 0 ? formatTime(track.duration) : '', style: TextStyle(fontSize: 0.85 * rem, color: context.pek.tokens.textMuted)),
@@ -485,10 +478,11 @@ class MiniPlayer extends StatelessWidget {
         return GestureDetector(
           onTap: () => Navigator.push(context, MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const NowPlayingScreen())),
           child: Container(
-            padding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.5 * rem),
-            decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
+            margin: EdgeInsets.fromLTRB(0.75 * rem, 0, 0.75 * rem, 0.5 * rem),
+            padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
+            decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: t.shadow, blurRadius: 16, offset: const Offset(0, 4))]),
             child: Row(children: [
-              Art(url: Api.trackArt(cur), size: 2.5 * rem),
+              Art(url: Api.trackArt(cur), size: 2.5 * rem, radius: 10),
               SizedBox(width: 0.75 * rem),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [

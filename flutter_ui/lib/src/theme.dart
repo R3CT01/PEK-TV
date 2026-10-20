@@ -21,5 +21,18 @@ ThemeData pekTheme([PekTokens t = PekTokens.light]) {
     colorScheme: base.colorScheme.copyWith(primary: t.accent, onPrimary: t.bg, surface: t.surface, onSurface: t.text),
     textTheme: base.textTheme.apply(bodyColor: t.text, displayColor: t.text),
     focusColor: t.surfaceFocused,
+    splashFactory: NoSplash.splashFactory,
+    highlightColor: Colors.transparent,
+    dividerColor: t.border,
+    appBarTheme: AppBarTheme(backgroundColor: Colors.transparent, elevation: 0, scrolledUnderElevation: 0, foregroundColor: t.text, centerTitle: false),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: t.surface,
+      hintStyle: TextStyle(color: t.textMuted),
+      prefixIconColor: t.textMuted,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: t.text.withAlpha(70))),
+    ),
   );
 }
