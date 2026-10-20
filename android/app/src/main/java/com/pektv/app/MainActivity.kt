@@ -232,7 +232,7 @@ class MainActivity : Activity() {
         webView.requestFocus()
         // First start: ask for storage access (held back until now so the prompt can't interrupt the splash).
         // If it is refused, the folder browsers ask again when opened.
-        if (!hasStoragePermission() && !getSharedPreferences("pek", MODE_PRIVATE).getBoolean("asked_storage", false)) {
+        if (MediaPermissions.missing(this).isNotEmpty() && !getSharedPreferences("pek", MODE_PRIVATE).getBoolean(MediaPermissions.ASKED_KEY, false)) {
             requestStoragePermission(true)
         }
     }
@@ -301,7 +301,8 @@ class MainActivity : Activity() {
 
     // ---- storage permission ----
     private val storageRequest = 4712
-    // Android 13+ replaced READ_EXTERNAL_STORAGE with per-type media permissions. PEK only scans video.
+    // Android 13+ replaced READ_EXTERNAL_STORAGE with per-type media permissions. This one is the video permission the page
+    // checks; the prompt itself also asks for audio (see MediaPermissions).
     private val storagePerm =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO
         else Manifest.permission.READ_EXTERNAL_STORAGE
@@ -315,10 +316,12 @@ class MainActivity : Activity() {
      */
     fun requestStoragePermission(auto: Boolean) {
         runOnUiThread {
-            if (hasStoragePermission()) { notifyStorage(true, false); return@runOnUiThread }
+            // Video and audio (Music). A deliberate call from the page that already has video access changes nothing.
+            val missing = MediaPermissions.missing(this)
+            if (missing.isEmpty() || (!auto && hasStoragePermission())) { notifyStorage(true, false); return@runOnUiThread }
             val prefs = getSharedPreferences("pek", MODE_PRIVATE)
-            val asked = prefs.getBoolean("asked_storage", false)
-            if (asked && !shouldShowRequestPermissionRationale(storagePerm)) {
+            val asked = prefs.getBoolean(MediaPermissions.ASKED_KEY, false)
+            if (asked && missing.none { shouldShowRequestPermissionRationale(it) }) {
                 if (!auto) {
                     try {
                         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
@@ -327,8 +330,8 @@ class MainActivity : Activity() {
                 }
                 return@runOnUiThread
             }
-            prefs.edit().putBoolean("asked_storage", true).apply()
-            requestPermissions(arrayOf(storagePerm), storageRequest)
+            prefs.edit().putBoolean(MediaPermissions.ASKED_KEY, true).apply()
+            requestPermissions(missing.toTypedArray(), storageRequest)
         }
     }
 
@@ -378,7 +381,7 @@ class MainActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == storageRequest) {
-            notifyStorage(grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED, false)
+            notifyStorage(hasStoragePermission(), false)
         }
     }
 

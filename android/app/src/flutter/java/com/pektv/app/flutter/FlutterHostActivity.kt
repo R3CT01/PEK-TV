@@ -16,6 +16,7 @@ import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
 import com.pektv.app.MainActivity
+import com.pektv.app.MediaPermissions
 import com.pektv.app.MpvController
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
@@ -87,6 +88,16 @@ class FlutterHostActivity : FlutterActivity() {
         }
         mpv = c
         hideSystemBars()
+        // MainActivity's own prompt never runs when it hands over to this screen, so ask here: video + audio, once.
+        MediaPermissions.askOnce(this)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // Scans that ran before the permission was given found no files: scan again so Movies and Music fill in.
+        if (requestCode == MediaPermissions.REQUEST && grantResults.any { it == PackageManager.PERMISSION_GRANTED }) {
+            MediaPermissions.rescan()
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
