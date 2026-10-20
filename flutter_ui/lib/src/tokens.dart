@@ -18,13 +18,11 @@ class PekTokens {
     required this.shadow,
     required this.glassStrong,
     required this.radius,
-    this.glow = const [],
   });
 
   final Color bg, bgElevated, surface, surfaceFocused, border, borderFocus;
   final Color text, textMuted, accent, accentGlow, overlay, shadow, glassStrong;
   final double radius;
-  final List<Gradient> glow; // drawn over bg, behind the app (the skin's bgImage)
 
   // :root in style.css
   static const light = PekTokens(
@@ -128,26 +126,12 @@ class PekRoot extends StatelessWidget {
   }
 }
 
-/// The page background: the solid colour with the skin's glow gradients on top.
+/// The page background: a flat colour (screens that open on top use it too, so they fully cover the page below).
 class PekBackdrop extends StatelessWidget {
   const PekBackdrop({super.key, required this.tokens, required this.child});
   final PekTokens tokens;
   final Widget child;
 
   @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: tokens.bg,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (tokens.glow.isNotEmpty)
-            RepaintBoundary(
-              child: Stack(fit: StackFit.expand, children: [for (final g in tokens.glow) DecoratedBox(decoration: BoxDecoration(gradient: g))]),
-            ),
-          child,
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => ColoredBox(color: tokens.bg, child: child);
 }

@@ -195,7 +195,7 @@ class _AppShellState extends State<AppShell> {
     final bottom = MediaQuery.paddingOf(context).bottom;
     final bar = Container(
       padding: EdgeInsets.only(bottom: bottom),
-      decoration: BoxDecoration(color: t.glow.isEmpty ? t.bgElevated : Colors.transparent, border: Border(top: BorderSide(color: t.border))),
+      decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
       child: IntrinsicHeight(
         child: ValueListenableBuilder<int>(
           valueListenable: _pageN,
