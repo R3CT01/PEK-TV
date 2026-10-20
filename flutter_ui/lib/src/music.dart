@@ -13,7 +13,9 @@ import 'widgets.dart';
 final _mc = MusicController.instance;
 
 /// Cover art with a note icon when there is none (or it fails to load).
-class Art extends StatelessWidget {
+/// The server answers 503 while it is still fetching an online picture in the background; that case is asked again a
+/// few seconds later (up to [_maxTries] times). 404 means there is no picture and is not retried.
+class Art extends StatefulWidget {
   const Art({super.key, required this.url, this.size, this.radius = 8, this.round = false});
   final String url;
   final double? size;
@@ -21,14 +23,55 @@ class Art extends StatelessWidget {
   final bool round;
 
   @override
+  State<Art> createState() => _ArtState();
+}
+
+class _ArtState extends State<Art> {
+  static const _maxTries = 8;
+  int _tries = 0;
+  Timer? _retry;
+
+  @override
+  void didUpdateWidget(Art old) {
+    super.didUpdateWidget(old);
+    if (old.url != widget.url) {
+      _retry?.cancel();
+      _tries = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    super.dispose();
+  }
+
+  void _askAgainLater() {
+    if (_tries >= _maxTries || (_retry?.isActive ?? false)) return;
+    _retry = Timer(Duration(seconds: 3 + 3 * _tries), () {
+      if (mounted) setState(() => _tries++);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final t = context.pek.tokens;
     Widget fallback() => ColoredBox(color: t.surfaceFocused, child: Center(child: Icon(Icons.music_note, color: t.textMuted)));
-    final img = url.isEmpty
+    final img = widget.url.isEmpty
         ? fallback()
-        : Image.network(url, fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => fallback());
-    final clipped = round ? ClipOval(child: img) : ClipRRect(borderRadius: BorderRadius.circular(radius), child: img);
-    return size == null ? clipped : SizedBox(width: size, height: size, child: clipped);
+        : Image.network(
+            widget.url,
+            key: ValueKey('${widget.url}#$_tries'),
+            fit: BoxFit.cover,
+            cacheWidth: 400,
+            gaplessPlayback: true,
+            errorBuilder: (_, error, __) {
+              if (error is NetworkImageLoadException && error.statusCode == 503) _askAgainLater();
+              return fallback();
+            },
+          );
+    final clipped = widget.round ? ClipOval(child: img) : ClipRRect(borderRadius: BorderRadius.circular(widget.radius), child: img);
+    return widget.size == null ? clipped : SizedBox(width: widget.size, height: widget.size, child: clipped);
   }
 }
 
@@ -45,30 +88,58 @@ class _MusicPageState extends State<MusicPage> {
   late Future<MusicLibrary> _lib = Api.musicLibrary();
   final _search = TextEditingController();
   Timer? _debounce;
+  Timer? _scanPoll;
   String _q = '';
   Future<MusicSearch>? _results;
 
-  // songs, loaded 200 at a time
+  // songs, loaded 200 at a time (the next page is fetched by itself when the list gets near its end)
   final List<Track> _songs = [];
   int _songTotal = 0;
   bool _songsLoading = false;
+  bool _songsFailed = false;
 
   @override
   void dispose() {
     _debounce?.cancel();
+    _scanPoll?.cancel();
     _search.dispose();
     super.dispose();
   }
 
   Future<void> _moreSongs() async {
     if (_songsLoading) return;
-    setState(() => _songsLoading = true);
+    setState(() {
+      _songsLoading = true;
+      _songsFailed = false;
+    });
     try {
       final r = await Api.musicSongs(offset: _songs.length);
       _songTotal = r.$1;
       _songs.addAll(r.$2);
-    } catch (_) {}
+    } catch (_) {
+      _songsFailed = true; // the button below tries again; nothing retries by itself
+    }
     if (mounted) setState(() => _songsLoading = false);
+  }
+
+  /// While the server is still reading the files the list is partial: ask again every few seconds until it is done.
+  void _pollWhileScanning(bool scanning) {
+    if (!scanning) {
+      _scanPoll?.cancel();
+      _scanPoll = null;
+      return;
+    }
+    if (_scanPoll?.isActive ?? false) return;
+    _scanPoll = Timer(const Duration(seconds: 3), () {
+      _scanPoll = null;
+      if (!mounted) return;
+      setState(() {
+        _lib = Api.musicLibrary();
+        _songs.clear(); // the song list is read again too
+        _songTotal = 0;
+        if (_tab == 2) _moreSongs();
+      });
+    });
   }
 
   void _onSearch(String v) {
@@ -92,91 +163,129 @@ class _MusicPageState extends State<MusicPage> {
     final rem = p.rem;
     final pad = widget.padding;
     final tabs = ['Albums', 'Artists', 'Songs'];
-    return ListView(
-      padding: pad,
-      children: [
-        const Heading('Music'),
-        TextField(
-          controller: _search,
-          onChanged: _onSearch,
-          decoration: InputDecoration(
-            hintText: 'Search songs, albums, artists',
-            prefixIcon: const Icon(Icons.search),
-            filled: true,
-            fillColor: t.surface,
-            contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
+    final side = EdgeInsets.only(left: pad.left, right: pad.right);
+    // A CustomScrollView with builder slivers: only the rows on screen (plus a little beyond, so the remote's arrow keys
+    // find the next row) are built. The old single ListView built every album and song at once.
+    return CustomScrollView(
+      cacheExtent: 900,
+      slivers: [
+        // The header is a SliverList (not a SliverToBoxAdapter) so the search box keeps its focus while it has it.
+        SliverPadding(
+          padding: EdgeInsets.only(left: pad.left, right: pad.right, top: pad.top),
+          sliver: SliverList(
+            delegate: SliverChildListDelegate([
+              const Heading('Music'),
+              TextField(
+                controller: _search,
+                onChanged: _onSearch,
+                decoration: InputDecoration(
+                  hintText: 'Search songs, albums, artists',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: t.surface,
+                  contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
+                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: t.border)),
+                ),
+              ),
+              SizedBox(height: rem),
+              if (_q.isEmpty) ...[
+                Wrap(spacing: 0.5 * rem, children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    PekButton(
+                      compact: true,
+                      primary: i == _tab,
+                      label: tabs[i],
+                      onTap: () {
+                        setState(() => _tab = i);
+                        if (i == 2 && _songs.isEmpty) _moreSongs();
+                      },
+                    ),
+                ]),
+                SizedBox(height: rem),
+              ],
+            ]),
           ),
         ),
-        SizedBox(height: rem),
         if (_q.isNotEmpty)
-          Async<MusicSearch>(future: _results!, builder: (c, r) => _searchResults(c, r))
-        else ...[
-          Wrap(spacing: 0.5 * rem, children: [
-            for (var i = 0; i < tabs.length; i++)
-              PekButton(
-                compact: true,
-                primary: i == _tab,
-                label: tabs[i],
-                onTap: () {
-                  setState(() => _tab = i);
-                  if (i == 2 && _songs.isEmpty) _moreSongs();
-                },
-              ),
-          ]),
-          SizedBox(height: rem),
-          Async<MusicLibrary>(future: _lib, builder: (c, lib) => _tabBody(c, lib)),
-        ],
-        SizedBox(height: 4 * rem), // room for the mini player
+          SliverPadding(
+            padding: side,
+            sliver: SliverToBoxAdapter(child: Async<MusicSearch>(future: _results!, builder: (c, r) => _searchResults(c, r))),
+          )
+        else
+          SliverPadding(padding: side, sliver: _librarySliver(context)),
+        SliverToBoxAdapter(child: SizedBox(height: 4 * rem + pad.bottom)), // room for the mini player
       ],
     );
   }
 
-  Widget _tabBody(BuildContext context, MusicLibrary lib) {
+  /// The Albums / Artists / Songs body as a sliver, once the library answered.
+  Widget _librarySliver(BuildContext context) {
     final p = context.pek;
-    final rem = p.rem;
-    if (lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {
-      return PekCard(title: lib.scanning ? 'Scanning your music\u2026' : 'No music yet', subtitle: lib.scanning ? 'Pull back in a moment.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.');
-    }
-    if (_tab == 0) return _albumGrid(context, lib.albums);
-    if (_tab == 1) {
-      return Column(children: [
-        for (final a in lib.artists)
-          ListRow(
-            title: a.name,
-            subtitle: '${a.albums} albums \u00b7 ${a.tracks} songs',
-            onTap: () => _openArtist(a),
-            trailing: Art(url: a.art ? Api.artistArt(a.id) : '', size: 2.5 * rem, round: true),
-          ),
-      ]);
-    }
-    return _songList(context);
+    return FutureBuilder<MusicLibrary>(
+      future: _lib,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(2 * p.rem), child: Text('Loading\u2026', style: TextStyle(color: p.tokens.textMuted))));
+        }
+        if (snap.hasError) {
+          return SliverToBoxAdapter(child: PekCard(title: 'Could not load', subtitle: 'The backend did not respond. Is the server running?'));
+        }
+        final lib = snap.data!;
+        _pollWhileScanning(lib.scanning);
+        if (lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {
+          return SliverToBoxAdapter(
+            child: PekCard(
+              title: lib.scanning ? 'Scanning your music\u2026' : 'No music yet',
+              subtitle: lib.scanning ? 'Songs appear here as they are read.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.',
+            ),
+          );
+        }
+        if (_tab == 0) return _albumSliver(context, lib.albums);
+        if (_tab == 1) return _artistSliver(context, lib.artists);
+        return _songSliver(context);
+      },
+    );
   }
 
-  Widget _albumGrid(BuildContext context, List<Album> albums) {
+  Widget _artistSliver(BuildContext context, List<Artist> artists) {
+    final rem = context.pek.rem;
+    return SliverList.builder(
+      itemCount: artists.length,
+      itemBuilder: (context, i) {
+        final a = artists[i];
+        return ListRow(
+          title: a.name,
+          subtitle: '${a.albums} albums \u00b7 ${a.tracks} songs',
+          onTap: () => _openArtist(a),
+          trailing: Art(url: a.art ? Api.artistArt(a.id) : '', size: 2.5 * rem, round: true),
+        );
+      },
+    );
+  }
+
+  /// The same rows of tiles as before, built one row at a time as they scroll into view.
+  Widget _albumSliver(BuildContext context, List<Album> albums) {
     final p = context.pek;
     final t = p.tokens;
     final rem = p.rem;
     final cols = (p.size.width / (p.compact ? 150 : 200)).floor().clamp(2, 12);
     final gap = 0.75 * rem;
     final rows = (albums.length / cols).ceil();
-    return Column(children: [
-      for (var r = 0; r < rows; r++)
-        Padding(
-          padding: EdgeInsets.only(bottom: gap),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            for (var c = 0; c < cols; c++) ...[
-              if (c > 0) SizedBox(width: gap),
-              Expanded(
-                child: r * cols + c < albums.length
-                    ? _albumTile(context, albums[r * cols + c], t, rem)
-                    : const SizedBox.shrink(),
-              ),
-            ],
-          ]),
-        ),
-    ]);
+    return SliverList.builder(
+      itemCount: rows,
+      itemBuilder: (context, r) => Padding(
+        padding: EdgeInsets.only(bottom: gap),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (var c = 0; c < cols; c++) ...[
+            if (c > 0) SizedBox(width: gap),
+            Expanded(
+              child: r * cols + c < albums.length ? _albumTile(context, albums[r * cols + c], t, rem) : const SizedBox.shrink(),
+            ),
+          ],
+        ]),
+      ),
+    );
   }
 
   Widget _albumTile(BuildContext context, Album a, PekTokens t, double rem) {
@@ -193,16 +302,27 @@ class _MusicPageState extends State<MusicPage> {
     );
   }
 
-  Widget _songList(BuildContext context) {
+  Widget _songSliver(BuildContext context) {
     final rem = context.pek.rem;
-    return Column(children: [
-      for (var i = 0; i < _songs.length; i++) TrackRow(track: _songs[i], onTap: () => _mc.playList(_songs, i)),
-      if (_songs.length < _songTotal || _songs.isEmpty)
-        Padding(
+    final more = _songs.length < _songTotal || _songs.isEmpty;
+    return SliverList.builder(
+      itemCount: _songs.length + (more ? 1 : 0),
+      itemBuilder: (context, i) {
+        if (i < _songs.length) {
+          // Near the end of what is loaded: fetch the next page (once; a failed page waits for the button).
+          if (i >= _songs.length - 25 && _songs.length < _songTotal && !_songsLoading && !_songsFailed) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _moreSongs();
+            });
+          }
+          return TrackRow(track: _songs[i], onTap: () => _mc.playList(_songs, i));
+        }
+        return Padding(
           padding: EdgeInsets.symmetric(vertical: rem),
-          child: PekButton(compact: true, label: _songsLoading ? 'Loading\u2026' : 'Load more', onTap: _songsLoading ? null : _moreSongs),
-        ),
-    ]);
+          child: PekButton(compact: true, label: _songsLoading ? 'Loading\u2026' : (_songsFailed ? 'Try again' : 'Load more'), onTap: _songsLoading ? null : _moreSongs),
+        );
+      },
+    );
   }
 
   Widget _searchResults(BuildContext context, MusicSearch r) {

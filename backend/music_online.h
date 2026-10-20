@@ -525,6 +525,16 @@ inline bool lookup(const std::string& kind, const std::string& a, const std::str
     return lookupEx(kind, a, b, bytes, mime) == 1;
 }
 
+// Like lookupEx but NEVER touches the network and never waits for a lookup slot: it answers only from what is already
+// on disk. Same codes: 1 = picture in bytes / mime, 0 = nothing exists (remembered), -1 = not looked up yet.
+// The cover route uses this so a grid asking for hundreds of pictures cannot tie up the server's request threads.
+inline int lookupCachedEx(const std::string& kind, const std::string& a, const std::string& b, std::string& bytes, std::string& mime) {
+    if (a.empty()) return 0;
+    const std::string key = kind + "|" + norm(a) + "|" + norm(b);
+    int c = store().load(key, bytes, mime);
+    return c == 1 ? 1 : c == 0 ? 0 : -1;
+}
+
 // Lyrics for one song; the answer (also "none") is kept like the pictures are, and served offline from then on.
 // Same return codes as lookupEx.
 inline int lyricsEx(const std::string& artist, const std::string& title, const std::string& album, double duration,

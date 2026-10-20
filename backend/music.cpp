@@ -1090,6 +1090,100 @@ void notFound(httplib::Response& res, const std::string& msg) {
 
 } // namespace
 
+// ---------------------------------------------------------------- cover lookup (shared by the route and its background worker)
+// Finds the picture for one /api/music/art request: the song's own, cover.jpg beside it, then (online art) the services.
+// blocking = false never touches the network: online answers come only from what is already on disk, and [unresolved]
+// counts the lookups that still have to be made. blocking = true is the background worker's full lookup.
+static bool resolveArt(const std::shared_ptr<MusicLibrary>& lib, const std::shared_ptr<const Snapshot>& s,
+                       const std::string& albumId, const std::string& trackId, const std::string& artistId,
+                       bool blocking, int& unresolved, std::string& bytes, std::string& mime) {
+    auto online = [&](const char* kind, const std::string& a, const std::string& b) {
+        int r = blocking ? musiconline::lookupEx(kind, a, b, bytes, mime) : musiconline::lookupCachedEx(kind, a, b, bytes, mime);
+        if (r < 0) ++unresolved;
+        return r == 1;
+    };
+    // local pictures first: the song's own, then cover.jpg / folder.jpg beside it
+    auto albumLocal = [&](const Album& a) {
+        for (int ti : a.tracks) if (s->tracks[ti].hasArt && lib->cover(s->tracks[ti], true, bytes, mime)) return true;
+        for (int ti : a.tracks) if (!s->tracks[ti].folderArt.empty() && lib->cover(s->tracks[ti], false, bytes, mime)) return true;
+        return false;
+    };
+    bool ok = false;
+    if (!artistId.empty()) {
+        auto f = s->artistById.find(artistId);
+        if (f != s->artistById.end()) {
+            const Artist& a = s->artists[f->second];
+            ok = online("artist", a.name, "");                                          // a photo of the artist (online art only)
+            if (!ok) for (int ai : a.albums) if (albumLocal(s->albums[ai])) { ok = true; break; }   // else one of their covers
+        }
+    } else if (!albumId.empty()) {
+        auto f = s->albumById.find(albumId);
+        if (f != s->albumById.end()) {
+            const Album& a = s->albums[f->second];
+            if (isSinglesTitle(a.title)) ok = online("artist", a.artist, "");           // "Singles" shows the artist
+            else {
+                ok = albumLocal(a);
+                if (!ok) ok = online("album", a.artist, a.title);
+                if (!ok) {                                                              // the album is not listed: one of its songs may be (singles, deluxe editions)
+                    int tried = 0;
+                    for (int ti : a.tracks) {
+                        if (tried++ >= 3) break;
+                        const Track& tt = s->tracks[ti];
+                        if (online("song", tt.rPrimary, tt.rTitle)) { ok = true; break; }
+                    }
+                }
+            }
+        }
+    } else {
+        auto f = s->trackById.find(trackId);
+        if (f != s->trackById.end()) {
+            const Track& t = s->tracks[f->second];
+            ok = lib->cover(t, true, bytes, mime);
+            if (!ok) {
+                // a copy, not a reference: splitArtists() returns a temporary vector
+                const std::string albumArtist = !t.albumArtist.empty() ? splitArtists(t.albumArtist)[0] : t.rPrimary;
+                if (!isSinglesTitle(t.rAlbum)) ok = online("album", albumArtist, t.rAlbum);
+                if (!ok) ok = online("song", t.rPrimary, t.rTitle);                     // a single: its own cover
+            }
+        }
+    }
+    return ok;
+}
+
+// Online covers are looked up here, one or two at a time, newest request first (that is what is on screen), instead of
+// on the server's request threads: a grid asking for hundreds of covers used to park every request thread waiting for a
+// lookup slot, so the song list, the player and everything else queued behind them.
+struct ArtBg {
+    std::mutex m;
+    std::condition_variable cv;
+    std::deque<std::pair<std::string, std::function<void()>>> q;
+    std::set<std::string> queued;
+    int started = 0;
+    void post(const std::string& key, std::function<void()> f) {
+        std::lock_guard<std::mutex> l(m);
+        if (queued.count(key) || q.size() >= 1000) return;
+        queued.insert(key);
+        q.emplace_front(key, std::move(f));
+        if (started < 2) { ++started; std::thread([this]() { loop(); }).detach(); }
+        cv.notify_one();
+    }
+    void loop() {
+        for (;;) {
+            std::pair<std::string, std::function<void()>> job;
+            {
+                std::unique_lock<std::mutex> l(m);
+                cv.wait(l, [this]() { return !q.empty(); });
+                job = std::move(q.front());
+                q.pop_front();
+            }
+            try { job.second(); } catch (...) {}
+            std::lock_guard<std::mutex> l(m);
+            queued.erase(job.first);
+        }
+    }
+};
+static ArtBg& artBg() { static ArtBg* b = new ArtBg(); return *b; }     // never destroyed: its threads outlive static teardown
+
 // ================================================================ routes
 void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std::string& dataDir) {
     std::error_code ec;
@@ -1204,51 +1298,25 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         std::string key = !artistId.empty() ? "r:" + artistId : albumId.empty() ? "t:" + trackId : "a:" + albumId;
         std::string mime, bytes;
         if (!art->get(key, mime, bytes)) {
-            bool ok = false;
-            // local pictures first: the song's own, then cover.jpg / folder.jpg beside it
-            auto albumLocal = [&](const Album& a) {
-                for (int ti : a.tracks) if (s->tracks[ti].hasArt && lib->cover(s->tracks[ti], true, bytes, mime)) return true;
-                for (int ti : a.tracks) if (!s->tracks[ti].folderArt.empty() && lib->cover(s->tracks[ti], false, bytes, mime)) return true;
-                return false;
-            };
-            if (!artistId.empty()) {
-                auto f = s->artistById.find(artistId);
-                if (f != s->artistById.end()) {
-                    const Artist& a = s->artists[f->second];
-                    ok = musiconline::lookup("artist", a.name, "", bytes, mime);           // a photo of the artist (online art only)
-                    if (!ok) for (int ai : a.albums) if (albumLocal(s->albums[ai])) { ok = true; break; }   // else one of their covers
+            int unresolved = 0;
+            if (!resolveArt(lib, s, albumId, trackId, artistId, false, unresolved, bytes, mime)) {
+                if (unresolved > 0 && onlineOn()) {
+                    // Not on disk yet: fetch it in the background and answer 503 at once (Retry-After), so no request thread waits.
+                    // Asking again a few seconds later finds it. 404 stays for "there is none".
+                    artBg().post(key, [lib, art, s, albumId, trackId, artistId, key]() {
+                        std::string b, m;
+                        int u = 0;
+                        if (resolveArt(lib, s, albumId, trackId, artistId, true, u, b, m)) art->put(key, m, b);
+                    });
+                    res.status = 503;
+                    res.set_header("Retry-After", "3");
+                    res.set_header("Cache-Control", "no-store");
+                    res.set_content("{\"error\": \"Artwork is being fetched\"}", "application/json");
+                    return;
                 }
-            } else if (!albumId.empty()) {
-                auto f = s->albumById.find(albumId);
-                if (f != s->albumById.end()) {
-                    const Album& a = s->albums[f->second];
-                    if (isSinglesTitle(a.title)) ok = musiconline::lookup("artist", a.artist, "", bytes, mime);   // "Singles" shows the artist
-                    else {
-                        ok = albumLocal(a);
-                        if (!ok) ok = musiconline::lookup("album", a.artist, a.title, bytes, mime);
-                        if (!ok) {                                               // the album is not listed: one of its songs may be (singles, deluxe editions)
-                            int tried = 0;
-                            for (int ti : a.tracks) {
-                                if (tried++ >= 3) break;
-                                const Track& tt = s->tracks[ti];
-                                if (musiconline::lookup("song", tt.rPrimary, tt.rTitle, bytes, mime)) { ok = true; break; }
-                            }
-                        }
-                    }
-                }
-            } else {
-                auto f = s->trackById.find(trackId);
-                if (f != s->trackById.end()) {
-                    const Track& t = s->tracks[f->second];
-                    ok = lib->cover(t, true, bytes, mime);
-                    if (!ok) {
-                        const std::string& albumArtist = !t.albumArtist.empty() ? splitArtists(t.albumArtist)[0] : t.rPrimary;
-                        if (!isSinglesTitle(t.rAlbum)) ok = musiconline::lookup("album", albumArtist, t.rAlbum, bytes, mime);
-                        if (!ok) ok = musiconline::lookup("song", t.rPrimary, t.rTitle, bytes, mime);     // a single: its own cover
-                    }
-                }
+                notFound(res, "No artwork");
+                return;
             }
-            if (!ok) { notFound(res, "No artwork"); return; }
             art->put(key, mime, bytes);
         }
         res.set_header("Cache-Control", "private, max-age=3600");
