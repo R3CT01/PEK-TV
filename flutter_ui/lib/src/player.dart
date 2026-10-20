@@ -242,7 +242,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     if (k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.gameButtonA || k == LogicalKeyboardKey.mediaPlayPause) {
-      if (e is KeyDownEvent && context.pek.isTv && _skip.cur != null && k != LogicalKeyboardKey.mediaPlayPause) {
+      if (e is KeyDownEvent && context.pek.tvDevice && _skip.cur != null && k != LogicalKeyboardKey.mediaPlayPause) {
         _skip.skip(); // on a TV the button is already "highlighted": OK skips
         _poke();
         return KeyEventResult.handled;

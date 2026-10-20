@@ -44,6 +44,9 @@ class Layouts {
   /// Multiplier for the poster grid's minimum cell width.
   static double get posterScale => switch (poster) { 's' => 0.75, 'l' => 1.35, _ => 1.0 };
 
+  /// TV look: `html.pek-tv[data-poster]` sets the grid minimum to 7rem / 9rem / 14rem for small / medium / large.
+  static double get posterScaleTv => switch (poster) { 's' => 7 / 9, 'l' => 14 / 9, _ => 1.0 };
+
   static Future<void> setLayout(String v) async {
     await Store.strSet('pek_layout', v);
     changes.value++;
@@ -67,9 +70,9 @@ class LayoutSection extends StatelessWidget {
       listenable: Listenable.merge([Layouts.changes, Store.profile]),
       builder: (context, _) => Section(
         title: 'Layout',
-        hint: p.isTv ? 'Where the menu sits and how big the posters are. Each profile keeps its own.' : 'How big the posters are.',
+        hint: p.sidebar ? 'Where the menu sits and how big the posters are. Each profile keeps its own.' : 'How big the posters are.',
         children: [
-          if (p.isTv)
+          if (p.sidebar)
             for (final l in Layouts.all)
               ListRow(
                 title: l.name,

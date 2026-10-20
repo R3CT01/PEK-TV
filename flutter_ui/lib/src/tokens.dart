@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'tv_mode.dart';
+
 /// The design tokens from style.css. Default = :root (the light "sx" theme). [netflix] = html.nf-on.
 /// Skins will later swap these at runtime, exactly like the CSS variables.
 class PekTokens {
@@ -67,15 +69,27 @@ class PekScope extends InheritedWidget {
     super.key,
     required this.tokens,
     required this.isTv,
+    required this.tvDevice,
+    required this.safePct,
     required this.rem,
     required this.size,
     required super.child,
   });
 
   final PekTokens tokens;
+  /// The 10-foot look (html.pek-tv): bigger text, safe margins, bold focus ring. Follows Settings > TV mode.
   final bool isTv;
+
+  /// The device itself is a TV box (no touch). Decides how you get around (sidebar, D-pad shortcuts), not how big things are.
+  final bool tvDevice;
+
+  /// Screen margin kept clear in TV mode, in percent (0, 2, 4 or 6).
+  final int safePct;
   final double rem;
   final Size size;
+
+  /// The sidebar layout: always on a TV box; on other devices only when the TV look is forced on and the screen is wide.
+  bool get sidebar => tvDevice || (isTv && !narrow);
 
   /// @media (max-width: 720px): the shell uses the bottom tab bar instead of the sidebar.
   bool get narrow => size.width <= 720;
@@ -83,14 +97,14 @@ class PekScope extends InheritedWidget {
   /// @media (max-width: 700px), (max-height: 500px): the compact poster grid.
   bool get compact => size.width <= 700 || size.height <= 500;
 
-  /// html.pek-tv --tv-safe-x / --tv-safe-y (2vw / 2vh, the default 2 % margin).
-  double get safeX => isTv ? size.width * 0.02 : 0;
-  double get safeY => isTv ? size.height * 0.02 : 0;
+  /// html.pek-tv --tv-safe-x / --tv-safe-y (safePct of the width / height; Settings > TV mode > Screen margins).
+  double get safeX => isTv ? size.width * safePct / 100 : 0;
+  double get safeY => isTv ? size.height * safePct / 100 : 0;
 
   static PekScope of(BuildContext c) => c.dependOnInheritedWidgetOfExactType<PekScope>()!;
 
   @override
-  bool updateShouldNotify(PekScope o) => tokens != o.tokens || isTv != o.isTv || rem != o.rem || size != o.size;
+  bool updateShouldNotify(PekScope o) => tokens != o.tokens || isTv != o.isTv || tvDevice != o.tvDevice || safePct != o.safePct || rem != o.rem || size != o.size;
 }
 
 extension PekContext on BuildContext {
@@ -98,7 +112,7 @@ extension PekContext on BuildContext {
 }
 
 /// Wraps the whole app. html.pek-tv: font-size clamp(16px, 1.5625vw, 64px) on the root, so everything in rem scales
-/// with the screen width (1920 wide = 30px). On a phone 1rem = 16px.
+/// with the screen width (1920 wide = 30px). On a phone 1rem = 16px. The TV look follows Settings > TV mode (tv_mode.dart).
 class PekRoot extends StatelessWidget {
   const PekRoot({super.key, required this.isPhone, required this.child, this.tokens = PekTokens.light});
   final bool isPhone;
@@ -107,23 +121,46 @@ class PekRoot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(listenable: TvMode.changes, builder: (context, _) => _build(context));
+  }
+
+  Widget _build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final isTv = !isPhone;
+    final isTv = TvMode.isOn(!isPhone);
     final rem = isTv ? (size.width * 0.015625).clamp(16.0, 64.0).toDouble() : 16.0;
     return PekScope(
       tokens: tokens,
       isTv: isTv,
+      tvDevice: !isPhone,
+      safePct: TvMode.safe,
       rem: rem,
       size: size,
       child: PekBackdrop(
         tokens: tokens,
-        child: DefaultTextStyle(
-          style: TextStyle(fontSize: rem, color: tokens.text, height: isTv ? 1.35 : null, fontWeight: FontWeight.w400, decoration: TextDecoration.none),
-          child: child,
+        child: PekIdlePointer(
+          enabled: isTv,
+          child: Theme(
+            data: isTv ? _tvTheme(Theme.of(context), rem) : Theme.of(context),
+            child: DefaultTextStyle(
+              style: TextStyle(fontSize: rem, color: tokens.text, height: isTv ? 1.35 : null, fontWeight: FontWeight.w400, decoration: TextDecoration.none),
+              child: child,
+            ),
+          ),
         ),
       ),
     );
   }
+
+  /// What the CSS did to Material-drawn widgets (dialogs, text fields, the app bar title): text that follows rem,
+  /// text inputs 3rem high with the bold 0.2rem focus ring, icons that match the text.
+  ThemeData _tvTheme(ThemeData th, double rem) => th.copyWith(
+        textTheme: th.textTheme.apply(fontSizeFactor: rem / 16),
+        iconTheme: th.iconTheme.copyWith(size: 1.5 * rem),
+        inputDecorationTheme: th.inputDecorationTheme.copyWith(
+          contentPadding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.9 * rem),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: tokens.borderFocus, width: 0.2 * rem)),
+        ),
+      );
 }
 
 /// The page background: a flat colour (screens that open on top use it too, so they fully cover the page below).

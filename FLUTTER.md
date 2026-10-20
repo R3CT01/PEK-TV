@@ -78,3 +78,16 @@ Plugins > Open, or its own entry in the menu / More page.
 
 ## Still only in the classic UI
 Plugins that only have a `ui.js`, the plugin store, installable skin packages, plugin dashboard tiles.
+
+## TV mode (port of `www/tv_mode.js`)
+Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,
+Large 6 %). Both belong to the device, not to a profile, like the web UI. The 10-foot look is the web `html.pek-tv` rules:
+- rem follows the screen width (1920 wide = 30 px) and TV-safe margins are applied by `PekScope.safeX / safeY` (pages, sidebar, top bar,
+  sub-screen app bar, detail pages).
+- Bold 0.2rem focus ring plus the 1.07 poster lift (`PekFocusable`), 3rem buttons / list rows / text fields, poster grid minimum 9rem
+  (7rem small, 14rem large) so the column count is the same at any resolution.
+- Material-drawn widgets (dialogs, text fields, icons) follow rem too (`PekRoot`).
+- The mouse pointer hides after 3 idle seconds in TV mode (mouse only, so touch is never blocked).
+- `PekScope.isTv` is the look; `PekScope.tvDevice` is the hardware and `PekScope.sidebar` the layout (sidebar on TV boxes, or wide screens
+  with the look forced on). Forcing TV mode Off on a TV box keeps the sidebar and D-pad behaviour.
+- Game controllers need no port: Android turns them into D-pad keys, which Flutter's focus system already handles.

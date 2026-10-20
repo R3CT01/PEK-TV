@@ -118,7 +118,7 @@ class PekButton extends StatelessWidget {
         radius: 999,
         background: bg,
         focusBackground: primary ? t.accent : null,
-        minHeight: (compact ? 2.5 : 2.75) * rem,
+        minHeight: p.isTv ? 3 * rem : (compact ? 2.5 : 2.75) * rem,
         alignment: Alignment.center,
         padding: EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.25) * rem, vertical: (compact ? 0.45 : 0.6) * rem),
         child: Row(
@@ -288,7 +288,9 @@ class PekGridSliver extends StatelessWidget {
   }
 
   Widget _grid(BuildContext context) {
-    final minW = minWidth * Layouts.posterScale;
+    final p = context.pek;
+    // html.pek-tv .sx-poster-grid { --sx-grid-min: 9rem } (7rem small, 14rem large): the same column count at any resolution.
+    final minW = p.isTv && !p.compact ? 9 * p.rem * Layouts.posterScaleTv : minWidth * Layouts.posterScale;
     return SliverLayoutBuilder(
       builder: (context, c) {
         final w = c.crossAxisExtent;

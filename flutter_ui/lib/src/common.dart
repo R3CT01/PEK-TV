@@ -44,7 +44,22 @@ class SubScreen extends StatelessWidget {
       tokens: p.tokens,
       child: Scaffold(
       backgroundColor: Colors.transparent,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600))),
+      appBar: p.isTv
+          // 10-foot look: a taller bar that starts inside the safe margins (like .plugin-window-bar).
+          ? PreferredSize(
+              preferredSize: Size.fromHeight(3.5 * p.rem + p.safeY),
+              child: Padding(
+                padding: EdgeInsets.only(top: p.safeY, left: p.safeX),
+                child: AppBar(
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  foregroundColor: p.tokens.text,
+                  toolbarHeight: 3.5 * p.rem,
+                  title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            )
+          : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600))),
       body: body,
     ));
   }
@@ -70,6 +85,7 @@ class ListRow extends StatelessWidget {
       child: PekFocusable(
         autofocus: autofocus,
         radius: 14,
+        minHeight: p.isTv ? 3 * rem : null,
         padding: EdgeInsets.symmetric(horizontal: 0.5 * rem, vertical: 0.7 * rem),
         onTap: onTap,
         child: Row(children: [

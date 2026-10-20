@@ -111,7 +111,7 @@ class _AppShellState extends State<AppShell> {
   /// Opens a screen: on a TV it replaces the content, on a phone swipe pages scroll to it and the rest open on top.
   void _open(String id) {
     final p = context.pek;
-    if (p.isTv) {
+    if (p.sidebar) {
       setState(() => _tab = id);
       return;
     }
@@ -170,8 +170,8 @@ class _AppShellState extends State<AppShell> {
         if (didPop) return;
         if (PluginBack.handle()) return; // a plugin screen on the TV that is inside one of its own pages
         // Back: leave a secondary screen / any other page for the first page, then ask before exiting.
-        if (p.isTv ? _tab != 'dashboard' : _page != 0) {
-          if (p.isTv) {
+        if (p.sidebar ? _tab != 'dashboard' : _page != 0) {
+          if (p.sidebar) {
             setState(() => _tab = 'dashboard');
           } else {
             _goTo(0);
@@ -180,7 +180,7 @@ class _AppShellState extends State<AppShell> {
           _askExit();
         }
       },
-      child: Material(color: p.tokens.bg, child: p.isTv ? _tv(context) : _phone(context)),
+      child: Material(color: p.tokens.bg, child: p.sidebar ? _tv(context) : _phone(context)),
     );
   }
 
@@ -189,7 +189,7 @@ class _AppShellState extends State<AppShell> {
   Widget _body(BuildContext context, String id) {
     final pad = context.pek.pagePad;
     if (id.startsWith('plugin:')) {
-      return PluginView(key: ValueKey(id), pluginId: id.substring(7), padding: pad, embedded: context.pek.isTv, onExit: () => setState(() => _tab = 'dashboard'));
+      return PluginView(key: ValueKey(id), pluginId: id.substring(7), padding: pad, embedded: context.pek.sidebar, onExit: () => setState(() => _tab = 'dashboard'));
     }
     switch (id) {
       case 'dashboard':

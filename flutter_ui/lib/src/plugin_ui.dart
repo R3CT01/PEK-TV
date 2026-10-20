@@ -534,7 +534,7 @@ class _PluginTrailerState extends State<_PluginTrailer> {
             color: Colors.black,
             child: c == null
                 ? Center(child: PekButton(label: '\u25b6  Play trailer', primary: true, onTap: () => setState(() => _start(play: true))))
-                : ExcludeFocus(excluding: p.isTv, child: WebViewWidget(controller: c)),
+                : ExcludeFocus(excluding: p.tvDevice, child: WebViewWidget(controller: c)),
           ),
         ),
       ),

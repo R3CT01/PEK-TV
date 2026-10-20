@@ -15,7 +15,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Store.init();
   Profiles.load();
-  // The same phone / TV test the web UI used for html.pek-tv (bigger text, TV safe margins, bold focus ring).
+  // The same phone / TV test the web UI used for html.pek-tv; Settings > TV mode (tv_mode.dart) can force the look on or off.
   final phone = await PekPlayer.isPhone();
   runApp(PekApp(isPhone: phone));
 }

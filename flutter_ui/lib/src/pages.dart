@@ -13,6 +13,7 @@ import 'plugin_host.dart' show PluginHost;
 import 'plugin_ui.dart';
 import 'settings_extra.dart';
 import 'store.dart';
+import 'tv_mode.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -322,6 +323,7 @@ class _SettingsPageState extends State<SettingsPage> {
       const AccountSection(),
       const AppearanceSection(),
       const LayoutSection(),
+      const TvModeSection(),
       const SubtitleSection(),
       const SkipSection(),
       const MusicOnlineSection(),
