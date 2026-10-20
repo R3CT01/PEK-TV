@@ -76,6 +76,9 @@ public:
     // unchanged files are skipped without re-invoking ffprobe.
     void scan();
 
+    // True while any scan() is running or waiting for its turn (startup, /api/rescan, adding a source).
+    bool isScanning() const { return active_scans_.load() > 0; }
+
     // Optional: maps a show name guessed from a filename/folder to the
     // official name (e.g. via TMDb). Return "" to keep the guess. Called
     // at most once per distinct guessed name per scan, on the scan thread,
@@ -159,6 +162,7 @@ private:
     std::mutex local_mutex_;
     std::map<std::string, std::pair<std::chrono::steady_clock::time_point, Local>> local_cache_;   // "m:<id>" / "e:<show>|s|e" / "s:<show>"
     Local cachedLocal(const std::string& key, const std::function<Local()>& make);
+    std::atomic<int> active_scans_{0};
     std::mutex scan_mutex_;   // serializes scan() so overlapping scans (startup + POST /api/sources + /api/rescan) can't race on the cache file
 
     bool dirHasNomedia(const std::string& dir_path);

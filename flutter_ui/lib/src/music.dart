@@ -89,6 +89,10 @@ class _MusicPageState extends State<MusicPage> {
   final _search = TextEditingController();
   Timer? _debounce;
   Timer? _scanPoll;
+  bool _scanning = false; // the music scan, or the video scan that starts it
+  int _scanned = 0;
+  String? _libKey; // tracks/albums/artists of the last status: a change means the lists on screen are stale
+  bool _polling = false;
   String _q = '';
   Future<MusicSearch>? _results;
 
@@ -97,6 +101,13 @@ class _MusicPageState extends State<MusicPage> {
   int _songTotal = 0;
   bool _songsLoading = false;
   bool _songsFailed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _scanPoll = Timer.periodic(const Duration(seconds: 2), (_) => _checkStatus());
+    _checkStatus();
+  }
 
   @override
   void dispose() {
@@ -122,24 +133,44 @@ class _MusicPageState extends State<MusicPage> {
     if (mounted) setState(() => _songsLoading = false);
   }
 
-  /// While the server is still reading the files the list is partial: ask again every few seconds until it is done.
-  void _pollWhileScanning(bool scanning) {
-    if (!scanning) {
-      _scanPoll?.cancel();
-      _scanPoll = null;
-      return;
-    }
-    if (_scanPoll?.isActive ?? false) return;
-    _scanPoll = Timer(const Duration(seconds: 3), () {
-      _scanPoll = null;
+  /// Every 2 s: is the server scanning, and did the number of songs / albums / artists change? Then the lists are read
+  /// again (without blanking them), so albums and artists show up while the scan runs and also when a scan began after
+  /// this page had already loaded an empty list.
+  Future<void> _checkStatus() async {
+    if (_polling) return;
+    _polling = true;
+    try {
+      final st = await Api.musicStatus();
+      final video = await Api.scanning(); // the video scan hands over to the music scan when it ends
       if (!mounted) return;
+      final scanning = st.scanning || video;
+      final changed = _libKey != null && (st.key != _libKey || (_scanning && !scanning));
       setState(() {
-        _lib = Api.musicLibrary();
-        _songs.clear(); // the song list is read again too
-        _songTotal = 0;
-        if (_tab == 2) _moreSongs();
+        _scanning = scanning;
+        _scanned = st.scanned;
+        _libKey = st.key;
+        if (changed) {
+          _lib = Api.musicLibrary();
+          _refreshSongs();
+        }
       });
-    });
+    } catch (_) {
+    } finally {
+      _polling = false;
+    }
+  }
+
+  /// Reads the songs already shown again, in place.
+  Future<void> _refreshSongs() async {
+    if (_songs.isEmpty || _songsLoading) return;
+    try {
+      final r = await Api.musicSongs(offset: 0, limit: _songs.length.clamp(200, 500));
+      _songTotal = r.$1;
+      _songs
+        ..clear()
+        ..addAll(r.$2);
+    } catch (_) {}
+    if (mounted) setState(() {});
   }
 
   void _onSearch(String v) {
@@ -204,6 +235,7 @@ class _MusicPageState extends State<MusicPage> {
                 ]),
                 SizedBox(height: rem),
               ],
+              if (_scanning) ScanLine(label: _scanned > 0 ? 'Reading your music\u2026 $_scanned songs so far' : 'Reading your music\u2026'),
             ]),
           ),
         ),
@@ -225,19 +257,18 @@ class _MusicPageState extends State<MusicPage> {
     return FutureBuilder<MusicLibrary>(
       future: _lib,
       builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
+        if (!snap.hasData && !snap.hasError) {
           return SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(2 * p.rem), child: Text('Loading\u2026', style: TextStyle(color: p.tokens.textMuted))));
         }
         if (snap.hasError) {
           return SliverToBoxAdapter(child: PekCard(title: 'Could not load', subtitle: 'The backend did not respond. Is the server running?'));
         }
         final lib = snap.data!;
-        _pollWhileScanning(lib.scanning);
         if (lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {
           return SliverToBoxAdapter(
             child: PekCard(
-              title: lib.scanning ? 'Scanning your music\u2026' : 'No music yet',
-              subtitle: lib.scanning ? 'Songs appear here as they are read.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.',
+              title: _scanning ? 'Scanning your music\u2026' : 'No music yet',
+              subtitle: _scanning ? 'Songs appear here as they are read.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.',
             ),
           );
         }

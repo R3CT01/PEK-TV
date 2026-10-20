@@ -953,6 +953,7 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
 }
 
 void MediaScanner::scan() {
+    struct ActiveGuard { std::atomic<int>& n; explicit ActiveGuard(std::atomic<int>& a) : n(a) { ++n; } ~ActiveGuard() { --n; } } activeGuard(active_scans_);
     std::lock_guard<std::mutex> scan_lock(scan_mutex_);
     {
         std::lock_guard<std::mutex> lock(local_mutex_);

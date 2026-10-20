@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -472,6 +473,7 @@ public:
         return snap_;
     }
     bool scanning() const { return scanning_.load(); }
+    size_t scannedCount() const { return scanned_.load(); }
     std::function<void()> onScanDone;                // called (on the scan thread) when a scan has finished
 
     // Starts a background scan (several requests in a row are folded into one extra pass).
@@ -619,7 +621,11 @@ private:
 
     void progress(ScanCtx& ctx) {
         scanned_.store(ctx.found.size());
-        if (ctx.firstScan && ctx.probed > 0 && ctx.probed % 250 == 0) publish(ctx.found);     // show the first results while the rest is still being read
+        // First scan: publish what has been read so far (albums and artists too) about every 1.5 s, not only every
+        // 250 songs, so a small library or a slow share fills in step by step instead of appearing at the end.
+        if (!ctx.firstScan || ctx.probed == 0) return;
+        auto now = std::chrono::steady_clock::now();
+        if (now - lastPublish_ >= std::chrono::milliseconds(1500)) { lastPublish_ = now; publish(ctx.found); }
     }
 
     void walkLocal(const fs::path& dir, std::vector<std::string>& rel, ScanCtx& ctx, int depth) {
@@ -707,6 +713,7 @@ private:
         for (const auto& t : previous) ctx.old[t.path] = &t;
         ctx.firstScan = previous.empty();
         scanned_.store(0);
+        lastPublish_ = std::chrono::steady_clock::now();
         std::cout << "[Music] Scanning " << dirs.size() << " source folder(s)..." << std::endl;
 
         for (const auto& dir : dirs) {
@@ -857,6 +864,7 @@ private:
     }
 
     std::atomic<size_t> scanned_{0};
+    std::chrono::steady_clock::time_point lastPublish_{};
 };
 
 bool MusicLibrary::cover(const Track& t, bool embeddedFirst, std::string& bytes, std::string& mime) {
@@ -1202,7 +1210,8 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         lib->scanOnceIfNeeded();
         auto s = lib->snapshot();
         jsonOut(res, std::string("{\"scanning\":") + (lib->scanning() ? "true" : "false") + ",\"tracks\":" + std::to_string(s->tracks.size()) +
-                         ",\"albums\":" + std::to_string(s->albums.size()) + ",\"artists\":" + std::to_string(s->artists.size()) + "}");
+                         ",\"albums\":" + std::to_string(s->albums.size()) + ",\"artists\":" + std::to_string(s->artists.size()) +
+                         ",\"scanned\":" + std::to_string(lib->scannedCount()) + "}");
     });
 
     svr.Get("/api/music/albums", [lib](const httplib::Request&, httplib::Response& res) {

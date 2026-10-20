@@ -290,6 +290,13 @@ class Api {
 
   // ---------------------------------------------------------------- Music (/api/music/*)
 
+  /// GET /api/music/status: whether the music scan runs, how many songs / albums / artists are published and how many files it has seen.
+  static Future<MusicStatus> musicStatus() async {
+    final j = await _get('/api/music/status');
+    int n(String k) => (j[k] as num?)?.toInt() ?? 0;
+    return MusicStatus(scanning: j['scanning'] == true, tracks: n('tracks'), albums: n('albums'), artists: n('artists'), scanned: n('scanned'));
+  }
+
   static Future<MusicLibrary> musicLibrary() async {
     final a = await _get('/api/music/albums');
     final r = await _get('/api/music/artists');
@@ -506,6 +513,13 @@ class MusicLibrary {
   final bool scanning;
   final List<Album> albums;
   final List<Artist> artists;
+}
+
+class MusicStatus {
+  const MusicStatus({required this.scanning, required this.tracks, required this.albums, required this.artists, required this.scanned});
+  final bool scanning;
+  final int tracks, albums, artists, scanned;
+  String get key => '$tracks/$albums/$artists';
 }
 
 class MusicSearch {

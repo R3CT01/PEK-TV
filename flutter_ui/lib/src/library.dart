@@ -23,14 +23,42 @@ class LibraryPage extends StatefulWidget {
 class _LibraryPageState extends State<LibraryPage> {
   late Future<List<Object>> _data = _load();
   bool _refreshing = false;
+  bool _scanning = false; // any scan on the server: startup, Refresh, or a source that was just added
   int _cooldown = 0;
   Timer? _timer;
+  Timer? _watch;
+  bool _polling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _watch = Timer.periodic(const Duration(seconds: 2), (_) => _checkScan());
+    _checkScan();
+  }
+
+  /// Asks the server whether it is scanning; when a scan has just finished the library is read again.
+  Future<void> _checkScan() async {
+    if (_polling) return;
+    _polling = true;
+    final now = await Api.scanning();
+    _polling = false;
+    if (!mounted) return;
+    final was = _scanning;
+    if (now != was) {
+      setState(() => _scanning = now);
+      if (was && !now && !_refreshing) {
+        Api.forgetLibrary();
+        setState(() => _data = _load());
+      }
+    }
+  }
 
   Future<List<Object>> _load() async => widget.tab == 'movies' ? await Api.movies() : await Api.shows();
 
   @override
   void dispose() {
     _timer?.cancel();
+    _watch?.cancel();
     super.dispose();
   }
 
@@ -100,6 +128,11 @@ class _LibraryPageState extends State<LibraryPage> {
           padding: widget.padding.copyWith(bottom: 0),
           sliver: SliverToBoxAdapter(child: header),
         ),
+        if (_scanning || _refreshing)
+          SliverPadding(
+            padding: EdgeInsets.only(left: widget.padding.left, right: widget.padding.right),
+            sliver: const SliverToBoxAdapter(child: ScanLine(label: 'Scanning your library\u2026')),
+          ),
         FutureBuilder<List<Object>>(
           future: _data,
           builder: (context, snap) {
@@ -161,7 +194,10 @@ class _LibraryPageState extends State<LibraryPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            PekCard(title: 'No $what yet', subtitle: 'Add a media folder and PEK TV will scan it and sort your videos here.'),
+            PekCard(
+              title: _scanning ? 'Scanning your library\u2026' : 'No $what yet',
+              subtitle: _scanning ? 'Your $what appear here when the scan finishes.' : 'Add a media folder and PEK TV will scan it and sort your videos here.',
+            ),
             SizedBox(height: 1.25 * rem),
             PekButton(
               label: 'Add a source',

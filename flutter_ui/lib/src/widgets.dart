@@ -368,3 +368,29 @@ class _SpinState extends State<Spin> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) => RotationTransition(turns: _c, child: widget.child);
 }
+
+/// A thin indeterminate loading line (with an optional caption) shown while the server is scanning a library.
+class ScanLine extends StatelessWidget {
+  const ScanLine({super.key, this.label});
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return Padding(
+      padding: EdgeInsets.only(bottom: 0.75 * rem),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: LinearProgressIndicator(minHeight: 3, color: t.accent, backgroundColor: t.border),
+        ),
+        if (label != null) ...[
+          SizedBox(height: 0.35 * rem),
+          Text(label!, style: TextStyle(color: t.textMuted, fontSize: 0.8 * rem)),
+        ],
+      ]),
+    );
+  }
+}

@@ -1170,8 +1170,9 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     });
 
     // 7b. Lets the UI wait for a manual rescan to finish before reloading.
-    svr.Get("/api/scan-status", [](const httplib::Request& req, httplib::Response& res) {
-        res.set_content(std::string("{\"scanning\": ") + (g_rescan_running.load() ? "true" : "false") + "}", "application/json");
+    svr.Get("/api/scan-status", [scanner](const httplib::Request& req, httplib::Response& res) {
+        bool busy = g_rescan_running.load() || scanner->isScanning();
+        res.set_content(std::string("{\"scanning\": ") + (busy ? "true" : "false") + "}", "application/json");
     });
 
     // 8. Directory picker: lists subfolders of ?path=..., or a default
