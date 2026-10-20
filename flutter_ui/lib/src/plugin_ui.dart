@@ -10,6 +10,7 @@ import 'fields.dart';
 import 'plugin_host.dart';
 import 'settings_extra.dart' show ToggleRow;
 import 'store.dart';
+import 'torrent.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -258,6 +259,24 @@ class _PluginViewState extends State<PluginView> {
         );
       } else if (op == 'favorite.remove') {
         await Store.removePluginFavorite('${raw['key']}');
+      } else if (op == 'torrent.play') {
+        // A plugin screen with the "torrent" permission started a release (pek_ui.play_torrent): PEK's own loading box and
+        // player take over, and the watch is kept under Resume Watching like any other torrent stream.
+        final src = '${raw['source'] ?? ''}';
+        if (!mounted || !(src.startsWith('magnet:?') || src.startsWith('https://'))) continue;
+        final isEp = '${raw['kind']}' == 'episode';
+        final name = '${raw['name'] ?? ''}';
+        final season = (raw['season'] as num?)?.toInt() ?? 0;
+        final episode = (raw['episode'] as num?)?.toInt() ?? 0;
+        final tt = TorrentTitle(
+          kind: isEp ? 'episode' : 'movie',
+          title: '${raw['title'] ?? ''}'.isNotEmpty ? '${raw['title']}' : name,
+          showTitle: isEp ? name : '',
+          year: (raw['year'] as num?)?.toInt() ?? 0,
+          season: season,
+          episode: episode,
+        );
+        unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId)));
       } else if (op == 'toast') {
         _toast('${raw['text'] ?? ''}');
       } else if (op == 'exit') {

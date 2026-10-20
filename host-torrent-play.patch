@@ -1,0 +1,77 @@
+--- a/android/app/src/main/python/pek_ui.py	2026-10-20 22:29:43.641969794 +0000
++++ b/android/app/src/main/python/pek_ui.py	2026-10-20 22:29:57.414699672 +0000
+@@ -286,6 +286,28 @@
+                                                        "year": int(year or 0)})
+ 
+ 
++def play_torrent(source, label, season=0, episode=0, kind="movie", name="", year=0, image=""):
++    """Start a stream in PEK's own player (loading box, buffering, Resume Watching). Needs "torrent": true.
++    source is a magnet link, or an https .torrent link on a host listed under permissions.network. PEK shows the
++    loading screen itself, so the plugin never touches the download. kind is 'movie' or 'episode'."""
++    s = _sess()
++    s.need("torrent")
++    src = _s(source, 8000).strip()
++    low = src.lower()
++    if low.startswith("magnet:?xt=urn:btih:"):
++        pass
++    elif low.startswith("https://"):
++        host = urllib.parse.urlsplit(src).hostname or ""
++        if not s.host_listed(host):
++            raise PermissionError("plugin.json does not list %s under permissions.network" % host)
++    else:
++        raise ValueError("a release link is a magnet link or an https link")
++    if kind not in ("movie", "episode"):
++        raise ValueError("kind must be movie or episode")
++    s.effect("torrent.play", source=src, title=_s(label, 200), season=int(season or 0), episode=int(episode or 0),
++             kind=kind, name=_s(name, 200), year=int(year or 0), image=_s(image, 200))
++
++
+ def _watched_key(kind, title, year):
+     # The same text as Store.keyFor in the Flutter app (and histKey() in sync.js), so history and the cloud agree.
+     t = " ".join(str(title or "").lower().split())
+--- a/android/app/src/main/python/pek_flutter.py	2026-10-20 22:29:43.645837476 +0000
++++ b/android/app/src/main/python/pek_flutter.py	2026-10-20 22:29:57.414995244 +0000
+@@ -33,7 +33,7 @@
+ WORK_LIMIT = 25.0                     # seconds one ui.background(work) may take
+ RESERVED_HOST = "hesper-tmdb.aquariusibeats.workers.dev"
+ OFFICIAL_PROXY_PLUGINS = {"tmdb-discover"}   # the only plugin that may use PEK's built-in TMDb access
+-ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "toast", "exit"}
++ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "torrent.play", "toast", "exit"}
+ 
+ _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
+ _SESSIONS = {}
+--- a/flutter_ui/lib/src/plugin_ui.dart	2026-10-20 22:29:43.647043185 +0000
++++ b/flutter_ui/lib/src/plugin_ui.dart	2026-10-20 22:29:57.415301199 +0000
+@@ -10,6 +10,7 @@
+ import 'plugin_host.dart';
+ import 'settings_extra.dart' show ToggleRow;
+ import 'store.dart';
++import 'torrent.dart';
+ import 'tokens.dart';
+ import 'widgets.dart';
+ 
+@@ -258,6 +259,24 @@
+         );
+       } else if (op == 'favorite.remove') {
+         await Store.removePluginFavorite('${raw['key']}');
++      } else if (op == 'torrent.play') {
++        // A plugin screen with the "torrent" permission started a release (pek_ui.play_torrent): PEK's own loading box and
++        // player take over, and the watch is kept under Resume Watching like any other torrent stream.
++        final src = '${raw['source'] ?? ''}';
++        if (!mounted || !(src.startsWith('magnet:?') || src.startsWith('https://'))) continue;
++        final isEp = '${raw['kind']}' == 'episode';
++        final name = '${raw['name'] ?? ''}';
++        final season = (raw['season'] as num?)?.toInt() ?? 0;
++        final episode = (raw['episode'] as num?)?.toInt() ?? 0;
++        final tt = TorrentTitle(
++          kind: isEp ? 'episode' : 'movie',
++          title: '${raw['title'] ?? ''}'.isNotEmpty ? '${raw['title']}' : name,
++          showTitle: isEp ? name : '',
++          year: (raw['year'] as num?)?.toInt() ?? 0,
++          season: season,
++          episode: episode,
++        );
++        unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId)));
+       } else if (op == 'toast') {
+         _toast('${raw['text'] ?? ''}');
+       } else if (op == 'exit') {

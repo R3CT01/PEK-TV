@@ -286,6 +286,28 @@ def open_plugin(plugin_id, kind, tmdb_id, title="", year=0):
                                                        "year": int(year or 0)})
 
 
+def play_torrent(source, label, season=0, episode=0, kind="movie", name="", year=0, image=""):
+    """Start a stream in PEK's own player (loading box, buffering, Resume Watching). Needs "torrent": true.
+    source is a magnet link, or an https .torrent link on a host listed under permissions.network. PEK shows the
+    loading screen itself, so the plugin never touches the download. kind is 'movie' or 'episode'."""
+    s = _sess()
+    s.need("torrent")
+    src = _s(source, 8000).strip()
+    low = src.lower()
+    if low.startswith("magnet:?xt=urn:btih:"):
+        pass
+    elif low.startswith("https://"):
+        host = urllib.parse.urlsplit(src).hostname or ""
+        if not s.host_listed(host):
+            raise PermissionError("plugin.json does not list %s under permissions.network" % host)
+    else:
+        raise ValueError("a release link is a magnet link or an https link")
+    if kind not in ("movie", "episode"):
+        raise ValueError("kind must be movie or episode")
+    s.effect("torrent.play", source=src, title=_s(label, 200), season=int(season or 0), episode=int(episode or 0),
+             kind=kind, name=_s(name, 200), year=int(year or 0), image=_s(image, 200))
+
+
 def _watched_key(kind, title, year):
     # The same text as Store.keyFor in the Flutter app (and histKey() in sync.js), so history and the cloud agree.
     t = " ".join(str(title or "").lower().split())
