@@ -168,7 +168,7 @@ class PekCard extends StatelessWidget {
             Text(title, style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700)),
             if (subtitle != null && subtitle!.isNotEmpty) ...[
               SizedBox(height: 1.25 * rem),
-              Text(subtitle!, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: rem, color: t.textMuted)),
+              Text(subtitle!, style: TextStyle(fontSize: rem, color: t.textMuted)),
             ],
           ],
         ),

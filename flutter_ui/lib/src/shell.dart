@@ -53,6 +53,7 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final PageController _pager = PageController();
   int _page = 0; // phone: index into _swipePages
+  final ValueNotifier<int> _pageN = ValueNotifier(0); // only the tab bar listens, so a swipe does not rebuild every page
   String _tab = 'dashboard'; // TV: sidebar selection
   Timer? _syncTimer;
 
@@ -69,6 +70,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _syncTimer?.cancel();
+    _pageN.dispose();
     _pager.dispose();
     super.dispose();
   }
@@ -194,12 +196,15 @@ class _AppShellState extends State<AppShell> {
       padding: EdgeInsets.only(bottom: bottom),
       decoration: BoxDecoration(color: t.bgElevated, border: Border(top: BorderSide(color: t.border))),
       child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (var i = 0; i < _swipePages.length; i++)
-              Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, active: i == _page, onTap: () => _goTo(i))),
-          ],
+        child: ValueListenableBuilder<int>(
+          valueListenable: _pageN,
+          builder: (context, page, _) => Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var i = 0; i < _swipePages.length; i++)
+                Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, active: i == page, onTap: () => _goTo(i))),
+            ],
+          ),
         ),
       ),
     );
@@ -208,8 +213,13 @@ class _AppShellState extends State<AppShell> {
         Expanded(
           child: PageView(
             controller: _pager,
-            onPageChanged: (i) => setState(() => _page = i),
-            children: [for (final id in _swipePages) _KeepAlive(child: _body(context, id))],
+            // The neighbouring pages are built while the current one is idle, so a swipe only has to slide them in.
+            allowImplicitScrolling: true,
+            onPageChanged: (i) {
+              _page = i;
+              _pageN.value = i;
+            },
+            children: [for (final id in _swipePages) RepaintBoundary(child: _KeepAlive(child: _body(context, id)))],
           ),
         ),
         const MiniPlayer(),
