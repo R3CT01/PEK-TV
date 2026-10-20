@@ -32,7 +32,7 @@ class _LibraryPageState extends State<LibraryPage> {
   @override
   void initState() {
     super.initState();
-    _watch = Timer.periodic(const Duration(seconds: 2), (_) => _checkScan());
+    _watch = Timer.periodic(const Duration(seconds: 3), (_) => _checkScan());
     _checkScan();
   }
 

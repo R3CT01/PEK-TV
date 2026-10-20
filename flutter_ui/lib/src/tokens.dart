@@ -141,7 +141,10 @@ class PekBackdrop extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          for (final g in tokens.glow) DecoratedBox(decoration: BoxDecoration(gradient: g)),
+          if (tokens.glow.isNotEmpty)
+            RepaintBoundary(
+              child: Stack(fit: StackFit.expand, children: [for (final g in tokens.glow) DecoratedBox(decoration: BoxDecoration(gradient: g))]),
+            ),
           child,
         ],
       ),

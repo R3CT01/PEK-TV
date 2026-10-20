@@ -105,7 +105,7 @@ class _MusicPageState extends State<MusicPage> {
   @override
   void initState() {
     super.initState();
-    _scanPoll = Timer.periodic(const Duration(seconds: 2), (_) => _checkStatus());
+    _scanPoll = Timer.periodic(const Duration(seconds: 3), (_) => _checkStatus());
     _checkStatus();
   }
 
@@ -145,15 +145,18 @@ class _MusicPageState extends State<MusicPage> {
       if (!mounted) return;
       final scanning = st.scanning || video;
       final changed = _libKey != null && (st.key != _libKey || (_scanning && !scanning));
-      setState(() {
-        _scanning = scanning;
-        _scanned = st.scanned;
-        _libKey = st.key;
-        if (changed) {
-          _lib = Api.musicLibrary();
-          _refreshSongs();
-        }
-      });
+      final shown = scanning != _scanning || (scanning && st.scanned != _scanned);
+      _libKey = st.key;
+      if (changed || shown) {
+        setState(() {
+          _scanning = scanning;
+          _scanned = st.scanned;
+          if (changed) {
+            _lib = Api.musicLibrary();
+            _refreshSongs();
+          }
+        });
+      }
     } catch (_) {
     } finally {
       _polling = false;
@@ -480,7 +483,7 @@ class MiniPlayer extends StatelessWidget {
           child: Container(
             margin: EdgeInsets.fromLTRB(0.75 * rem, 0, 0.75 * rem, 0.5 * rem),
             padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
-            decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: t.shadow, blurRadius: 16, offset: const Offset(0, 4))]),
+            decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18)),
             child: Row(children: [
               Art(url: Api.trackArt(cur), size: 2.5 * rem, radius: 10),
               SizedBox(width: 0.75 * rem),
