@@ -19,7 +19,12 @@ def _run_module(module_name, folder):
     hesper_guard.run_plugin(module_name, folder)
 
 
+PLUGINS_DIR = ""   # read by pek_flutter (the Flutter UI's plugin screens) to find plugins/<id>/screen.py
+
+
 def run_all(plugins_dir):
+    global PLUGINS_DIR
+    PLUGINS_DIR = plugins_dir
     if not os.path.isdir(plugins_dir):
         print("[PEK Python Bridge] No plugins folder at", plugins_dir)
         return

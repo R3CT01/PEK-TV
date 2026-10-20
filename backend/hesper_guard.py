@@ -53,7 +53,7 @@ ALLOWED_IMPORTS = {
     "json", "re", "math", "datetime", "time", "collections", "itertools", "functools",
     "string", "textwrap", "html", "urllib.parse", "base64", "hashlib", "random",
     "statistics", "decimal", "fractions", "typing", "dataclasses", "enum", "copy",
-    "operator", "unicodedata", "pek_host", "hesper_host",
+    "operator", "unicodedata", "pek_host", "hesper_host", "pek_ui",
 }
 
 FORBIDDEN_CALLS = {

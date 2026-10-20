@@ -12,6 +12,8 @@ dependencies:
   http: ^1.2.0
   shared_preferences: ^2.2.3
   crypto: ^3.0.3
+  webview_flutter: ^4.10.0          # plugin trailers (YouTube, locked to youtube-nocookie.com)
+  webview_flutter_android: ^4.3.0
 
 flutter:
   uses-material-design: true

@@ -1,12 +1,14 @@
 package com.pektv.app.flutter
 
 import android.app.UiModeManager
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Bundle
 import android.os.Handler
@@ -17,6 +19,8 @@ import android.view.View
 import android.widget.FrameLayout
 import com.pektv.app.MainActivity
 import com.pektv.app.MediaPermissions
+import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import com.pektv.app.MpvController
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
@@ -26,6 +30,8 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.util.concurrent.Executors
 
 /**
  * Hosts the Flutter UI (flutter_ui/). MainActivity has already copied the assets, started the C++ server on
@@ -41,12 +47,101 @@ import org.json.JSONObject
  *   pek/mpv/events  (EventChannel)   {event: time|state|tracks|ended, data: {...}}  - same payloads the web UI got
  *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit, isPhone, setMulticast
  *   pek/output      (MethodChannel)  Settings > Video / Audio output: video, setMatchRate, setHdr, audio, setPassthrough
+ *   pek/plugins     (MethodChannel)  call(json) -> json: a plugin's Python screen (plugins/<id>/screen.py, run by
+ *                                    python/pek_flutter.py through Chaquopy); openUrl(url): an https link in the
+ *                                    YouTube app or the browser; openApp({packages, url}): a streaming app. See FLUTTER_PLUGINS.md.
  */
 class FlutterHostActivity : FlutterActivity() {
 
     private var mpv: MpvController? = null
     private var events: EventChannel.EventSink? = null
     private var multicastLock: WifiManager.MulticastLock? = null
+
+    // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
+    private val pluginPool = Executors.newCachedThreadPool()
+
+    private fun pythonCall(json: String): String = try {
+        // MainActivity starts Python on its own thread at boot; start it here too if that has not happened yet.
+        synchronized(Python::class.java) {
+            if (!Python.isStarted()) {
+                try { Python.start(AndroidPlatform(applicationContext)) } catch (e: IllegalStateException) { /* started meanwhile */ }
+            }
+        }
+        val req = JSONObject(json)
+        if (!req.has("pluginsDir")) req.put("pluginsDir", File(File(filesDir, "hesper"), "plugins").absolutePath)
+        Python.getInstance().getModule("pek_flutter").callAttr("call", req.toString()).toString()
+    } catch (t: Throwable) {
+        android.util.Log.w("PEK", "plugin call failed", t)
+        JSONObject().put("ok", false).put("error", "Python is not ready: ${t.message}").toString()
+    }
+
+    // Streaming apps a plugin's "Watch on ..." button may open. Generated from www/providers.js by tools/sync_providers.js
+    // (the same list as MainActivity.streamingPackages and the manifest <queries>).
+    private val streamingPackages = setOf(
+        // PKGS-START
+        "air.com.vudu.air.DownloaderTablet",
+        "com.amazon.amazonvideo.livingroom",
+        "com.amazon.avod.thirdpartyclient",
+        "com.amazon.imdb.tv.android.app",
+        "com.apple.atve.androidtv.appletv",
+        "com.bydeluxe.d3.android.program.starz",
+        "com.cbs.app",
+        "com.cbs.ott",
+        "com.criterionchannel",
+        "com.crunchyroll.crunchyroid",
+        "com.disney.disneyplus",
+        "com.google.android.videos",
+        "com.google.android.youtube",
+        "com.google.android.youtube.tv",
+        "com.hbo.hbonow",
+        "com.hoopladigital.android",
+        "com.hulu.livingroomplus",
+        "com.hulu.plus",
+        "com.kanopy",
+        "com.mubi",
+        "com.netflix.mediaclient",
+        "com.netflix.ninja",
+        "com.peacocktv.peacockandroid",
+        "com.plexapp.android",
+        "com.roku.web.trc",
+        "com.showtime.standalone",
+        "com.tubitv",
+        "com.wbd.stream",
+        "tv.pluto.android"
+        // PKGS-END
+    )
+
+    private fun tryStart(intent: Intent): Boolean = try {
+        startActivity(intent); true
+    } catch (e: ActivityNotFoundException) { false }
+    catch (e: Throwable) { android.util.Log.w("PEK", "could not open app", e); false }
+
+    /**
+     * A streaming app: first on the title's page (the app's own handler for [url]), else just the app itself, else
+     * (not installed) the website. [packagesCsv] is a comma list of candidates; only allow-listed packages are used.
+     */
+    private fun openStreamingApp(packagesCsv: String, url: String): Boolean {
+        val web = url.takeIf { it.length <= 2000 && it.startsWith("https://") }
+        val pkgs = packagesCsv.split(',').map { it.trim() }.filter { it in streamingPackages }
+        for (pkg in pkgs) {
+            if (web != null && tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(web)).setPackage(pkg))) return true
+            val launch = packageManager.getLeanbackLaunchIntentForPackage(pkg) ?: packageManager.getLaunchIntentForPackage(pkg)
+            if (launch != null && tryStart(launch)) return true
+        }
+        return web != null && openUrl(web)
+    }
+
+    // https links only (a plugin never supplies the address of an app, and file:/intent: links are refused).
+    private fun openUrl(url: String): Boolean {
+        if (url.length > 2000 || !url.startsWith("https://")) return false
+        return try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        } catch (e: Throwable) {
+            android.util.Log.w("PEK", "could not open link", e)
+            false
+        }
+    }
 
     // Wi-Fi drops multicast packets unless Android is told to let them through; held only while searching the network.
     private fun setMulticast(on: Boolean) {
@@ -175,6 +270,21 @@ class FlutterHostActivity : FlutterActivity() {
             }
         }
 
+        MethodChannel(messenger, "pek/plugins").setMethodCallHandler { call, result ->
+            when (call.method) {
+                "call" -> {
+                    val json = call.arguments as? String ?: "{}"
+                    pluginPool.execute {
+                        val answer = pythonCall(json)
+                        runOnUiThread { result.success(answer) }
+                    }
+                }
+                "openUrl" -> result.success(openUrl(call.arguments as? String ?: ""))
+                "openApp" -> result.success(openStreamingApp(call.argument<String>("packages") ?: "", call.argument<String>("url") ?: ""))
+                else -> result.notImplemented()
+            }
+        }
+
         EventChannel(messenger, "pek/mpv/events").setStreamHandler(object : EventChannel.StreamHandler {
             override fun onListen(arguments: Any?, sink: EventChannel.EventSink?) { events = sink }
             override fun onCancel(arguments: Any?) { events = null }
@@ -219,6 +329,7 @@ class FlutterHostActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        pluginPool.shutdown()
         events = null
         setMulticast(false)
         mpv?.destroy()

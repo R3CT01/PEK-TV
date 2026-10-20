@@ -72,5 +72,9 @@ there are no lock-screen controls yet (those need native channel methods).
 
 - **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
 
+## Plugin screens (Python)
+Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `FLUTTER_PLUGINS.md`). TMDb Discover is fully ported (inline trailer, streaming apps, watched, Play with a plugin, synced favorites):
+Plugins > Open, or its own entry in the menu / More page.
+
 ## Still only in the classic UI
-Plugins and their screens (JavaScript in the web sandbox), the plugin store, installable skin packages, plugin dashboard tiles.
+Plugins that only have a `ui.js`, the plugin store, installable skin packages, plugin dashboard tiles.

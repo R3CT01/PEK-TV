@@ -23,4 +23,15 @@ swap(path.join(root, 'android/app/src/main/java/com/pektv/app/MainActivity.kt'),
     pkgs.map((p, i) => '"' + p + '"' + (i < pkgs.length - 1 ? ',' : '')));
 swap(path.join(root, 'android/app/src/main/AndroidManifest.xml'), '<!-- PKGS-START -->', '<!-- PKGS-END -->',
     pkgs.map(p => '<package android:name="' + p + '" />'));
+swap(path.join(root, 'android/app/src/flutter/java/com/pektv/app/flutter/FlutterHostActivity.kt'), '// PKGS-START', '// PKGS-END',
+    pkgs.map((p, i) => '"' + p + '"' + (i < pkgs.length - 1 ? ',' : '')));
+
+// The Flutter UI's plugin screens build the same plan in Python (pek_ui.provider_button), from this same table.
+const pyStr = s => JSON.stringify(String(s));
+const rows = table.map(p => '    (r"' + p.re.source + '", ' + pyStr(p.name) + ', [' + p.pkgs.map(pyStr).join(', ') + '], ' +
+    pyStr(p.home) + ', ' + (p.search ? pyStr(p.search) : 'None') + '),');
+fs.writeFileSync(path.join(root, 'android/app/src/main/python/pek_providers.py'),
+    '"""Streaming services the "Watch on ..." buttons know (generated from www/providers.js by tools/sync_providers.js; do not edit).\n\n' +
+    'Each row: (regex on the normalised service name, display name, Android packages, home page, search link with {q} or None).\n"""\n' +
+    'TABLE = [\n' + rows.join('\n') + '\n]\n');
 console.log('synced ' + pkgs.length + ' packages');

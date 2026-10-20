@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'api.dart' show Api, PluginInfo;
 import 'cloud.dart';
 import 'common.dart';
 import 'dashboard.dart';
@@ -11,6 +12,8 @@ import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
 import 'pages.dart';
+import 'plugin_host.dart' show PluginBack, PluginHost;
+import 'plugin_ui.dart';
 import 'tokens.dart';
 import 'torrent.dart';
 import 'widgets.dart';
@@ -57,10 +60,39 @@ class _AppShellState extends State<AppShell> {
   final ValueNotifier<int> _pageN = ValueNotifier(0); // only the tab bar listens, so a swipe does not rebuild every page
   String _tab = 'dashboard'; // TV: sidebar selection
   Timer? _syncTimer;
+  List<PluginInfo> _pluginScreens = const []; // installed plugins that have a Python screen for this UI
+
+  /// The menu with one entry per plugin screen, just above Plugins (a plugin's own plugin.json ui.navTab names it).
+  List<(String, String)> get _nav {
+    final i = _navItems.indexWhere((e) => e.$1 == 'plugins');
+    return [
+      ..._navItems.sublist(0, i),
+      for (final pl in _pluginScreens) ('plugin:${pl.folder}', pl.navTab.isEmpty ? pl.name : pl.navTab),
+      ..._navItems.sublist(i),
+    ];
+  }
+
+  /// Same for the More page (phones).
+  List<String> get _more {
+    final i = _moreIds.indexOf('plugins');
+    return [..._moreIds.sublist(0, i), for (final pl in _pluginScreens) 'plugin:${pl.folder}', ..._moreIds.sublist(i)];
+  }
+
+  String _title(String id) {
+    if (id.startsWith('plugin:')) {
+      final pl = _pluginScreens.where((e) => 'plugin:${e.folder}' == id).firstOrNull;
+      if (pl != null) return pl.navTab.isEmpty ? pl.name : pl.navTab;
+    }
+    return _titleOf(id);
+  }
 
   @override
   void initState() {
     super.initState();
+    Api.plugins().then((l) {
+      PluginHost.streamers = [for (final e in l) if (e.flutterScreen && e.streamer) {'id': e.folder, 'name': e.name}];
+      if (mounted) setState(() => _pluginScreens = l.where((e) => e.flutterScreen).toList());
+    }).catchError((_) {});
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) unawaited(Cloud.sync());
     _syncTimer = Timer.periodic(const Duration(minutes: 5), (_) {
@@ -88,7 +120,7 @@ class _AppShellState extends State<AppShell> {
       _goTo(i);
       return;
     }
-    Navigator.push(context, MaterialPageRoute<void>(builder: (c) => SubScreen(title: _titleOf(id), body: _body(c, id))));
+    Navigator.push(context, MaterialPageRoute<void>(builder: (c) => SubScreen(title: _title(id), body: _body(c, id))));
   }
 
   void _goTo(int i) {
@@ -136,6 +168,7 @@ class _AppShellState extends State<AppShell> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (PluginBack.handle()) return; // a plugin screen on the TV that is inside one of its own pages
         // Back: leave a secondary screen / any other page for the first page, then ask before exiting.
         if (p.isTv ? _tab != 'dashboard' : _page != 0) {
           if (p.isTv) {
@@ -155,6 +188,9 @@ class _AppShellState extends State<AppShell> {
 
   Widget _body(BuildContext context, String id) {
     final pad = context.pek.pagePad;
+    if (id.startsWith('plugin:')) {
+      return PluginView(key: ValueKey(id), pluginId: id.substring(7), padding: pad, embedded: context.pek.isTv, onExit: () => setState(() => _tab = 'dashboard'));
+    }
     switch (id) {
       case 'dashboard':
         return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'));
@@ -164,7 +200,7 @@ class _AppShellState extends State<AppShell> {
       case 'music':
         return MusicPage(padding: pad);
       case 'more':
-        return _MorePage(padding: pad, onOpen: _open);
+        return _MorePage(padding: pad, onOpen: _open, ids: _more, titleOf: _title, hints: {for (final pl in _pluginScreens) 'plugin:${pl.folder}': pl.description});
       case 'search':
         return SearchPage(padding: pad);
       case 'history':
@@ -250,13 +286,13 @@ class _AppShellState extends State<AppShell> {
               height: 3 * rem,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: _navItems.length,
+                itemCount: _nav.length,
                 separatorBuilder: (_, __) => SizedBox(width: 0.5 * rem),
                 itemBuilder: (_, i) => _NavItem(
-                  label: _navItems[i].$2,
-                  active: _navItems[i].$1 == _tab,
-                  autofocus: _navItems[i].$1 == _tab,
-                  onTap: () => setState(() => _tab = _navItems[i].$1),
+                  label: _nav[i].$2,
+                  active: _nav[i].$1 == _tab,
+                  autofocus: _nav[i].$1 == _tab,
+                  onTap: () => setState(() => _tab = _nav[i].$1),
                 ),
               ),
             ),
@@ -280,13 +316,13 @@ class _AppShellState extends State<AppShell> {
           Expanded(
             child: ListView.separated(
               padding: const EdgeInsets.all(4),
-              itemCount: _navItems.length,
+              itemCount: _nav.length,
               separatorBuilder: (_, __) => SizedBox(height: (Layouts.id == 'compact' ? 0.3 : 0.5) * rem),
               itemBuilder: (_, i) => _NavItem(
-                label: _navItems[i].$2,
-                active: _navItems[i].$1 == _tab,
-                autofocus: _navItems[i].$1 == _tab,
-                onTap: () => setState(() => _tab = _navItems[i].$1),
+                label: _nav[i].$2,
+                active: _nav[i].$1 == _tab,
+                autofocus: _nav[i].$1 == _tab,
+                onTap: () => setState(() => _tab = _nav[i].$1),
               ),
             ),
           ),
@@ -323,9 +359,12 @@ class _KeepAliveState extends State<_KeepAlive> with AutomaticKeepAliveClientMix
 
 /// The "More" page: every screen that is not a swipe page, as tiles.
 class _MorePage extends StatelessWidget {
-  const _MorePage({required this.padding, required this.onOpen});
+  const _MorePage({required this.padding, required this.onOpen, required this.ids, required this.titleOf, this.hints = const {}});
   final EdgeInsets padding;
   final void Function(String id) onOpen;
+  final List<String> ids;
+  final String Function(String id) titleOf;
+  final Map<String, String> hints; // plugin screens: their description
 
   static const _hint = {
     'search': 'Titles, actors, genres, years',
@@ -345,7 +384,7 @@ class _MorePage extends StatelessWidget {
     final rem = p.rem;
     final cols = p.size.width >= 600 ? 3 : 2;
     final gap = 0.75 * rem;
-    final rows = (_moreIds.length / cols).ceil();
+    final rows = (ids.length / cols).ceil();
     return ListView(
       padding: padding,
       children: [
@@ -358,8 +397,8 @@ class _MorePage extends StatelessWidget {
                 for (var c = 0; c < cols; c++) ...[
                   if (c > 0) SizedBox(width: gap),
                   Expanded(
-                    child: r * cols + c < _moreIds.length
-                        ? PekCard(title: _titleOf(_moreIds[r * cols + c]), subtitle: _hint[_moreIds[r * cols + c]], onTap: () => onOpen(_moreIds[r * cols + c]))
+                    child: r * cols + c < ids.length
+                        ? PekCard(title: titleOf(ids[r * cols + c]), subtitle: _hint[ids[r * cols + c]] ?? hints[ids[r * cols + c]], onTap: () => onOpen(ids[r * cols + c]))
                         : const SizedBox.shrink(),
                   ),
                 ],

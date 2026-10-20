@@ -51,13 +51,13 @@ class Store {
   /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
   static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
     if (id == 'p1') {
-      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_fav_tombs']) {
-        if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs')) continue;
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
+        if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs' || k == 'pek_plugin_favs_v1')) continue;
         await _p.remove(k);
       }
     } else {
       for (final k in _p.getKeys().where((k) => k.startsWith('p/$id/')).toList()) {
-        if (keepFavorites && (k.endsWith('/pek_favorites_v1') || k.endsWith('/pek_fav_tombs'))) continue;
+        if (keepFavorites && (k.endsWith('/pek_favorites_v1') || k.endsWith('/pek_fav_tombs') || k.endsWith('/pek_plugin_favs_v1'))) continue;
         await _p.remove(k);
       }
     }
@@ -69,7 +69,7 @@ class Store {
     for (final k in _p.getKeys().toList()) {
       if (k.startsWith('pek_sync_') || k.startsWith('pek_profiles')) {
         await _p.remove(k);
-      } else if (k.startsWith('p/') && !k.endsWith('/pek_favorites_v1') && !k.endsWith('/pek_fav_tombs')) {
+      } else if (k.startsWith('p/') && !k.endsWith('/pek_favorites_v1') && !k.endsWith('/pek_fav_tombs') && !k.endsWith('/pek_plugin_favs_v1')) {
         await _p.remove(k);
       }
     }
@@ -291,6 +291,47 @@ class Store {
     await _p.setString(_favKey, jsonEncode(l));
     _bump();
   }
+
+  // ---------------------------------------------------------------- favorites saved by plugin screens
+  // The Flutter twin of pek.favorites in the web sandbox: one list shared by every plugin ("movie:603" / "tv:1396"),
+  // kept per profile on this device. Library favorites above are separate (they are files, these are TMDb titles).
+
+  static String get _pluginFavKey => _sc('pek_plugin_favs_v1');
+
+  static List<Map<String, dynamic>> pluginFavorites() => _list(_pluginFavKey);
+
+  static List<String> pluginFavoriteKeys() => pluginFavorites().map((e) => '${e['key']}').toList();
+
+  static Future<void> addPluginFavorite({required String plugin, required String type, required int id, required String title, int year = 0, String posterPath = ''}) async {
+    if ((type != 'movie' && type != 'tv') || id <= 0) return;
+    final key = '$type:$id';
+    final l = _list(_pluginFavKey);
+    if (l.any((e) => e['key'] == key)) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    l.insert(0, {'key': key, 'type': type, 'id': id, 'title': title, 'year': year, 'posterPath': posterPath, 'plugin': plugin, 'added': now, 'updated': now});
+    await _p.setString(_pluginFavKey, jsonEncode(l));
+    // Added again after having been removed: the new favorite wins over the old removal (the cloud sync reads these).
+    final tombs = _map(_sc('pek_fav_tombs'));
+    if (tombs.remove(key) != null) await _p.setString(_sc('pek_fav_tombs'), jsonEncode(tombs));
+    _bump();
+  }
+
+  static Future<void> removePluginFavorite(String key) async {
+    final l = _list(_pluginFavKey);
+    final n = l.length;
+    l.removeWhere((e) => e['key'] == key);
+    if (l.length == n) return;
+    await _p.setString(_pluginFavKey, jsonEncode(l));
+    // The removal is told to the cloud on the next sync (the same markers library favorites use: 'movie:603').
+    final tombs = _map(_sc('pek_fav_tombs'));
+    tombs[key] = DateTime.now().millisecondsSinceEpoch;
+    await _p.setString(_sc('pek_fav_tombs'), jsonEncode(tombs));
+    _bump();
+  }
+
+  /// Raw plugin favorites for the cloud sync.
+  static List<Map<String, dynamic>> pluginFavRaw() => _list(_pluginFavKey);
+  static Future<void> writePluginFavRaw(List<Map<String, dynamic>> l) => _p.setString(_pluginFavKey, jsonEncode(l));
 
   /// Raw favorites and removal markers for the cloud sync.
   static List<Map<String, dynamic>> favRaw() => _list(_favKey);

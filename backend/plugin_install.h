@@ -15,7 +15,7 @@
 //   - setting PEK_ALLOW_PLUGIN_BACKEND=0 refuses .py files altogether (for example for a
 //     store build that must not install code from files)
 //   - size and file-count limits
-//   - plugin.json and ui.js are required
+//   - plugin.json and ui.js are required (screen.py instead, for a Flutter-UI-only plugin)
 // Nothing is written until every check passes, and an update swaps the old
 // folder out only after the new one was written completely.
 // ============================================================
@@ -175,14 +175,14 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
                 return std::string(reservedHost()) + " is reserved for PEK's official plugins";
         }
-        if (f.path == "ui.js") hasUi = true;
+        if (f.path == "ui.js" || f.path == "screen.py") hasUi = true;   // screen.py = the Flutter UI's Python screen
         if (f.path == "skin.json") hasSkin = true;
     }
     // A skin is not a plugin (and a zip that is both is refused by both installers).
     if (hasSkin && !hasManifest) return "this is a skin, not a plugin. Install it from Settings -> Skins.";
     if (hasSkin) return "this zip has both plugin.json and skin.json, so it is not clearly a plugin or a skin";
     if (!hasManifest) return "plugin.json is missing";
-    if (!hasUi) return "ui.js is missing";
+    if (!hasUi) return "ui.js is missing (or screen.py, for a plugin made for the Flutter UI)";
     return "";
 }
 

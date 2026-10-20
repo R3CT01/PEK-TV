@@ -270,14 +270,22 @@ class Api {
     final out = <PluginInfo>[];
     for (final e in ((j['plugins'] as List?) ?? const [])) {
       final folder = '${(e as Map)['folder']}';
-      var name = folder, desc = '', version = '';
+      var name = folder, desc = '', version = '', navTab = '';
+      var flutterScreen = false;
+      var streamer = false;
       try {
         final m = await _get('/plugins/${Uri.encodeComponent(folder)}/plugin.json');
         name = '${m['name'] ?? folder}';
         desc = '${m['description'] ?? ''}';
         version = '${m['version'] ?? ''}';
+        // "flutter": {"screen": "screen.py"} marks a plugin that has a Python screen for this UI (FLUTTER_PLUGINS.md).
+        flutterScreen = m['flutter'] is Map;
+        final prov = m['provides'];
+        streamer = prov is Map && prov['stream'] == true; // can play a title another plugin hands over
+        final ui = m['ui'];
+        if (ui is Map) navTab = '${ui['navTab'] ?? ''}';
       } catch (_) {}
-      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true));
+      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer));
     }
     return out;
   }
@@ -458,9 +466,18 @@ class DuplicatesResult {
 }
 
 class PluginInfo {
-  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend});
+  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false});
   final String folder, name, description, version;
   final bool hasBackend;
+
+  /// plugin.json has a "flutter" entry: the plugin ships a Python screen (screen.py) this UI can draw.
+  final bool flutterScreen;
+
+  /// plugin.json "ui.navTab": the label for the plugin's own entry in the menu ('' = none).
+  final String navTab;
+
+  /// plugin.json "provides": {"stream": true}: other plugins may open it on a title ("Play with ...").
+  final bool streamer;
 }
 
 class Track {

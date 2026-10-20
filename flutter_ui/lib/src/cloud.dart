@@ -26,7 +26,8 @@ class CloudResult {
 ///
 /// Library favorites sync too. The cloud keys favorites by TMDb id (`f|movie:603`), so each favorite is looked up once through
 /// the same TMDb worker the backend uses and the id is kept with it. A favorite that comes from another device (or from a plugin
-/// in the web UI) shows up here when the same title is in this device's library.
+/// in the web UI) shows up here when the same title is in this device's library; otherwise it becomes a plugin favorite
+/// (Favorites > Saved from plugins). Favorites a plugin screen saves here already have their TMDb id and sync as they are.
 class Cloud {
   static const api = 'https://pek-sync.aquariusibeats.workers.dev';
 
@@ -562,6 +563,23 @@ class Cloud {
         'deleted': 0,
       });
     }
+    // Favorites saved by plugin screens: same keys and format as the web UI's plugin favorites (`from` = the plugin).
+    final libIds = {for (final f in Store.favRaw()) '${f['type']}:${_int(f['tmdb'])}'};
+    for (final f in Store.pluginFavRaw()) {
+      final id = _int(f['id']);
+      final type = '${f['type'] ?? ''}' == 'tv' ? 'tv' : 'movie';
+      if (id <= 0 || libIds.contains('$type:$id')) continue; // a library favorite of the same title already carries it
+      final key = 'f|$type:$id';
+      final updated = _int(f['updated']) > 0 ? _int(f['updated']) : _int(f['added']);
+      if (updated <= 0 || _int(sf[key]) == updated) continue;
+      final added = _int(f['added']) > 0 ? _int(f['added']) : updated;
+      favorites.add({
+        'key': key,
+        'data': {'key': '$type:$id', 'type': type, 'id': id, 'title': '${f['title'] ?? ''}', 'year': _int(f['year']), 'posterPath': _cleanPoster('${f['posterPath'] ?? ''}'), 'from': <String>['${f['plugin'] ?? ''}'], 'added': added, 'updated': updated},
+        'updated': updated,
+        'deleted': 0,
+      });
+    }
     Store.favTombs().forEach((k, v) {
       final key = 'f|$k';
       final u = _int(v);
@@ -683,6 +701,7 @@ class Cloud {
       final m = RegExp(r'^f\|(movie|tv):(\d+)$').firstMatch(key);
       if (m == null) continue;
       if (haveFavs.any((f) => _int(f['tmdb']) == int.parse(m.group(2)!) && '${f['type']}' == m.group(1))) continue;
+      if (Store.pluginFavRaw().any((f) => _int(f['id']) == int.parse(m.group(2)!) && '${f['type']}' == m.group(1))) continue;
       final d = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
       final lib = await _libraryFavorite(m.group(1) == 'tv', '${d['title'] ?? ''}', _int(d['year']));
       if (lib != null) resolvedF[key] = lib;
@@ -793,6 +812,8 @@ class Cloud {
     }
     // favorites: the newest change per title wins; a title this library does not have stays pending
     final favs = Store.favRaw();
+    final pfavs = Store.pluginFavRaw();
+    var pluginFavChanged = false;
     final tombs = Store.favTombs();
     final sf = seen['f'] is Map ? Map<String, dynamic>.from(seen['f'] as Map) : <String, dynamic>{};
     final newPendingF = <String, dynamic>{};
@@ -807,7 +828,12 @@ class Cloud {
       final ru = _int(r['updated']);
       final tk = '$type:$id';
       final idx = favs.indexWhere((f) => _int(f['tmdb']) == id && '${f['type']}' == type);
+      final pidx = pfavs.indexWhere((f) => _int(f['id']) == id && '${f['type']}' == type);
       if (_truthy(r['deleted'])) {
+        if (pidx >= 0 && _int(pfavs[pidx]['updated']) <= ru) {
+          pfavs.removeAt(pidx); // removed on another device after we saved it
+          pluginFavChanged = true;
+        }
         if (idx >= 0) {
           if (_int(favs[idx]['updated']) > ru) continue; // favorited again here: ours wins
           favs.removeAt(idx);
@@ -830,6 +856,17 @@ class Cloud {
         }
         continue;
       }
+      if (pidx >= 0) {
+        final lu = _int(pfavs[pidx]['updated']);
+        if (ru > lu) {
+          pfavs[pidx]['updated'] = ru;
+          sf[key] = ru;
+          pluginFavChanged = true;
+        } else if (ru == lu) {
+          sf[key] = ru;
+        }
+        continue;
+      }
       if (tombs[tk] != null && _int(tombs[tk]) >= ru) continue; // removed here after that
       final lib = resolvedF[key];
       if (lib != null) {
@@ -839,12 +876,36 @@ class Cloud {
         sf[key] = ru;
         favChanged = true;
       } else {
-        newPendingF[key] = r;
+        // Not a title of this library: keep it as a plugin favorite (the web UI's plugin favorites arrive this way too).
+        final d = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
+        final title = '${d['title'] ?? ''}';
+        if (title.isEmpty) {
+          newPendingF[key] = r;
+        } else {
+          final from = d['from'] is List && (d['from'] as List).isNotEmpty ? '${(d['from'] as List).first}' : '';
+          pfavs.insert(0, {
+            'key': tk,
+            'type': type,
+            'id': id,
+            'title': title,
+            'year': _int(d['year']),
+            'posterPath': _cleanPoster('${d['posterPath'] ?? ''}'),
+            'plugin': from.isEmpty ? 'tmdb-discover' : from,
+            'added': _int(d['added']) > 0 ? _int(d['added']) : ru,
+            'updated': ru,
+          });
+          sf[key] = ru;
+          pluginFavChanged = true;
+        }
       }
     }
     seen['f'] = sf;
     if (favChanged) {
       await Store.writeFavRaw(favs);
+      changed = true;
+    }
+    if (pluginFavChanged) {
+      await Store.writePluginFavRaw(pfavs);
       changed = true;
     }
     if (tombChanged) await Store.writeFavTombs(tombs);

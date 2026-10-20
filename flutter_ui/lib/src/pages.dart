@@ -9,6 +9,8 @@ import 'common.dart';
 import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
+import 'plugin_host.dart' show PluginHost;
+import 'plugin_ui.dart';
 import 'settings_extra.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -37,6 +39,7 @@ class ResumePage extends StatelessWidget {
               onTap: () => playMedia(context, it, startSec: it.position),
               trailing: IconButton(tooltip: 'Remove', onPressed: () => Store.removeProgress(it.id), icon: Icon(Icons.close, color: p.tokens.textMuted)),
             ),
+          const PluginFavoritesSection(),
         ]);
       },
     );
@@ -71,9 +74,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
         final favs = Store.favorites();
         return ListView(padding: widget.padding, children: [
           const Heading('Favorites'),
-          if (favs.isEmpty)
+          if (favs.isEmpty && Store.pluginFavorites().isEmpty)
             const PekCard(title: 'No favorites yet', subtitle: 'Open a movie or show and tap \u2661 Favorite. It will show up here.')
-          else
+          else if (favs.isNotEmpty)
             FutureBuilder<(List<Movie>, List<Show>)>(
               future: _lib,
               builder: (context, snap) {
@@ -174,8 +177,8 @@ class UnknownPage extends StatelessWidget {
 
 // ====================================================================== Plugins
 
-/// Lists the installed plugins and removes them. A plugin's own screen is JavaScript that runs in the web UI's sandbox,
-/// so opening one goes through the classic UI.
+/// Lists the installed plugins, opens the ones that have a Python screen for this UI (plugin.json "flutter") and
+/// removes them. A plugin that only has a ui.js (JavaScript for the web UI's sandbox) opens through the classic UI.
 class PluginsPage extends StatefulWidget {
   const PluginsPage({super.key, required this.padding});
   final EdgeInsets padding;
@@ -203,6 +206,7 @@ class _PluginsPageState extends State<PluginsPage> {
     );
     if (yes != true) return;
     final ok = await Api.uninstallPlugin(pl.folder).catchError((_) => false);
+    if (ok) unawaited(PluginHost.close(pl.folder));
     if (!mounted) return;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(ok ? 'Removed ${pl.name}' : 'Could not remove ${pl.name}')));
     setState(() => _list = Api.plugins());
@@ -222,7 +226,13 @@ class _PluginsPageState extends State<PluginsPage> {
               ListRow(
                 title: pl.version.isEmpty ? pl.name : '${pl.name}  v${pl.version}',
                 subtitle: pl.description,
-                trailing: PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (pl.flutterScreen) ...[
+                    PekButton(compact: true, primary: true, label: 'Open', onTap: () => openPluginScreen(context, pluginId: pl.folder, title: pl.navTab.isEmpty ? pl.name : pl.navTab)),
+                    SizedBox(width: 0.5 * rem),
+                  ],
+                  PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
+                ]),
               ),
             SizedBox(height: rem),
             PekButton(label: 'Open plugins & store (classic UI)', primary: true, onTap: PekPlayer.classicUi),
