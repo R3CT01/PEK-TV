@@ -498,19 +498,25 @@ def _where():
 
 
 def _from_chaquopy_importer():
-    """True when Chaquopy's own importer is on the call stack. It extracts native modules (stdlib-armeabi-v7a and
-    friends) from the APK the first time something imports them, and that is a file write the plugin did not ask for.
-    The check is by module identity, so a plugin cannot fake it by naming a file importer.py."""
-    imp = sys.modules.get("importer")
-    d = getattr(imp, "__dict__", None)
-    if d is None:
-        return False
+    """True when Chaquopy's own importer is on the call stack. The first time something imports a native module it
+    extracts it from the APK (stdlib-armeabi-v7a and friends): creating folders, writing temp files, renaming and
+    chmod-ing them. None of that is the plugin's doing, so the guard lets it through.
+
+    A frame counts only if ALL of these hold, so a plugin cannot fake it: the file is called importer.py, the module
+    name is Chaquopy's (importer or chaquopy.importer, whichever this Chaquopy version uses), and the file is NOT
+    inside the plugin's own folder (a plugin cannot change its code's file name without compile/exec, which the
+    static scan refuses)."""
     try:
-        f = sys._getframe(2)
+        folder = _state.roots[-1] if getattr(_state, "roots", None) else None
+        f = sys._getframe(1)
         n = 0
-        while f is not None and n < 40:
-            if f.f_globals is d:
-                return True
+        while f is not None and n < 80:
+            code_file = f.f_code.co_filename or ""
+            if os.path.basename(code_file) == "importer.py" \
+                    and f.f_globals.get("__name__") in ("importer", "chaquopy.importer"):
+                real = os.path.realpath(code_file)
+                if not folder or not (real == folder or real.startswith(folder + os.sep)):
+                    return True
             f = f.f_back
             n += 1
     except Exception:  # noqa: BLE001
@@ -518,7 +524,7 @@ def _from_chaquopy_importer():
     return False
 
 
-def _hook(event, args):
+def _check(event, args):
     if not getattr(_state, "active", False) or getattr(_state, "privileged", 0):
         return
     if event.startswith(_DENY_PREFIXES):
@@ -537,8 +543,6 @@ def _hook(event, args):
             raise PermissionError("blocked by PEK plugin guard: unreadable path")
         writes = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) \
             or (isinstance(mode, str) and any(c in mode for c in "wax+"))
-        if writes and _from_chaquopy_importer():
-            return
         if writes:
             raise PermissionError("blocked by PEK plugin guard: file writes to '%s' from %s (use pek_host.write_json)"
                                   % (os.path.basename(path), _where()))
@@ -553,6 +557,17 @@ def _hook(event, args):
                 return
             if not _under(path, _state.roots):
                 raise PermissionError("blocked by PEK plugin guard: listing outside the plugin folder")
+
+
+def _hook(event, args):
+    """Runs _check on every audit event. Only when _check would block something do we look at the call stack (that
+    walk is too slow for every event), and Chaquopy's own module extraction is let through."""
+    try:
+        _check(event, args)
+    except PermissionError:
+        if _from_chaquopy_importer():
+            return
+        raise
 
 
 def _install_hook():

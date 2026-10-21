@@ -61,7 +61,17 @@ class _LibraryPageState extends State<LibraryPage> {
     }
   }
 
-  Future<List<Object>> _load() => Activity.track<List<Object>>('lib:${widget.tab}', 'Loading your library\u2026', () async => widget.tab == 'movies' ? await Api.movies() : await Api.shows());
+  /// One read of the list. A failure is tried once more after a moment: the server can be busy right after it starts or
+  /// while a scan is saving, and a second try usually gets through.
+  Future<List<Object>> _load() => Activity.track<List<Object>>('lib:${widget.tab}', 'Loading your library\u2026', () async {
+        Future<List<Object>> once() async => widget.tab == 'movies' ? await Api.movies() : await Api.shows();
+        try {
+          return await once();
+        } catch (_) {
+          await Future<void>.delayed(const Duration(milliseconds: 1500));
+          return await once();
+        }
+      });
 
   @override
   void dispose() {
@@ -156,9 +166,21 @@ class _LibraryPageState extends State<LibraryPage> {
               );
             }
             if (snap.hasError) {
+              // The real reason is shown (it used to say "did not respond" for every kind of failure), with a way to retry.
+              var why = '${snap.error}'.replaceFirst('Exception: ', '');
+              if (why.length > 160) why = '${why.substring(0, 160)}\u2026';
               return SliverPadding(
                 padding: widget.padding.copyWith(top: 0),
-                sliver: const SliverToBoxAdapter(child: PekCard(title: 'Could not load library', subtitle: 'The backend did not respond. Is the server running?')),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      PekCard(title: 'Could not load ${widget.tab == 'movies' ? 'movies' : 'shows'}', subtitle: why),
+                      SizedBox(height: 1.25 * rem),
+                      PekButton(label: 'Try again', primary: true, onTap: () => setState(() => _data = _load())),
+                    ],
+                  ),
+                ),
               );
             }
             final items = snap.data ?? const <Object>[];
