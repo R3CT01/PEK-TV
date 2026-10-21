@@ -88,15 +88,37 @@ class Api {
   static final _Pool _pool = _Pool(4);
 
   /// Poster + synopsis for a movie. Cached, and at most 4 lookups run at once so a big grid does not flood the box.
-  static Future<Details> movieDetails(String id) => _details.putIfAbsent('m:$id', () => _pool.run(() async {
+  static Future<Details> movieDetails(String id) => _cachedDetails('m:$id', () async {
         final j = await _get('/api/movie-details?id=${Uri.encodeQueryComponent(id)}');
         return Details(overview: (j['overview'] ?? '') as String, poster: abs((j['poster'] ?? '') as String));
-      }));
+      });
 
-  static Future<Details> showDetails(String title) => _details.putIfAbsent('s:$title', () => _pool.run(() async {
+  static Future<Details> showDetails(String title) => _cachedDetails('s:$title', () async {
         final j = await _get('/api/show-details?title=${Uri.encodeQueryComponent(title)}');
         return Details(overview: (j['overview'] ?? '') as String, poster: abs((j['poster'] ?? '') as String));
+      });
+
+  /// Lookups that failed or came back without a poster (e.g. while offline): [forgetFailedDetails] lets them run again.
+  static final Set<String> _noArt = {};
+
+  static Future<Details> _cachedDetails(String key, Future<Details> Function() load) => _details.putIfAbsent(key, () => _pool.run(() async {
+        try {
+          final d = await load();
+          if (d.poster.isEmpty) _noArt.add(key);
+          return d;
+        } catch (_) {
+          _noArt.add(key);
+          rethrow;
+        }
       }));
+
+  /// Back online: forget the lookups that had no result so the next screen build asks again.
+  static void forgetFailedDetails() {
+    for (final k in _noArt) {
+      _details.remove(k);
+    }
+    _noArt.clear();
+  }
 
   // ---------------------------------------------------------------- Duplicates / Unknown / Sources / Plugins
 

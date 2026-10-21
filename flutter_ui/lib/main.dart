@@ -6,6 +6,7 @@ import 'src/profile_pages.dart';
 import 'src/profiles.dart';
 import 'src/skins.dart';
 import 'src/mpv.dart';
+import 'src/net.dart';
 import 'src/shell.dart';
 import 'src/store.dart';
 import 'src/theme.dart';
@@ -15,6 +16,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Store.init();
   Profiles.load();
+  Net.start(); // the green / red dot and offline mode (net.js)
   // The same phone / TV test the web UI used for html.pek-tv; Settings > TV mode (tv_mode.dart) can force the look on or off.
   final phone = await PekPlayer.isPhone();
   runApp(PekApp(isPhone: phone));
@@ -34,9 +36,10 @@ class PekApp extends StatelessWidget {
         return MaterialApp(
           title: 'PEK TV',
           debugShowCheckedModeBanner: false,
+          scaffoldMessengerKey: Net.messenger,
           theme: pekTheme(tokens),
           // Tokens, TV mode and the rem size are available to every route (dialogs and the player included).
-          builder: (context, child) => PekRoot(isPhone: isPhone, tokens: tokens, child: child ?? const SizedBox.shrink()),
+          builder: (context, child) => PekRoot(isPhone: isPhone, tokens: tokens, child: Stack(fit: StackFit.expand, children: [child ?? const SizedBox.shrink(), const NetDot()])),
           home: const _Boot(),
         );
       },

@@ -1,8 +1,7 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'clock.dart';
 import 'common.dart';
 import 'detail.dart';
 import 'plugin_ui.dart';
@@ -30,8 +29,6 @@ typedef _Node = ({Widget w, int span, bool full});
 class _DashboardPageState extends State<DashboardPage> {
   late Future<(List<Movie>, List<Show>)> _lib = _load();
   Future<List<PluginInfo>> _plugins = _loadPlugins();
-  Timer? _tick;
-  DateTime _now = DateTime.now();
   bool _edit = false;
 
   Future<(List<Movie>, List<Show>)> _load() async {
@@ -41,31 +38,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   static Future<List<PluginInfo>> _loadPlugins() => Api.plugins().catchError((_) => <PluginInfo>[]);
-
-  @override
-  void initState() {
-    super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (mounted) setState(() => _now = DateTime.now());
-    });
-  }
-
-  @override
-  void dispose() {
-    _tick?.cancel();
-    super.dispose();
-  }
-
-  String get _time {
-    final h = _now.hour % 12 == 0 ? 12 : _now.hour % 12;
-    return '$h:${_now.minute.toString().padLeft(2, '0')} ${_now.hour < 12 ? 'AM' : 'PM'}';
-  }
-
-  String get _date {
-    const d = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    const m = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    return '${d[_now.weekday - 1]}, ${m[_now.month - 1]} ${_now.day}';
-  }
 
   // ---------------- saved layout (_dashMove / _dashResize / _dashRemove / _dashAdd / _dashReset) ----------------
 
@@ -208,7 +180,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final span = it.size == 'm' ? 2 : 1;
     switch (it.type) {
       case 'clock':
-        return (w: DashTile(big: _time, sub: _date, onLongPress: _startEdit), span: span, full: false);
+        return (w: ClockTile(onLongPress: _startEdit), span: span, full: false);
       case 'weather':
         return (w: WeatherTile(onLongPress: _startEdit), span: span, full: false);
       case 'plugin':
