@@ -332,32 +332,52 @@ class _WeatherSettingsScreenState extends State<WeatherSettingsScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _q.dispose();
     super.dispose();
   }
 
+  Timer? _debounce;
+  int _seq = 0; // numbers each search, so a slow answer for text that was already changed is dropped
+
+  /// Suggestions as you type: after a short pause, from 2 letters on (like the web UI's city box).
+  void _typed(String _) {
+    _debounce?.cancel();
+    if (_q.text.trim().length < 2) {
+      _seq++;
+      setState(() {
+        _hits = const [];
+        _note = '';
+        _busy = false;
+      });
+      return;
+    }
+    _debounce = Timer(const Duration(milliseconds: 300), _find);
+  }
+
   Future<void> _find() async {
+    _debounce?.cancel();
     final q = _q.text.trim();
-    if (q.length < 2 || _busy) return;
+    if (q.length < 2) return;
+    final seq = ++_seq;
     setState(() {
       _busy = true;
-      _note = 'Searching\u2026';
+      if (_hits.isEmpty) _note = 'Searching\u2026'; // with suggestions on screen they just update, no flicker
     });
     try {
       final r = await Weather.search(q);
-      if (!mounted) return;
+      if (!mounted || seq != _seq) return;
       setState(() {
         _busy = false;
         _hits = r;
         _note = r.isEmpty ? 'No city found. Try another spelling.' : '';
       });
     } catch (_) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _note = 'Could not reach the weather service.';
-        });
-      }
+      if (!mounted || seq != _seq) return;
+      setState(() {
+        _busy = false;
+        _note = 'Could not reach the weather service.';
+      });
     }
   }
 
@@ -373,8 +393,8 @@ class _WeatherSettingsScreenState extends State<WeatherSettingsScreen> {
           title: 'City',
           hint: city == null ? 'No city chosen yet.' : 'Now showing: ${city.label}',
           children: [
-            PekField(label: 'Search for a city', controller: _q, onSubmitted: _find, autofocus: true),
-            Align(alignment: Alignment.centerLeft, child: PekButton(label: _busy ? 'Searching\u2026' : 'Search', primary: true, onTap: _busy ? null : _find)),
+            PekField(label: 'Search for a city', controller: _q, onChanged: _typed, onSubmitted: _find, autofocus: true),
+            Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Search', primary: true, onTap: _find)),
             if (_note.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.5 * p.rem), child: Text(_note, style: TextStyle(color: t.textMuted))),
             for (final h in _hits)
               ListRow(

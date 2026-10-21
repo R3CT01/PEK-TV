@@ -4,7 +4,7 @@ import 'tokens.dart';
 
 /// A text box in the app's look (the web UI's `ui.textInput`).
 class PekField extends StatelessWidget {
-  const PekField({super.key, required this.label, required this.controller, this.hint, this.obscure = false, this.onSubmitted, this.autofocus = false, this.keyboardType});
+  const PekField({super.key, required this.label, required this.controller, this.hint, this.obscure = false, this.onSubmitted, this.autofocus = false, this.keyboardType, this.onChanged});
   final String label;
   final TextEditingController controller;
   final String? hint;
@@ -12,6 +12,7 @@ class PekField extends StatelessWidget {
   final VoidCallback? onSubmitted;
   final bool autofocus;
   final TextInputType? keyboardType;
+  final ValueChanged<String>? onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -27,6 +28,7 @@ class PekField extends StatelessWidget {
         autocorrect: false,
         enableSuggestions: false,
         keyboardType: keyboardType,
+        onChanged: onChanged,
         onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
         style: TextStyle(color: t.text),
         decoration: InputDecoration(
