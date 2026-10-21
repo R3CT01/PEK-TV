@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
+import 'activity.dart';
 import 'common.dart';
 import 'fields.dart';
 import 'plugin_host.dart';
@@ -18,6 +19,7 @@ import 'widgets.dart';
 
 /// Opens a plugin's screen on top of the current one (a phone, or a TV from a place that is not the sidebar).
 Future<void> openPluginScreen(BuildContext context, {required String pluginId, required String title, Map<String, dynamic>? launch}) {
+  Activity.note('$title started', detail: true);
   return Navigator.push<void>(
     context,
     MaterialPageRoute<void>(

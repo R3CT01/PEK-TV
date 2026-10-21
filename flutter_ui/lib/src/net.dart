@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'activity.dart';
 import 'api.dart';
 import 'cloud.dart';
 import 'store.dart';
@@ -74,6 +75,7 @@ class Net {
     final changed = known && v != isOnline;
     status.value = v;
     if (!changed) return;
+    Activity.note(v ? 'Back online' : 'You are offline');
     messenger.currentState
       ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(v ? 'Back online' : 'Offline mode: your local library only')));

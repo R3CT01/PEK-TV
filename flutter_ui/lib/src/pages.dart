@@ -360,6 +360,7 @@ class _SettingsPageState extends State<SettingsPage> {
       const SubtitleSection(),
       const SkipSection(),
       const PluginPostersSection(),
+      const ActivitySection(),
       const MusicOnlineSection(),
       const VideoOutputSection(),
       const AudioOutputSection(),

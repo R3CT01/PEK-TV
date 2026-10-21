@@ -5,6 +5,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'activity.dart';
+
 import 'api.dart';
 import 'plugin_host.dart';
 import 'store.dart';
@@ -258,7 +260,12 @@ class PluginInstaller {
   static const _sourcesKey = 'pek_plugin_sources';
 
   /// POST /api/plugins/install (a dry run first, to learn whether it is allowed and whether it replaces one).
-  static Future<InstallResult> send(PreparedPlugin p, {required bool dry}) async {
+  static Future<InstallResult> send(PreparedPlugin p, {required bool dry}) {
+    if (dry) return _send(p, dry: true);
+    return Activity.track('install', 'Installing ${p.name}\u2026', () => _send(p, dry: false), result: (r) => r.ok ? 'Installed ${p.name}' : 'Plugin install failed', failText: 'Plugin install failed');
+  }
+
+  static Future<InstallResult> _send(PreparedPlugin p, {required bool dry}) async {
     final boundary = '----pekstore${DateTime.now().microsecondsSinceEpoch}';
     final body = BytesBuilder();
     void write(String s) => body.add(utf8.encode(s));

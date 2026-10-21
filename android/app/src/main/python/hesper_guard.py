@@ -482,6 +482,21 @@ def _under(path, roots):
     return False
 
 
+def _where():
+    """The last few places in the code that led to a blocked action ("file.py:123 func"), so the message says WHAT tried it."""
+    out = []
+    try:
+        f = sys._getframe(2)
+        while f is not None and len(out) < 4:
+            name = os.path.basename(f.f_code.co_filename)
+            if name != "hesper_guard.py":
+                out.append("%s:%d %s" % (name, f.f_lineno, f.f_code.co_name))
+            f = f.f_back
+    except Exception:  # noqa: BLE001
+        pass
+    return " < ".join(out) or "unknown"
+
+
 def _hook(event, args):
     if not getattr(_state, "active", False) or getattr(_state, "privileged", 0):
         return
@@ -502,7 +517,8 @@ def _hook(event, args):
         writes = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) \
             or (isinstance(mode, str) and any(c in mode for c in "wax+"))
         if writes:
-            raise PermissionError("blocked by PEK plugin guard: file writes (use pek_host.write_json)")
+            raise PermissionError("blocked by PEK plugin guard: file writes to '%s' from %s (use pek_host.write_json)"
+                                  % (os.path.basename(path), _where()))
         if not _under(path, _state.roots):
             raise PermissionError("blocked by PEK plugin guard: reading outside the plugin folder")
     elif event in ("os.listdir", "os.scandir", "glob.glob"):

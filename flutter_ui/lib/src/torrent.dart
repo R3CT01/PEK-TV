@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'activity.dart';
+
 import 'api.dart';
 import 'common.dart';
 import 'fields.dart';
@@ -161,6 +163,8 @@ class TorrentTitle {
 Future<void> playTorrent(BuildContext context, {required Progress track, double startSec = 0}) async {
   final t = track.torrent;
   if (t == null) return;
+  final label = track.title.length > 40 ? track.title.substring(0, 40) : track.title;
+  Activity.note('Starting stream${label.isEmpty ? '' : ': $label'}\u2026');
   await Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => TorrentLoadingScreen(track: track, startSec: startSec)));
 }
 

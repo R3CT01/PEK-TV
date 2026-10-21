@@ -5,6 +5,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'activity.dart';
+
 import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
@@ -322,8 +324,10 @@ class Cloud {
     final running = _inflight;
     if (running != null) return running;
     if (!linked) return Future.value(const CloudResult(ok: false, error: 'not_linked'));
+    Activity.begin('sync', 'Syncing watch history\u2026');
     final f = _syncInner(light).catchError((Object _) => const CloudResult(ok: false, error: 'offline')).then((res) async {
       _inflight = null;
+      Activity.end('sync', res.ok ? 'Sync complete' : 'Sync failed');
       if (res.error == 'session_expired') await _unlink(); // signed out elsewhere or expired: ask to sign in again
       return res;
     });

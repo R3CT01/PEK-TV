@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'activity.dart';
 import 'api.dart';
 import 'cloud.dart';
 import 'mpv.dart';
@@ -69,6 +70,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    Activity.playerEnter();
     MusicController.instance.suspend();
     _player.reset();
     _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
@@ -88,6 +90,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    Activity.playerLeave();
     if (!_leaving) _record(notify: true); // when the next episode took over, this one was recorded as finished already
     _save?.cancel();
     _hide?.cancel();

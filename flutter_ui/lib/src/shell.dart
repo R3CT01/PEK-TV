@@ -100,10 +100,14 @@ class _AppShellState extends State<AppShell> {
 
   /// Plugins that have a Python screen: one menu entry each. Reloaded when the store installs or removes one.
   void _loadPluginScreens() {
+    Activity.begin('plugins', 'Loading plugins\u2026', detail: true);
     Api.plugins().then((l) {
+      Activity.end('plugins', 'Loaded ${l.length} plugins');
       PluginHost.streamers = [for (final e in l) if (e.flutterScreen && e.streamer) {'id': e.folder, 'name': e.name}];
       if (mounted) setState(() => _pluginScreens = l.where((e) => e.flutterScreen).toList());
-    }).catchError((_) {});
+    }).catchError((_) {
+      Activity.end('plugins');
+    });
   }
 
   Timer? _weatherTimer;

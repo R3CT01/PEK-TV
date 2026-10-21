@@ -5,19 +5,26 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import 'activity.dart' show Busy;
+
 /// Talks to the existing C++ server (backend/server.cpp) on the loopback port. Nothing in the backend changes.
 class Api {
   static const base = 'http://127.0.0.1:8080';
   static final http.Client _client = http.Client();
 
-  static Future<dynamic> _get(String path) async {
+  /// A slow request shows the loading ring (Busy), like busy.js did for fetch().
+  static Future<dynamic> _get(String path) => Busy.run(path, () => _getRaw(path));
+
+  static Future<dynamic> _getRaw(String path) async {
     final r = await _client.get(Uri.parse('$base$path')).timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode} for $path');
     return jsonDecode(utf8.decode(r.bodyBytes));
   }
 
   /// POST a form and return the JSON object. The backend answers `{ok:false, error}` on failure; that text is what the person sees.
-  static Future<Map<String, dynamic>> postForm(String path, Map<String, String> body) async {
+  static Future<Map<String, dynamic>> postForm(String path, Map<String, String> body) => Busy.run(path, () => _postFormRaw(path, body));
+
+  static Future<Map<String, dynamic>> _postFormRaw(String path, Map<String, String> body) async {
     http.Response r;
     try {
       r = await _client.post(Uri.parse('$base$path'), headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: body).timeout(const Duration(seconds: 30));
@@ -48,7 +55,9 @@ class Api {
   }
 
   /// POST /api/rescan. Returns null when the scan started, or the seconds to wait when the server said "too soon" (429).
-  static Future<int?> rescan() async {
+  static Future<int?> rescan() => Busy.run('/api/rescan', _rescanRaw);
+
+  static Future<int?> _rescanRaw() async {
     final r = await _client.post(Uri.parse('$base/api/rescan')).timeout(const Duration(seconds: 20));
     if (r.statusCode == 429) {
       try {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'activity.dart';
 import 'api.dart';
 import 'common.dart';
 import 'mpv.dart';
@@ -246,6 +247,38 @@ class SkipSection extends StatelessWidget {
         children: [
           ToggleRow(title: 'Skip automatically', subtitle: Store.skipAuto ? 'On' : 'Off', on: Store.skipAuto, onTap: () => Store.setSkipAuto(!Store.skipAuto)),
           ToggleRow(title: 'Look up intro/recap online', subtitle: Store.skipOnline ? 'On' : 'Off', on: Store.skipOnline, onTap: () => Store.setSkipOnline(!Store.skipOnline)),
+        ],
+      ),
+    );
+  }
+}
+
+// ====================================================================== Settings > Background activity
+
+/// The corner status line (activity.dart): Off / Basic / Detailed (Detailed adds plugin loading and similar chatter).
+class ActivitySection extends StatelessWidget {
+  const ActivitySection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.pek.tokens;
+    return ValueListenableBuilder<int>(
+      valueListenable: Store.changed,
+      builder: (context, _, __) => Section(
+        title: 'Background activity',
+        hint: 'A small line in the corner says what PEK TV is doing quietly (scanning, syncing, loading). It never takes a tap and hides while a video plays.',
+        children: [
+          for (final (id, name, desc) in const [
+            ('off', 'Off', 'Show nothing'),
+            ('basic', 'Basic', 'Scans, sync, library loading, installs'),
+            ('detailed', 'Detailed', 'Also plugins loading and starting'),
+          ])
+            ListRow(
+              title: name,
+              subtitle: desc,
+              onTap: () => Activity.setLevel(id),
+              trailing: Icon(Activity.level == id ? Icons.check_circle : Icons.circle_outlined, color: Activity.level == id ? t.accent : t.textMuted),
+            ),
         ],
       ),
     );

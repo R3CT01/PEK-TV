@@ -65,6 +65,8 @@ def _guarded(sess, fn, limit):
             box["value"] = fn()
         except PermissionError as e:
             box["error"] = "permission denied: %s" % e
+            log("'%s' blocked: %s" % (sess.id, e))
+            traceback.print_exc()
         except g.PluginTimeout:
             box["error"] = "plugin exceeded its %.0f second time limit" % limit
         except BaseException as e:  # noqa: BLE001 - a plugin must never take the host down

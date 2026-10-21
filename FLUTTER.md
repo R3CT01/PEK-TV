@@ -86,6 +86,13 @@ Watch History page, plugins and PEK Cloud agree. A change is pushed to the worke
 `{deleted}` markers, which `cloud/worker.js` already stores for `m|` and `e|` keys, so the worker needed no change. Plugins with the `watched`
 permission can check / set movies and episodes (see `FLUTTER_PLUGINS.md`). Plugin movie posters also get the tick and press-and-hold toggle automatically (Settings > Plugin posters).
 
+## Background activity line and loading ring (ports of `www/activity.js` and `www/busy.js`)
+`activity.dart`: a small, non-focusable status line bottom right ("Scanning your media folders...", "Syncing watch history...", "Loading your library...",
+"Searching releases: ...", "Installing ...", "Starting stream: ..."), hidden while a video plays or the keyboard is open, and lifted above the phone's bottom bar
+and the mini player. Settings > Background activity: Off / Basic / Detailed (Detailed adds plugin loading / starting). `Activity.begin / update / end / note / track`.
+The ring (`Busy`, `BusyRing`) appears over the screen when a request to the PEK TV server takes more than 0.5 s (poll-style lookups are ignored, same list as busy.js).
+Not shown: plugin network requests (the Python side makes them, so the app can't see them).
+
 ## Plugin screens (Python)
 Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `FLUTTER_PLUGINS.md`). TMDb Discover is fully ported (inline trailer, streaming apps, watched, Play with a plugin, synced favorites):
 Plugins > Open, or its own entry in the menu / More page.

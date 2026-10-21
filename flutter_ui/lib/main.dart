@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'src/activity.dart';
 import 'src/api.dart';
 import 'src/cloud.dart';
 import 'src/profile_pages.dart';
@@ -39,7 +40,7 @@ class PekApp extends StatelessWidget {
           scaffoldMessengerKey: Net.messenger,
           theme: pekTheme(tokens),
           // Tokens, TV mode and the rem size are available to every route (dialogs and the player included).
-          builder: (context, child) => PekRoot(isPhone: isPhone, tokens: tokens, child: Stack(fit: StackFit.expand, children: [child ?? const SizedBox.shrink(), const NetDot()])),
+          builder: (context, child) => PekRoot(isPhone: isPhone, tokens: tokens, child: Stack(fit: StackFit.expand, children: [child ?? const SizedBox.shrink(), const NetDot(), const ActivityOverlay(), const BusyRing()])),
           home: const _Boot(),
         );
       },

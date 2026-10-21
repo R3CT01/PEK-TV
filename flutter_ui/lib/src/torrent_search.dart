@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'activity.dart';
+
 import 'api.dart';
 import 'common.dart';
 import 'fields.dart';
@@ -345,7 +347,18 @@ class TorrentSearch {
   }
 
   /// Best first. [errors] lists the sites that failed.
-  static Future<({List<TorrentResult> results, List<String> errors})> search(String text) async {
+  static Future<({List<TorrentResult> results, List<String> errors})> search(String text) {
+    final name = text.length > 40 ? text.substring(0, 40) : text;
+    return Activity.track(
+      'search',
+      'Searching releases${name.isEmpty ? '' : ': $name'}\u2026',
+      () => _searchInner(text),
+      result: (r) => r.results.isEmpty ? 'No releases found' : '${r.results.length} releases found',
+      failText: 'Release search failed',
+    );
+  }
+
+  static Future<({List<TorrentResult> results, List<String> errors})> _searchInner(String text) async {
     final q = _parseQuery(text);
     final words = _words(q);
     final jobs = <Future<List<_Raw>>>[for (final s in sites) _searchSite(s, words), if (torznabUrl.isNotEmpty) _searchTorznab(words)];

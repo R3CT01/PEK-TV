@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'activity.dart';
 import 'api.dart';
 import 'detail.dart';
 import 'common.dart';
@@ -48,6 +49,11 @@ class _LibraryPageState extends State<LibraryPage> {
     final was = _scanning;
     if (now != was) {
       setState(() => _scanning = now);
+      if (now) {
+        Activity.begin('scan', 'Scanning your media folders\u2026');
+      } else {
+        Activity.end('scan', 'Scan finished');
+      }
       if (was && !now && !_refreshing) {
         Api.forgetLibrary();
         setState(() => _data = _load());
@@ -55,10 +61,11 @@ class _LibraryPageState extends State<LibraryPage> {
     }
   }
 
-  Future<List<Object>> _load() async => widget.tab == 'movies' ? await Api.movies() : await Api.shows();
+  Future<List<Object>> _load() => Activity.track<List<Object>>('lib:${widget.tab}', 'Loading your library\u2026', () async => widget.tab == 'movies' ? await Api.movies() : await Api.shows());
 
   @override
   void dispose() {
+    if (_scanning) Activity.end('scan');
     _timer?.cancel();
     _watch?.cancel();
     super.dispose();
@@ -79,6 +86,7 @@ class _LibraryPageState extends State<LibraryPage> {
     if (_refreshing || _cooldown > 0) return;
     _startCooldown(10);
     setState(() => _refreshing = true);
+    Activity.begin('scan', 'Scanning your media folders\u2026');
     try {
       final wait = await Api.rescan();
       if (wait != null) {
@@ -90,6 +98,7 @@ class _LibraryPageState extends State<LibraryPage> {
         }
       }
     } catch (_) {}
+    Activity.end('scan', 'Scan finished');
     if (!mounted) return;
     Api.forgetLibrary();
     setState(() {
