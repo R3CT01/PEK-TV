@@ -139,11 +139,29 @@ progress -> the author's own `warning` screen (if `plugin.json` has one) -> the 
 UI) -> **Install / Update**. Nothing installs by itself, and uploading is still done on the store's website, not in the app.
 After an install or a removal the menu entries and the Plugins page reload (`PluginHost.changed`), any open screen of that
 plugin restarts, and the Plugins page shows where each plugin came from ("PEK Store official" / "approved · community store").
-A plugin with only a `ui.js` installs but says it opens in the classic UI; one with a `backend.py` reminds the person to restart
+A plugin with only a `ui.js` is **no longer accepted** anywhere (store, .zip, GitHub), and neither is any other `.js` / `.mjs` file: a plugin is Python only and needs a `screen.py` and a `"flutter"` entry in `plugin.json`, checked in the app and again by `backend/plugin_install.h`. The server also refuses to serve any `.js` under `/plugins/`, so the classic UI can no longer load a plugin's `ui.js` (including ones installed earlier and the bundled Weather / TMDb Discover ones). One with a `backend.py` reminds the person to restart
 PEK TV once.
 
-Not in the Flutter store yet: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`),
-installing from a GitHub link or a local .zip, and the cloud plugin backup the web UI triggers after an install.
+Not in the Flutter store yet: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`)
+and the cloud plugin backup the web UI triggers after an install.
+
+## Install from a .zip file or from GitHub
+Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.dart`) are the Flutter twins of
+`www/app_plugins.js` (zip picker) and `www/github_install.js`. Both end on the same install screen as the store
+(`PluginInstallPage`: server dry run -> the author's warning -> permissions -> Install), so nothing installs by itself.
+
+- **.zip**: PEK TV's own picker, on `POST /api/plugins/browse` + `/api/plugins/fetch` (works on TV boxes and network folders;
+  it starts at *This device* and your media sources). `plugin_zip.dart` unpacks it in memory with the web UI's limits
+  (2 MB per file, 8 MB total, 400 files, CRC checked, inflate stops at the limit; no ZIP64 / encrypted / split zips). It needs no
+  extra package (`dart:io` raw inflate). plugin.json at the top or inside one folder; a zip with `skin.json` is refused.
+- **GitHub**: type `owner/repo` or paste a link. `plugin_github.dart` asks `api.github.com` for the latest release (its .zip files
+  and its source), or the default branch's source if there is no release; you pick one when there are several. The download goes
+  through `POST /api/plugins/github-zip` (backend/github_install.h). A first-time warning is shown once; the switch is Settings >
+  *Plugins from GitHub* (same keys as the web UI, `PEK_ALLOW_GITHUB=0` still turns it off in the server). Source zips are
+  installed under the repository name so an update replaces the same plugin.
+- The Plugins page labels where each plugin came from ("unverified - from GitHub owner/repo", "third party - from a .zip file").
+- Still web-UI only: the system file picker, finding network devices from inside the zip picker (add the device as a media
+  source in Settings, then it shows up under the picker's start list), and installing a *skin* from a zip or GitHub.
 
 ## Files
 - `android/app/src/main/python/pek_ui.py` - what a screen imports (builders + host calls)
@@ -153,7 +171,8 @@ installing from a GitHub link or a local .zip, and the cloud plugin backup the w
 - `android/app/src/flutter/.../FlutterHostActivity.kt` - `pek/plugins` channel (`call`, `openUrl`)
 - `flutter_ui/lib/src/plugin_host.dart` - Dart client, host allow-list for pictures, TV Back hook
 - `flutter_ui/lib/src/plugin_ui.dart` - the renderer, effects, polling, "Saved from plugins"
-- `flutter_ui/lib/src/plugin_store.dart` / `plugin_store_ui.dart` - the plugin store: client, fingerprint, install upload; shelves, list and install screens
+- `flutter_ui/lib/src/plugin_store.dart` / `plugin_store_ui.dart` - the plugin store: client, fingerprint, install upload; shelves, list and the shared install screen
+- `flutter_ui/lib/src/plugin_zip.dart` / `plugin_github.dart` / `plugin_install_ui.dart` - install from a .zip file / from GitHub: zip reader + picker client, GitHub client, screens and the Settings switch
 - `flutter_ui/lib/src/shell.dart`, `pages.dart`, `store.dart`, `api.dart`, `cloud.dart` - menu / More entries, Plugins > Open, plugin favorites and their cloud sync
 - `flutter_ui/pubspec.yaml` - adds `webview_flutter` / `webview_flutter_android` (trailer player); run `flutter pub get`
 - `backend/plugin_install.h` - a zip may contain `screen.py` instead of `ui.js`

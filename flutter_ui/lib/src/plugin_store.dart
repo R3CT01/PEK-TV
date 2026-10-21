@@ -161,6 +161,18 @@ class PreparedPlugin {
     if (raw is! Map) throw const StoreException('plugin.json must be a JSON object.');
     String str(Object? v, int max) => v is String ? v.substring(0, math.min(v.length, max)) : '';
 
+    // Plugins are Python only: no JavaScript of any kind, and a screen.py for this UI.
+    final js = files.where((f) => RegExp(r'\.m?js$', caseSensitive: false).hasMatch(f.path)).firstOrNull;
+    if (js != null) {
+      throw StoreException('This plugin includes JavaScript (${js.path}). PEK TV only installs plugins written in Python, so plugins with .js files are no longer accepted.');
+    }
+    if (!files.any((f) => f.path == 'screen.py')) {
+      throw const StoreException('This plugin has no screen.py. PEK TV only installs plugins with a Python screen.');
+    }
+    if (raw['flutter'] is! Map) {
+      throw const StoreException('plugin.json needs a "flutter" entry, for example "flutter": {"screen": "screen.py"}.');
+    }
+
     final perms = raw['permissions'] is Map ? raw['permissions'] as Map : const {};
     final net = <String>[];
     if (perms['network'] is List) {
@@ -204,9 +216,13 @@ class PreparedPlugin {
   }
 
   /// What the confirm screen lists, in plain words (the same sentences as the web UI's install screen).
-  List<String> describe({required bool replaced, required String shelf}) {
+  List<String> describe({required bool replaced, required String shelf, List<String> notice = const []}) {
     final l = <String>[
-      shelf == 'official' ? 'From the PEK Store, Official shelf (published by the PEK owner).' : 'From the PEK Store, Community shelf: made by another person and approved by the owner.',
+      // shelf: 'official' / 'community' (the PEK Store), 'zip' (a file the person picked) or 'github' (notice has the details).
+      if (shelf == 'official') 'From the PEK Store, Official shelf (published by the PEK owner).',
+      if (shelf == 'community') 'From the PEK Store, Community shelf: made by another person and approved by the owner.',
+      if (shelf == 'zip') 'Unverified plugin from a .zip file you chose. PEK TV did not make, review or approve it; its developer is responsible for it.',
+      ...notice,
       [if (version.isNotEmpty) 'Version $version', if (author.isNotEmpty) 'by $author'].join(' \u00b7 '),
       description,
       network.isNotEmpty ? 'Can connect to: ${network.join(', ')}' : 'No network access',
@@ -221,7 +237,6 @@ class PreparedPlugin {
       if (perms.contains('live')) 'Can play live TV streams from web addresses in PEK TV\u2019s player. The stream\u2019s server sees your internet address.',
       if (stream) 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with $name\u201d button.',
       if (navTab.isNotEmpty) 'Adds a \u201c$navTab\u201d entry to PEK TV.',
-      if (!hasFlutterScreen && hasWebScreen) 'It only has a screen for the classic UI, so it opens there (Plugins > Open plugins in the classic UI), not in this app.',
       if (hasFlutterScreen) 'Its screen is Python code that runs in the same sandbox when you open it. It can only draw the screen and ask PEK TV for the things listed here.',
       if (hasBackend) 'Includes Python code that runs on this device after a restart. PEK TV only runs it if it declares its permissions and passes a safety scan, and then it can only reach the hosts listed above and its own data folder.',
       if (replaced) 'This replaces the version you already have (its saved data is kept).',
@@ -276,10 +291,11 @@ class PluginInstaller {
     return InstallResult(ok: j['ok'] == true, error: '${j['error'] ?? ''}', replaced: j['replaced'] == true);
   }
 
-  /// Remembers where a plugin came from ('official' / 'community' shelf), shown under its name on the Plugins page.
-  static Future<void> rememberSource(String id, String shelf) async {
+  /// Remembers where a plugin came from, shown under its name on the Plugins page: 'official' / 'community' (store shelf),
+  /// 'zip' (a picked file) or a GitHub map {type: 'github', owner, repo, tag}.
+  static Future<void> rememberSource(String id, Object source) async {
     final m = Store.jsonMap(_sourcesKey, scoped: false);
-    m[id] = shelf;
+    m[id] = source;
     await Store.setJsonMap(_sourcesKey, m, scoped: false);
   }
 
@@ -288,11 +304,16 @@ class PluginInstaller {
     if (m.remove(id) != null) await Store.setJsonMap(_sourcesKey, m, scoped: false);
   }
 
-  /// null when the plugin did not come from the store (built in, or installed another way).
+  /// The raw remembered source (a String or a Map), or null.
+  static Object? sourceOf(String id) => Store.jsonMap(_sourcesKey, scoped: false)[id];
+
+  /// null when nothing is known (built in, or installed in the classic UI).
   static String? sourceLabel(String id) {
-    final s = Store.jsonMap(_sourcesKey, scoped: false)[id];
+    final s = sourceOf(id);
     if (s == 'official') return 'PEK Store official';
     if (s == 'community') return 'approved \u00b7 community store';
+    if (s == 'zip') return 'third party \u00b7 from a .zip file';
+    if (s is Map && s['type'] == 'github') return 'unverified \u00b7 from GitHub ${s['owner']}/${s['repo']}';
     return null;
   }
 

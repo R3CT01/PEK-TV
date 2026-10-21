@@ -131,6 +131,16 @@ const PekPluginInstaller = (() => {
                 permissions: { network: [], storage: false, library: false, torrent: false, favorites: false, providers: false, plugins: false, live: false, watched: false, device: false },
                 provides: { stream: false },
                 ui: { navTab: '', reloadOnInstall: false, closeOnRemove: false } };
+        const js = files.find(f => /\.m?js$/i.test(f.path));
+        if (js) {
+            throw new Error('This plugin includes JavaScript (' + js.path + '). PEK TV only installs plugins written in Python, so plugins with .js files are no longer accepted.');
+        }
+        if (!files.some(f => f.path === 'screen.py')) {
+            throw new Error('This plugin has no screen.py. PEK TV only installs plugins with a Python screen.');
+        }
+        if (!raw.flutter || typeof raw.flutter !== 'object') {
+            throw new Error('plugin.json needs a "flutter" entry, for example "flutter": { "screen": "screen.py" }.');
+        }
         const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
         const id = slug(folder) || slug(m.name) || slug(fileName) || 'plugin';
 

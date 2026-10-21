@@ -84,7 +84,17 @@ class _ShelfPageState extends State<_ShelfPage> {
     await Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
-        builder: (_) => SubScreen(title: it.name, body: Builder(builder: (c) => _InstallPage(item: it, shelf: widget.shelf, padding: c.pek.pagePad))),
+        builder: (_) => SubScreen(
+          title: it.name,
+          body: Builder(
+            builder: (c) => PluginInstallPage(
+              title: it.name,
+              shelf: widget.shelf,
+              load: (progress) => PekStoreApi.download(it, onProgress: progress),
+              padding: c.pek.pagePad,
+            ),
+          ),
+        ),
       ),
     );
     if (mounted) setState(() => _data = _load()); // an install or update changes the "installed" marks
@@ -142,22 +152,31 @@ class _ShelfPageState extends State<_ShelfPage> {
 
 enum _Stage { downloading, error, warning, confirm, installing, done }
 
-class _InstallPage extends StatefulWidget {
-  const _InstallPage({required this.item, required this.shelf, required this.padding});
-  final StoreItem item;
-  final String shelf;
+/// The install screen shared by every way of getting a plugin: the PEK Store, a .zip file and a GitHub repository.
+/// [load] fetches and unpacks it (calling `progress(done, of)` when it knows how far along it is). Then PEK TV's server does a
+/// dry run (is it allowed, does it replace one?), the author's warning (if any) and the permissions screen come up, and
+/// only the person's tap installs it.
+///   shelf    'official' / 'community' (store), 'zip' or 'github': sets the first line of the permissions screen
+///   source   what to remember about where it came from (defaults to [shelf])
+///   notice   extra lines for the top of the permissions screen
+class PluginInstallPage extends StatefulWidget {
+  const PluginInstallPage({super.key, required this.title, required this.shelf, required this.load, required this.padding, this.source, this.notice});
+  final String title, shelf;
+  final Future<PreparedPlugin> Function(void Function(int, int) progress) load;
   final EdgeInsets padding;
+  final Object? source;
+  final List<String> Function(PreparedPlugin prep, bool replaced)? notice;
 
   @override
-  State<_InstallPage> createState() => _InstallPageState();
+  State<PluginInstallPage> createState() => _InstallPageState();
 }
 
-class _InstallPageState extends State<_InstallPage> {
+class _InstallPageState extends State<PluginInstallPage> {
   _Stage _stage = _Stage.downloading;
   String _error = '';
   PreparedPlugin? _prep;
   bool _replaced = false;
-  int _chunk = 0;
+  int _chunk = 0, _chunks = 0;
 
   @override
   void initState() {
@@ -171,10 +190,14 @@ class _InstallPageState extends State<_InstallPage> {
       _stage = _Stage.downloading;
       _error = '';
       _chunk = 0;
+      _chunks = 0;
     });
     try {
-      final prep = await PekStoreApi.download(widget.item, onProgress: (i, n) {
-        if (mounted) setState(() => _chunk = i);
+      final prep = await widget.load((i, n) {
+        if (mounted) setState(() {
+          _chunk = i;
+          _chunks = n;
+        });
       });
       final verdict = await PluginInstaller.send(prep, dry: true);
       if (!mounted) return;
@@ -217,7 +240,7 @@ class _InstallPageState extends State<_InstallPage> {
         });
         return;
       }
-      await PluginInstaller.rememberSource(prep.id, widget.shelf);
+      await PluginInstaller.rememberSource(prep.id, widget.source ?? widget.shelf);
       await PluginInstaller.changed(prep.id);
       if (mounted) setState(() => _stage = _Stage.done);
     } on StoreException catch (e) {
@@ -252,10 +275,10 @@ class _InstallPageState extends State<_InstallPage> {
     switch (_stage) {
       case _Stage.downloading:
         children.addAll([
-          Heading('Downloading ${widget.item.name}\u2026'),
-          Text(widget.item.chunks > 1 ? 'Part ${math.min(_chunk + 1, widget.item.chunks)} of ${widget.item.chunks}' : 'Please wait\u2026', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.95 * p.rem)),
+          Heading('Downloading ${widget.title}\u2026'),
+          Text(_chunks > 1 ? 'Part ${math.min(_chunk + 1, _chunks)} of $_chunks' : 'Please wait\u2026', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.95 * p.rem)),
           SizedBox(height: p.rem),
-          LinearProgressIndicator(value: widget.item.chunks > 0 ? _chunk / widget.item.chunks : null, color: p.tokens.accent, backgroundColor: p.tokens.surface),
+          LinearProgressIndicator(value: _chunks > 0 ? _chunk / _chunks : null, color: p.tokens.accent, backgroundColor: p.tokens.surface),
         ]);
       case _Stage.error:
         children.addAll([
@@ -281,7 +304,7 @@ class _InstallPageState extends State<_InstallPage> {
       case _Stage.confirm:
         children.addAll([
           Heading('${_replaced ? 'Update' : 'Install'} \u201c${prep!.name}\u201d?'),
-          _panel(context, prep.describe(replaced: _replaced, shelf: widget.shelf)),
+          _panel(context, prep.describe(replaced: _replaced, shelf: widget.shelf, notice: widget.notice?.call(prep, _replaced) ?? const [])),
           SizedBox(height: p.rem),
           Wrap(spacing: 0.6 * p.rem, runSpacing: 0.6 * p.rem, children: [
             PekButton(label: _replaced ? 'Update plugin' : 'Install plugin', primary: true, autofocus: true, onTap: _install),
@@ -301,7 +324,6 @@ class _InstallPageState extends State<_InstallPage> {
           _panel(context, [
             if (pr.hasFlutterScreen) 'It is ready: open it below${pr.navTab.isNotEmpty ? ', or from \u201c${pr.navTab}\u201d in the menu' : ''}.',
             if (pr.hasBackend) 'Close and reopen PEK TV once so the plugin\u2019s Python part starts.',
-            if (!pr.hasFlutterScreen && !pr.hasBackend) 'Installed. It has no screen for this app; use the classic UI to open it.',
           ]),
           SizedBox(height: p.rem),
           Wrap(spacing: 0.6 * p.rem, runSpacing: 0.6 * p.rem, children: [

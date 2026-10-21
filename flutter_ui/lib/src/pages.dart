@@ -10,6 +10,7 @@ import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
 import 'plugin_host.dart' show PluginHost;
+import 'plugin_install_ui.dart';
 import 'plugin_store.dart' show PluginInstaller;
 import 'plugin_store_ui.dart';
 import 'plugin_ui.dart';
@@ -216,7 +217,7 @@ class _PluginsPageState extends State<PluginsPage> {
       builder: (c) => AlertDialog(
         backgroundColor: p.tokens.glassStrong,
         title: Text('Remove \u201c${pl.name}\u201d?'),
-        content: const Text('Its files are deleted from this device. You can install it again from the plugin store.'),
+        content: const Text('Its files are deleted from this device. You can install it again later.'),
         actions: [
           TextButton(autofocus: true, onPressed: () => Navigator.pop(c, false), child: const Text('Keep')),
           TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Remove')),
@@ -239,12 +240,16 @@ class _PluginsPageState extends State<PluginsPage> {
     final rem = context.pek.rem;
     return ListView(padding: widget.padding, children: [
       const Heading('Plugins'),
-      Wrap(children: [PekButton(label: 'Browse the plugin store', primary: true, onTap: () => openPluginStore(context))]),
+      Wrap(spacing: 0.6 * rem, runSpacing: 0.6 * rem, children: [
+        PekButton(label: 'Browse the plugin store', primary: true, onTap: () => openPluginStore(context)),
+        PekButton(label: 'Install from .zip', onTap: () => openZipInstall(context)),
+        PekButton(label: 'Install from GitHub', onTap: () => openGithubInstall(context)),
+      ]),
       SizedBox(height: rem),
       Async<List<PluginInfo>>(
         future: _list,
         builder: (context, list) {
-          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Open the plugin store to find some.');
+          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Open the plugin store, or install one from a .zip file or GitHub.');
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final pl in list)
               ListRow(
@@ -344,6 +349,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
       const AccountSection(),
+      const GithubInstallSection(),
       const AppearanceSection(),
       const LayoutSection(),
       const TvModeSection(),

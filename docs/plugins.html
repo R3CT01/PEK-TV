@@ -72,7 +72,7 @@ def run():
     h.write_json("library.json", {"count": len(titles)})</code></pre>
 
 <h2 id="zip">Packaging and installing</h2>
-<p>In the app: <b>Settings &rarr; Plugins &rarr; Install plugin from .zip</b>, pick the file, read the permissions and confirm. Hold a plugin's row to remove it. The zip needs <code>plugin.json</code> and <code>ui.js</code>, at the top or inside one folder (the folder name becomes the plugin id: lowercase letters, digits, <code>-</code> and <code>_</code>). Installing again with the same id updates the plugin and keeps its <code>data/</code> folder.</p>
+<p>In the app: <b>Settings &rarr; Plugins &rarr; Install plugin from .zip</b>, pick the file, read the permissions and confirm. Hold a plugin's row to remove it. The zip needs <code>plugin.json</code> (with a <code>"flutter"</code> entry) and <code>screen.py</code> (plugins that only have a <code>ui.js</code> are no longer accepted), at the top or inside one folder (the folder name becomes the plugin id: lowercase letters, digits, <code>-</code> and <code>_</code>). Installing again with the same id updates the plugin and keeps its <code>data/</code> folder.</p>
 <ul>
 <li>Allowed files: <code>.js .json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf</code>, and <code>.py</code> for the backend.</li>
 <li>Limits: 200 files, 2 MB per file (200 KB per <code>.py</code>), 8 MB total, no hidden files, no <code>..</code> in paths.</li>
@@ -80,7 +80,7 @@ def run():
 </ul>
 <h3>Publish on GitHub</h3>
 <ol>
-<li>Put <code>plugin.json</code> and <code>ui.js</code> at the top of your zip, or inside one folder.</li>
+<li>Put <code>plugin.json</code> and <code>screen.py</code> at the top of your zip, or inside one folder.</li>
 <li>Make a <b>GitHub Release</b> and attach the zip (a <code>.zip</code> asset up to 8 MB). PEK TV installs the latest release.</li>
 <li>Keep the folder name or plugin name the same across versions so updates replace the old copy.</li>
 </ol>

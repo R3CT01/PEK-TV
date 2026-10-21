@@ -34,7 +34,9 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with PEK TV runs *
 
   `title` (max 60) and `button` (max 40) are optional and default to the text above. Shortcuts: `"warning": "one paragraph"` or `"warning": ["para 1", "para 2"]`.
 
-## UI (`ui.js`)
+## UI (`ui.js`, legacy: no longer installed or loaded)
+
+> Plugins are Python only now. The server refuses to serve any `.js` from a plugin folder and refuses to install a zip that contains one. Write the screen as `screen.py` instead (see `FLUTTER_PLUGINS.md`). The section below is kept only as history.
 
 Runs in a sandboxed iframe: no access to the page, PEK TV's API, cookies or storage.
 You get one global, `pek`:
@@ -86,10 +88,10 @@ In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, 
 shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
 with PEK TV (`weather` and `tmdb-discover`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
 
-The zip must contain `plugin.json` and `ui.js`, either at the top of the zip or inside one folder
+The zip must contain `plugin.json` (with a `"flutter": {"screen": "screen.py"}` entry) and `screen.py` (a plugin that only has a `ui.js` is no longer accepted), either at the top of the zip or inside one folder
 (the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:
 
-- allowed files: `.js .json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf`, and `.py` for the backend
+- allowed files: `.json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf`, and `.py` for the backend
 - a `backend.py` is not trusted: it only runs if `plugin.json` declares its permissions and the code passes the
   safety scan described under "Backend" above, and then it can only use the hosts it declared and its own `data/`
   folder. It starts the next time PEK TV starts, so restart PEK TV after installing one. If the scan refuses it,
@@ -182,7 +184,7 @@ Users can install a plugin straight from a public GitHub repository: **Settings 
 then type `owner/repo` (a pasted github.com link works too). PEK TV keeps no list of repositories, so there is
 nothing to submit anywhere. To make yours installable:
 
-1. Put `plugin.json` and `ui.js` at the top of your plugin's zip, or inside one folder (same rules as a .zip install).
+1. Put `plugin.json` and `screen.py` at the top of your plugin's zip, or inside one folder (same rules as a .zip install).
 2. Make a **GitHub Release** and attach the zip as a release file (an `.zip` asset up to 8 MB). PEK TV installs the
    *latest* release. With no .zip file attached it can offer the release's source code instead, but then the
    plugin files must be at the top of the repository.

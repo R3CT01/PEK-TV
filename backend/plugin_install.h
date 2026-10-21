@@ -7,7 +7,7 @@
 // UI does:
 //   - the plugin id is a short, safe folder name, and not a bundled one
 //   - every file path is relative, plain and stays inside the plugin folder
-//   - only plain file types are accepted: JavaScript, JSON, CSS, images, fonts, text, and
+//   - only plain file types are accepted: JSON, CSS, images, fonts, text, and
 //     Python (.py) for a plugin's optional backend. No .so, .dex, .html, .svg ...
 //     A third-party backend.py is not trusted: hesper_guard.py only runs it if plugin.json
 //     declares its permissions and it passes the guard's source scan, and then it can only
@@ -15,7 +15,9 @@
 //   - setting PEK_ALLOW_PLUGIN_BACKEND=0 refuses .py files altogether (for example for a
 //     store build that must not install code from files)
 //   - size and file-count limits
-//   - plugin.json and ui.js are required (screen.py instead, for a Flutter-UI-only plugin)
+//   - plugin.json and screen.py are required, and plugin.json must have a "flutter" entry. A plugin that only has
+//     a ui.js (a JavaScript screen for the classic UI) is no longer installed, and no .js / .mjs file of any kind is
+//     accepted in a plugin (server.cpp also refuses to serve .js from /plugins/).
 // Nothing is written until every check passes, and an update swaps the old
 // folder out only after the new one was written completely.
 // ============================================================
@@ -107,7 +109,7 @@ inline std::string extensionOf(const std::string& path) {
 
 inline bool allowedExtension(const std::string& ext) {
     static const std::set<std::string> ok = {
-        "js", "json", "css", "md", "txt",
+        "json", "css", "md", "txt",        // no "js": plugins are Python only
         "png", "jpg", "jpeg", "gif", "webp", "ico",
         "woff", "woff2", "ttf", "otf"
     };
@@ -148,7 +150,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
     if (files.empty()) return "the plugin has no files";
     if (files.size() > kMaxFiles) return "too many files (limit " + std::to_string(kMaxFiles) + ")";
     std::set<std::string> seen;
-    bool hasManifest = false, hasUi = false, hasSkin = false;
+    bool hasManifest = false, hasScreen = false, hasFlutterEntry = false, hasSkin = false;
     for (const auto& f : files) {
         std::string why = checkRelativePath(f.path);
         if (!why.empty()) return why;
@@ -158,6 +160,8 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
         if (totalBytes > kMaxTotalBytes) return "the plugin is too large (limit 8 MB in total)";
 
         const std::string ext = extensionOf(f.path);
+        if (ext == "js" || ext == "mjs")
+            return "plugins can't include JavaScript any more (" + f.path + "). PEK TV only installs plugins written in Python (screen.py)";
         if (!allowedExtension(ext)) {
             if (ext == "py")
                 return "this build of PEK TV doesn't install plugins that include Python code (" + f.path + ")";
@@ -174,15 +178,17 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             if (a >= f.data.size() || f.data[a] != '{') return "plugin.json is not a JSON object";
             if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
                 return std::string(reservedHost()) + " is reserved for PEK's official plugins";
+            hasFlutterEntry = lowerCopy(f.data).find("\"flutter\"") != std::string::npos;
         }
-        if (f.path == "ui.js" || f.path == "screen.py") hasUi = true;   // screen.py = the Flutter UI's Python screen
+        if (f.path == "screen.py") hasScreen = true;   // the Flutter UI's Python screen
         if (f.path == "skin.json") hasSkin = true;
     }
     // A skin is not a plugin (and a zip that is both is refused by both installers).
     if (hasSkin && !hasManifest) return "this is a skin, not a plugin. Install it from Settings -> Skins.";
     if (hasSkin) return "this zip has both plugin.json and skin.json, so it is not clearly a plugin or a skin";
     if (!hasManifest) return "plugin.json is missing";
-    if (!hasUi) return "ui.js is missing (or screen.py, for a plugin made for the Flutter UI)";
+    if (!hasScreen) return "screen.py is missing. PEK TV only installs plugins with a Python screen for the Flutter UI";
+    if (!hasFlutterEntry) return "plugin.json needs a \"flutter\" entry, for example \"flutter\": { \"screen\": \"screen.py\" }";
     return "";
 }
 

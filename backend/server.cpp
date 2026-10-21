@@ -305,6 +305,22 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     svr.set_pre_routing_handler([remoteOpen, token](const httplib::Request& req, httplib::Response& res) {
         const bool fromLoopback = isLoopbackAddr(req.remote_addr);
 
+        // Plugins are Python only now: no JavaScript is served out of a plugin folder, so the classic UI can't load a
+        // plugin's ui.js (or any other .js / .mjs under /plugins/), whatever the page asks for.
+        if (req.path.rfind("/plugins/", 0) == 0) {
+            std::string low = req.path;
+            for (auto& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            auto ends = [&low](const char* suffix) {
+                const std::string s(suffix);
+                return low.size() >= s.size() && low.compare(low.size() - s.size(), s.size(), s) == 0;
+            };
+            if (ends(".js") || ends(".mjs")) {
+                res.status = 404;
+                res.set_content("{\"error\": \"Plugins no longer run JavaScript\"}", "application/json");
+                return httplib::Server::HandlerResponse::Handled;
+            }
+        }
+
         if (!remoteOpen && !isLoopbackHostHeader(req.get_header_value("Host"))) {
             res.status = 403;
             res.set_content("{\"error\": \"Forbidden host\"}", "application/json");
@@ -352,7 +368,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     peektrailer::registerTrailerRoutes(svr);   // /api/trailer: trailers as a plain video stream (trailer.h)
     registerTorrentRoutes(svr);             // /api/torrent/* (start, status, stream, stop)
     registerMusicRoutes(svr, scanner, std::filesystem::path(plugins_dir).parent_path().string());   // /api/music/* (music.h)
-    // 1a. Serve plugin folders (ui.js / backend.js) at /plugins — registered
+    // 1a. Serve plugin folders (plugin.json, screen.py's data, images; never .js, see the pre-routing handler) at /plugins — registered
     //     before the catch-all below so it's matched directly, without
     //     needing to fail against www_dir first.
     svr.set_mount_point("/plugins", plugins_dir);
