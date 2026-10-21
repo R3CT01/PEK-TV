@@ -608,6 +608,20 @@ class MpvController(
                 " drops=" + drops + " delayed=" + m.getPropertyString("vo-delayed-frame-count") +
                 " lite=" + lite + (if (liteSuspended) "(subtitle)" else "") +
                 " hdr=" + hdrGamma + (if (hdrDirect) "(direct)" else "") + " matched=" + appliedFps)
+            // Audio plays but the direct-to-screen renderer (smooth mode / direct HDR) never produced a picture: some releases
+            // (10-bit HEVC and the like) cannot go that way on every chip. Go back to the normal renderer and stop using
+            // the direct paths, so the next video does not get stuck the same way.
+            if (useEmbed() && !buffering && !paused && !seeking && position > 4.0) {
+                val w = m.getPropertyString("width")
+                if (w == null || w == "0" || w == "false") {
+                    lite = false; hdrOut = false; hdrDirect = false; liteSuspended = false
+                    prefs.edit().putBoolean("lite", false).putBoolean("hdr_out", false).apply()
+                    applyRenderer(m)
+                    Toast.makeText(activity, "No picture from the direct renderer - switched to compatibility mode", Toast.LENGTH_LONG).show()
+                    ui.postDelayed(stutterCheck, 4_000L)
+                    return
+                }
+            }
             if (!buffering && !paused && !seeking) {
                 // 15 or more frames lost in 4 seconds of normal playback: the renderer cannot keep up.
                 if (lastDrops >= 0 && drops - lastDrops >= 15 && !lite) {

@@ -40,6 +40,7 @@ class ResumePage extends StatelessWidget {
           if (items.isEmpty) const PekCard(title: 'Nothing to resume', subtitle: 'Anything you stop partway through shows up here.'),
           for (final it in items)
             ListRow(
+              leading: it.image.startsWith('https://') ? _ResumeThumb(url: it.image) : null,
               title: it.title,
               subtitle: it.duration > 0 ? '${formatTime(it.position)} of ${formatTime(it.duration)}' : 'Stopped at ${formatTime(it.position)}',
               onTap: () => playMedia(context, it, startSec: it.position),
@@ -425,6 +426,27 @@ class _FolderPickerState extends State<FolderPicker> {
         if (!_loading && _dirs.isEmpty && _error == null) Text('No folders here.', style: TextStyle(color: p.tokens.textMuted)),
         for (final d in _dirs) ListRow(title: '${d['name']}', onTap: () => _go('${d['path']}')),
       ]),
+    );
+  }
+}
+
+
+/// The small picture at the left of a Resume Watching row (a stream started from a plugin brings its own artwork).
+class _ResumeThumb extends StatelessWidget {
+  const _ResumeThumb({required this.url});
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final w = 3.2 * p.rem;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: w,
+        height: w * 1.5,
+        child: Image.network(url, fit: BoxFit.cover, cacheWidth: 200, gaplessPlayback: true, errorBuilder: (_, __, ___) => ColoredBox(color: p.tokens.surface)),
+      ),
     );
   }
 }

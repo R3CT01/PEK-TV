@@ -344,7 +344,7 @@ class _PluginViewState extends State<PluginView> {
           season: season,
           episode: episode,
         );
-        unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId)));
+        unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId, image: _artwork('${raw['image'] ?? ''}'))));
       } else if (op == 'toast') {
         _toast('${raw['text'] ?? ''}');
       } else if (op == 'exit') {
@@ -356,6 +356,14 @@ class _PluginViewState extends State<PluginView> {
         }
       }
     }
+  }
+
+  /// A TMDb picture for Continue Watching: a poster / still path ("/abc.jpg") or an image.tmdb.org address. Anything else is dropped.
+  static String _artwork(String v) {
+    final x = v.trim();
+    if (RegExp(r'^/[A-Za-z0-9_\-]+\.(jpg|jpeg|png|webp)$').hasMatch(x)) return 'https://image.tmdb.org/t/p/w342$x';
+    final u = Uri.tryParse(x);
+    return (u != null && u.scheme == 'https' && u.host == 'image.tmdb.org') ? x : '';
   }
 
   void _toast(String text) {
@@ -374,7 +382,7 @@ class _PluginViewState extends State<PluginView> {
       body = ListView(padding: widget.padding, children: [
         Text(_error!, style: TextStyle(fontSize: 0.95 * p.rem, height: 1.4, color: t.text)),
         SizedBox(height: p.rem),
-        Wrap(children: [PekButton(label: 'Try again', primary: true, autofocus: true, onTap: () => _open(fresh: true))]),
+        Wrap(children: [PekButton(shrink: true, label: 'Try again', primary: true, autofocus: true, onTap: () => _open(fresh: true))]),
       ]);
     } else if (_tree == null) {
       body = Center(child: CircularProgressIndicator(color: t.accent));
@@ -454,22 +462,24 @@ class _PluginViewState extends State<PluginView> {
       case 'video':
         return const SizedBox.shrink(); // pinned above the list by build()
       case 'text':
-        return Text('${n['s'] ?? ''}', style: TextStyle(fontSize: 0.95 * rem, height: 1.4, color: t.text));
+        return Text('${n['s'] ?? ''}', softWrap: true, style: TextStyle(fontSize: 0.92 * rem, height: 1.45, color: t.text.withAlpha(230)));
       case 'heading':
         return Padding(
-          padding: EdgeInsets.only(top: 0.25 * rem),
-          child: Text('${n['s'] ?? ''}', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.text)),
+          padding: EdgeInsets.only(top: 0.4 * rem),
+          child: Text('${n['s'] ?? ''}', softWrap: true, style: TextStyle(fontSize: (p.compact ? 1.15 : 1.3) * rem, fontWeight: FontWeight.w700, letterSpacing: -0.3, height: 1.2, color: t.text)),
         );
       case 'spinner':
         final label = '${n['s'] ?? ''}';
         final size = (n['big'] == true ? 2.0 : 1.2) * rem;
-        return Row(mainAxisSize: MainAxisSize.min, children: [
+        // The label is Flexible so a long title wraps onto the next line instead of running off the screen.
+        return Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
           SizedBox(width: size, height: size, child: CircularProgressIndicator(strokeWidth: 2.5, color: t.accent)),
-          if (label.isNotEmpty) ...[SizedBox(width: 0.6 * rem), Text(label, style: TextStyle(color: t.textMuted, fontSize: 0.95 * rem))],
+          if (label.isNotEmpty) ...[SizedBox(width: 0.7 * rem), Flexible(child: Text(label, style: TextStyle(color: t.textMuted, fontSize: 0.92 * rem, height: 1.3)))],
         ]);
       case 'button':
         final selected = n['sel'] == true;
         return PekButton(
+          shrink: true,
           label: '${n['s'] ?? ''}',
           primary: n['primary'] == true || selected,
           leading: selected && n['primary'] != true ? Icon(Icons.check, size: 1.1 * rem, color: t.bg) : null,
@@ -514,18 +524,22 @@ class _PluginViewState extends State<PluginView> {
         );
       case 'tabs':
         final active = '${n['active']}';
-        return Wrap(
-          spacing: 0.6 * rem,
-          runSpacing: 0.6 * rem,
-          children: [
-            for (final it in ((n['items'] as List?) ?? const []).whereType<Map<String, dynamic>>())
-              PekButton(label: '${it['label']}', primary: '${it['id']}' == active, onTap: () => _send(on, value: '${it['id']}')),
-          ],
+        return _SegmentedTabs(
+          items: [for (final it in ((n['items'] as List?) ?? const []).whereType<Map<String, dynamic>>()) ('${it['id']}', '${it['label']}')],
+          active: active,
+          onPick: (id) => _send(on, value: id),
         );
       case 'input':
         final st = _inputs['${n['key']}'];
         if (st == null) return const SizedBox.shrink();
         final submit = '${n['submit'] ?? ''}';
+        if ('${n['s'] ?? ''}'.isEmpty) {
+          return _SearchBar(
+            controller: st.controller,
+            hint: '${n['ph'] ?? ''}'.isEmpty ? 'Search' : '${n['ph']}',
+            onSubmit: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
+          );
+        }
         return PekField(
           label: '${n['s'] ?? ''}',
           controller: st.controller,
@@ -627,8 +641,18 @@ class _PluginTrailerState extends State<_PluginTrailer> {
     if (platform is AndroidWebViewController) {
       unawaited(platform.setMediaPlaybackRequiresUserGesture(false)); // let the trailer start by itself
     }
-    final q = 'autoplay=${play ? 1 : 0}&mute=${widget.muted ? 1 : 0}&playsinline=1&rel=0&modestbranding=1';
-    unawaited(c.loadRequest(Uri.parse('https://www.youtube-nocookie.com/embed/${Uri.encodeComponent(widget.id)}?$q')));
+    // "Error 153 / Video player configuration error" is YouTube refusing an embed that has no referrer. A page loaded from
+    // a bare URL sends none, so the player sits in an iframe of a page whose base address is YouTube's own host (the only
+    // one the navigation filter above allows) and says where it is embedded from.
+    const origin = 'https://www.youtube-nocookie.com';
+    final id = Uri.encodeComponent(widget.id);
+    final q = 'autoplay=${play ? 1 : 0}&mute=${widget.muted ? 1 : 0}&playsinline=1&rel=0&modestbranding=1&origin=${Uri.encodeComponent(origin)}';
+    final html = '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<meta name="referrer" content="strict-origin-when-cross-origin">'
+        '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style></head>'
+        '<body><iframe src="$origin/embed/$id?$q" title="Trailer" referrerpolicy="strict-origin-when-cross-origin" '
+        'allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></body></html>';
+    unawaited(c.loadHtmlString(html, baseUrl: '$origin/'));
     _controller = c;
   }
 
@@ -645,7 +669,7 @@ class _PluginTrailerState extends State<_PluginTrailer> {
           child: ColoredBox(
             color: Colors.black,
             child: c == null
-                ? Center(child: PekButton(label: '\u25b6  Play trailer', primary: true, onTap: () => setState(() => _start(play: true))))
+                ? Center(child: PekButton(shrink: true, label: 'Play trailer', primary: true, onTap: () => setState(() => _start(play: true))))
                 : ExcludeFocus(excluding: p.tvDevice, child: WebViewWidget(controller: c)),
           ),
         ),
@@ -797,5 +821,124 @@ class PluginFavoritesSection extends StatelessWidget {
           trailing: PekButton(compact: true, label: 'Remove', onTap: () => Store.removePluginFavorite('${f['key']}')),
         ),
     ]);
+  }
+}
+
+
+/// `ui.tabs`: a single rounded strip, the chosen tab filled with the accent. It scrolls sideways when there are many
+/// (a season list), instead of stacking one full-width button per tab.
+class _SegmentedTabs extends StatelessWidget {
+  const _SegmentedTabs({required this.items, required this.active, required this.onPick});
+  final List<(String, String)> items;
+  final String active;
+  final void Function(String id) onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      clipBehavior: Clip.none,
+      child: Container(
+        padding: EdgeInsets.all(0.25 * rem),
+        decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(999)),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (final it in items)
+            PekFocusable(
+              onTap: () => onPick(it.$1),
+              radius: 999,
+              background: it.$1 == active ? t.accent : Colors.transparent,
+              focusBackground: it.$1 == active ? t.accent : null,
+              padding: EdgeInsets.symmetric(horizontal: (p.isTv ? 1.4 : 1.0) * rem, vertical: (p.isTv ? 0.7 : 0.5) * rem),
+              child: Text(it.$2, maxLines: 1, style: TextStyle(fontSize: 0.88 * rem, fontWeight: FontWeight.w600, height: 1.2, color: it.$1 == active ? t.bg : t.text)),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/// A text box with no label is a search bar: one rounded pill, magnifier at the left, clear and search at the right, and
+/// the keyboard's search key submits. (A box with a label stays a normal field.)
+class _SearchBar extends StatefulWidget {
+  const _SearchBar({required this.controller, required this.hint, required this.onSubmit});
+  final TextEditingController controller;
+  final String hint;
+  final VoidCallback? onSubmit;
+
+  @override
+  State<_SearchBar> createState() => _SearchBarState();
+}
+
+class _SearchBarState extends State<_SearchBar> {
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    final empty = widget.controller.text.isEmpty;
+    return Container(
+      constraints: BoxConstraints(minHeight: (p.isTv ? 3.2 : 2.9) * rem),
+      padding: EdgeInsets.only(left: 1.0 * rem, right: 0.35 * rem),
+      decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(999)),
+      child: Row(children: [
+        Icon(Icons.search_rounded, size: 1.3 * rem, color: t.textMuted),
+        SizedBox(width: 0.6 * rem),
+        Expanded(
+          child: TextField(
+            controller: widget.controller,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.search,
+            onSubmitted: widget.onSubmit == null ? null : (_) => widget.onSubmit!(),
+            style: TextStyle(color: t.text, fontSize: 0.95 * rem),
+            cursorColor: t.accent,
+            decoration: InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              filled: false,
+              contentPadding: EdgeInsets.symmetric(vertical: 0.7 * rem),
+              hintText: widget.hint,
+              hintStyle: TextStyle(color: t.textMuted.withAlpha(190), fontSize: 0.95 * rem),
+            ),
+          ),
+        ),
+        if (!empty)
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Clear',
+            onPressed: widget.controller.clear,
+            icon: Icon(Icons.close_rounded, size: 1.15 * rem, color: t.textMuted),
+          ),
+        if (widget.onSubmit != null)
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            tooltip: 'Search',
+            onPressed: widget.onSubmit,
+            style: IconButton.styleFrom(backgroundColor: t.accent, foregroundColor: t.bg),
+            icon: Icon(Icons.arrow_forward_rounded, size: 1.1 * rem),
+          ),
+      ]),
+    );
   }
 }

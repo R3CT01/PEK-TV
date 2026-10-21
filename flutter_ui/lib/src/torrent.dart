@@ -140,7 +140,7 @@ class TorrentTitle {
   }
 
   /// The Resume Watching entry for this release (its id is the same one the cloud and other devices use for torrents).
-  Progress track(String source, {String origin = 'Torrent'}) {
+  Progress track(String source, {String origin = 'Torrent', String image = ''}) {
     final key = Store.keyFor(kind: kind, title: title, showTitle: showTitle, year: year, season: season, episode: episode) ?? 'o|${Store.normalize(title)}|0|0';
     return Progress(
       id: 'tor:$key',
@@ -155,6 +155,7 @@ class TorrentTitle {
       episode: episode,
       torrent: {'source': source, 'title': title, 'season': season, 'episode': episode},
       origin: origin,
+      image: image,
     );
   }
 }

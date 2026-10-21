@@ -210,7 +210,10 @@ class _DashboardPageState extends State<DashboardPage> {
             PosterCard(
               title: r.title,
               subtitle: r.duration > 0 ? '${(100 * r.position / r.duration).round()}% watched' : formatTime(r.position),
-              poster: r.kind == 'movie' ? Api.movieDetails(r.id) : Api.showDetails(r.showTitle),
+              // A library title uses its library artwork; a stream started from a plugin carries its own picture.
+              poster: r.isTorrent ? Future.value(const Details(overview: '', poster: '')) : (r.kind == 'movie' ? Api.movieDetails(r.id) : Api.showDetails(r.showTitle)),
+              fallbackImage: r.image,
+              progress: r.duration > 0 ? r.position / r.duration : null,
               onTap: () => playMedia(context, r, startSec: r.position),
             ),
         ]);

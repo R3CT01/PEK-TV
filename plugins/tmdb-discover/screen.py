@@ -648,7 +648,7 @@ def streamer_buttons(item, info):
     if not lst:
         return []
     return [ui.heading("Play with a plugin"),
-            ui.row([ui.button("\u25b6  " + p["name"], lambda p=p: open_with(p, item), primary=True) for p in lst])]
+            ui.row([ui.button(p["name"], lambda p=p: open_with(p, item), primary=True) for p in lst])]
 
 
 # ---------------------------------------------------------------- settings actions
@@ -757,7 +757,7 @@ def poster_row(items, focus_key=""):
 
 def section_row(sec):
     e = S["pages"].get(page_key(sec, 1))
-    head = ui.row(ui.heading(sec["title"]), ui.button("See all \u203a", lambda: open_list(sec, sec["title"])))
+    head = ui.row(ui.heading(sec["title"]), ui.button("See all", lambda: open_list(sec, sec["title"])))
     if not e or e.get("loading"):
         return ui.column(head, ui.spinner("Loading\u2026"))
     if e.get("error"):
@@ -862,13 +862,13 @@ def detail_view():
     kids = []
     meta = [str(item["year"]) if item["year"] else "", "TV show" if item["type"] == "tv" else "Movie"]
     if item["rating"]:
-        meta.append("\u2605 %.1f (%s votes)" % (item["rating"], item["votes"]))
+        meta.append("%.1f (%s votes)" % (item["rating"], item["votes"]))
     if info.get("runtime"):
         meta.append("%s min" % info["runtime"])
     if info.get("number_of_seasons"):
         n = info["number_of_seasons"]
         meta.append("%s %s" % (n, "season" if n == 1 else "seasons"))
-    back_btn = ui.button("\u2190 Back", back, autofocus="detail:%s%s" % (item["type"], item["id"]))
+    back_btn = ui.button("Back", back, autofocus="detail:%s%s" % (item["type"], item["id"]))
     trailer = None if (d["loading"] or d["error"]) else pick_trailer(info)
     if trailer:      # the trailer goes first: PEK pins it to the very top of the page
         kids.append(ui.video(trailer["key"], autoplay=S["autoplay"], muted=not S["sound"], title=item["title"] + " trailer"))
@@ -877,21 +877,21 @@ def detail_view():
         kids.append(ui.spinner("Loading\u2026", True))
     else:
         is_fav = fav_key(item) in S["favs"]
-        top = [back_btn, ui.button("\u2665  In your favorites" if is_fav else "\u2661  Add to favorites",
+        top = [back_btn, ui.button("In your favorites" if is_fav else "Add to favorites",
                                    lambda: toggle_fav(item), selected=is_fav)]
         if trailer:
-            top.append(ui.button("\u25b6  Open in YouTube", lambda: ui.open_trailer(trailer["key"])))
+            top.append(ui.button("Open in YouTube", lambda: ui.open_trailer(trailer["key"])))
         kids.append(ui.row(top))
         if item["type"] == "movie":
             seen = watched_state(item)
-            kids.append(ui.button("\u2713 Watched \u00b7 mark as unwatched" if seen else "Mark as watched",
+            kids.append(ui.button("Watched \u00b7 mark as unwatched" if seen else "Mark as watched",
                                   lambda: toggle_watched(item), selected=seen))
         if S["fav_msg"]:
             kids.append(ui.text(S["fav_msg"]))
     kids.append(ui.heading(item["title"]))
     kids.append(ui.text(" \u00b7 ".join([m for m in meta if m])))
     if owned(item):
-        kids.append(ui.text("\u2713 In your library"))
+        kids.append(ui.text("In your library"))
     if info.get("tagline"):
         kids.append(ui.text("\u201c" + str(info["tagline"]) + "\u201d"))
     overview = info.get("overview") or item["overview"]
@@ -923,14 +923,14 @@ def pager(cur):
     page = cur["page"]
     kids = []
     if page > 10:
-        kids.append(ui.button("\u00ab 10", lambda: go_page(page - 10)))
+        kids.append(ui.button("-10", lambda: go_page(page - 10)))
     if page > 1:
-        kids.append(ui.button("\u2039 Prev", lambda: go_page(page - 1)))
+        kids.append(ui.button("Prev", lambda: go_page(page - 1)))
     kids.append(ui.text("Page %d%s" % (page, " of %d" % total if total else "")))
     if not total or page < total:
-        kids.append(ui.button("Next \u203a", lambda: go_page(page + 1)))
+        kids.append(ui.button("Next", lambda: go_page(page + 1)))
     if total and page + 10 <= total:
-        kids.append(ui.button("10 \u00bb", lambda: go_page(page + 10)))
+        kids.append(ui.button("+10", lambda: go_page(page + 10)))
     return ui.row(kids)
 
 
@@ -939,7 +939,7 @@ def list_view():
     e = S["pages"].get(page_key(cur["src"], cur["page"]))
     if e and e.get("total"):
         cur["total"] = e["total"]
-    kids = [ui.row(ui.button("\u2190 Back", back), ui.heading(cur["title"]))]
+    kids = [ui.row(ui.button("Back", back), ui.heading(cur["title"]))]
     pg = None if cur["src"].get("paged") is False else pager(cur)
     if pg:
         kids.append(pg)
@@ -1024,14 +1024,17 @@ def render():
         return detail_view()
     kids = []
     if S["tab"] != "settings":
-        kids.append(ui.text_input("", S["query"], set_query, placeholder="Search any movie or TV show",
+        # One search pill (its arrow submits), then the tabs and Refresh on one line.
+        kids.append(ui.text_input("", S["query"], set_query, placeholder="Search movies and TV shows",
                                   on_submit=do_search, key="tmdb-search"))
-        kids.append(ui.row(
-            ui.button("Search", do_search, primary=True),
-            ui.button("Clear search", clear_search) if (S["list"] and S["list"]["search"]) else None,
-            ui.button("Refresh", refresh)))
+    in_search = bool(S["list"] and S["list"]["search"])
     if not S["list"]:
-        kids.append(ui.tabs([("movie", "Movies"), ("tv", "TV Shows"), ("settings", "Settings")], S["tab"], select_tab))
+        kids.append(ui.row(
+            ui.tabs([("movie", "Movies"), ("tv", "TV Shows"), ("settings", "Settings")], S["tab"], select_tab),
+            ui.button("Refresh", refresh) if S["tab"] != "settings" else None))
+    elif S["tab"] != "settings":
+        kids.append(ui.row(ui.button("Clear search", clear_search) if in_search else None,
+                           ui.button("Refresh", refresh)))
     if S["tab"] == "settings":
         kids.append(settings_view())
     elif S["auth_error"]:

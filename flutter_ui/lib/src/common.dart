@@ -28,7 +28,14 @@ class Heading extends StatelessWidget {
     return Padding(
       padding: EdgeInsets.only(bottom: (p.isTv ? 2 : 1.5) * p.rem),
       child: Row(children: [
-        Expanded(child: Text(title, style: TextStyle(fontSize: (p.narrow ? 1.9 : 2.2) * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1))),
+        // One line, shrunk to fit beside the buttons (a long title used to break mid-word: "Dashboar / d").
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(title, maxLines: 1, softWrap: false, style: TextStyle(fontSize: (p.narrow ? 1.6 : 2.2) * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1)),
+          ),
+        ),
         if (trailing != null) ...[SizedBox(width: 0.75 * p.rem), trailing!],
         if (weather && !_InSubScreen.of(context)) ...[SizedBox(width: 0.75 * p.rem), const WeatherBadge()], // a SubScreen already has it in its bar
       ]),
@@ -68,12 +75,12 @@ class SubScreen extends StatelessWidget {
                   elevation: 0,
                   foregroundColor: p.tokens.text,
                   toolbarHeight: 3.5 * p.rem,
-                  title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)),
+                  title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)),
                   actions: weatherActions(context),
                 ),
               ),
             )
-          : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)), actions: weatherActions(context)),
+          : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)), actions: weatherActions(context)),
       body: body,
     )));
   }
@@ -81,13 +88,14 @@ class SubScreen extends StatelessWidget {
 
 /// `ui.listRow(title, subtitle, onTap)`.
 class ListRow extends StatelessWidget {
-  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.onLongPress, this.trailing, this.autofocus = false, this.highlight = false});
+  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.onLongPress, this.trailing, this.leading, this.autofocus = false, this.highlight = false});
   final VoidCallback? onLongPress;
   final bool highlight;
   final String title;
   final String subtitle;
   final VoidCallback? onTap;
   final Widget? trailing;
+  final Widget? leading; // a picture at the left
   final bool autofocus;
 
   @override
@@ -105,6 +113,7 @@ class ListRow extends StatelessWidget {
         onTap: onTap,
         onLongPress: onLongPress,
         child: Row(children: [
+          if (leading != null) ...[leading!, SizedBox(width: 0.8 * rem)],
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, fontSize: rem, color: highlight ? t.accent : null)),

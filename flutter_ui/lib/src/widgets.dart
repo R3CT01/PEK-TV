@@ -94,13 +94,16 @@ class _PekFocusableState extends State<PekFocusable> {
 
 /// `.theme-launch-btn` / `.refresh-btn` / `.sx-btn` (primary = filled with the accent).
 class PekButton extends StatelessWidget {
-  const PekButton({super.key, required this.label, this.onTap, this.leading, this.primary = false, this.compact = false, this.autofocus = false});
+  const PekButton({super.key, required this.label, this.onTap, this.leading, this.primary = false, this.compact = false, this.autofocus = false, this.shrink = false});
   final String label;
   final VoidCallback? onTap; // null = disabled
   final Widget? leading;
   final bool primary;
   final bool compact; // the Refresh button: 2.5rem high, 1rem padding
   final bool autofocus;
+
+  /// Natural width instead of stretching across the whole line (used by plugin screens, where buttons sit side by side).
+  final bool shrink;
 
   @override
   Widget build(BuildContext context) {
@@ -118,9 +121,12 @@ class PekButton extends StatelessWidget {
         radius: 999,
         background: bg,
         focusBackground: primary ? t.accent : null,
-        minHeight: p.isTv ? 3 * rem : (compact ? 2.5 : 2.75) * rem,
-        alignment: Alignment.center,
-        padding: EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.25) * rem, vertical: (compact ? 0.45 : 0.6) * rem),
+        // A shrink-wrapped button has no alignment (it would stretch to the full line) so its height comes from padding.
+        minHeight: shrink ? null : (p.isTv ? 3 * rem : (compact ? 2.5 : 2.75) * rem),
+        alignment: shrink ? null : Alignment.center,
+        padding: shrink
+            ? EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.2) * rem, vertical: ((p.isTv ? 3.0 : (compact ? 2.5 : 2.6)) * rem - 0.9 * rem * 1.2) / 2)
+            : EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.25) * rem, vertical: (compact ? 0.45 : 0.6) * rem),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -235,13 +241,19 @@ class DashTile extends StatelessWidget {
 /// `ui.posterCard`: shows a plain card until the poster is known (and if it fails to load), then the 2:3 poster with the
 /// title over a dark gradient at the bottom.
 class PosterCard extends StatefulWidget {
-  const PosterCard({super.key, required this.title, required this.subtitle, required this.poster, required this.onTap, this.onLongPress, this.autofocus = false});
+  const PosterCard({super.key, required this.title, required this.subtitle, required this.poster, required this.onTap, this.onLongPress, this.autofocus = false, this.fallbackImage = '', this.progress});
   final String title;
   final String subtitle;
   final Future<Details> poster;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
   final bool autofocus;
+
+  /// Used when the library has no artwork for this title (a stream started from a plugin): an https picture address.
+  final String fallbackImage;
+
+  /// 0..1: a thin bar along the bottom of the picture (Continue Watching).
+  final double? progress;
 
   @override
   State<PosterCard> createState() => _PosterCardState();
@@ -255,7 +267,8 @@ class _PosterCardState extends State<PosterCard> {
     return FutureBuilder<Details>(
       future: widget.poster,
       builder: (context, snap) {
-        final url = snap.data?.poster ?? '';
+        var url = snap.data?.poster ?? '';
+        if (url.isEmpty && widget.fallbackImage.startsWith('https://')) url = widget.fallbackImage;
         if (url.isEmpty || _failed) {
           return PekCard(title: widget.title, subtitle: widget.subtitle, onTap: widget.onTap, autofocus: widget.autofocus);
         }
@@ -276,18 +289,27 @@ class _PosterCardState extends State<PosterCard> {
                   borderRadius: BorderRadius.circular(p.compact ? 12 : 14),
                   child: ColoredBox(
                     color: t.surface,
-                    child: Image.network(
-                      url,
-                      fit: BoxFit.cover,
-                      cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (mounted && !_failed) setState(() => _failed = true);
-                        });
-                        return const SizedBox.shrink();
-                      },
-                    ),
+                    child: Stack(fit: StackFit.expand, children: [
+                      Image.network(
+                        url,
+                        fit: BoxFit.cover,
+                        cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
+                        gaplessPlayback: true,
+                        errorBuilder: (_, __, ___) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted && !_failed) setState(() => _failed = true);
+                          });
+                          return const SizedBox.shrink();
+                        },
+                      ),
+                      if (widget.progress != null && widget.progress! > 0)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: LinearProgressIndicator(value: widget.progress!.clamp(0.0, 1.0), minHeight: 4, color: t.accent, backgroundColor: Colors.black54),
+                        ),
+                    ]),
                   ),
                 ),
               ),
