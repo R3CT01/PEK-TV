@@ -15,11 +15,13 @@ import 'src/tokens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // The same phone / TV test the web UI used for html.pek-tv; Settings > TV mode (tv_mode.dart) can force the look on or off.
+  // Asked right away so it runs alongside the storage load instead of after it.
+  final phoneAsk = PekPlayer.isPhone();
   await Store.init();
   Profiles.load();
   Net.start(); // the green / red dot and offline mode (net.js)
-  // The same phone / TV test the web UI used for html.pek-tv; Settings > TV mode (tv_mode.dart) can force the look on or off.
-  final phone = await PekPlayer.isPhone();
+  final phone = await phoneAsk;
   runApp(PekApp(isPhone: phone));
 }
 
@@ -64,7 +66,11 @@ class _BootState extends State<_Boot> {
       future: _ready,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          // Same colour as the native splash (pek_splash_bg), so the hand-over from the launch screen does not flash.
+          return const Scaffold(
+            backgroundColor: Color(0xFFE04A00),
+            body: Center(child: CircularProgressIndicator(color: Colors.white)),
+          );
         }
         if (snap.data == true) {
           // With an account, "Who's watching?" comes first; the app below is rebuilt for each profile.

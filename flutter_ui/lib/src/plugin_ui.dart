@@ -570,8 +570,11 @@ class _PluginViewState extends State<PluginView> {
     final minW = ((n['min'] as num?) ?? 150).toDouble() * rem / 16;
     if (kids.isEmpty) return const SizedBox.shrink();
     if (n['scroll'] == true) {
+      // Row height = poster (2:3) + caption (title + sub line, scaled with the system text size) + list padding + slack,
+      // so the card never overflows by a fraction of a pixel (the yellow/black "BOTTOM OVERFLOWED" stripes).
+      final textScale = MediaQuery.textScalerOf(context).scale(1.0);
       return SizedBox(
-        height: minW * 1.5 + 3.4 * rem,
+        height: minW * 1.5 + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: EdgeInsets.symmetric(vertical: 0.4 * rem, horizontal: 0.3 * rem),
