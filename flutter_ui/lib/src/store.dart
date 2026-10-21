@@ -51,7 +51,7 @@ class Store {
   /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
   static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
     if (id == 'p1') {
-      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dashboard_v3', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
         if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs' || k == 'pek_plugin_favs_v1')) continue;
         await _p.remove(k);
       }
@@ -341,28 +341,72 @@ class Store {
 
   // ---------------------------------------------------------------- dashboard widgets
 
-  static String get _dashKey => _sc('pek_dashboard_v1');
+  static String get _dashKey => _sc('pek_dashboard_v1'); // the older list of widget types (read once, then replaced by v3)
+  static String get _dashKey3 => _sc('pek_dashboard_v3'); // JSON list of {id, type, size, folder?}: the same shape the web UI saves
   static const dashTypes = <String, (String, String)>{
     'clock': ('Clock', 'The time and date'),
     'weather': ('Weather', 'Conditions for your city'),
     'continue': ('Continue Watching', 'Pick up where you left off'),
     'recent': ('Recently Added', 'Newest movies in your library'),
     'favorites': ('Favorites', 'Your saved movies and shows'),
+    'plugin': ('Plugin', 'A shortcut to a plugin'),
   };
   static const dashDefault = ['clock', 'weather', 'continue', 'recent', 'favorites'];
 
-  static List<String> dashboard() {
-    final raw = _p.getStringList(_dashKey);
-    if (raw == null) return List.of(dashDefault);
-    var l = raw.where(dashTypes.containsKey).toList();
-    // A dashboard saved before the clock became a widget keeps showing it (it was always on top).
-    if (!(_p.getBool(_sc('pek_dash_v2')) ?? false) && !l.contains('clock')) l = ['clock', ...l];
-    return l;
+  /// Tiles (a small box, 1 or 2 columns wide) versus rows of posters (full width): `tile: true` in DASH_TYPES.
+  static bool dashIsTile(String type) => type == 'clock' || type == 'weather' || type == 'plugin';
+
+  static List<DashItem> dashboardDefault() => [for (final t in dashDefault) DashItem(t, t)];
+
+  /// Port of _readDash: unknown types, bad plugin folders and repeats are dropped; an empty list is the person's own choice.
+  static List<DashItem> cleanDashboard(dynamic raw) {
+    if (raw is! List) return dashboardDefault();
+    final seen = <String>{};
+    final out = <DashItem>[];
+    for (final w in raw) {
+      if (w is! Map) continue;
+      final type = w['type'];
+      if (type is! String || !dashTypes.containsKey(type) || out.length >= 40) continue;
+      final folder = type == 'plugin' ? '${w['folder'] ?? ''}' : '';
+      if (type == 'plugin' && !RegExp(r'^[A-Za-z0-9_-]{1,80}$').hasMatch(folder)) continue;
+      final id = type == 'plugin' ? 'plugin:$folder' : type;
+      if (!seen.add(id)) continue;
+      out.add(DashItem(id, type, size: w['size'] == 'm' ? 'm' : 's', folder: folder));
+    }
+    return out;
   }
 
-  static Future<void> setDashboard(List<String> l) async {
-    await _p.setBool(_sc('pek_dash_v2'), true);
-    await _p.setStringList(_dashKey, l);
+  static List<DashItem> dashboardItems() {
+    final v3 = _p.getString(_dashKey3);
+    if (v3 != null) {
+      try {
+        return cleanDashboard(jsonDecode(v3));
+      } catch (_) {}
+    }
+    final raw = _p.getStringList(_dashKey);
+    if (raw == null) return dashboardDefault();
+    var l = raw.where((t) => dashTypes.containsKey(t) && t != 'plugin').toList();
+    // A dashboard saved before the clock became a widget keeps showing it (it was always on top).
+    if (!(_p.getBool(_sc('pek_dash_v2')) ?? false) && !l.contains('clock')) l = ['clock', ...l];
+    return [for (final t in l) DashItem(t, t)];
+  }
+
+  /// True once a dashboard was saved on this device (so there is something to sync).
+  static bool get dashboardChosen => _p.getString(_dashKey3) != null || _p.getStringList(_dashKey) != null;
+
+  /// Bumped only when the person changes the dashboard here: Cloud sync listens to it.
+  static final ValueNotifier<int> dashEdited = ValueNotifier(0);
+
+  /// A change made here: repaints, and [dashEdited] tells the sync to send it.
+  static Future<void> setDashboardItems(List<DashItem> l) async {
+    await _p.setString(_dashKey3, jsonEncode([for (final w in l) w.toJson()]));
+    _bump();
+    dashEdited.value++;
+  }
+
+  /// A change that came from the cloud: stored and repainted, but not sent back.
+  static Future<void> applyDashboardFromCloud(List<DashItem> l) async {
+    await _p.setString(_dashKey3, jsonEncode([for (final w in l) w.toJson()]));
     _bump();
   }
 
@@ -551,4 +595,15 @@ class HistoryEntry {
     }
     return year > 0 ? '$title ($year)' : title;
   }
+}
+
+
+/// One widget on the dashboard (app_dashboard.js `{ id, type, size, folder }`). size: 's' = small, 'm' = wide (tiles only).
+class DashItem {
+  const DashItem(this.id, this.type, {this.size = 's', this.folder = ''});
+  final String id, type, size, folder;
+
+  DashItem withSize(String s) => DashItem(id, type, size: s, folder: folder);
+
+  Map<String, dynamic> toJson() => {'id': id, 'type': type, 'size': size, if (folder.isNotEmpty) 'folder': folder};
 }

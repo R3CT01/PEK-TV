@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -47,14 +49,47 @@ class Layouts {
   /// TV look: `html.pek-tv[data-poster]` sets the grid minimum to 7rem / 9rem / 14rem for small / medium / large.
   static double get posterScaleTv => switch (poster) { 's' => 7 / 9, 'l' => 14 / 9, _ => 1.0 };
 
+  /// Bumped only when the person changes the layout or poster size here (not when the cloud does): Cloud sync listens to it.
+  static final ValueNotifier<int> edited = ValueNotifier(0);
+
   static Future<void> setLayout(String v) async {
     await Store.strSet('pek_layout', v);
     changes.value++;
+    edited.value++;
   }
 
   static Future<void> setPoster(String v) async {
     await Store.strSet('pek_poster', v);
     changes.value++;
+    edited.value++;
+  }
+
+  // ---- cloud sync (`s|look`, the same shape the web UI sends: {layout, poster, view}; this UI has no list/grid `view`) ----
+
+  /// What this profile has chosen on this device, or null when nothing was ever chosen (a default that was never changed is not synced).
+  static Map<String, dynamic>? syncValue() {
+    final out = <String, dynamic>{};
+    final l = Store.strGet('pek_layout');
+    if (all.any((e) => e.id == l)) out['layout'] = l;
+    final s = Store.strGet('pek_poster');
+    if (sizes.any((e) => e.$1 == s)) out['poster'] = s;
+    return out.isEmpty ? null : out;
+  }
+
+  /// Checks a value that came from the cloud (same limits as the web UI's cleanLook). Null when nothing in it is usable.
+  static Map<String, dynamic>? cleanSync(dynamic o) {
+    if (o is! Map) return null;
+    final out = <String, dynamic>{};
+    if (all.any((e) => e.id == o['layout'])) out['layout'] = o['layout'];
+    if (sizes.any((e) => e.$1 == o['poster'])) out['poster'] = o['poster'];
+    return out.isEmpty ? null : out;
+  }
+
+  /// Puts a cleaned value from the cloud on this device. Only what the value has is changed; `view` is left alone.
+  static void applySynced(Map<String, dynamic> o) {
+    if (o['layout'] is String) unawaited(Store.strSet('pek_layout', o['layout'] as String));
+    if (o['poster'] is String) unawaited(Store.strSet('pek_poster', o['poster'] as String));
+    changes.value++; // repaint, but not `edited`: this change came from the cloud
   }
 }
 

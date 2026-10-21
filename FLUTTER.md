@@ -73,7 +73,8 @@ there are no lock-screen controls yet (those need native channel methods).
 - **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance).
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
-- **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
+- **Dashboard** (`dashboard.dart`, `store.dart`): the same grid as the web UI. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Customize (or press and hold a tile) to move, resize, remove, add widgets or reset. Saved per profile in the web UI's `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
+- **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. The weather tile looks like the web one (big temperature, "condition \u00b7 city" under it). Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
 
 ## Plugin screens (Python)
 Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `FLUTTER_PLUGINS.md`). TMDb Discover is fully ported (inline trailer, streaming apps, watched, Play with a plugin, synced favorites):
@@ -83,7 +84,7 @@ Plugins > Open, or its own entry in the menu / More page.
 Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the same warning and permissions screens as the web UI (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
 
 ## Still only in the classic UI
-Plugins that only have a `ui.js`, skins (the store's skin shelf and installable skin packages), installing from GitHub or a .zip, plugin dashboard tiles.
+Plugins that only have a `ui.js`, skins (the store's skin shelf and installable skin packages), installing from GitHub or a .zip, plugin dashboard tiles for plugins that only have a `ui.js` (plugins with a Python screen get a tile).
 
 ## TV mode (port of `www/tv_mode.js`)
 Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,

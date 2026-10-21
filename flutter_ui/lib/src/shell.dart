@@ -15,6 +15,7 @@ import 'pages.dart';
 import 'plugin_backup.dart';
 import 'plugin_host.dart' show PluginBack, PluginHost;
 import 'plugin_ui.dart';
+import 'store.dart';
 import 'tokens.dart';
 import 'torrent.dart';
 import 'weather.dart' show Weather;
@@ -130,6 +131,8 @@ class _AppShellState extends State<AppShell> {
     });
     PluginHost.changed.addListener(_backupSoon); // installed / updated here: back it up
     Weather.edited.addListener(_weatherSoon); // a new city / unit: send it to the profile
+    Layouts.edited.addListener(_weatherSoon); // a new layout / poster size: same
+    Store.dashEdited.addListener(_weatherSoon); // a changed dashboard: same
     Cloud.changes.addListener(_backupSoon); // just signed in: back up what is installed
   }
 
@@ -138,6 +141,8 @@ class _AppShellState extends State<AppShell> {
     PluginHost.changed.removeListener(_loadPluginScreens);
     PluginHost.changed.removeListener(_backupSoon);
     Weather.edited.removeListener(_weatherSoon);
+    Layouts.edited.removeListener(_weatherSoon);
+    Store.dashEdited.removeListener(_weatherSoon);
     _weatherTimer?.cancel();
     Cloud.changes.removeListener(_backupSoon);
     _backupTimer?.cancel();

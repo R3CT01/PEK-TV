@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
+import 'layouts.dart' show Layouts;
 import 'weather.dart' show Weather;
 
 /// The answer of one cloud call.
@@ -602,13 +603,16 @@ class Cloud {
       final u = _int(v);
       if (u > 0 && _int(sf[key]) != u) favorites.add({'key': key, 'data': <String, dynamic>{}, 'updated': u, 'deleted': 1});
     });
-    // Settings that follow the profile (the weather city and unit): item `s|weather`, last writer wins.
+    // Settings that follow the profile (dashboard layout, look = layout + poster size, weather city and unit): items `s|dashboard`,
+    // `s|look` and `s|weather`, last writer wins.
     final settings = <Map<String, dynamic>>[];
     final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
-    final wm = _trackSettings()['weather'];
-    if (wm is Map && _int(ss['weather']) != _int(wm['u'])) {
-      final o = Weather.syncValue();
-      if (o != null) settings.add({'key': 's|weather', 'data': o, 'updated': _int(wm['u']), 'deleted': 0});
+    final smeta = _trackSettings();
+    for (final n in _skeys) {
+      final m = smeta[n];
+      if (m is! Map || _int(ss[n]) == _int(m['u'])) continue;
+      final o = _settingRead(n);
+      if (o != null) settings.add({'key': 's|$n', 'data': o, 'updated': _int(m['u']), 'deleted': 0});
     }
     return _All(history, progress, favorites, settings);
   }
@@ -617,20 +621,72 @@ class Cloud {
 
   static const _baseTs = 1; // a value that was on the device before it ever synced: it loses to anything already in the cloud
 
+  static const _skeys = ['dashboard', 'look', 'weather'];
+  static const _dashBudget = 1900; // same size limit as the web UI's DATA_BUDGET
+
+  /// What this device has now for one setting (null when nothing was ever chosen).
+  static Map<String, dynamic>? _settingRead(String n) {
+    switch (n) {
+      case 'dashboard':
+        return Store.dashboardChosen ? _dashValue(Store.dashboardItems()) : null;
+      case 'look':
+        return Layouts.syncValue();
+      default:
+        return Weather.syncValue();
+    }
+  }
+
+  static Map<String, dynamic> _dashValue(List<DashItem> items) {
+    final l = [for (final w in items) w.toJson()];
+    while (l.isNotEmpty && jsonEncode({'list': l}).length > _dashBudget) {
+      l.removeLast();
+    }
+    return {'list': l};
+  }
+
+  /// Checks a value that came from the cloud. Null when nothing in it is usable.
+  static Map<String, dynamic>? _settingClean(String n, dynamic o) {
+    switch (n) {
+      case 'dashboard':
+        return o is Map && o['list'] is List ? _dashValue(Store.cleanDashboard(o['list'])) : null;
+      case 'look':
+        return Layouts.cleanSync(o);
+      default:
+        return Weather.cleanSync(o);
+    }
+  }
+
+  /// Puts a cleaned value from the cloud on this device.
+  static void _settingWrite(String n, Map<String, dynamic> o) {
+    switch (n) {
+      case 'dashboard':
+        unawaited(Store.applyDashboardFromCloud(Store.cleanDashboard(o['list'])));
+      case 'look':
+        Layouts.applySynced(o);
+      default:
+        Weather.applySynced(o);
+    }
+  }
+
   /// Notices a change made on this device since the last look and stamps it with the time it was noticed.
   static Map<String, dynamic> _trackSettings() {
     final meta = Store.jsonMap('pek_sync_setmeta');
-    final o = Weather.syncValue();
-    final cur = o == null ? '' : jsonEncode(o);
-    if (cur.isEmpty) return meta; // nothing chosen on this device: nothing to sync
-    final m = meta['weather'];
-    if (m is! Map || m['v'] is! String) {
-      meta['weather'] = {'v': cur, 'u': _baseTs};
-      unawaited(Store.setJsonMap('pek_sync_setmeta', meta));
-    } else if (m['v'] != cur) {
-      meta['weather'] = {'v': cur, 'u': DateTime.now().millisecondsSinceEpoch};
-      unawaited(Store.setJsonMap('pek_sync_setmeta', meta));
+    var changed = false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final n in _skeys) {
+      final o = _settingRead(n);
+      final cur = o == null ? '' : jsonEncode(o);
+      if (cur.isEmpty) continue; // nothing chosen on this device: nothing to sync
+      final m = meta[n];
+      if (m is! Map || m['v'] is! String) {
+        meta[n] = {'v': cur, 'u': _baseTs};
+        changed = true;
+      } else if (m['v'] != cur) {
+        meta[n] = {'v': cur, 'u': now};
+        changed = true;
+      }
     }
+    if (changed) unawaited(Store.setJsonMap('pek_sync_setmeta', meta));
     return meta;
   }
 
@@ -964,28 +1020,31 @@ class Cloud {
     if (tombChanged) await Store.writeFavTombs(tombs);
     await Store.setJsonMap('pek_sync_pendingf', newPendingF);
 
-    // settings: the cloud's weather city / unit, unless this device changed it more recently
+    // settings: the cloud's dashboard / look / weather, unless this device changed it more recently
     final remoteS = resp['settings'];
     if (remoteS is List) {
       final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
       final smeta = _trackSettings(); // a change made while the request was in flight counts as newer than the cloud's copy
       for (final r in listOf(remoteS)) {
-        if ('${r['key']}' != 's|weather' || _truthy(r['deleted'])) continue;
-        final wm = smeta['weather'];
-        final mine = wm is Map ? _int(wm['u']) : 0;
+        final key = '${r['key']}';
+        if (!key.startsWith('s|') || _truthy(r['deleted'])) continue;
+        final n = key.substring(2);
+        if (!_skeys.contains(n)) continue;
+        final sm = smeta[n];
+        final mine = sm is Map ? _int(sm['u']) : 0;
         final ru = _int(r['updated']);
         if (ru < mine) continue; // ours is newer; it gets pushed
         if (ru == mine) {
-          ss['weather'] = ru;
+          ss[n] = ru;
           continue;
         }
-        final clean = Weather.cleanSync(r['data']);
+        final clean = _settingClean(n, r['data']);
         if (clean == null) continue;
-        Weather.applySynced(clean);
-        final now2 = Weather.syncValue();
+        _settingWrite(n, clean);
+        final now2 = _settingRead(n);
         if (now2 == null) continue;
-        smeta['weather'] = {'v': jsonEncode(now2), 'u': ru};
-        ss['weather'] = ru;
+        smeta[n] = {'v': jsonEncode(now2), 'u': ru};
+        ss[n] = ru;
         changed = true;
       }
       seen['s'] = ss;

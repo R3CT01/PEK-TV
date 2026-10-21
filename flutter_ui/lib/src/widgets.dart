@@ -175,6 +175,61 @@ class PekCard extends StatelessWidget {
   }
 }
 
+/// `.dash-tile` of the web dashboard (`_dashTile` in app_dashboard.js): a card at least 7.5rem high with its content centred
+/// vertically, padding 1.25rem 1.5rem. Two looks, like the web UI: a big value with a small line under it (clock, weather:
+/// `.dash-big` + `.dash-sub`), or a heading with a sentence (`h3.empty-heading` + `p`). Press and hold = [onLongPress].
+class DashTile extends StatelessWidget {
+  const DashTile({super.key, this.big, this.sub, this.heading, this.body, this.onTap, this.onLongPress, this.autofocus = false});
+  final String? big; // `.dash-big`: 2.2rem bold (1.6rem on a TV, never wrapped)
+  final String? sub; // `.dash-sub`: 0.95rem, dimmed, one line (wraps on phones)
+  final String? heading; // `h3.empty-heading`
+  final String? body; // `p` under the heading
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final bool autofocus;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return PekFocusable(
+      autofocus: autofocus,
+      onTap: onTap,
+      onLongPress: onLongPress,
+      radius: t.radius,
+      background: t.surface,
+      minHeight: 7.5 * rem,
+      alignment: Alignment.centerLeft,
+      padding: EdgeInsets.symmetric(horizontal: 1.5 * rem, vertical: 1.25 * rem),
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (big != null)
+              Text(big!, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: (p.isTv ? 1.6 : 2.2) * rem, fontWeight: FontWeight.w700, height: 1.1)),
+            if (sub != null && sub!.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 0.4 * rem),
+                child: Opacity(
+                  opacity: 0.75,
+                  child: Text(sub!, maxLines: p.compact ? null : 1, overflow: p.compact ? TextOverflow.clip : TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, color: t.text)),
+                ),
+              ),
+            if (heading != null) Text(heading!, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
+            if (body != null && body!.isNotEmpty) ...[
+              SizedBox(height: 0.5 * rem),
+              Text(body!, style: TextStyle(fontSize: 0.92 * rem, color: t.textMuted, height: 1.35)),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// `ui.posterCard`: shows a plain card until the poster is known (and if it fails to load), then the 2:3 poster with the
 /// title over a dark gradient at the bottom.
 class PosterCard extends StatefulWidget {

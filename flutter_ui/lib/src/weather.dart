@@ -231,16 +231,19 @@ class _WeatherBadgeState extends State<WeatherBadge> {
   }
 }
 
-/// The dashboard tile.
+/// The dashboard tile: the same card as the web UI's weather widget (big temperature, "condition \u00b7 city" under it).
+/// Tap = Weather settings (choose city / unit), like the web tile opening the Weather plugin; press and hold = [onLongPress]
+/// (customize the dashboard).
 class WeatherTile extends StatefulWidget {
-  const WeatherTile({super.key});
+  const WeatherTile({super.key, this.onLongPress});
+  final VoidCallback? onLongPress;
   @override
   State<WeatherTile> createState() => _WeatherTileState();
 }
 
 class _WeatherTileState extends State<WeatherTile> {
   String _title = '--\u00b0';
-  String _sub = 'Loading\u2026';
+  String _sub = '';
   bool _noCity = false;
   Timer? _timer;
 
@@ -259,62 +262,37 @@ class _WeatherTileState extends State<WeatherTile> {
     super.dispose();
   }
 
+  String _line(String condition, String city) => [condition, city].where((e) => e.isNotEmpty).join(' \u00b7 ');
+
   Future<void> _refresh() async {
     final c = Weather.city;
     if (c == null) {
-      if (mounted) {
-        setState(() {
-          _noCity = true;
-          _title = 'Weather';
-          _sub = 'Choose your city';
-        });
-      }
+      if (mounted) setState(() => _noCity = true);
       return;
     }
     final cached = Weather.last(c.label);
-    if (mounted && cached != null) {
+    if (mounted) {
       setState(() {
         _noCity = false;
-        _title = Weather.format(cached.tempC);
-        _sub = '${cached.condition} \u2014 ${c.label}';
+        _title = cached != null ? Weather.format(cached.tempC) : '--\u00b0';
+        _sub = _line(cached?.condition ?? '', c.label);
       });
     }
     final r = await Weather.fetch(c.lat, c.lon, c.label);
-    if (!mounted) return;
+    if (!mounted || r == null || Weather.city?.label != c.label) return;
     setState(() {
-      _noCity = false;
-      if (r != null) {
-        _title = Weather.format(r.tempC);
-        _sub = '${r.condition} \u2014 ${c.label}';
-      } else if (cached == null) {
-        _title = '--\u00b0';
-        _sub = 'Weather unavailable \u2014 ${c.label}';
-      }
+      _title = Weather.format(r.tempC);
+      _sub = _line(r.condition, c.label);
     });
   }
 
+  void _open() => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const WeatherSettingsScreen()));
+
   @override
   Widget build(BuildContext context) {
-    return PekCard(
-      title: _title,
-      subtitle: _sub,
-      onTap: () => _noCity ? _open() : _refresh(),
-    ).withLongOpen(_open);
+    if (_noCity) return DashTile(heading: 'Weather', body: 'Tap to choose your city', onTap: _open, onLongPress: widget.onLongPress);
+    return DashTile(big: _title, sub: _sub, onTap: _open, onLongPress: widget.onLongPress);
   }
-
-  void _open() => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const WeatherSettingsScreen()));
-}
-
-extension on Widget {
-  /// A tile that refreshes on tap also needs a way to the settings; a small button under it does that.
-  Widget withLongOpen(VoidCallback open) => Builder(builder: (context) {
-        final p = context.pek;
-        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          this,
-          SizedBox(height: 0.5 * p.rem),
-          PekButton(compact: true, label: 'Weather settings', onTap: open),
-        ]);
-      });
 }
 
 /// Pick the city and the unit.
