@@ -249,7 +249,7 @@ class _AppShellState extends State<AppShell> {
       case 'music':
         return MusicPage(padding: pad);
       case 'more':
-        return _MorePage(padding: pad, onOpen: _open, ids: _more, titleOf: _title, hints: {for (final pl in _pluginScreens) 'plugin:${pl.folder}': pl.description});
+        return _MorePage(padding: pad, onOpen: _open, ids: _more, titleOf: _title);
       case 'search':
         return SearchPage(padding: pad);
       case 'history':
@@ -427,33 +427,60 @@ class _MorePage extends StatelessWidget {
     'settings': 'Sources and app options',
   };
 
+  bool _isPluginTile(String id) => id.startsWith('plugin:') || id == 'plugins';
+
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
     final rem = p.rem;
     final cols = p.size.width >= 600 ? 3 : 2;
     final gap = 0.75 * rem;
-    final rows = (ids.length / cols).ceil();
-    return ListView(
-      padding: padding,
-      children: [
-        const Heading('More', weather: true),
+    // Every tile is the same height: a title of up to 2 lines + a description of up to 3 lines (longer text is cut with "...").
+    final tileH = (p.compact ? 0.75 : 1.5) * 2 * rem + 1.1 * rem * 1.3 * 2 + 0.5 * rem + 0.92 * rem * 1.35 * 3 + 2;
+
+    Widget grid(List<String> list) {
+      final rows = (list.length / cols).ceil();
+      return Column(children: [
         for (var r = 0; r < rows; r++)
           Padding(
             padding: EdgeInsets.only(bottom: gap),
-            child: IntrinsicHeight(
+            child: SizedBox(
+              height: tileH,
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 for (var c = 0; c < cols; c++) ...[
                   if (c > 0) SizedBox(width: gap),
                   Expanded(
-                    child: r * cols + c < ids.length
-                        ? PekCard(title: titleOf(ids[r * cols + c]), subtitle: _hint[ids[r * cols + c]] ?? hints[ids[r * cols + c]], onTap: () => onOpen(ids[r * cols + c]))
+                    child: r * cols + c < list.length
+                        ? PekCard(
+                            title: titleOf(list[r * cols + c]),
+                            subtitle: _hint[list[r * cols + c]] ?? hints[list[r * cols + c]],
+                            titleMaxLines: 2,
+                            subtitleMaxLines: 3,
+                            onTap: () => onOpen(list[r * cols + c]),
+                          )
                         : const SizedBox.shrink(),
                   ),
                 ],
               ]),
             ),
           ),
+      ]);
+    }
+
+    final main = [for (final id in ids) if (!_isPluginTile(id)) id];
+    final plugins = [for (final id in ids) if (_isPluginTile(id)) id];
+    return ListView(
+      padding: padding,
+      children: [
+        const Heading('More', weather: true),
+        grid(main),
+        if (plugins.isNotEmpty) ...[
+          Padding(
+            padding: EdgeInsets.only(top: 0.75 * rem, bottom: gap),
+            child: Text('Plugins', style: TextStyle(fontSize: 1.3 * rem, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
+          ),
+          grid(plugins),
+        ],
       ],
     );
   }
