@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'activity.dart';
 import 'api.dart' show Api, PluginInfo;
 import 'cloud.dart';
 import 'common.dart';
