@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -288,6 +289,37 @@ class Api {
       out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer));
     }
     return out;
+  }
+
+  /// Folder names of the installed plugins, or null when the list could not be read.
+  static Future<List<String>?> pluginFolders() async {
+    try {
+      final j = await _get('/api/plugins');
+      final l = (j is Map) ? j['plugins'] : null;
+      if (l is! List) return null;
+      return [for (final e in l) if (e is Map) '${e['folder']}'];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// GET /api/plugins/files: the plugin's own files (never data/) as (path, size, mtime), or null.
+  static Future<List<({String path, int size, int mtime})>?> pluginFiles(String id) async {
+    try {
+      final j = await _get('/api/plugins/files?id=${Uri.encodeQueryComponent(id)}');
+      final l = (j is Map && j['ok'] == true) ? j['files'] : null;
+      if (l is! List) return null;
+      return [for (final e in l) if (e is Map) (path: '${e['path']}', size: (e['size'] as num?)?.toInt() ?? 0, mtime: (e['mtime'] as num?)?.toInt() ?? 0)];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// GET /api/plugins/file: the bytes of one of the plugin's files.
+  static Future<Uint8List> pluginFile(String id, String path) async {
+    final r = await _client.get(Uri.parse('$base/api/plugins/file?id=${Uri.encodeQueryComponent(id)}&path=${Uri.encodeQueryComponent(path)}')).timeout(const Duration(seconds: 30));
+    if (r.statusCode != 200) throw Exception('read');
+    return r.bodyBytes;
   }
 
   static Future<bool> uninstallPlugin(String folder) async {

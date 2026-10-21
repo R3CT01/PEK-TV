@@ -12,6 +12,7 @@ import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
 import 'pages.dart';
+import 'plugin_backup.dart';
 import 'plugin_host.dart' show PluginBack, PluginHost;
 import 'plugin_ui.dart';
 import 'tokens.dart';
@@ -60,6 +61,15 @@ class _AppShellState extends State<AppShell> {
   final ValueNotifier<int> _pageN = ValueNotifier(0); // only the tab bar listens, so a swipe does not rebuild every page
   String _tab = 'dashboard'; // TV: sidebar selection
   Timer? _syncTimer;
+  Timer? _backupTimer;
+
+  // A plugin was installed, updated or removed: back up a moment later (lets a removal reach the cloud first).
+  void _backupSoon() {
+    _backupTimer?.cancel();
+    _backupTimer = Timer(const Duration(seconds: 4), () {
+      if (Cloud.linked) unawaited(PluginBackup.run());
+    });
+  }
   List<PluginInfo> _pluginScreens = const []; // installed plugins that have a Python screen for this UI
 
   /// The menu with one entry per plugin screen, just above Plugins (a plugin's own plugin.json ui.navTab names it).
@@ -100,15 +110,26 @@ class _AppShellState extends State<AppShell> {
     _loadPluginScreens();
     PluginHost.changed.addListener(_loadPluginScreens);
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
-    if (Cloud.linked) unawaited(Cloud.sync());
+    if (Cloud.linked) {
+      unawaited(Cloud.sync());
+      unawaited(PluginBackup.run());
+    }
     _syncTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      if (Cloud.linked) unawaited(Cloud.sync(light: !Cloud.hasLocalChanges()));
+      if (Cloud.linked) {
+        unawaited(Cloud.sync(light: !Cloud.hasLocalChanges()));
+        unawaited(PluginBackup.run()); // cheap when nothing changed: file sizes and times only
+      }
     });
+    PluginHost.changed.addListener(_backupSoon); // installed / updated here: back it up
+    Cloud.changes.addListener(_backupSoon); // just signed in: back up what is installed
   }
 
   @override
   void dispose() {
     PluginHost.changed.removeListener(_loadPluginScreens);
+    PluginHost.changed.removeListener(_backupSoon);
+    Cloud.changes.removeListener(_backupSoon);
+    _backupTimer?.cancel();
     _syncTimer?.cancel();
     _pageN.dispose();
     _pager.dispose();

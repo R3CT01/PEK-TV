@@ -9,6 +9,8 @@ import 'common.dart';
 import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
+import 'plugin_backup.dart';
+import 'plugin_backup_ui.dart';
 import 'plugin_host.dart' show PluginHost;
 import 'plugin_install_ui.dart';
 import 'plugin_store.dart' show PluginInstaller;
@@ -228,6 +230,7 @@ class _PluginsPageState extends State<PluginsPage> {
     final ok = await Api.uninstallPlugin(pl.folder).catchError((_) => false);
     if (ok) {
       await PluginInstaller.forgetSource(pl.folder);
+      unawaited(PluginBackup.forget(pl.folder)); // other devices stop offering it; nothing is deleted from them
       await PluginInstaller.changed(pl.folder); // closes its open screen and reloads the menu
     }
     if (!mounted) return;
@@ -246,6 +249,7 @@ class _PluginsPageState extends State<PluginsPage> {
         PekButton(label: 'Install from GitHub', onTap: () => openGithubInstall(context)),
       ]),
       SizedBox(height: rem),
+      const PluginBackupOffers(),
       Async<List<PluginInfo>>(
         future: _list,
         builder: (context, list) {

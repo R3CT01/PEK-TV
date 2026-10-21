@@ -6,6 +6,7 @@ import 'cloud.dart';
 import 'common.dart';
 import 'fields.dart';
 import 'profile_pages.dart';
+import 'plugin_backup_ui.dart';
 import 'profiles.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -135,6 +136,7 @@ class _AccountSectionState extends State<AccountSection> {
             ]),
             SizedBox(height: 0.5 * rem),
             Text('Library favorites stay on this device. The cloud keeps watch history and resume points.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.85 * rem)),
+            const PluginBackupSettings(),
           ],
         );
       },

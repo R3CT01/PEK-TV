@@ -132,6 +132,22 @@ class Cloud {
     return (status: r.statusCode, body: out);
   }
 
+  /// A signed-in call to the worker for other modules (plugin backup). Errors come back as a short code in [CloudResult.error]
+  /// (the worker's own code when it sent one, e.g. `plugin_quota`; otherwise `session_expired`, `rate_limited`, `offline`, ...).
+  static Future<CloudResult> call(String method, String path, [Map<String, dynamic>? body]) async {
+    if (!linked) return const CloudResult(ok: false, error: 'not_linked');
+    try {
+      final r = await _request(method, path, body: body, withToken: true);
+      if (r.status == 200 && r.body['ok'] == true) return CloudResult(ok: true, status: 200, body: r.body);
+      final e = r.body['error'];
+      final code = (e is String && e.isNotEmpty && r.status != 401) ? e : _failure(r.status, r.body);
+      if (code == 'session_expired') await _unlink(); // signed out elsewhere or expired: ask to sign in again
+      return CloudResult(ok: false, status: r.status, error: code, body: r.body);
+    } catch (_) {
+      return const CloudResult(ok: false, error: 'offline');
+    }
+  }
+
   // ---------------------------------------------------------------- account
 
   static Future<void> _startSession(String token, String mail, String user) async {
