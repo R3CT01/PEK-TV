@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'activity.dart';
 import 'tv_mode.dart';
 
 /// The design tokens from style.css. Default = :root (the light "sx" theme). [netflix] = html.nf-on.
@@ -170,5 +171,11 @@ class PekBackdrop extends StatelessWidget {
   final Widget child;
 
   @override
-  Widget build(BuildContext context) => ColoredBox(color: tokens.bg, child: child);
+  // While a video is open the picture is a native surface BEHIND Flutter, so this must not paint an opaque colour
+  // over it (that is what made the video look blank while the controls still showed).
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+        valueListenable: Activity.playerOpen,
+        child: child,
+        builder: (_, open, c) => ColoredBox(color: open ? Colors.transparent : tokens.bg, child: c),
+      );
 }

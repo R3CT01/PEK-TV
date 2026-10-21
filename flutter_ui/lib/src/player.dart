@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -402,8 +403,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ignoring: !_controls,
                 child: AnimatedOpacity(
                   opacity: _controls ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
-                  child: Theme(data: ThemeData.dark(useMaterial3: true), child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: _overlay())),
+                  duration: const Duration(milliseconds: 120),
+                  child: RepaintBoundary(child: Theme(data: ThemeData.dark(useMaterial3: true), child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: _overlay()))),
                 ),
               ),
             ],
@@ -447,72 +448,124 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  // Look of www/player.js: dark glass buttons (rgba(28,24,21,.58) + 1px light border), warm off-white highlight,
+  // 4px seek track with a 12px knob and halo, time on the left, transport in the middle, tracks + exit on the right.
+  static const _glass = Color(0xB31C1815); // flat fill, no blur / border / shadow: cheap to draw on weak boxes
+  static const _fg = Color(0xFFF6F2EC);
+  static const _hi = Color(0xFFF3EEE7);
+
+  Widget _glassBtn(IconData icon, VoidCallback onTap, {double size = 44, double icon_ = 22}) {
+    return Material(
+      color: _glass,
+      shape: const CircleBorder(),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(width: size, height: size, child: Icon(icon, size: icon_, color: _fg)),
+      ),
+    );
+  }
+
+  Widget _seekBar() {
+    return ValueListenableBuilder<double>(
+      valueListenable: _player.duration,
+      builder: (_, dur, __) => ValueListenableBuilder<double>(
+        valueListenable: _player.position,
+        builder: (_, pos, __) {
+          final max = dur > 0 ? dur : 1.0;
+          final v = (_drag ?? pos).clamp(0.0, max).toDouble();
+          return SliderTheme(
+            data: SliderThemeData(
+              trackHeight: 4,
+              activeTrackColor: _hi,
+              inactiveTrackColor: const Color(0x29F6F2EC),
+              thumbColor: _hi,
+              overlayColor: Colors.transparent,
+              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6, elevation: 0, pressedElevation: 0),
+              overlayShape: const RoundSliderOverlayShape(overlayRadius: 0),
+              trackShape: const RoundedRectSliderTrackShape(),
+            ),
+            child: Slider(
+              value: v,
+              max: max,
+              onChanged: (x) => setState(() => _drag = x),
+              onChangeEnd: (x) {
+                _player.seek(x);
+                setState(() => _drag = null);
+                _poke();
+              },
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _overlay() {
+    const shade = Color(0xFF0E0C0A);
+    final timeStyle = const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: _fg, fontFeatures: [FontFeature.tabularFigures()]);
     return Column(
       children: [
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xCC000000), Color(0x00000000)]),
+          padding: const EdgeInsets.fromLTRB(22, 18, 22, 54),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [shade.withAlpha(209), shade.withAlpha(0)]),
           ),
           child: Row(
             children: [
-              IconButton(onPressed: () => Navigator.of(context).maybePop(), icon: const Icon(Icons.arrow_back)),
-              const SizedBox(width: 8),
-              Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
-              IconButton(onPressed: _tracks, icon: const Icon(Icons.subtitles_outlined)),
+              _glassBtn(Icons.arrow_back, () => Navigator.of(context).maybePop()),
+              const SizedBox(width: 12),
+              Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w600, letterSpacing: 0.2, color: _fg))),
             ],
           ),
         ),
         const Spacer(),
         Container(
-          padding: const EdgeInsets.fromLTRB(24, 32, 24, 20),
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Color(0xCC000000), Color(0x00000000)]),
+          padding: const EdgeInsets.fromLTRB(22, 58, 22, 16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [shade.withAlpha(230), shade.withAlpha(0)]),
           ),
-          child: Row(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              ValueListenableBuilder<bool>(
-                valueListenable: _player.playing,
-                builder: (_, p, __) => IconButton(
-                  iconSize: 36,
-                  onPressed: () {
-                    _player.togglePause();
-                    _poke();
-                  },
-                  icon: Icon(p ? Icons.pause : Icons.play_arrow),
-                ),
-              ),
-              ValueListenableBuilder<double>(
-                valueListenable: _player.position,
-                builder: (_, pos, __) => Text(_fmt(_drag ?? pos)),
-              ),
-              Expanded(
-                child: ValueListenableBuilder<double>(
-                  valueListenable: _player.duration,
-                  builder: (_, dur, __) => ValueListenableBuilder<double>(
-                    valueListenable: _player.position,
-                    builder: (_, pos, __) {
-                      final max = dur > 0 ? dur : 1.0;
-                      final v = (_drag ?? pos).clamp(0.0, max).toDouble();
-                      return Slider(
-                        value: v,
-                        max: max,
-                        onChanged: (x) => setState(() => _drag = x),
-                        onChangeEnd: (x) {
-                          _player.seek(x);
-                          setState(() => _drag = null);
-                          _poke();
-                        },
-                      );
-                    },
+              SizedBox(height: 30, child: RepaintBoundary(child: _seekBar())),
+              const SizedBox(height: 4),
+              Row(
+                children: [
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ValueListenableBuilder<double>(
+                        valueListenable: _player.position,
+                        builder: (_, pos, __) => ValueListenableBuilder<double>(
+                          valueListenable: _player.duration,
+                          builder: (_, dur, __) => Text.rich(TextSpan(style: timeStyle, children: [
+                            TextSpan(text: _fmt(_drag ?? pos)),
+                            TextSpan(text: '  /  ', style: timeStyle.copyWith(color: _fg.withAlpha(115))),
+                            TextSpan(text: _fmt(dur), style: timeStyle.copyWith(color: _fg.withAlpha(179))),
+                          ])),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              ValueListenableBuilder<double>(
-                valueListenable: _player.duration,
-                builder: (_, dur, __) => Text(_fmt(dur)),
+                  _glassBtn(Icons.replay_10, () { _seekBy(-10); _poke(); }),
+                  const SizedBox(width: 16),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _player.playing,
+                    builder: (_, p, __) => _glassBtn(p ? Icons.pause : Icons.play_arrow, () { _player.togglePause(); _poke(); }, size: 56, icon_: 30),
+                  ),
+                  const SizedBox(width: 16),
+                  _glassBtn(Icons.forward_10, () { _seekBy(10); _poke(); }),
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerRight,
+                      child: _glassBtn(Icons.subtitles_outlined, _tracks),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
