@@ -123,6 +123,28 @@ A third-party plugin listing PEK's built-in TMDb proxy host is refused here too 
 "Play with a plugin" only shows when another installed plugin with a Flutter screen declares `provides.stream`; none ship
 today, so the section stays hidden until one is installed.
 
+## The plugin store in the Flutter UI
+Plugins > **Browse the plugin store**. It is the Flutter twin of `www/plugin_store.js` + `www/plugin_installer.js` and talks to the
+same two places:
+
+1. **The PEK Store worker** (`https://pek-store.aquariusibeats.workers.dev`, `plugin_store.dart`): `GET /v1/store?shelf=official|community&kind=plugin`
+   lists a shelf; `GET /v1/store/chunk?id&fp&i` downloads the bundle in parts. The parts are joined, checked against the
+   item's 64-bit fingerprint (a port of `fingerprint()` in `plugin_store.js`, checked equal to the JS on test strings) and unpacked in memory.
+2. **PEK TV's own server** (`POST /api/plugins/install`): first a **dry run** (the server's safety checks, and whether it
+   replaces an installed plugin), then the real install after the person confirms. The multipart body is built by hand because the
+   server pairs repeated `path` / `file` parts by position; it was tested against the real route from `backend/plugin_install.h`.
+
+Screens (`plugin_store_ui.dart`): shelves -> list (with *installed* / *update available* marks) -> install page: download
+progress -> the author's own `warning` screen (if `plugin.json` has one) -> the permissions screen (the same sentences as the web
+UI) -> **Install / Update**. Nothing installs by itself, and uploading is still done on the store's website, not in the app.
+After an install or a removal the menu entries and the Plugins page reload (`PluginHost.changed`), any open screen of that
+plugin restarts, and the Plugins page shows where each plugin came from ("PEK Store official" / "approved · community store").
+A plugin with only a `ui.js` installs but says it opens in the classic UI; one with a `backend.py` reminds the person to restart
+PEK TV once.
+
+Not in the Flutter store yet: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`),
+installing from a GitHub link or a local .zip, and the cloud plugin backup the web UI triggers after an install.
+
 ## Files
 - `android/app/src/main/python/pek_ui.py` - what a screen imports (builders + host calls)
 - `android/app/src/main/python/pek_flutter.py` - sessions, guarded calls, background jobs, effects
@@ -131,6 +153,7 @@ today, so the section stays hidden until one is installed.
 - `android/app/src/flutter/.../FlutterHostActivity.kt` - `pek/plugins` channel (`call`, `openUrl`)
 - `flutter_ui/lib/src/plugin_host.dart` - Dart client, host allow-list for pictures, TV Back hook
 - `flutter_ui/lib/src/plugin_ui.dart` - the renderer, effects, polling, "Saved from plugins"
+- `flutter_ui/lib/src/plugin_store.dart` / `plugin_store_ui.dart` - the plugin store: client, fingerprint, install upload; shelves, list and install screens
 - `flutter_ui/lib/src/shell.dart`, `pages.dart`, `store.dart`, `api.dart`, `cloud.dart` - menu / More entries, Plugins > Open, plugin favorites and their cloud sync
 - `flutter_ui/pubspec.yaml` - adds `webview_flutter` / `webview_flutter_android` (trailer player); run `flutter pub get`
 - `backend/plugin_install.h` - a zip may contain `screen.py` instead of `ui.js`

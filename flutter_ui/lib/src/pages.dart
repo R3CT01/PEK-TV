@@ -10,6 +10,8 @@ import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
 import 'plugin_host.dart' show PluginHost;
+import 'plugin_store.dart' show PluginInstaller;
+import 'plugin_store_ui.dart';
 import 'plugin_ui.dart';
 import 'settings_extra.dart';
 import 'store.dart';
@@ -190,6 +192,22 @@ class PluginsPage extends StatefulWidget {
 class _PluginsPageState extends State<PluginsPage> {
   late Future<List<PluginInfo>> _list = Api.plugins();
 
+  @override
+  void initState() {
+    super.initState();
+    PluginHost.changed.addListener(_reload); // the store installed, updated or removed something
+  }
+
+  @override
+  void dispose() {
+    PluginHost.changed.removeListener(_reload);
+    super.dispose();
+  }
+
+  void _reload() {
+    if (mounted) setState(() => _list = Api.plugins());
+  }
+
   Future<void> _remove(PluginInfo pl) async {
     final p = context.pek;
     final yes = await showDialog<bool>(
@@ -207,7 +225,10 @@ class _PluginsPageState extends State<PluginsPage> {
     );
     if (yes != true) return;
     final ok = await Api.uninstallPlugin(pl.folder).catchError((_) => false);
-    if (ok) unawaited(PluginHost.close(pl.folder));
+    if (ok) {
+      await PluginInstaller.forgetSource(pl.folder);
+      await PluginInstaller.changed(pl.folder); // closes its open screen and reloads the menu
+    }
     if (!mounted) return;
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(content: Text(ok ? 'Removed ${pl.name}' : 'Could not remove ${pl.name}')));
     setState(() => _list = Api.plugins());
@@ -218,15 +239,17 @@ class _PluginsPageState extends State<PluginsPage> {
     final rem = context.pek.rem;
     return ListView(padding: widget.padding, children: [
       const Heading('Plugins'),
+      Wrap(children: [PekButton(label: 'Browse the plugin store', primary: true, onTap: () => openPluginStore(context))]),
+      SizedBox(height: rem),
       Async<List<PluginInfo>>(
         future: _list,
         builder: (context, list) {
-          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Install plugins from the plugin store in the classic UI.');
+          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Open the plugin store to find some.');
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final pl in list)
               ListRow(
                 title: pl.version.isEmpty ? pl.name : '${pl.name}  v${pl.version}',
-                subtitle: pl.description,
+                subtitle: [PluginInstaller.sourceLabel(pl.folder) ?? '', pl.description].where((s) => s.isNotEmpty).join(' \u00b7 '),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (pl.flutterScreen) ...[
                     PekButton(compact: true, primary: true, label: 'Open', onTap: () => openPluginScreen(context, pluginId: pl.folder, title: pl.navTab.isEmpty ? pl.name : pl.navTab)),
@@ -236,7 +259,7 @@ class _PluginsPageState extends State<PluginsPage> {
                 ]),
               ),
             SizedBox(height: rem),
-            PekButton(label: 'Open plugins & store (classic UI)', primary: true, onTap: PekPlayer.classicUi),
+            PekButton(label: 'Open plugins in the classic UI', onTap: PekPlayer.classicUi),
           ]);
         },
       ),
@@ -329,7 +352,7 @@ class _SettingsPageState extends State<SettingsPage> {
       const MusicOnlineSection(),
       const VideoOutputSection(),
       const AudioOutputSection(),
-      Section(title: 'Classic UI', hint: 'Plugins and their screens, the plugin store and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
+      Section(title: 'Classic UI', hint: 'Plugins that only have a web screen, skins and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
       Section(title: 'App', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
     ]);
   }

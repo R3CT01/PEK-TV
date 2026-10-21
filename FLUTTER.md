@@ -76,8 +76,11 @@ there are no lock-screen controls yet (those need native channel methods).
 Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `FLUTTER_PLUGINS.md`). TMDb Discover is fully ported (inline trailer, streaming apps, watched, Play with a plugin, synced favorites):
 Plugins > Open, or its own entry in the menu / More page.
 
+## Plugin store
+Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the same warning and permissions screens as the web UI (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
+
 ## Still only in the classic UI
-Plugins that only have a `ui.js`, the plugin store, installable skin packages, plugin dashboard tiles.
+Plugins that only have a `ui.js`, skins (the store's skin shelf and installable skin packages), installing from GitHub or a .zip, plugin dashboard tiles.
 
 ## TV mode (port of `www/tv_mode.js`)
 Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,

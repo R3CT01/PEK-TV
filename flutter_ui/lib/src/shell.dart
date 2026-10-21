@@ -86,13 +86,19 @@ class _AppShellState extends State<AppShell> {
     return _titleOf(id);
   }
 
-  @override
-  void initState() {
-    super.initState();
+  /// Plugins that have a Python screen: one menu entry each. Reloaded when the store installs or removes one.
+  void _loadPluginScreens() {
     Api.plugins().then((l) {
       PluginHost.streamers = [for (final e in l) if (e.flutterScreen && e.streamer) {'id': e.folder, 'name': e.name}];
       if (mounted) setState(() => _pluginScreens = l.where((e) => e.flutterScreen).toList());
     }).catchError((_) {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPluginScreens();
+    PluginHost.changed.addListener(_loadPluginScreens);
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) unawaited(Cloud.sync());
     _syncTimer = Timer.periodic(const Duration(minutes: 5), (_) {
@@ -102,6 +108,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    PluginHost.changed.removeListener(_loadPluginScreens);
     _syncTimer?.cancel();
     _pageN.dispose();
     _pager.dispose();

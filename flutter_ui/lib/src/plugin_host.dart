@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ui' show PlatformDispatcher;
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart';
 
 import 'api.dart';
@@ -17,6 +18,9 @@ import 'store.dart';
 /// "effects" it can ask for are a short fixed list (open an https link, save a favorite, show a message).
 class PluginHost {
   static const _channel = MethodChannel('pek/plugins');
+
+  /// Bumped after a plugin is installed, updated or removed: the menu and the Plugins page reload their lists from it.
+  static final ValueNotifier<int> changed = ValueNotifier(0);
 
   /// Installed plugins that have a Python screen and can play a title ("provides": {"stream": true}); null until loaded.
   static List<Map<String, String>>? streamers;
