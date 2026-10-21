@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'tokens.dart';
-import 'weather.dart' show WeatherBadge;
+import 'weather.dart' show WeatherBadge, weatherActions;
 import 'widgets.dart';
 
 extension PekPad on PekScope {
@@ -30,10 +30,18 @@ class Heading extends StatelessWidget {
       child: Row(children: [
         Expanded(child: Text(title, style: TextStyle(fontSize: (p.narrow ? 1.9 : 2.2) * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1))),
         if (trailing != null) ...[SizedBox(width: 0.75 * p.rem), trailing!],
-        if (weather) ...[SizedBox(width: 0.75 * p.rem), const WeatherBadge()],
+        if (weather && !_InSubScreen.of(context)) ...[SizedBox(width: 0.75 * p.rem), const WeatherBadge()], // a SubScreen already has it in its bar
       ]),
     );
   }
+}
+
+/// Marks everything under a [SubScreen]: its app bar carries the weather pill, so a [Heading] inside must not add a second one.
+class _InSubScreen extends InheritedWidget {
+  const _InSubScreen({required super.child});
+  static bool of(BuildContext context) => context.getInheritedWidgetOfExactType<_InSubScreen>() != null;
+  @override
+  bool updateShouldNotify(_InSubScreen o) => false;
 }
 
 /// A page pushed from the More page (or opened from the sidebar on wide screens): back arrow + scrolling body.
@@ -47,26 +55,27 @@ class SubScreen extends StatelessWidget {
     final p = context.pek;
     return PekBackdrop(
       tokens: p.tokens,
-      child: Scaffold(
+      child: _InSubScreen(child: Scaffold(
       backgroundColor: Colors.transparent,
       appBar: p.isTv
           // 10-foot look: a taller bar that starts inside the safe margins (like .plugin-window-bar).
           ? PreferredSize(
               preferredSize: Size.fromHeight(3.5 * p.rem + p.safeY),
               child: Padding(
-                padding: EdgeInsets.only(top: p.safeY, left: p.safeX),
+                padding: EdgeInsets.only(top: p.safeY, left: p.safeX, right: p.safeX),
                 child: AppBar(
                   backgroundColor: Colors.transparent,
                   elevation: 0,
                   foregroundColor: p.tokens.text,
                   toolbarHeight: 3.5 * p.rem,
                   title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)),
+                  actions: weatherActions(context),
                 ),
               ),
             )
-          : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600))),
+          : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)), actions: weatherActions(context)),
       body: body,
-    ));
+    )));
   }
 }
 

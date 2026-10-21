@@ -4,6 +4,7 @@ import 'api.dart';
 import 'player.dart';
 import 'store.dart';
 import 'tokens.dart';
+import 'weather.dart' show weatherActions;
 import 'torrent.dart';
 import 'widgets.dart';
 
@@ -91,7 +92,7 @@ class MovieScreen extends StatelessWidget {
     );
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text),
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, actions: weatherActions(context)),
       body: p.narrow
           ? SingleChildScrollView(padding: EdgeInsets.all(rem), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Center(child: poster), SizedBox(height: rem), info]))
           : Padding(
@@ -130,7 +131,7 @@ class _ShowScreenState extends State<ShowScreen> {
     final episodes = seasons.isEmpty ? const <Episode>[] : seasons[_season].episodes;
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, title: Text(show.title)),
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, title: Text(show.title), actions: weatherActions(context)),
       body: ValueListenableBuilder<int>(
         valueListenable: Store.changed,
         builder: (context, _, __) {

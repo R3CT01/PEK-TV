@@ -12,6 +12,7 @@ import 'settings_extra.dart' show ToggleRow;
 import 'store.dart';
 import 'torrent.dart';
 import 'tokens.dart';
+import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
 
 /// Opens a plugin's screen on top of the current one (a phone, or a TV from a place that is not the sidebar).
@@ -320,6 +321,7 @@ class _PluginViewState extends State<PluginView> {
     final video = (_error == null && _tree != null) ? _findVideo(_tree!) : null;
     final content = Column(children: [
       bar,
+      if (widget.embedded) Padding(padding: EdgeInsets.fromLTRB(widget.padding.left, 0.5 * p.rem, widget.padding.right, 0), child: const Align(alignment: Alignment.centerRight, child: WeatherBadge())),
       if (video != null)
         Padding(
           padding: EdgeInsets.fromLTRB(widget.padding.left, 0.5 * p.rem, widget.padding.right, 0.25 * p.rem),

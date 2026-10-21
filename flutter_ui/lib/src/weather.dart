@@ -186,6 +186,11 @@ class Weather {
   }
 }
 
+/// `AppBar.actions` for screens pushed on top of the main pages: the same pill, so it stays in the top right corner there too.
+List<Widget> weatherActions(BuildContext context) => [
+      Padding(padding: EdgeInsets.only(right: 0.75 * context.pek.rem), child: const Center(child: WeatherBadge())),
+    ];
+
 /// The pill in the top right corner of the main pages. Tap = open Weather settings (choose city / unit).
 class WeatherBadge extends StatefulWidget {
   const WeatherBadge({super.key});
