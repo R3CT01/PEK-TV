@@ -7,6 +7,7 @@ import 'detail.dart';
 import 'common.dart';
 import 'pages.dart';
 import 'tokens.dart';
+import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
 
 /// The Movies / TV Shows tabs: `_renderHeader(title, showRefresh)` + `_renderLibrary(tab)` in app_library.js.
@@ -118,6 +119,8 @@ class _LibraryPageState extends State<LibraryPage> {
           Expanded(child: Text(widget.title, style: TextStyle(fontSize: 2 * rem, fontWeight: FontWeight.w700))),
           SizedBox(width: rem),
           refresh,
+          SizedBox(width: 0.75 * rem),
+          const WeatherBadge(),
         ],
       ),
     );

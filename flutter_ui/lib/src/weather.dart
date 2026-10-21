@@ -11,7 +11,8 @@ import 'tokens.dart';
 import 'widgets.dart';
 
 /// The Weather tile of the dashboard. Same source as plugins/weather: Open-Meteo (no key), a city you pick, Fahrenheit or
-/// Celsius. The city and unit belong to the device, not to a profile.
+/// Celsius. The city and unit are kept on the device and also sync to the signed-in profile as the `s|weather` setting
+/// (same item as the web UI, see Cloud), so a profile's other devices get the same city.
 class Weather {
   static const _kCoords = 'pek_weather_coords';
   static const _kUnit = 'pek_weather_unit';
@@ -34,9 +35,13 @@ class Weather {
   static final ValueNotifier<int> changes = ValueNotifier(0);
 
   static String get unit => Store.strGet(_kUnit, scoped: false) == 'C' ? 'C' : 'F';
+  /// Bumped only when the person changes the city or unit here (not when the cloud does): Cloud sync listens to it.
+  static final ValueNotifier<int> edited = ValueNotifier(0);
+
   static Future<void> setUnit(String u) async {
     await Store.strSet(_kUnit, u, scoped: false);
     changes.value++;
+    edited.value++;
   }
 
   static ({double lat, double lon, String label})? get city {
@@ -51,12 +56,60 @@ class Weather {
     await Store.strSet(_kCoords, jsonEncode({'lat': lat, 'lon': lon, 'label': label}), scoped: false);
     await Store.strDel(_kLast, scoped: false);
     changes.value++;
+    edited.value++;
   }
 
   static Future<void> clearCity() async {
     await Store.strDel(_kCoords, scoped: false);
     await Store.strDel(_kLast, scoped: false);
     changes.value++;
+    edited.value++;
+  }
+
+  // ---- cloud sync (`s|weather`, the same shape the web UI sends: {coords: {lat, lon, label}, city, unit}) ----
+
+  /// What this device has chosen, or null when nothing was ever chosen (a unit that was never changed is not synced).
+  static Map<String, dynamic>? syncValue() {
+    final out = <String, dynamic>{};
+    final c = city;
+    if (c != null) {
+      out['coords'] = {'lat': c.lat, 'lon': c.lon, 'label': c.label};
+      out['city'] = c.label;
+    }
+    final u = Store.strGet(_kUnit, scoped: false);
+    if (u == 'F' || u == 'C') out['unit'] = u;
+    return out.isEmpty ? null : out;
+  }
+
+  /// Checks a value that came from the cloud (same limits as the web UI). Null when nothing in it is usable.
+  static Map<String, dynamic>? cleanSync(dynamic o) {
+    if (o is! Map) return null;
+    final out = <String, dynamic>{};
+    final c = o['coords'];
+    if (c is Map && c['lat'] is num && c['lon'] is num && c['label'] is String) {
+      final lat = (c['lat'] as num).toDouble(), lon = (c['lon'] as num).toDouble(), label = c['label'] as String;
+      if (lat.isFinite && lon.isFinite && lat.abs() <= 90 && lon.abs() <= 180 && label.isNotEmpty && label.length <= 120) {
+        out['coords'] = {'lat': lat, 'lon': lon, 'label': label};
+      }
+    }
+    final city = o['city'];
+    if (city is String && city.isNotEmpty && city.length <= 120) out['city'] = city;
+    if (o['unit'] == 'F' || o['unit'] == 'C') out['unit'] = o['unit'];
+    return out.isEmpty ? null : out;
+  }
+
+  /// Puts a cleaned value from the cloud on this device. Only what the value has is changed (like the web UI).
+  static void applySynced(Map<String, dynamic> o) {
+    final c = o['coords'];
+    if (c is Map) {
+      final label = '${c['label']}';
+      final changedCity = city?.label != label;
+      unawaited(Store.strSet(_kCoords, jsonEncode({'lat': c['lat'], 'lon': c['lon'], 'label': label}), scoped: false));
+      if (changedCity) unawaited(Store.strDel(_kLast, scoped: false)); // the old city's reading must not show for the new one
+    }
+    final u = o['unit'];
+    if (u == 'F' || u == 'C') unawaited(Store.strSet(_kUnit, u as String, scoped: false));
+    changes.value++; // refresh the badge and tile, but not `edited`: this change came from the cloud
   }
 
   /// The last good reading for [label] (shown when offline), or null.
@@ -83,6 +136,41 @@ class Weather {
     }
   }
 
+  // ---- header badge (top right of every main page, like .weather-badge in the web UI) ----
+  /// Text the badge shows, e.g. "65\u00b0F". One value for every page, so only one request is made.
+  static final ValueNotifier<String> badge = ValueNotifier('--\u00b0');
+  static Timer? _badgeTimer;
+  static DateTime? _badgeAt;
+  static bool _badgeBusy = false;
+
+  /// Starts the shared refresh (city / unit changes + every 15 minutes). Safe to call from every badge.
+  static void startBadge() {
+    if (_badgeTimer != null) return;
+    changes.addListener(() => refreshBadge(force: true));
+    _badgeTimer = Timer.periodic(const Duration(minutes: 15), (_) => refreshBadge(force: true));
+    refreshBadge(force: true);
+  }
+
+  static Future<void> refreshBadge({bool force = false}) async {
+    final c = city;
+    if (c == null) {
+      badge.value = '--\u00b0';
+      return;
+    }
+    final cached = last(c.label);
+    if (cached != null) badge.value = format(cached.tempC);
+    if (_badgeBusy) return;
+    if (!force && _badgeAt != null && DateTime.now().difference(_badgeAt!) < const Duration(minutes: 5)) return;
+    _badgeBusy = true;
+    try {
+      final r = await fetch(c.lat, c.lon, c.label);
+      _badgeAt = DateTime.now();
+      if (r != null && city?.label == c.label) badge.value = format(r.tempC);
+    } finally {
+      _badgeBusy = false;
+    }
+  }
+
   static String format(double tempC) => unit == 'C' ? '${tempC.round()}\u00b0C' : '${(tempC * 9 / 5 + 32).round()}\u00b0F';
 
   /// City search through Open-Meteo's geocoder: (label, lat, lon).
@@ -95,6 +183,46 @@ class Weather {
         if (l['latitude'] is num && l['longitude'] is num)
           (label: '${l['name']}${l['admin1'] != null ? ', ${l['admin1']}' : ''} (${l['country'] ?? ''})', lat: (l['latitude'] as num).toDouble(), lon: (l['longitude'] as num).toDouble()),
     ];
+  }
+}
+
+/// The pill in the top right corner of the main pages. Tap = open Weather settings (choose city / unit).
+class WeatherBadge extends StatefulWidget {
+  const WeatherBadge({super.key});
+  @override
+  State<WeatherBadge> createState() => _WeatherBadgeState();
+}
+
+class _WeatherBadgeState extends State<WeatherBadge> {
+  @override
+  void initState() {
+    super.initState();
+    Weather.startBadge();
+    Weather.refreshBadge(); // a page that was just opened shows a reading at most 5 minutes old
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    return ValueListenableBuilder<String>(
+      valueListenable: Weather.badge,
+      builder: (context, text, _) => Semantics(
+        button: true,
+        label: 'Weather $text. Open weather settings',
+        child: PekFocusable(
+          onTap: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const WeatherSettingsScreen())),
+          radius: 999,
+          background: t.surface,
+          borderColor: t.border,
+          minHeight: p.isTv ? 3 * rem : 2.5 * rem,
+          alignment: Alignment.center,
+          padding: EdgeInsets.symmetric(horizontal: 1.1 * rem, vertical: 0.45 * rem),
+          child: Text(text, maxLines: 1, style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600, color: t.text, height: 1.2)),
+        ),
+      ),
+    );
   }
 }
 

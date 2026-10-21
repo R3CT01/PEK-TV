@@ -17,6 +17,7 @@ import 'plugin_host.dart' show PluginBack, PluginHost;
 import 'plugin_ui.dart';
 import 'tokens.dart';
 import 'torrent.dart';
+import 'weather.dart' show Weather;
 import 'widgets.dart';
 
 /// NAV_ITEMS in app_config.js, plus Resume Watching (the web UI only inserts it once there is something to resume).
@@ -104,6 +105,13 @@ class _AppShellState extends State<AppShell> {
     }).catchError((_) {});
   }
 
+  Timer? _weatherTimer;
+  void _weatherSoon() {
+    if (!Cloud.linked) return;
+    _weatherTimer?.cancel();
+    _weatherTimer = Timer(const Duration(seconds: 2), () => unawaited(Cloud.sync(light: true)));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -121,6 +129,7 @@ class _AppShellState extends State<AppShell> {
       }
     });
     PluginHost.changed.addListener(_backupSoon); // installed / updated here: back it up
+    Weather.edited.addListener(_weatherSoon); // a new city / unit: send it to the profile
     Cloud.changes.addListener(_backupSoon); // just signed in: back up what is installed
   }
 
@@ -128,6 +137,8 @@ class _AppShellState extends State<AppShell> {
   void dispose() {
     PluginHost.changed.removeListener(_loadPluginScreens);
     PluginHost.changed.removeListener(_backupSoon);
+    Weather.edited.removeListener(_weatherSoon);
+    _weatherTimer?.cancel();
     Cloud.changes.removeListener(_backupSoon);
     _backupTimer?.cancel();
     _syncTimer?.cancel();
@@ -416,7 +427,7 @@ class _MorePage extends StatelessWidget {
     return ListView(
       padding: padding,
       children: [
-        const Heading('More'),
+        const Heading('More', weather: true),
         for (var r = 0; r < rows; r++)
           Padding(
             padding: EdgeInsets.only(bottom: gap),

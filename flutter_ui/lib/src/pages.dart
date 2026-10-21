@@ -36,7 +36,7 @@ class ResumePage extends StatelessWidget {
       builder: (context, _, __) {
         final items = Store.resumeItems();
         return ListView(padding: padding, children: [
-          const Heading('Resume Watching'),
+          const Heading('Resume Watching', weather: true),
           if (items.isEmpty) const PekCard(title: 'Nothing to resume', subtitle: 'Anything you stop partway through shows up here.'),
           for (final it in items)
             ListRow(
@@ -79,7 +79,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
       builder: (context, _, __) {
         final favs = Store.favorites();
         return ListView(padding: widget.padding, children: [
-          const Heading('Favorites'),
+          const Heading('Favorites', weather: true),
           if (favs.isEmpty && Store.pluginFavorites().isEmpty)
             const PekCard(title: 'No favorites yet', subtitle: 'Open a movie or show and tap \u2661 Favorite. It will show up here.')
           else if (favs.isNotEmpty)
@@ -141,7 +141,7 @@ class DuplicatesPage extends StatelessWidget {
     const kind = {'movie': 'Same movie', 'episode': 'Same episode', 'size': 'Same size, different names'};
     String plural(int n, String w) => '$n $w${n == 1 ? '' : 's'}';
     return ListView(padding: padding, children: [
-      const Heading('Duplicates'),
+      const Heading('Duplicates', weather: true),
       Async<DuplicatesResult>(
         future: Api.duplicates(),
         builder: (context, d) {
@@ -169,7 +169,7 @@ class UnknownPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(padding: padding, children: [
-      const Heading('Unknown'),
+      const Heading('Unknown', weather: true),
       Async<List<FileRow>>(
         future: Api.unknown(),
         builder: (context, files) {
@@ -242,7 +242,7 @@ class _PluginsPageState extends State<PluginsPage> {
   Widget build(BuildContext context) {
     final rem = context.pek.rem;
     return ListView(padding: widget.padding, children: [
-      const Heading('Plugins'),
+      const Heading('Plugins', weather: true),
       Wrap(spacing: 0.6 * rem, runSpacing: 0.6 * rem, children: [
         PekButton(label: 'Browse the plugin store', primary: true, onTap: () => openPluginStore(context)),
         PekButton(label: 'Install from .zip', onTap: () => openZipInstall(context)),
@@ -333,7 +333,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final t = p.tokens;
     final rem = p.rem;
     return ListView(padding: widget.padding, children: [
-      const Heading('Settings'),
+      const Heading('Settings', weather: true),
       Section(
         title: 'Media sources',
         hint: 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',

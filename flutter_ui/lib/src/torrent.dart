@@ -408,7 +408,7 @@ class _TorrentsPageState extends State<TorrentsPage> {
     final rem = p.rem;
     final t = p.tokens;
     return ListView(padding: widget.padding, children: [
-      const Heading('Torrents'),
+      const Heading('Torrents', weather: true),
       FutureBuilder<bool>(
         future: _available,
         builder: (context, snap) {

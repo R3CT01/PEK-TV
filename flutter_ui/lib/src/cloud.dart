@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
+import 'weather.dart' show Weather;
 
 /// The answer of one cloud call.
 class CloudResult {
@@ -312,7 +313,7 @@ class Cloud {
   static bool hasLocalChanges() {
     if (!linked) return false;
     final a = _collectPush();
-    return a.history.length + a.progress.length + a.favorites.length > 0 || _hasUnresolvedFavorites;
+    return a.history.length + a.progress.length + a.favorites.length + a.settings.length > 0 || _hasUnresolvedFavorites;
   }
 
   /// [light] skips the profile round trip (a stop-of-playback sync only needs to push what changed).
@@ -345,13 +346,13 @@ class Cloud {
       }
       await _resolveFavorites();
       final all = _collectPush();
-      final pushed = all.history.length + all.progress.length + all.favorites.length;
+      final pushed = all.history.length + all.progress.length + all.favorites.length + all.settings.length;
       var anyChange = false;
       CloudResult? fail;
       for (var n = 1; n <= _maxRounds; n++) {
         final chunk = all.take(_chunk);
         final cursor = int.tryParse(Store.strGet('pek_sync_cursor') ?? '') ?? 0;
-        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites}, withToken: true);
+        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites, 'settings': chunk.settings}, withToken: true);
         if (r.status == 404 && r.body['error'] == 'unknown_profile') {
           fail = const CloudResult(ok: false, error: 'unknown_profile');
           break;
@@ -365,7 +366,7 @@ class Cloud {
           fail = const CloudResult(ok: false, error: 'cloud_outdated');
           break;
         }
-        _markPushed(chunk);
+        _markPushed(chunk, settingsStored: r.body['settings'] is List); // an older cloud ignores settings: keep them for later
         if (await _applyRemote(r.body)) anyChange = true;
         await Store.strSet('pek_sync_cursor', '${r.body['cursor'] ?? cursor}');
         final more = r.body['more'] == true || all.isNotEmpty;
@@ -601,10 +602,39 @@ class Cloud {
       final u = _int(v);
       if (u > 0 && _int(sf[key]) != u) favorites.add({'key': key, 'data': <String, dynamic>{}, 'updated': u, 'deleted': 1});
     });
-    return _All(history, progress, favorites);
+    // Settings that follow the profile (the weather city and unit): item `s|weather`, last writer wins.
+    final settings = <Map<String, dynamic>>[];
+    final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
+    final wm = _trackSettings()['weather'];
+    if (wm is Map && _int(ss['weather']) != _int(wm['u'])) {
+      final o = Weather.syncValue();
+      if (o != null) settings.add({'key': 's|weather', 'data': o, 'updated': _int(wm['u']), 'deleted': 0});
+    }
+    return _All(history, progress, favorites, settings);
   }
 
-  static void _markPushed(_Chunk chunk) {
+  // ---------------------------------------------------------------- settings (port of trackSettings in www/sync.js)
+
+  static const _baseTs = 1; // a value that was on the device before it ever synced: it loses to anything already in the cloud
+
+  /// Notices a change made on this device since the last look and stamps it with the time it was noticed.
+  static Map<String, dynamic> _trackSettings() {
+    final meta = Store.jsonMap('pek_sync_setmeta');
+    final o = Weather.syncValue();
+    final cur = o == null ? '' : jsonEncode(o);
+    if (cur.isEmpty) return meta; // nothing chosen on this device: nothing to sync
+    final m = meta['weather'];
+    if (m is! Map || m['v'] is! String) {
+      meta['weather'] = {'v': cur, 'u': _baseTs};
+      unawaited(Store.setJsonMap('pek_sync_setmeta', meta));
+    } else if (m['v'] != cur) {
+      meta['weather'] = {'v': cur, 'u': DateTime.now().millisecondsSinceEpoch};
+      unawaited(Store.setJsonMap('pek_sync_setmeta', meta));
+    }
+    return meta;
+  }
+
+  static void _markPushed(_Chunk chunk, {bool settingsStored = false}) {
     final seen = _seen();
     final sh = seen['h'] as Map<String, dynamic>;
     final sp = seen['p'] as Map<String, dynamic>;
@@ -619,6 +649,13 @@ class Cloud {
       sf['${it['key']}'] = it['updated'];
     }
     seen['f'] = sf;
+    if (settingsStored) {
+      final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
+      for (final it in chunk.settings) {
+        ss['${it['key']}'.substring(2)] = it['updated'];
+      }
+      seen['s'] = ss;
+    }
     Store.setJsonMap('pek_sync_seen', seen);
   }
 
@@ -927,6 +964,34 @@ class Cloud {
     if (tombChanged) await Store.writeFavTombs(tombs);
     await Store.setJsonMap('pek_sync_pendingf', newPendingF);
 
+    // settings: the cloud's weather city / unit, unless this device changed it more recently
+    final remoteS = resp['settings'];
+    if (remoteS is List) {
+      final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
+      final smeta = _trackSettings(); // a change made while the request was in flight counts as newer than the cloud's copy
+      for (final r in listOf(remoteS)) {
+        if ('${r['key']}' != 's|weather' || _truthy(r['deleted'])) continue;
+        final wm = smeta['weather'];
+        final mine = wm is Map ? _int(wm['u']) : 0;
+        final ru = _int(r['updated']);
+        if (ru < mine) continue; // ours is newer; it gets pushed
+        if (ru == mine) {
+          ss['weather'] = ru;
+          continue;
+        }
+        final clean = Weather.cleanSync(r['data']);
+        if (clean == null) continue;
+        Weather.applySynced(clean);
+        final now2 = Weather.syncValue();
+        if (now2 == null) continue;
+        smeta['weather'] = {'v': jsonEncode(now2), 'u': ru};
+        ss['weather'] = ru;
+        changed = true;
+      }
+      seen['s'] = ss;
+      await Store.setJsonMap('pek_sync_setmeta', smeta);
+    }
+
     await Store.writeHistoryRaw(hmap);
     await Store.writeProgressRaw(pmap);
     await Store.setJsonMap('pek_sync_seen', seen);
@@ -943,19 +1008,21 @@ class _P {
 }
 
 class _Chunk {
-  _Chunk(this.history, this.progress, this.favorites);
+  _Chunk(this.history, this.progress, this.favorites, this.settings);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
+  final List<Map<String, dynamic>> settings;
 }
 
 class _All {
-  _All(this.history, this.progress, this.favorites);
+  _All(this.history, this.progress, this.favorites, this.settings);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
+  final List<Map<String, dynamic>> settings;
 
-  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty;
+  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty || settings.isNotEmpty;
 
   /// Up to [max] items (history first), removed from this list.
   _Chunk take(int max) {
@@ -965,6 +1032,8 @@ class _All {
     progress.removeRange(0, p.length);
     final f = favorites.take(max - h.length - p.length).toList();
     favorites.removeRange(0, f.length);
-    return _Chunk(h, p, f);
+    final s = settings.take(max - h.length - p.length - f.length).toList();
+    settings.removeRange(0, s.length);
+    return _Chunk(h, p, f, s);
   }
 }

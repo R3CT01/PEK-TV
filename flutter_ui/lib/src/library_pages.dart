@@ -275,7 +275,7 @@ class _SearchPageState extends State<SearchPage> {
         );
 
     final children = <Widget>[
-      const Heading('Search'),
+      const Heading('Search', weather: true),
       PekField(label: 'Search your library', controller: _q, hint: 'Title, actor, genre or year', onSubmitted: _run),
       Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
         filterBtn('Genre', 'genre'),
@@ -405,7 +405,7 @@ class HistoryPage extends StatelessWidget {
       builder: (context, _, __) {
         final items = Store.history();
         return ListView(padding: padding, children: [
-          const Heading('Watch History'),
+          const Heading('Watch History', weather: true),
           if (items.isEmpty)
             const PekCard(title: 'Nothing watched yet', subtitle: 'Movies and episodes show up here once you finish them.')
           else ...[

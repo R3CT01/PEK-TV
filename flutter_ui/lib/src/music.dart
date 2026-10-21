@@ -208,7 +208,7 @@ class _MusicPageState extends State<MusicPage> {
           padding: EdgeInsets.only(left: pad.left, right: pad.right, top: pad.top),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              const Heading('Music'),
+              const Heading('Music', weather: true),
               TextField(
                 controller: _search,
                 onChanged: _onSearch,

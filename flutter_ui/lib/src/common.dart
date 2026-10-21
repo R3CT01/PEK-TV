@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'tokens.dart';
+import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
 
 extension PekPad on PekScope {
@@ -14,9 +15,12 @@ extension PekPad on PekScope {
 
 /// `h1.content-title`.
 class Heading extends StatelessWidget {
-  const Heading(this.title, {super.key, this.trailing});
+  const Heading(this.title, {super.key, this.trailing, this.weather = false});
   final String title;
   final Widget? trailing;
+
+  /// The weather pill, pinned to the top right of the header (main pages only).
+  final bool weather;
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +29,8 @@ class Heading extends StatelessWidget {
       padding: EdgeInsets.only(bottom: (p.isTv ? 2 : 1.5) * p.rem),
       child: Row(children: [
         Expanded(child: Text(title, style: TextStyle(fontSize: (p.narrow ? 1.9 : 2.2) * p.rem, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.1))),
-        if (trailing != null) trailing!,
+        if (trailing != null) ...[SizedBox(width: 0.75 * p.rem), trailing!],
+        if (weather) ...[SizedBox(width: 0.75 * p.rem), const WeatherBadge()],
       ]),
     );
   }

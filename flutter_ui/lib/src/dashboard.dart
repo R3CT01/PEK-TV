@@ -79,7 +79,7 @@ class _DashboardPageState extends State<DashboardPage> {
         return ListView(
           padding: widget.padding,
           children: [
-            Heading('Dashboard', trailing: PekButton(compact: true, label: 'Customize', onTap: _customize)),
+            Heading('Dashboard', weather: true, trailing: PekButton(compact: true, label: 'Customize', onTap: _customize)),
             FutureBuilder<(List<Movie>, List<Show>)>(
               future: _lib,
               builder: (context, snap) {
