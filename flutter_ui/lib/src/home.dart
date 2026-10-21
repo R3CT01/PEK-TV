@@ -5,6 +5,7 @@ import 'detail.dart';
 import 'focus.dart';
 import 'mpv.dart';
 import 'theme.dart';
+import 'art_cache.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -221,11 +222,10 @@ class PosterImage extends StatelessWidget {
       builder: (context, snap) {
         final url = snap.data?.poster ?? '';
         if (url.isEmpty) return placeholder();
-        return Image.network(
+        return ArtImage(
           url,
           fit: BoxFit.cover,
           cacheWidth: width, // decode small: weak TV boxes run out of memory on full-size posters
-          gaplessPlayback: true,
           errorBuilder: (_, __, ___) => placeholder(),
         );
       },

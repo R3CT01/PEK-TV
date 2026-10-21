@@ -21,6 +21,7 @@ import 'store.dart';
 import 'tv_mode.dart';
 import 'tokens.dart';
 import 'widgets.dart';
+import 'art_cache.dart';
 
 // ====================================================================== Resume Watching
 
@@ -445,7 +446,7 @@ class _ResumeThumb extends StatelessWidget {
       child: SizedBox(
         width: w,
         height: w * 1.5,
-        child: Image.network(url, fit: BoxFit.cover, cacheWidth: 200, gaplessPlayback: true, errorBuilder: (_, __, ___) => ColoredBox(color: p.tokens.surface)),
+        child: ArtImage(url, fit: BoxFit.cover, cacheWidth: 200, errorBuilder: (_, __, ___) => ColoredBox(color: p.tokens.surface)),
       ),
     );
   }

@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import 'activity.dart' show Busy;
+import 'art_cache.dart';
 
 /// Talks to the existing C++ server (backend/server.cpp) on the loopback port. Nothing in the backend changes.
 class Api {
@@ -13,10 +14,10 @@ class Api {
   static final http.Client _client = http.Client();
 
   /// A slow request shows the loading ring (Busy), like busy.js did for fetch().
-  static Future<dynamic> _get(String path) => Busy.run(path, () => _getRaw(path));
+  static Future<dynamic> _get(String path, {Duration timeout = const Duration(seconds: 20)}) => Busy.run(path, () => _getRaw(path, timeout));
 
-  static Future<dynamic> _getRaw(String path) async {
-    final r = await _client.get(Uri.parse('$base$path')).timeout(const Duration(seconds: 20));
+  static Future<dynamic> _getRaw(String path, [Duration timeout = const Duration(seconds: 20)]) async {
+    final r = await _client.get(Uri.parse('$base$path')).timeout(timeout);
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode} for $path');
     return jsonDecode(utf8.decode(r.bodyBytes, allowMalformed: true));
   }
@@ -81,16 +82,42 @@ class Api {
   /// A rescan changes what the library holds, so cached lookups and lists are dropped.
   static void forgetLibrary() => _details.clear();
 
+  // The last lists are kept on the device (art_cache.dart): if the server cannot answer, the titles still show.
+  static List<Movie> _movieList(dynamic j) => (((j as Map)['movies'] as List?) ?? const []).map((e) => Movie.fromJson(e as Map<String, dynamic>)).toList();
+  static List<Show> _showList(dynamic j) => (((j as Map)['shows'] as List?) ?? const []).map((e) => Show.fromJson(e as Map<String, dynamic>)).toList();
+
   static Future<List<Movie>> movies() async {
-    final j = await _get('/api/movies');
-    final list = (j['movies'] as List?) ?? const [];
-    return list.map((e) => Movie.fromJson(e as Map<String, dynamic>)).toList();
+    try {
+      final j = await _get('/api/movies');
+      final list = _movieList(j);
+      unawaited(ArtCache.writeText('movies.json', jsonEncode(j)));
+      return list;
+    } catch (_) {
+      final t = await ArtCache.readText('movies.json');
+      if (t != null) {
+        try {
+          return _movieList(jsonDecode(t));
+        } catch (_) {}
+      }
+      rethrow;
+    }
   }
 
   static Future<List<Show>> shows() async {
-    final j = await _get('/api/shows');
-    final list = (j['shows'] as List?) ?? const [];
-    return list.map((e) => Show.fromJson(e as Map<String, dynamic>)).toList();
+    try {
+      final j = await _get('/api/shows');
+      final list = _showList(j);
+      unawaited(ArtCache.writeText('shows.json', jsonEncode(j)));
+      return list;
+    } catch (_) {
+      final t = await ArtCache.readText('shows.json');
+      if (t != null) {
+        try {
+          return _showList(jsonDecode(t));
+        } catch (_) {}
+      }
+      rethrow;
+    }
   }
 
   static final Map<String, Future<Details>> _details = {};
@@ -110,16 +137,69 @@ class Api {
   /// Lookups that failed or came back without a poster (e.g. while offline): [forgetFailedDetails] lets them run again.
   static final Set<String> _noArt = {};
 
-  static Future<Details> _cachedDetails(String key, Future<Details> Function() load) => _details.putIfAbsent(key, () => _pool.run(() async {
-        try {
-          final d = await load();
-          if (d.poster.isEmpty) _noArt.add(key);
-          return d;
-        } catch (_) {
-          _noArt.add(key);
-          rethrow;
+  static Future<Details> _cachedDetails(String key, Future<Details> Function() load) => _details.putIfAbsent(key, () async {
+        final saved = await _savedDetail(key);
+        if (saved != null) return saved; // looked up in an earlier run: no request, works offline
+        return _pool.run(() async {
+          try {
+            final d = await load();
+            if (d.poster.isEmpty) {
+              _noArt.add(key);
+            } else {
+              unawaited(_saveDetail(key, d));
+            }
+            return d;
+          } catch (_) {
+            _noArt.add(key);
+            rethrow;
+          }
+        });
+      });
+
+  // ---- details kept on disk: synopsis + poster address per title. Only pictures from the internet are kept (a poster the
+  // library itself has comes from the local server, which answers at once and may change when the files do).
+  static const _detailsTtl = Duration(days: 30);
+  static const _detailsMax = 6000;
+  static Future<Map<String, dynamic>>? _diskLoad;
+  static Timer? _diskSave;
+
+  static Future<Map<String, dynamic>> _disk() => _diskLoad ??= () async {
+        final t = await ArtCache.readText('details.json');
+        if (t != null) {
+          try {
+            final o = jsonDecode(t);
+            if (o is Map) return Map<String, dynamic>.from(o);
+          } catch (_) {}
         }
-      }));
+        return <String, dynamic>{};
+      }();
+
+  static Future<Details?> _savedDetail(String key) async {
+    try {
+      final e = (await _disk())[key];
+      if (e is! Map) return null;
+      final poster = '${e['p'] ?? ''}';
+      final at = (e['t'] as num?)?.toInt() ?? 0;
+      if (!poster.startsWith('https://')) return null;
+      if (DateTime.now().millisecondsSinceEpoch - at > _detailsTtl.inMilliseconds) return null;
+      return Details(overview: '${e['o'] ?? ''}', poster: poster);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _saveDetail(String key, Details d) async {
+    if (!d.poster.startsWith('https://')) return;
+    final m = await _disk();
+    m[key] = {'o': d.overview, 'p': d.poster, 't': DateTime.now().millisecondsSinceEpoch};
+    if (m.length > _detailsMax) {
+      for (final k in m.keys.take(m.length - _detailsMax + 1000).toList()) {
+        m.remove(k);
+      }
+    }
+    _diskSave?.cancel();
+    _diskSave = Timer(const Duration(seconds: 3), () => unawaited(ArtCache.writeText('details.json', jsonEncode(m))));
+  }
 
   /// Back online: forget the lookups that had no result so the next screen build asks again.
   static void forgetFailedDetails() {
@@ -369,8 +449,18 @@ class Api {
   }
 
   static Future<MusicLibrary> musicLibrary() async {
-    final a = await _get('/api/music/albums');
-    final r = await _get('/api/music/artists');
+    // A big library (thousands of songs) on a busy phone can take longer than 20 s, and the server can be mid-scan: wait longer
+    // and ask once more before giving up. The error that is thrown at the end says what went wrong (shown on the Music page).
+    const wait = Duration(seconds: 60);
+    Future<List<dynamic>> ask() => Future.wait([_get('/api/music/albums', timeout: wait), _get('/api/music/artists', timeout: wait)]);
+    List<dynamic> both;
+    try {
+      both = await ask();
+    } catch (_) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      both = await ask();
+    }
+    final a = both[0], r = both[1];
     return MusicLibrary(
       scanning: a['scanning'] == true || r['scanning'] == true,
       albums: ((a['albums'] as List?) ?? const []).map((e) => Album.fromJson(e as Map<String, dynamic>)).toList(),

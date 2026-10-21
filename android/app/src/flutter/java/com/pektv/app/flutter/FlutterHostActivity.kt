@@ -45,7 +45,7 @@ import java.util.concurrent.Executors
  *   pek/mpv         (MethodChannel)  load, play, pause, seek, setAudio, setSubtitle, addSubtitle, setMiniRect,
  *                                    fullscreen, destroy
  *   pek/mpv/events  (EventChannel)   {event: time|state|tracks|ended, data: {...}}  - same payloads the web UI got
- *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit, isPhone, setMulticast
+ *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit, isPhone, setMulticast, dirs
  *   pek/output      (MethodChannel)  Settings > Video / Audio output: video, setMatchRate, setHdr, audio, setPassthrough
  *   pek/music       (MethodChannel)  meta, state, end -> FlutterMusic (background play, lock-screen controls);
  *                                    remote {action} comes back the other way (next, prev, stop)
@@ -347,6 +347,8 @@ class FlutterHostActivity : FlutterActivity() {
                     setMulticast(call.argument<Boolean>("on") ?: false)
                     result.success(null)
                 }
+                // Where the Flutter side keeps its artwork / title cache (art_cache.dart): files = kept, cache = may be cleared by Android.
+                "dirs" -> result.success(mapOf("files" to filesDir.absolutePath, "cache" to cacheDir.absolutePath))
                 "classicUi" -> {
                     // Escape hatch while the Flutter UI is still being filled in: open the web UI for this session only
                     // (add sources, plugins, settings there). The next normal launch starts the Flutter UI again.

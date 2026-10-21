@@ -26,16 +26,20 @@ class Activity {
   /// True while a video is on screen (the line stays off the picture).
   static final ValueNotifier<bool> playerOpen = ValueNotifier(false);
   static int _players = 0;
+  // Called from initState / dispose, i.e. in the middle of a build: telling the listeners (the backdrop above every route)
+  // right then asks an ancestor to rebuild while the tree is being built. The flag is set once the build is done instead.
   static void playerEnter() {
     _players++;
-    playerOpen.value = true;
+    scheduleMicrotask(_syncPlayerOpen);
   }
 
   /// Counted, because the next episode's player opens before the old one is gone.
   static void playerLeave() {
     _players = _players > 0 ? _players - 1 : 0;
-    playerOpen.value = _players > 0;
+    scheduleMicrotask(_syncPlayerOpen);
   }
+
+  static void _syncPlayerOpen() => playerOpen.value = _players > 0;
 
   static final Map<String, _Item> _items = {};
   static int _seq = 0;

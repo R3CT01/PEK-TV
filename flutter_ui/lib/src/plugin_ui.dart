@@ -16,6 +16,7 @@ import 'tokens.dart';
 import 'watched.dart';
 import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
+import 'art_cache.dart';
 
 /// Opens a plugin's screen on top of the current one (a phone, or a TV from a place that is not the sidebar).
 Future<void> openPluginScreen(BuildContext context, {required String pluginId, required String title, Map<String, dynamic>? launch}) {
@@ -707,7 +708,7 @@ class _PluginEpisode extends StatelessWidget {
               width: (p.compact ? 9.5 : 13) * rem,
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: image.isEmpty ? blank() : Image.network(image, fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => blank()),
+                child: image.isEmpty ? blank() : ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (_, __, ___) => blank()),
               ),
             ),
           ),
@@ -765,7 +766,7 @@ class _PluginPoster extends StatelessWidget {
                   if (image.isEmpty)
                     plain()
                   else
-                    Image.network(image, fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => plain()),
+                    ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (_, __, ___) => plain()),
                   if (watched)
                     Positioned(
                       top: 6,

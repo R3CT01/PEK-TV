@@ -257,7 +257,15 @@ class _MusicPageState extends State<MusicPage> {
           return SliverToBoxAdapter(child: Padding(padding: EdgeInsets.all(2 * p.rem), child: Text('Loading\u2026', style: TextStyle(color: p.tokens.textMuted))));
         }
         if (snap.hasError) {
-          return SliverToBoxAdapter(child: PekCard(title: 'Could not load', subtitle: 'The backend did not respond. Is the server running?'));
+          // Say what actually failed (a timeout, a bad answer, no connection) instead of always blaming the server.
+          final why = '${snap.error}'.replaceFirst('Exception: ', '');
+          return SliverToBoxAdapter(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              PekCard(title: 'Could not load your music', subtitle: why.length > 160 ? '${why.substring(0, 160)}\u2026' : why),
+              SizedBox(height: p.rem),
+              FilledButton(autofocus: true, onPressed: () => setState(() => _lib = Api.musicLibrary()), child: const Text('Try again')),
+            ]),
+          );
         }
         final lib = snap.data!;
         if (lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {

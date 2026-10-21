@@ -74,6 +74,11 @@
         <!-- enableOnBackInvokedCallback=false: apps targeting Android 16 otherwise stop getting
              KEYCODE_BACK / onBackPressed, which the web UI (TV remote Back) and the exit dialog rely on. -->
 
+        <!-- Flutter renders with Skia/GL, not Impeller. The video is drawn on a native surface BEHIND the transparent
+             Flutter surface, and Impeller's Vulkan path can paint an opaque black frame there (picture missing, sound fine).
+             Remove this line to try Impeller again once video is confirmed to show through. -->
+        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
+
         <!-- Launcher entry. The PEK splash video plays inside this activity, on top of the app while it loads
              (see SplashOverlay.kt); controls are locked until the video is done. -->
         <activity

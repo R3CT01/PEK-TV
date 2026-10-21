@@ -115,3 +115,14 @@ Large 6 %). Both belong to the device, not to a profile, like the web UI. The 10
 - `PekScope.isTv` is the look; `PekScope.tvDevice` is the hardware and `PekScope.sidebar` the layout (sidebar on TV boxes, or wide screens
   with the look forced on). Forcing TV mode Off on a TV box keeps the sidebar and D-pad behaviour.
 - Game controllers need no port: Android turns them into D-pad keys, which Flutter's focus system already handles.
+
+
+## Artwork / title cache and the video surface (Fixes 3)
+
+- `flutter_ui/lib/src/art_cache.dart`: posters (and any other picture shown through `ArtImage`) are kept on the device (cache
+  folder, about 300 MB, oldest removed first). Synopsis + poster address per title are kept in `details.json` for 30 days
+  (internet pictures only), and the last movie / show lists in `movies.json` / `shows.json` (used when the server cannot answer).
+  Pictures from the local server (127.0.0.1) are not copied.
+- Video shows through the transparent Flutter surface. Flutter's Impeller renderer is switched off in `AndroidManifest.xml`
+  (`io.flutter.embedding.android.EnableImpeller`) because its Vulkan path can paint an opaque black frame over the video.
+  The `PEK playback: vo=...` line in logcat (MpvController) says whether mpv itself is producing video.

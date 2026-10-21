@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart' show Details;
 import 'layouts.dart';
 import 'tokens.dart';
+import 'art_cache.dart';
 
 /// The `.focusable` of the web UI. On a remote / keyboard (focus highlight on) it gets `.focused`:
 /// border-focus colour, background surface-focused, and a glow (10px accent-glow) or, in TV mode, a 0.2rem ring.
@@ -290,11 +291,10 @@ class _PosterCardState extends State<PosterCard> {
                   child: ColoredBox(
                     color: t.surface,
                     child: Stack(fit: StackFit.expand, children: [
-                      Image.network(
+                      ArtImage(
                         url,
                         fit: BoxFit.cover,
                         cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
-                        gaplessPlayback: true,
                         errorBuilder: (_, __, ___) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted && !_failed) setState(() => _failed = true);
@@ -345,7 +345,7 @@ class PosterImage extends StatelessWidget {
       builder: (context, snap) {
         final url = snap.data?.poster ?? '';
         if (url.isEmpty) return placeholder();
-        return Image.network(url, fit: BoxFit.cover, cacheWidth: width, gaplessPlayback: true, errorBuilder: (_, __, ___) => placeholder());
+        return ArtImage(url, fit: BoxFit.cover, cacheWidth: width, errorBuilder: (_, __, ___) => placeholder());
       },
     );
   }
