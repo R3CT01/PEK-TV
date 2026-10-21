@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'api.dart';
 import 'mpv.dart';
+import 'music_session.dart';
 
 /// Music playback for the Music page: a queue on top of the same libmpv engine the video player uses
 /// (/api/music/stream/<id> is a plain audio URL). Starting a video stops the music ([suspend]).
@@ -12,7 +13,10 @@ class MusicController {
     _p.ended.addListener(() {
       if (_p.ended.value && current.value != null) next(auto: true);
     });
+    _session = MusicSession(this); // background play + lock-screen controls
   }
+  // ignore: unused_field
+  late final MusicSession _session;
   static final MusicController instance = MusicController._();
 
   final PekPlayer _p = PekPlayer.shared;

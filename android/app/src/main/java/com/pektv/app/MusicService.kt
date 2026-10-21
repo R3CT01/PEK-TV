@@ -21,6 +21,17 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 
+/** Whoever owns the sound (the web UI's MpvAudioController, or the Flutter UI's FlutterMusic) and answers the notification / lock-screen buttons. */
+interface MusicHost {
+    fun remotePlay()
+    fun remotePause()
+    fun remoteNext()
+    fun remotePrev()
+    fun remoteSeek(sec: Double)
+    fun remoteStop()
+    fun destroy()
+}
+
 /** What the music tab is doing right now, written by [MpvAudioController] and read by [MusicService]. */
 object MusicState {
     @Volatile var title = ""
@@ -58,7 +69,7 @@ class MusicService : Service() {
         private const val LOCK_MAX_MS = 3 * 60 * 60 * 1000L
 
         @Volatile var instance: MusicService? = null
-        @Volatile var host: MpvAudioController? = null
+        @Volatile var host: MusicHost? = null
 
         fun start(ctx: Context) {
             if (instance != null) { refresh(); return }

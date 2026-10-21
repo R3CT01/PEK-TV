@@ -47,6 +47,8 @@ import java.util.concurrent.Executors
  *   pek/mpv/events  (EventChannel)   {event: time|state|tracks|ended, data: {...}}  - same payloads the web UI got
  *   pek/host        (MethodChannel)  classicUi (switch back to the web UI), exit, isPhone, setMulticast
  *   pek/output      (MethodChannel)  Settings > Video / Audio output: video, setMatchRate, setHdr, audio, setPassthrough
+ *   pek/music       (MethodChannel)  meta, state, end -> FlutterMusic (background play, lock-screen controls);
+ *                                    remote {action} comes back the other way (next, prev, stop)
  *   pek/plugins     (MethodChannel)  call(json) -> json: a plugin's Python screen (plugins/<id>/screen.py, run by
  *                                    python/pek_flutter.py through Chaquopy); openUrl(url): an https link in the
  *                                    YouTube app or the browser; openApp({packages, url}): a streaming app. See FLUTTER_PLUGINS.md.
@@ -55,6 +57,8 @@ class FlutterHostActivity : FlutterActivity() {
 
     private var mpv: MpvController? = null
     private var events: EventChannel.EventSink? = null
+    private var music: FlutterMusic? = null
+    private var musicChannel: MethodChannel? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
@@ -182,6 +186,9 @@ class FlutterHostActivity : FlutterActivity() {
             events?.success(mapOf("event" to event, "data" to data.toMap()))
         }
         mpv = c
+        music = FlutterMusic(this, c) { name, args ->
+            runOnUiThread { musicChannel?.invokeMethod(name, args) }
+        }
         hideSystemBars()
         // MainActivity's own prompt never runs when it hands over to this screen, so ask here: video + audio, once.
         MediaPermissions.askOnce(this)
@@ -270,6 +277,34 @@ class FlutterHostActivity : FlutterActivity() {
             }
         }
 
+        musicChannel = MethodChannel(messenger, "pek/music").also { ch ->
+            ch.setMethodCallHandler { call, result ->
+                val m = music
+                if (m == null) { result.success(null); return@setMethodCallHandler }
+                try {
+                    when (call.method) {
+                        "meta" -> m.meta(
+                            call.argument<String>("title") ?: "",
+                            call.argument<String>("artist") ?: "",
+                            call.argument<String>("album") ?: "",
+                            call.argument<String>("art") ?: ""
+                        )
+                        "state" -> m.state(
+                            call.argument<Boolean>("active") ?: false,
+                            call.argument<Boolean>("buffering") ?: false,
+                            call.argument<Number>("positionMs")?.toLong() ?: 0L,
+                            call.argument<Number>("durationMs")?.toLong() ?: 0L
+                        )
+                        "end" -> m.end()
+                        else -> { result.notImplemented(); return@setMethodCallHandler }
+                    }
+                    result.success(null)
+                } catch (t: Throwable) {
+                    result.error("music_error", t.message, null)
+                }
+            }
+        }
+
         MethodChannel(messenger, "pek/plugins").setMethodCallHandler { call, result ->
             when (call.method) {
                 "call" -> {
@@ -332,6 +367,8 @@ class FlutterHostActivity : FlutterActivity() {
         pluginPool.shutdown()
         events = null
         setMulticast(false)
+        music?.destroy()          // also stops MusicService: without this activity there is no queue to control
+        music = null
         mpv?.destroy()
         super.onDestroy()
     }

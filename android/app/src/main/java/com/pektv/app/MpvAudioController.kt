@@ -38,7 +38,7 @@ import org.json.JSONObject
 class MpvAudioController(
     private val activity: Activity,
     private val webView: WebView
-) : MPVLib.EventObserver {
+) : MPVLib.EventObserver, MusicHost {
 
     private val ui = Handler(Looper.getMainLooper())
     private var mpv: MPVLib? = null
@@ -173,7 +173,7 @@ class MpvAudioController(
     /** Stop and release the instance (the page keeps its queue). */
     fun stop() { stopEngine(); endSession() }
 
-    fun destroy() { stopEngine(); endSession() }
+    override fun destroy() { stopEngine(); endSession() }
 
     /** The page tells us what is playing, for the notification and lock screen. [url] is an absolute cover URL or "". */
     fun setMeta(title: String, artist: String, album: String, url: String) {
@@ -184,12 +184,12 @@ class MpvAudioController(
 
     // ---- buttons on the notification / lock screen / headset (main thread). Native first, so pause and play work even
     // if the page is busy; then the page, which owns the queue.
-    fun remotePlay() { play(); js("window.PekMusic&&PekMusic.resume()") }
-    fun remotePause() { pause(); js("window.PekMusic&&PekMusic.pause()") }
-    fun remoteNext() { js("window.PekMusic&&PekMusic.next(false)") }
-    fun remotePrev() { js("window.PekMusic&&PekMusic.prev()") }
-    fun remoteSeek(sec: Double) { js("window.PekMusic&&PekMusic.seek(" + sec + ")") }
-    fun remoteStop() { js("window.PekMusic&&PekMusic.stop()") }
+    override fun remotePlay() { play(); js("window.PekMusic&&PekMusic.resume()") }
+    override fun remotePause() { pause(); js("window.PekMusic&&PekMusic.pause()") }
+    override fun remoteNext() { js("window.PekMusic&&PekMusic.next(false)") }
+    override fun remotePrev() { js("window.PekMusic&&PekMusic.prev()") }
+    override fun remoteSeek(sec: Double) { js("window.PekMusic&&PekMusic.seek(" + sec + ")") }
+    override fun remoteStop() { js("window.PekMusic&&PekMusic.stop()") }
     private fun js(code: String) { webView.post { webView.evaluateJavascript(code, null) } }
 
     // ---------------- engine ----------------

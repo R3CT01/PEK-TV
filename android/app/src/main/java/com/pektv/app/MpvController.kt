@@ -392,7 +392,10 @@ class MpvController(
     }
 
     /** Called from the activity's onStop: don't keep playing in the background. */
-    fun onActivityStop() { mpv?.setPropertyBoolean("pause", true) }
+    fun onActivityStop() { if (!keepPlayingInBackground) mpv?.setPropertyBoolean("pause", true) }
+
+    /** Flutter UI: true while a song (not a video) is loaded, so leaving the app keeps the music going (MusicService holds the process). */
+    @Volatile var keepPlayingInBackground = false
 
     // ---------------- engine ----------------
 
