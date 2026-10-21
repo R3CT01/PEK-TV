@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import 'api.dart';
@@ -17,6 +19,9 @@ class MusicController {
 
   final ValueNotifier<Track?> current = ValueNotifier(null);
   final ValueNotifier<List<Track>> queue = ValueNotifier(const []);
+
+  /// The queue in the order it plays (a shuffled copy while shuffle is on). The full-screen player's Queue tab shows this.
+  final ValueNotifier<List<Track>> playOrder = ValueNotifier(const []);
   final ValueNotifier<bool> shuffle = ValueNotifier(false);
   final ValueNotifier<bool> repeat = ValueNotifier(false);
 
@@ -26,7 +31,12 @@ class MusicController {
   ValueNotifier<bool> get buffering => _p.buffering;
 
   int _index = -1;
-  List<Track> _order = const []; // queue in play order (shuffled copy when shuffle is on)
+  List<Track> _orderList = const [];
+  List<Track> get _order => _orderList;
+  set _order(List<Track> v) {
+    _orderList = v;
+    playOrder.value = List.unmodifiable(v);
+  }
 
   Future<void> playList(List<Track> tracks, int start) async {
     if (tracks.isEmpty) return;
@@ -34,6 +44,29 @@ class MusicController {
     _order = shuffle.value ? _shuffled(tracks, tracks[start]) : List.of(tracks);
     _index = _order.indexWhere((t) => t.id == tracks[start].id);
     await _load(_order[_index]);
+  }
+
+  /// Plays [tracks] from the start, or from a random song with shuffle turned on.
+  Future<void> playAll(List<Track> tracks, {bool shuffle = false}) async {
+    if (tracks.isEmpty) return;
+    if (shuffle && !this.shuffle.value) toggleShuffle();
+    await playList(tracks, shuffle ? math.Random().nextInt(tracks.length) : 0);
+  }
+
+  /// "Play next" (right after the playing song) or "Add to queue" (the end). Starts playing when nothing does.
+  Future<void> enqueue(List<Track> tracks, {bool next = false}) async {
+    if (tracks.isEmpty) return;
+    final cur = current.value;
+    if (cur == null || _order.isEmpty) {
+      await playList(tracks, 0);
+      return;
+    }
+    final order = List.of(_order)..insertAll(next ? _index + 1 : _order.length, tracks);
+    _order = order;
+    final q = List.of(queue.value);
+    final qi = q.indexWhere((t) => t.id == cur.id);
+    q.insertAll(next && qi >= 0 ? qi + 1 : q.length, tracks);
+    queue.value = q;
   }
 
   List<Track> _shuffled(List<Track> l, Track first) {
@@ -53,6 +86,13 @@ class MusicController {
   }
 
   Future<void> seek(double sec) => _p.seek(sec);
+
+  /// Plays entry [i] of [playOrder] (a tap in the full-screen player's Queue tab).
+  Future<void> jump(int i) async {
+    if (i < 0 || i >= _order.length) return;
+    _index = i;
+    await _load(_order[i]);
+  }
 
   Future<void> next({bool auto = false}) async {
     if (_order.isEmpty) return;

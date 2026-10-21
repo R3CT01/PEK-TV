@@ -26,7 +26,10 @@ Settings; a tap opens that screen on top and Back returns. On a TV the sidebar l
 - Movies, TV Shows: poster grids, Refresh (rescan), movie and show / season / episode pages, Favorite button
 - Player: libmpv engine, audio + subtitle pick, buffering, auto-hiding controls, records progress for Resume Watching
 - Resume Watching, Favorites (long-press a poster to remove)
-- Music: Albums / Artists / Songs, search, album and artist pages, queue, shuffle / repeat, mini player, Now Playing
+- Music: Albums / Artists / Songs, search, album and artist pages, queue, shuffle / repeat, mini player, full-screen player
+  (cover + title on the left, time-synced lyrics on the right, a Browse panel with Queue / Albums / Artists / Songs; `music_fullscreen.dart`,
+  a port of `www/music_fullscreen.js`)
+- Playlists (`playlists.dart` store per profile, `playlist_ui.dart`): Music > Playlists tab, playlist page (Play / Shuffle / Add to queue / Rename / Delete, drag to reorder), press-and-hold a song for Play next / Add to queue / Add to playlist, "Add to playlist" on album pages and in the full-screen player, "Save as playlist" for the queue. Not synced to the cloud yet.
 - Duplicates, Unknown, Plugins (list + remove), Settings (media sources + folder picker)
 - Settings > Subtitles (automatic look-up on / off, language, Test), Video output (match refresh rate, HDR) and Audio output
   (Dolby / DTS passthrough). Subtitles are also found automatically while a library movie / episode plays, and the player's
@@ -59,7 +62,7 @@ there are no lock-screen controls yet (those need native channel methods).
 - Search (title, actor, genre, year; `library_pages.dart`) and Watch History (a permanent "finished" record kept in `Store`), both under More.
 - Skip Intro / Skip Recap (`skip.dart`: file chapters, then the online database) and Up next (last 5 minutes of an episode, 5 s countdown
   when it ends) in the player. Settings > Skip intro and recap.
-- Lyrics on Now Playing (`lyrics.dart`) and Settings > Music > Online art & lyrics.
+- Lyrics in the full-screen player (`lyrics.dart`, shown by `music_fullscreen.dart`) and Settings > Music > Online art & lyrics.
 
 ## Added in phase 3
 - **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (same hash as the web UI), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Like the web UI, profiles need a signed-in account.

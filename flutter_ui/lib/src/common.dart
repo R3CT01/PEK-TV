@@ -67,7 +67,8 @@ class SubScreen extends StatelessWidget {
 
 /// `ui.listRow(title, subtitle, onTap)`.
 class ListRow extends StatelessWidget {
-  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.trailing, this.autofocus = false, this.highlight = false});
+  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.onLongPress, this.trailing, this.autofocus = false, this.highlight = false});
+  final VoidCallback? onLongPress;
   final bool highlight;
   final String title;
   final String subtitle;
@@ -88,6 +89,7 @@ class ListRow extends StatelessWidget {
         minHeight: p.isTv ? 3 * rem : null,
         padding: EdgeInsets.symmetric(horizontal: 0.5 * rem, vertical: 0.7 * rem),
         onTap: onTap,
+        onLongPress: onLongPress,
         child: Row(children: [
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

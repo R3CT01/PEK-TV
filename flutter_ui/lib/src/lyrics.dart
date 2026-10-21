@@ -44,10 +44,17 @@ class _Lyrics {
 /// Synced lyrics light up line by line and scroll to keep the current line in the middle; tapping a line jumps there.
 /// Songs with only plain lyrics show the text. Answers are kept in memory for the session (the backend keeps them on disk).
 class LyricsPanel extends StatefulWidget {
-  const LyricsPanel({super.key, required this.trackId, required this.position, required this.onSeek});
+  const LyricsPanel({super.key, required this.trackId, required this.position, required this.onSeek, this.onDark = false, this.fontSize, this.align = TextAlign.center});
   final String trackId;
   final ValueNotifier<double> position;
   final void Function(double sec) onSeek;
+
+  /// White text on a dark picture (the full-screen player) instead of the theme colours.
+  final bool onDark;
+
+  /// Base text size in logical pixels; null = 1rem. The full-screen player passes a size from the screen height.
+  final double? fontSize;
+  final TextAlign align;
 
   @override
   State<LyricsPanel> createState() => _LyricsPanelState();
@@ -114,7 +121,10 @@ class _LyricsPanelState extends State<LyricsPanel> {
     setState(() => _res = r);
   }
 
-  double _lineH(BuildContext context) => 2.6 * context.pek.rem;
+  double get _base => widget.fontSize ?? context.pek.rem;
+
+  // two lines of text fit in a row when the text is big (full screen)
+  double _lineH(BuildContext context) => (widget.fontSize != null ? 3.0 : 2.6) * _base;
 
   void _tick() {
     final lines = _res?.lines;
@@ -143,17 +153,19 @@ class _LyricsPanelState extends State<LyricsPanel> {
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
-    final rem = p.rem;
+    final rem = _base;
     final r = _res;
-    Widget msg(String s) => Center(child: Text(s, textAlign: TextAlign.center, style: TextStyle(color: t.textMuted)));
+    final strong = widget.onDark ? Colors.white : t.text;
+    final muted = widget.onDark ? Colors.white : t.textMuted;
+    Widget msg(String s) => Center(child: Text(s, textAlign: TextAlign.center, style: TextStyle(color: widget.onDark ? Colors.white70 : t.textMuted, fontSize: widget.onDark ? rem * 0.8 : null)));
     if (r == null) return msg('Loading lyrics\u2026');
     if (r.none) return msg(r.failed ? 'Couldn\u2019t load lyrics.' : 'No lyrics found for this song.');
     final lines = r.lines;
     if (lines == null) {
-      return SingleChildScrollView(padding: EdgeInsets.all(0.5 * rem), child: Text(r.plain, textAlign: TextAlign.center, style: TextStyle(color: t.text.withAlpha(220), height: 1.5)));
+      return SingleChildScrollView(padding: EdgeInsets.all(0.5 * rem), child: Text(r.plain, textAlign: widget.onDark ? TextAlign.start : TextAlign.center, style: TextStyle(color: strong.withAlpha(widget.onDark ? 230 : 220), height: 1.5, fontSize: widget.onDark ? rem * 0.8 : null)));
     }
     final h = _lineH(context);
-    return NotificationListener<UserScrollNotification>(
+    Widget list = NotificationListener<UserScrollNotification>(
       onNotification: (n) {
         if (n.direction != ScrollDirection.idle) _manualUntil = DateTime.now().add(const Duration(seconds: 4));
         return false;
@@ -170,16 +182,21 @@ class _LyricsPanelState extends State<LyricsPanel> {
               _manualUntil = DateTime.fromMillisecondsSinceEpoch(0);
               widget.onSeek(ln.t < 0 ? 0 : ln.t);
             },
-            child: Center(
+            child: Align(
+              alignment: widget.align == TextAlign.start ? Alignment.centerLeft : Alignment.center,
               child: Text(
                 ln.s.isEmpty ? '\u266A' : ln.s,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
+                textAlign: widget.align,
                 style: TextStyle(
-                  fontSize: on ? 1.15 * rem : rem,
+                  fontSize: on ? (widget.onDark ? 1.06 : 1.15) * rem : rem,
                   fontWeight: on ? FontWeight.w800 : FontWeight.w500,
-                  color: on ? t.text : (i < _active ? t.textMuted.withAlpha(140) : t.textMuted),
+                  height: widget.onDark ? 1.2 : null,
+                  // full screen: current line is solid white, the others are dimmed (web .pm-lyric opacity .38 / .5 for past lines)
+                  color: widget.onDark
+                      ? Colors.white.withAlpha(on ? 255 : (i < _active ? 128 : 97))
+                      : (on ? strong : (i < _active ? muted.withAlpha(140) : muted)),
                 ),
               ),
             ),
@@ -187,5 +204,19 @@ class _LyricsPanelState extends State<LyricsPanel> {
         },
       ),
     );
+    if (widget.onDark) {
+      // the top and bottom 14% fade out, as in the web player
+      list = ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (r) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+          stops: [0, 0.14, 0.86, 1],
+        ).createShader(r),
+        child: list,
+      );
+    }
+    return list;
   }
 }

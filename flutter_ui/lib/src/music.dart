@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'common.dart';
-import 'lyrics.dart';
 import 'music_controller.dart';
-import 'store.dart';
+import 'music_fullscreen.dart';
+import 'playlist_ui.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -84,7 +84,7 @@ class MusicPage extends StatefulWidget {
 }
 
 class _MusicPageState extends State<MusicPage> {
-  int _tab = 0; // 0 albums, 1 artists, 2 songs
+  int _tab = 0; // 0 albums, 1 artists, 2 songs, 3 playlists
   late Future<MusicLibrary> _lib = Api.musicLibrary();
   final _search = TextEditingController();
   Timer? _debounce;
@@ -196,7 +196,7 @@ class _MusicPageState extends State<MusicPage> {
     final t = p.tokens;
     final rem = p.rem;
     final pad = widget.padding;
-    final tabs = ['Albums', 'Artists', 'Songs'];
+    final tabs = ['Albums', 'Artists', 'Songs', 'Playlists'];
     final side = EdgeInsets.only(left: pad.left, right: pad.right);
     // A CustomScrollView with builder slivers: only the rows on screen (plus a little beyond, so the remote's arrow keys
     // find the next row) are built. The old single ListView built every album and song at once.
@@ -249,6 +249,7 @@ class _MusicPageState extends State<MusicPage> {
   /// The Albums / Artists / Songs body as a sliver, once the library answered.
   Widget _librarySliver(BuildContext context) {
     final p = context.pek;
+    if (_tab == 3) return const SliverToBoxAdapter(child: PlaylistRows()); // playlists live on the device, not in the library
     return FutureBuilder<MusicLibrary>(
       future: _lib,
       builder: (context, snap) {
@@ -363,10 +364,13 @@ class _MusicPageState extends State<MusicPage> {
 }
 
 class TrackRow extends StatelessWidget {
-  const TrackRow({super.key, required this.track, required this.onTap, this.number});
+  const TrackRow({super.key, required this.track, required this.onTap, this.number, this.onLongPress});
   final Track track;
   final VoidCallback onTap;
   final int? number;
+
+  /// Press and hold; default = the song menu (play next, add to queue, add to playlist).
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -380,6 +384,7 @@ class TrackRow extends StatelessWidget {
           highlight: on,
           subtitle: [track.artist, if (track.album.isNotEmpty && number == null) track.album].where((e) => e.isNotEmpty).join(' \u00b7 '),
           onTap: onTap,
+          onLongPress: onLongPress ?? () => showTrackMenu(context, track),
           trailing: Text(track.duration > 0 ? formatTime(track.duration) : '', style: TextStyle(fontSize: 0.85 * rem, color: context.pek.tokens.textMuted)),
         );
       },
@@ -413,6 +418,7 @@ class AlbumScreen extends StatelessWidget {
                   SizedBox(height: 0.75 * rem),
                   Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
                     PekButton(compact: true, primary: true, autofocus: true, label: 'Play', onTap: tracks.isEmpty ? null : () => _mc.playList(tracks, 0)),
+                    PekButton(compact: true, label: 'Add to playlist', onTap: tracks.isEmpty ? null : () => addToPlaylistSheet(context, tracks)),
                     PekButton(
                       compact: true,
                       label: 'Shuffle',
@@ -479,7 +485,7 @@ class MiniPlayer extends StatelessWidget {
       builder: (context, cur, _) {
         if (cur == null) return const SizedBox.shrink();
         return GestureDetector(
-          onTap: () => Navigator.push(context, MaterialPageRoute<void>(fullscreenDialog: true, builder: (_) => const NowPlayingScreen())),
+          onTap: () => openNowPlaying(context),
           child: Container(
             margin: EdgeInsets.fromLTRB(0.75 * rem, 0, 0.75 * rem, 0.5 * rem),
             padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
@@ -502,107 +508,6 @@ class MiniPlayer extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class NowPlayingScreen extends StatefulWidget {
-  const NowPlayingScreen({super.key});
-  @override
-  State<NowPlayingScreen> createState() => _NowPlayingState();
-}
-
-class _NowPlayingState extends State<NowPlayingScreen> {
-  double? _drag;
-  bool _lyrics = Store.musicLyrics;
-
-  @override
-  void initState() {
-    super.initState();
-    _mc.current.addListener(_closeWhenStopped);
-  }
-
-  @override
-  void dispose() {
-    _mc.current.removeListener(_closeWhenStopped);
-    super.dispose();
-  }
-
-  void _closeWhenStopped() {
-    if (_mc.current.value == null && mounted) Navigator.of(context).maybePop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pek;
-    final t = p.tokens;
-    final rem = p.rem;
-    return Scaffold(
-      backgroundColor: t.bg,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, leading: IconButton(icon: const Icon(Icons.keyboard_arrow_down), onPressed: () => Navigator.pop(context)), title: const Text('Now playing')),
-      body: ValueListenableBuilder<Track?>(
-        valueListenable: _mc.current,
-        builder: (context, cur, _) {
-          if (cur == null) return const SizedBox.shrink();
-          final side = (p.size.shortestSide - 4 * rem).clamp(120.0, 28 * rem).toDouble();
-          return Center(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.all(rem),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Art(url: Api.trackArt(cur), size: side, radius: 16),
-                SizedBox(height: 1.25 * rem),
-                Text(cur.title, textAlign: TextAlign.center, style: TextStyle(fontSize: 1.4 * rem, fontWeight: FontWeight.w800)),
-                Text('${cur.artist}${cur.album.isNotEmpty ? ' \u00b7 ${cur.album}' : ''}', textAlign: TextAlign.center, style: TextStyle(color: t.textMuted)),
-                SizedBox(height: rem),
-                SizedBox(
-                  width: side,
-                  child: ValueListenableBuilder<double>(
-                    valueListenable: _mc.duration,
-                    builder: (_, dur, __) => ValueListenableBuilder<double>(
-                      valueListenable: _mc.position,
-                      builder: (_, pos, __) {
-                        final max = dur > 0 ? dur : (cur.duration > 0 ? cur.duration : 1.0);
-                        final v = (_drag ?? pos).clamp(0.0, max).toDouble();
-                        return Column(children: [
-                          Slider(value: v, max: max, onChanged: (x) => setState(() => _drag = x), onChangeEnd: (x) {
-                            _mc.seek(x);
-                            setState(() => _drag = null);
-                          }),
-                          Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(formatTime(v)), Text(formatTime(max))]),
-                        ]);
-                      },
-                    ),
-                  ),
-                ),
-                SizedBox(height: 0.5 * rem),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  ValueListenableBuilder<bool>(valueListenable: _mc.shuffle, builder: (_, on, __) => IconButton(onPressed: _mc.toggleShuffle, icon: Icon(Icons.shuffle, color: on ? t.accent : t.textMuted))),
-                  IconButton(iconSize: 2.2 * rem, onPressed: _mc.prev, icon: const Icon(Icons.skip_previous)),
-                  ValueListenableBuilder<bool>(
-                    valueListenable: _mc.playing,
-                    builder: (_, on, __) => IconButton(autofocus: true, iconSize: 3 * rem, onPressed: _mc.toggle, icon: Icon(on ? Icons.pause_circle_filled : Icons.play_circle_filled)),
-                  ),
-                  IconButton(iconSize: 2.2 * rem, onPressed: () => _mc.next(), icon: const Icon(Icons.skip_next)),
-                  ValueListenableBuilder<bool>(valueListenable: _mc.repeat, builder: (_, on, __) => IconButton(onPressed: _mc.toggleRepeat, icon: Icon(Icons.repeat, color: on ? t.accent : t.textMuted))),
-                ]),
-                Row(mainAxisSize: MainAxisSize.min, children: [
-                  TextButton(onPressed: _mc.stop, child: const Text('Stop')),
-                  SizedBox(width: rem),
-                  TextButton.icon(
-                    onPressed: () {
-                      setState(() => _lyrics = !_lyrics);
-                      Store.setMusicLyrics(_lyrics);
-                    },
-                    icon: Icon(Icons.lyrics_outlined, color: _lyrics ? t.accent : t.textMuted),
-                    label: Text('Lyrics', style: TextStyle(color: _lyrics ? t.accent : t.textMuted)),
-                  ),
-                ]),
-                if (_lyrics) SizedBox(width: side, height: 13 * rem, child: LyricsPanel(trackId: cur.id, position: _mc.position, onSeek: _mc.seek)),
-              ]),
-            ),
-          );
-        },
-      ),
     );
   }
 }

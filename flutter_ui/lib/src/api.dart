@@ -485,6 +485,8 @@ class Track {
   final String id, title, artist, album, albumId;
   final double duration;
   final bool art;
+  /// The slim form kept in a playlist (what the song needs to be listed and played again).
+  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'artist': artist, 'album': album, 'albumId': albumId, 'duration': duration, 'art': art};
   factory Track.fromJson(Map<String, dynamic> j) => Track(
         id: '${j['id']}',
         title: '${j['title'] ?? ''}',
