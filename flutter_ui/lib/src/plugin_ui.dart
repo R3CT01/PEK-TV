@@ -424,6 +424,17 @@ class _PluginViewState extends State<PluginView> {
           autofocus: _af(n),
           onTap: on.isEmpty ? null : () => _send(on),
         );
+      case 'episode':
+        final eimg = '${n['img'] ?? ''}';
+        return _PluginEpisode(
+          title: '${n['s'] ?? ''}',
+          meta: '${n['meta'] ?? ''}',
+          text: '${n['text'] ?? ''}',
+          image: eimg.isNotEmpty && PluginHosts.allows(_hosts, eimg) ? eimg : '',
+          dim: n['dim'] == true,
+          autofocus: _af(n),
+          onTap: on.isEmpty ? null : () => _send(on),
+        );
       case 'tabs':
         final active = '${n['active']}';
         return Wrap(
@@ -558,6 +569,53 @@ class _PluginTrailerState extends State<_PluginTrailer> {
                 : ExcludeFocus(excluding: p.tvDevice, child: WebViewWidget(controller: c)),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// `ui.episodeRow`: the episode's picture (16:9) beside its title, facts and description. An episode that has not aired
+/// is dimmed. Without a picture (none on TMDb, or a host the plugin did not list) a plain block stands in for it.
+class _PluginEpisode extends StatelessWidget {
+  const _PluginEpisode({required this.title, required this.meta, required this.text, required this.image, required this.dim, required this.autofocus, required this.onTap});
+  final String title, meta, text, image;
+  final bool dim, autofocus;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    Widget blank() => ColoredBox(color: t.bg, child: Center(child: Icon(Icons.play_arrow_rounded, color: t.textMuted, size: 2 * rem)));
+    return Opacity(
+      opacity: dim ? 0.55 : 1,
+      child: PekFocusable(
+        autofocus: autofocus,
+        onTap: onTap,
+        radius: 14,
+        background: t.surface,
+        padding: EdgeInsets.all(0.6 * rem),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox(
+              width: (p.compact ? 9.5 : 13) * rem,
+              child: AspectRatio(
+                aspectRatio: 16 / 9,
+                child: image.isEmpty ? blank() : Image.network(image, fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => blank()),
+              ),
+            ),
+          ),
+          SizedBox(width: 0.8 * rem),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, fontWeight: FontWeight.w600, height: 1.25, color: t.text)),
+              if (meta.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.15 * rem), child: Text(meta, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.8 * rem, color: t.textMuted))),
+              if (text.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.3 * rem), child: Text(text, maxLines: p.compact ? 2 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.82 * rem, height: 1.35, color: t.textMuted))),
+            ]),
+          ),
+        ]),
       ),
     );
   }

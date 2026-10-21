@@ -65,6 +65,7 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 | `pek.requestRender()` after a fetch | `ui.background(work, done, fail)` (redraws by itself) |
 | `ui.column / row / text / heading / spinner` | same names |
 | `ui.button(label, fn, {primary, selected, autofocus})` | `ui.button(label, fn, primary=, selected=, autofocus=)` |
+| `ui.episodeRow({title, meta, text, image, dim, on})` | `ui.episode_row(title, meta, text, image, dim=, on=)`: episode picture + title + description |
 | `ui.card / listRow / posterCard / grid` | `ui.card / list_row / poster_card / grid(kids, min_col=, scroll=)` |
 | `ui.tabs(items, active, fn)` | `ui.tabs([(id, label)], active, fn)`, `fn(id)` |
 | `ui.textInput(label, value, onChange, {placeholder, type:'password', onSubmit})` | `ui.text_input(label, value, on_change, placeholder=, secret=, on_submit=, key=)` |

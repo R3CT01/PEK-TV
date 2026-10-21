@@ -112,6 +112,14 @@ def poster_card(title, sub="", poster="", on=None, badge="", autofocus=""):
             "badge": _s(badge, 40), "af": _s(autofocus, 100), "on": _sess().register(on, 0)}
 
 
+def episode_row(title, meta="", text="", image="", dim=False, on=None, autofocus=""):
+    """One episode: its picture on the left, then the title, a line of facts and a short description. The Python twin of
+    ui.episodeRow in the web UI. dim=True greys it out (not aired yet). The picture only loads from a host listed under
+    permissions.network (TMDb stills come from image.tmdb.org)."""
+    return {"t": "episode", "s": _s(title, 200), "meta": _s(meta, 200), "text": _s(text, 600), "img": _s(image, 600),
+            "dim": bool(dim), "af": _s(autofocus, 100), "on": _sess().register(on, 0)}
+
+
 def tabs(items, active, on):
     """items: [(id, label), ...] or [{"id", "label"}, ...]. on(id) runs when one is chosen."""
     out = []
