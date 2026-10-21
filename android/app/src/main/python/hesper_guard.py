@@ -502,18 +502,16 @@ def _from_chaquopy_importer():
     extracts it from the APK (stdlib-armeabi-v7a and friends): creating folders, writing temp files, renaming and
     chmod-ing them. None of that is the plugin's doing, so the guard lets it through.
 
-    A frame counts only if ALL of these hold, so a plugin cannot fake it: the file is called importer.py, the module
-    name is Chaquopy's (importer or chaquopy.importer, whichever this Chaquopy version uses), and the file is NOT
-    inside the plugin's own folder (a plugin cannot change its code's file name without compile/exec, which the
-    static scan refuses)."""
+    A frame counts only if the code's file is called importer.py AND that file is NOT inside the plugin's own folder.
+    (The module name is not checked: it differs between Chaquopy versions. A plugin cannot change its code's file name
+    without compile/exec, which the static scan refuses, and it can only write inside its own data/ folder.)"""
     try:
         folder = _state.roots[-1] if getattr(_state, "roots", None) else None
         f = sys._getframe(1)
         n = 0
         while f is not None and n < 80:
             code_file = f.f_code.co_filename or ""
-            if os.path.basename(code_file) == "importer.py" \
-                    and f.f_globals.get("__name__") in ("importer", "chaquopy.importer"):
+            if os.path.basename(code_file) == "importer.py":
                 real = os.path.realpath(code_file)
                 if not folder or not (real == folder or real.startswith(folder + os.sep)):
                     return True
@@ -544,7 +542,7 @@ def _check(event, args):
         writes = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) \
             or (isinstance(mode, str) and any(c in mode for c in "wax+"))
         if writes:
-            raise PermissionError("blocked by PEK plugin guard: file writes to '%s' from %s (use pek_host.write_json)"
+            raise PermissionError("blocked by PEK plugin guard: file writes to '%s' from %s (use pek_host.write_json) [guard 2]"
                                   % (os.path.basename(path), _where()))
         if not _under(path, _state.roots):
             raise PermissionError("blocked by PEK plugin guard: reading outside the plugin folder")
