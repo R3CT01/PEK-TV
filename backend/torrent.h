@@ -71,6 +71,10 @@ void removeAll();
 // Starts the torrent session ahead of the first stream (DHT bootstrap takes a few seconds). Safe to call often.
 void warmUp();
 
+// Plain-text report on what the engine is doing (listening ports, DHT, tracker answers, peer counts).
+// Shown at /api/torrent/diag to find out why a torrent has 0 peers.
+std::string diagnostics();
+
 }  // namespace torrent
 
 #endif

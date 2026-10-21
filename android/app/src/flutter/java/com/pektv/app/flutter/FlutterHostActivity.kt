@@ -16,18 +16,15 @@ import android.os.Looper
 import android.os.Process
 import android.view.SurfaceView
 import android.view.View
-import android.widget.ImageView
 import android.widget.FrameLayout
 import com.pektv.app.MainActivity
 import com.pektv.app.MediaPermissions
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pektv.app.MpvController
-import io.flutter.embedding.android.DrawableSplashScreen
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
 import io.flutter.embedding.android.RenderMode
-import io.flutter.embedding.android.SplashScreen
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -173,10 +170,9 @@ class FlutterHostActivity : FlutterActivity() {
     // (drawn above mpv's surface, transparent where nothing is painted) is the fast path.
     override fun getRenderMode(): RenderMode = RenderMode.surface
 
-    // Until Flutter has drawn its first frame, cover the (still empty) Flutter surface with the PEK splash colour and
-    // fade it out. Without this the screen is black for the moment the engine and Dart need to start.
-    override fun provideSplashScreen(): SplashScreen? =
-        DrawableSplashScreen(ColorDrawable(getColor(com.pektv.app.R.color.pek_splash_bg)), ImageView.ScaleType.CENTER, 250L)
+    // (Flutter 3.4x removed the embedding's SplashScreen / DrawableSplashScreen API, so provideSplashScreen() is gone.
+    // Until Flutter's first frame the launch theme's windowBackground / Android 12 splash colour (pek_splash_bg) covers
+    // the screen instead, and onFlutterUiDisplayed() below swaps it for black.)
 
     // Behind the app the window is black (mpv's surface shows through where the Flutter surface is transparent).
     // It turns black only once Flutter is on screen; the launch theme's splash colour stays until then.

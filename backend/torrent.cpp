@@ -83,6 +83,7 @@ int64_t read(const std::string&, uint64_t, void*, size_t, bool (*)(void*), void*
 void remove(const std::string&) {}
 void removeAll() {}
 void warmUp() {}
+std::string diagnostics() { return "This build has no torrent engine.\n"; }
 }  // namespace torrent
 
 #else
@@ -91,8 +92,11 @@ void warmUp() {}
 // ------------------------------------------------------------------------------------------
 #include <condition_variable>
 #include <cstring>
+#include <cstdlib>
 #include <deque>
+#include <fstream>
 #include <map>
+#include <random>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -161,6 +165,21 @@ std::map<std::string, std::shared_ptr<Entry>> g_entries;
 std::unique_ptr<lt::session> g_ses;
 std::thread g_alerts;
 bool g_stop = false;
+
+// ---- Diagnostics: why are there 0 peers? (shown at /api/torrent/diag) ----
+std::deque<std::string> g_diag;          // recent events, newest last (g_mx held)
+Clock::time_point g_diagT0 = Clock::now();
+int g_trkReplies = 0, g_trkErrors = 0, g_dhtReplies = 0, g_dhtPeers = 0;
+int g_listenPort = 0;
+std::string g_listenHow;
+
+void diagLocked(const std::string& line) {
+    long long t = std::chrono::duration_cast<std::chrono::seconds>(Clock::now() - g_diagT0).count();
+    std::string l = "[+" + std::to_string(t) + "s] " + line;
+    if (l.size() > 260) l.resize(260);
+    g_diag.push_back(l);
+    while (g_diag.size() > 40) g_diag.pop_front();
+}
 
 std::string toHex(const lt::sha1_hash& h) {
     std::ostringstream ss;
@@ -266,6 +285,8 @@ void peerWatchdog(Entry& e, Clock::time_point now) {
         e.h.force_reannounce();
         e.h.force_dht_announce();
         e.h.resume();   // no-op unless something paused it
+        diagLocked("watchdog: 0 peers for " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(now - e.last_peer).count()) +
+                   "s, forced tracker + DHT re-announce #" + std::to_string(e.kicks) + " on " + e.hash.substr(0, 8));
     } catch (const std::exception&) {}
 }
 
@@ -301,6 +322,20 @@ void alertLoop() {
                 }
             } else if (auto* t = lt::alert_cast<lt::torrent_error_alert>(a)) {
                 for (auto& kv : g_entries) if (kv.second->h == t->handle) kv.second->err = t->error.message();
+            } else if (lt::alert_cast<lt::listen_succeeded_alert>(a) || lt::alert_cast<lt::listen_failed_alert>(a) ||
+                       lt::alert_cast<lt::external_ip_alert>(a) || lt::alert_cast<lt::portmap_alert>(a) ||
+                       lt::alert_cast<lt::portmap_error_alert>(a) || lt::alert_cast<lt::dht_bootstrap_alert>(a) ||
+                       lt::alert_cast<lt::dht_error_alert>(a)) {
+                diagLocked(a->message());
+            } else if (lt::alert_cast<lt::tracker_reply_alert>(a)) {
+                g_trkReplies++;
+                diagLocked(a->message());
+            } else if (lt::alert_cast<lt::tracker_error_alert>(a) || lt::alert_cast<lt::tracker_warning_alert>(a)) {
+                g_trkErrors++;
+                diagLocked(a->message());
+            } else if (auto* d = lt::alert_cast<lt::dht_reply_alert>(a)) {
+                g_dhtReplies++;
+                g_dhtPeers += d->num_peers;
             }
         }
         // Drop torrents nobody has touched for a long time.
@@ -319,6 +354,31 @@ void alertLoop() {
     }
 }
 
+// The port libtorrent listens on. Some VPNs / networks drop traffic that leaves from the default
+// BitTorrent port 6881, so it is NOT fixed: the PEK_TORRENT_PORT environment variable wins, else the
+// number saved in <data dir>/torrent_port.txt, else a random one is picked once and saved there (so it stays
+// stable, e.g. for a VPN port forward). Edit that file to change it.
+int listenPort(std::string& how) {
+    auto valid = [](long v) { return v >= 1024 && v <= 65535; };
+    const char* env = std::getenv("PEK_TORRENT_PORT");
+    if (env && *env) {
+        long v = std::atol(env);
+        if (valid(v)) { how = "PEK_TORRENT_PORT"; return static_cast<int>(v); }
+    }
+    fs::path f = fs::path(g_dir) / "torrent_port.txt";
+    {
+        std::ifstream in(f);
+        long v = 0;
+        if (in >> v && valid(v)) { how = f.string(); return static_cast<int>(v); }
+    }
+    std::random_device rd;
+    int v = 20000 + static_cast<int>(rd() % 40000);
+    std::ofstream out(f);
+    if (out) out << v << "\n";
+    how = f.string() + " (new random port)";
+    return v;
+}
+
 void ensureSession() {   // g_mx held
     if (g_ses) return;
     std::error_code ec;
@@ -327,10 +387,13 @@ void ensureSession() {   // g_mx held
 
     lt::settings_pack sp;
     sp.set_str(lt::settings_pack::user_agent, "PEK/1.0");
-    sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:6881,[::]:6881");
+    g_listenPort = listenPort(g_listenHow);
+    const std::string lp = std::to_string(g_listenPort);
+    sp.set_str(lt::settings_pack::listen_interfaces, "0.0.0.0:" + lp + ",[::]:" + lp);
     // piece_progress: a finished piece wakes the reader at once instead of at its next poll.
     sp.set_int(lt::settings_pack::alert_mask, lt::alert_category::status | lt::alert_category::error | lt::alert_category::storage |
-                                              lt::alert_category::piece_progress);
+                                              lt::alert_category::piece_progress | lt::alert_category::tracker |
+                                              lt::alert_category::dht | lt::alert_category::port_mapping);
     // Memory: this runs next to a WebView and mpv on devices with 1-2 GB of RAM.
     sp.set_int(lt::settings_pack::connections_limit, 60);
     sp.set_int(lt::settings_pack::max_queued_disk_bytes, 4 * 1024 * 1024);
@@ -347,6 +410,8 @@ void ensureSession() {   // g_mx held
     sp.set_int(lt::settings_pack::min_reconnect_time, 20);
     sp.set_bool(lt::settings_pack::enable_upnp, true);
     sp.set_bool(lt::settings_pack::enable_natpmp, true);
+    g_diagT0 = Clock::now();
+    g_diag.clear(); g_trkReplies = g_trkErrors = g_dhtReplies = g_dhtPeers = 0;
     lt::session_params params(sp);
 #ifdef PEK_PLAIN_DISK_IO
     // libtorrent 2.x memory-maps the files by default. On a 32-bit process (armeabi-v7a TVs / sticks) mapping
@@ -385,6 +450,8 @@ std::string addParams(lt::add_torrent_params p, int season, int episode, std::st
         dropLocked(oldest->first);
     }
 
+    diagLocked("added torrent " + hash.substr(0, 8) + ": " + std::to_string(p.trackers.size()) +
+               " tracker(s) in the link, DHT " + (g_ses->is_dht_running() ? "on" : "off"));
     for (const char* t : kFallbackTrackers)
         if (std::find(p.trackers.begin(), p.trackers.end(), std::string(t)) == p.trackers.end()) p.trackers.push_back(t);
     p.save_path = (fs::path(g_dir) / "torrent_cache" / hash).string();
@@ -470,6 +537,28 @@ std::string addFile(const std::string& bytes, int season, int episode, std::stri
         lt::span<char const>(bytes.data(), static_cast<std::ptrdiff_t>(bytes.size())), ec, lt::from_span_t());
     if (ec) { err = "Not a valid .torrent file"; return ""; }
     return addParams(std::move(p), season, episode, err);
+}
+
+std::string diagnostics() {
+    std::lock_guard<std::mutex> lk(g_mx);
+    std::ostringstream o;
+    o << "PEK torrent diagnostics\n";
+    if (!g_ses) { o << "Session: not started yet (start a stream first, then reload this page)\n"; return o.str(); }
+    o << "Session: running, DHT " << (g_ses->is_dht_running() ? "on" : "off") << "\n";
+    o << "Listening port: " << g_listenPort << " (from " << g_listenHow << ")\n";
+    o << "Tracker replies: " << g_trkReplies << ", tracker errors: " << g_trkErrors
+      << ", DHT replies: " << g_dhtReplies << " (" << g_dhtPeers << " peers offered)\n";
+    for (auto& kv : g_entries) {
+        if (!kv.second->h.is_valid()) continue;
+        lt::torrent_status st = kv.second->h.status();
+        o << "Torrent " << kv.first.substr(0, 8) << ": connected peers " << st.num_peers << " (seeds " << st.num_seeds
+          << "), known but not connected " << st.list_peers << ", connect candidates " << st.connect_candidates
+          << ", tracker in use '" << st.current_tracker << "'\n";
+    }
+    o << "Recent events (oldest first):\n";
+    for (auto& l : g_diag) o << "  " << l << "\n";
+    if (g_diag.empty()) o << "  (none yet)\n";
+    return o.str();
 }
 
 bool status(const std::string& hash, Status& out, bool withMap) {

@@ -278,6 +278,10 @@ void registerTorrentRoutes(httplib::Server& svr) {
         res.set_content("{\"hash\": \"" + hash + "\"}", "application/json");
     });
 
+    svr.Get("/api/torrent/diag", [](const httplib::Request&, httplib::Response& res) {
+        res.set_content(torrent::diagnostics(), "text/plain; charset=utf-8");
+    });
+
     svr.Get(R"(/api/torrent/([0-9A-Fa-f]+)/status)", [](const httplib::Request& req, httplib::Response& res) {
         std::string hash = lower(req.matches[1].str());
         torrent::Status s;

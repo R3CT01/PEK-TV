@@ -75,13 +75,15 @@ target_link_options(pek PRIVATE -Wl,-z,max-page-size=16384)
 
 # NFS via libnfs: off by default so a libnfs build problem can never break the
 # app. To turn it on, clone https://github.com/sahlberg/libnfs into android/libnfs
-# (the workflow has a ready-made step to un-comment).
+# (the workflow's "Clone libnfs" step does this).
 set(LIBNFS_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../libnfs)
 if(EXISTS ${LIBNFS_DIR}/CMakeLists.txt)
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(ENABLE_TESTS OFF CACHE BOOL "" FORCE)
     set(ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(ENABLE_UTILS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_DOCUMENTATION OFF CACHE BOOL "" FORCE)
+    set(ENABLE_SHARED OFF CACHE BOOL "" FORCE)
     add_subdirectory(${LIBNFS_DIR} libnfs EXCLUDE_FROM_ALL)
     target_sources(pek PRIVATE ${BACKEND}/vfs_nfs.cpp)
     target_include_directories(pek PRIVATE ${LIBNFS_DIR}/include)
