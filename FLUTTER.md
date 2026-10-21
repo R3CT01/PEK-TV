@@ -79,6 +79,13 @@ there are no lock-screen controls yet (those need native channel methods).
 - **Clock settings** (`clock.dart`): tap the Clock tile for 24-hour time, Show date and a time zone list (each zone shows the time it has now). Same 38 zones and the same "day \u00b7 zone" line as the web UI; kept on the device, not synced. Zones are computed from built-in daylight-saving rules (US/Canada, EU/UK, Sydney, Auckland, Cairo), so there is no extra package; the rules need a look only if a country changes its clocks.
 - **Online / offline mode** (`net.dart`, port of `www/net.js`): a 10px dot in the top right corner (green online, red offline), a "Back online" / "Offline mode" notice, and a check every 30 s (8 s while offline) and whenever the app returns to the front. Back online: poster lookups that failed are asked again, the profile syncs and the weather refreshes. The local library works the same either way.
 
+## Watched / unwatched (port of `_setWatched` in `www/app_library.js`)
+Movie page: **Mark as watched / unwatched**. Show page: **Mark show ...**, **Mark season ...** and a tick on each watched episode (press and hold
+an episode to toggle just that one); movie posters show a tick before the year. Everything uses Watch History (`Store.setWatched`), so the
+Watch History page, plugins and PEK Cloud agree. A change is pushed to the worker about 2 s later (`watched.dart`); removals go up as
+`{deleted}` markers, which `cloud/worker.js` already stores for `m|` and `e|` keys, so the worker needed no change. Plugins with the `watched`
+permission can check / set movies and episodes (see `FLUTTER_PLUGINS.md`). Plugin movie posters also get the tick and press-and-hold toggle automatically (Settings > Plugin posters).
+
 ## Plugin screens (Python)
 Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `FLUTTER_PLUGINS.md`). TMDb Discover is fully ported (inline trailer, streaming apps, watched, Play with a plugin, synced favorites):
 Plugins > Open, or its own entry in the menu / More page.

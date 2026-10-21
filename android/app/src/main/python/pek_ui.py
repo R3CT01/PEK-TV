@@ -106,10 +106,20 @@ def list_row(title, sub="", on=None, autofocus=""):
             "on": _sess().register(on, 0)}
 
 
-def poster_card(title, sub="", poster="", on=None, badge="", autofocus=""):
-    """A poster tile. The picture only loads from a host listed under permissions.network in plugin.json."""
+def poster_card(title, sub="", poster="", on=None, badge="", autofocus="", year=0, kind="movie"):
+    """A poster tile. The picture only loads from a host listed under permissions.network in plugin.json.
+
+    Watched marks need nothing from the plugin: PEK TV puts a tick on a movie poster that is in Watch History and lets the
+    person press and hold it to mark / un-mark it. Pass year= (and kind="show" for TV so it is never ticked as a movie)
+    for an exact match; without a year PEK TV looks for one in the title or the sub line, then (Settings > Plugin posters)
+    matches by title alone. No "watched" permission is needed, and the plugin is never told the answer."""
+    try:
+        yr = int(year or 0)
+    except (TypeError, ValueError):
+        yr = 0
     return {"t": "poster", "s": _s(title, 200), "sub": _s(sub, 300), "img": _s(poster, 600),
-            "badge": _s(badge, 40), "af": _s(autofocus, 100), "on": _sess().register(on, 0)}
+            "badge": _s(badge, 40), "af": _s(autofocus, 100), "yr": yr if 1880 <= yr <= 2200 else 0,
+            "k": "movie" if kind == "movie" else "other", "on": _sess().register(on, 0)}
 
 
 def episode_row(title, meta="", text="", image="", dim=False, on=None, autofocus=""):
@@ -316,32 +326,82 @@ def play_torrent(source, label, season=0, episode=0, kind="movie", name="", year
              kind=kind, name=_s(name, 200), year=int(year or 0), image=_s(image, 200))
 
 
-def _watched_key(kind, title, year):
-    # The same text as Store.keyFor in the Flutter app (and histKey() in sync.js), so history and the cloud agree.
-    t = " ".join(str(title or "").lower().split())
-    if kind != "movie" or not t:
-        raise ValueError("only movies can be marked watched here")
-    return "m|%s|%d" % (t, int(year or 0))
+_WATCHED_MAX = 300      # items per is_watched_many() / set_watched_many() call (the web pek.watched.check limit)
 
 
-def is_watched(kind, title, year=0):
-    """Is this movie in PEK TV's Watch History? Needs "watched": true."""
+def _norm(v):
+    return " ".join(str(v or "").lower().split())
+
+
+def _watched_key(kind, title, year=0, season=0, episode=0):
+    # The same text as Store.keyFor in the Flutter app (and histKey() in sync.js), so history and the cloud agree:
+    #   movie    m|title|year
+    #   episode  e|show title|season|episode      (for an episode, "title" is the SHOW's title)
+    t = _norm(title)
+    if not t:
+        raise ValueError("a movie or show title is needed")
+    if kind == "movie":
+        return "m|%s|%d" % (t, int(year or 0))
+    if kind == "episode":
+        return "e|%s|%d|%d" % (t, int(season or 0), int(episode or 0))
+    raise ValueError("kind must be 'movie' or 'episode'")
+
+
+def is_watched(kind, title, year=0, season=0, episode=0):
+    """Is this movie / episode in PEK TV's Watch History? Needs "watched": true.
+    Movie: is_watched("movie", title, year). Episode: is_watched("episode", show_title, season=1, episode=3)."""
     s = _sess()
     s.need("watched")
     try:
-        key = _watched_key(kind, title, year)
+        key = _watched_key(kind, title, year, season, episode)
     except ValueError:
         return False
     return key in (s.ctx.get("watched") or [])
 
 
-def set_watched(kind, title, year=0, value=True):
-    """Mark a movie watched / unwatched in PEK TV's Watch History (the history the person sees; it syncs). Needs
-    "watched": true."""
+def is_watched_many(items):
+    """is_watched() for a list of {"kind", "title", "year", "season", "episode"} dicts (max 300): returns [True, False, ...],
+    one per item (the web pek.watched.check). Needs "watched": true."""
     s = _sess()
     s.need("watched")
-    _watched_key(kind, title, year)       # validates
-    s.effect("watched.set", kind=kind, title=_s(title, 200), year=int(year or 0), value=bool(value))
+    have = set(s.ctx.get("watched") or [])
+    out = []
+    for it in list(items or [])[:_WATCHED_MAX]:
+        try:
+            key = _watched_key(it.get("kind"), it.get("title"), it.get("year", 0), it.get("season", 0), it.get("episode", 0))
+        except (ValueError, AttributeError):
+            out.append(False)
+            continue
+        out.append(key in have)
+    return out
+
+
+def set_watched(kind, title, year=0, value=True, season=0, episode=0):
+    """Mark a movie / episode watched / unwatched in PEK TV's Watch History (the history the person sees; it syncs to PEK
+    Cloud). Needs "watched": true. For an episode, "title" is the show's title and season / episode are the numbers.
+    The screen's own is_watched() answers with the new value on the next call."""
+    s = _sess()
+    s.need("watched")
+    _watched_key(kind, title, year, season, episode)       # validates
+    s.effect("watched.set", kind=kind, title=_s(title, 200), year=int(year or 0), season=int(season or 0),
+             episode=int(episode or 0), value=bool(value))
+
+
+def set_watched_many(items, value=True):
+    """set_watched() for a whole season or list in one go: items are {"kind", "title", "year", "season", "episode"} dicts
+    (max 300, anything invalid is skipped). Needs "watched": true."""
+    s = _sess()
+    s.need("watched")
+    clean = []
+    for it in list(items or [])[:_WATCHED_MAX]:
+        try:
+            _watched_key(it.get("kind"), it.get("title"), it.get("year", 0), it.get("season", 0), it.get("episode", 0))
+        except (ValueError, AttributeError):
+            continue
+        clean.append({"kind": it.get("kind"), "title": _s(it.get("title"), 200), "year": int(it.get("year") or 0),
+                      "season": int(it.get("season") or 0), "episode": int(it.get("episode") or 0)})
+    if clean:
+        s.effect("watched.set_many", items=clean, value=bool(value))
 
 
 def toast(message):

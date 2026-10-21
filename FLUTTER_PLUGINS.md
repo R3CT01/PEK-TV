@@ -75,7 +75,7 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 | `pek.favorites.add/remove` (`favorites`) | `ui.favorite_add(kind, id, title, year, poster_path)` / `ui.favorite_remove("movie:603")` |
 | `ui.video({id, autoplay, muted})` (YouTube host in `network`) | `ui.video(video_id, autoplay=, muted=)`: an inline player pinned to the top of the screen; `ui.open_trailer(video_id)` opens YouTube instead |
 | `pek.plugins.streamers()` / `pek.plugins.open(id, intent)` (`plugins`) | `ui.streamers()` / `ui.open_plugin(id, kind, tmdb_id, title, year)` (`plugins`) |
-| `pek.watched.has / set` (`watched`) | `ui.is_watched("movie", title, year)` / `ui.set_watched("movie", title, year, True)` (`watched`) |
+| `pek.watched.check / set` (`watched`) | `ui.is_watched("movie", title, year)` / `ui.set_watched("movie", title, year, True)`; episodes: `ui.is_watched("episode", show_title, season=1, episode=3)` / `ui.set_watched("episode", show_title, season=1, episode=3, value=True)`; lists (max 300): `ui.is_watched_many(items)` / `ui.set_watched_many(items, True)` with items `{kind, title, year, season, episode}` (`watched`) |
 | `pek.fetchJSON(url)` (`network`) | `h.fetch_json(url)` (inside `ui.background`) |
 | `pek.storage.*`, `pek.readJSON` | `h.write_json / h.read_json` (`storage`, in `data/`) |
 | `navigator.language` | `ui.ctx()["lang"]`, `["region"]`, `["tv"]`, `["favorites"]` |
@@ -87,7 +87,7 @@ round trip per keystroke. Pictures (`poster_card`, provider logos) only load fro
 ### What a screen can ask for (effects)
 A fixed list, each checked in Python against `plugin.json` before Flutter sees it: open an **https** link (`open_trailer`
 builds the YouTube address itself; a plugin never supplies an address), open a streaming **app**, open another plugin on a
-title, save / remove a favorite (`favorites`), mark a movie watched / unwatched (`watched`), show a message, close itself.
+title, save / remove a favorite (`favorites`), mark movies / episodes watched / unwatched (`watched`), show a message, close itself.
 Anything else is dropped.
 
 **Streaming apps.** `provider_button` looks the service up in `python/pek_providers.py`, which is generated from
@@ -103,8 +103,17 @@ address is refused). If `autoplay` is false the person presses **Play trailer**.
 implements `on_launch(intent)` (`{"type", "id", "title", "year"}`). Every other screen with the `plugins` permission can then
 list it (`ui.streamers()`) and hand it a title (`ui.open_plugin`).
 
-**Watched.** It is PEK TV's own Watch History (the same record the library and PEK Cloud use), movies only, keyed
-`m|title|year`.
+**Watched.** It is PEK TV's own Watch History (the same record the library, the Mark as watched buttons and PEK Cloud use).
+Movies are keyed `m|title|year`, episodes `e|show title|season|episode` (for an episode `title` is the show's title). A mark or
+un-mark made by a plugin is written to history straight away and pushed to PEK Cloud a couple of seconds later (an un-mark goes up
+as a removal marker), so it shows on the library's ticks and on the other devices. A plugin sees only whether the items it asks
+about are watched, never the rest of the history.
+
+**Universal watched tick (no plugin work, no permission).** Every `ui.poster_card` movie gets a tick in the corner when it is in Watch
+History, and pressing and holding it marks / un-marks it (the app does this itself; the plugin is never told). For an exact match pass
+`year=` and, for TV, `kind="show"` (`poster_card(title, sub, poster, on, year=2010, kind="movie")`; the default kind is `"movie"`). With no
+year the app looks for `(2010)` at the end of the title, then a year in the sub line, then (Settings > Plugin posters, on by default)
+matches by title alone. TMDb Discover passes both. Episode rows are not ticked yet.
 
 **Favorites.** Plugin favorites use the web UI's cloud format (`f|movie:603`, `from` = the plugin id), so they sync with the
 web UI and other devices; one that arrives for a title outside this library shows under Favorites > Saved from plugins.

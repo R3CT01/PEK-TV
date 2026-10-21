@@ -33,7 +33,7 @@ EVENT_LIMIT = 15.0                    # seconds a tap handler may take
 WORK_LIMIT = 25.0                     # seconds one ui.background(work) may take
 RESERVED_HOST = "hesper-tmdb.aquariusibeats.workers.dev"
 OFFICIAL_PROXY_PLUGINS = {"tmdb-discover"}   # the only plugin that may use PEK's built-in TMDb access
-ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "torrent.play", "toast", "exit"}
+ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "torrent.play", "toast", "exit"}
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _SESSIONS = {}

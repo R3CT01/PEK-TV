@@ -12,6 +12,7 @@ import 'settings_extra.dart' show ToggleRow;
 import 'store.dart';
 import 'torrent.dart';
 import 'tokens.dart';
+import 'watched.dart';
 import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
 
@@ -200,6 +201,69 @@ class _PluginViewState extends State<PluginView> {
     return true;
   }
 
+  /// The year a poster stands for: the one the plugin passed, else a "(2010)" in the title, else a year in the sub line
+  /// ("2010 \u00b7 Movie"). 0 = unknown.
+  static int _posterYear(String title, String sub, int given) {
+    if (given > 0) return given;
+    final inTitle = RegExp(r'\((19|20)\d{2}\)\s*$').firstMatch(title);
+    if (inTitle != null) return int.parse(inTitle.group(0)!.replaceAll(RegExp(r'[^0-9]'), ''));
+    final inSub = RegExp(r'(?<!\d)(19|20)\d{2}(?!\d)').firstMatch(sub);
+    return inSub == null ? 0 : int.parse(inSub.group(0)!);
+  }
+
+  /// The title without a trailing "(2010)", which is how plugins often write it.
+  static String _posterName(String title) => title.replaceFirst(RegExp(r'\s*\((19|20)\d{2}\)\s*$'), '').trim();
+
+  /// Is this poster's movie in Watch History? With a year it must match exactly; without one it matches by title when
+  /// Settings > Plugin posters allows it.
+  bool _posterWatched(String title, int year) {
+    final name = _posterName(title);
+    if (year > 0) return Store.isWatched(kind: 'movie', title: name, year: year);
+    if (!Store.pluginWatchedLoose) return false;
+    return Store.watchedMovieTitles().contains(Store.normalize(name));
+  }
+
+  /// Press and hold on a plugin poster: mark / un-mark the movie (un-marking a poster with no year clears every year of that title).
+  Future<void> _togglePosterWatched(String title, int year) async {
+    final name = _posterName(title);
+    if (Store.keyFor(kind: 'movie', title: name, year: year) == null) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    Progress movie(String t, int y) => Progress(id: '', title: t, kind: 'movie', position: 0, duration: 0, updated: now, year: y);
+    final seen = _posterWatched(title, year);
+    if (!seen) {
+      await Watched.set([movie(name, year)], true);
+      _toast('Marked as watched');
+      return;
+    }
+    final keys = year > 0 ? [Store.keyFor(kind: 'movie', title: name, year: year)!] : Store.watchedMovieKeysFor(name);
+    final items = <Progress>[
+      for (final k in keys) movie(name, int.tryParse(k.substring(k.lastIndexOf('|') + 1)) ?? 0),
+    ];
+    await Watched.set(items, false);
+    _toast('Marked as unwatched');
+  }
+
+  /// A movie or episode a plugin named: `{kind: 'movie', title, year}` or `{kind: 'episode', title (the show's), season, episode}`.
+  Progress? _watchedItem(Map it) {
+    final kind = '${it['kind']}';
+    final title = '${it['title'] ?? ''}';
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (kind == 'movie') {
+      final year = (it['year'] as num?)?.toInt() ?? 0;
+      return Store.keyFor(kind: 'movie', title: title, year: year) == null
+          ? null
+          : Progress(id: '', title: title, kind: 'movie', position: 0, duration: 0, updated: now, year: year);
+    }
+    if (kind == 'episode') {
+      final season = (it['season'] as num?)?.toInt() ?? 0;
+      final episode = (it['episode'] as num?)?.toInt() ?? 0;
+      return Store.keyFor(kind: 'episode', showTitle: title, season: season, episode: episode) == null
+          ? null
+          : Progress(id: '', title: title, kind: 'episode', position: 0, duration: 0, updated: now, showTitle: title, season: season, episode: episode);
+    }
+    return null;
+  }
+
   /// Text boxes keep what the person typed across redraws. The plugin's own value only replaces it when the person
   /// has not typed since the plugin last heard from the box (so a plugin can clear or fill a box itself).
   void _syncInputs(Map<String, dynamic> n) {
@@ -238,17 +302,18 @@ class _PluginViewState extends State<PluginView> {
         final intent = raw['intent'];
         if (known == null || intent is! Map || !mounted) continue;
         unawaited(openPluginScreen(context, pluginId: id, title: known['name'] ?? id, launch: Map<String, dynamic>.from(intent)));
-      } else if (op == 'watched.set') {
-        // Watch History, the same record the library and the cloud sync use (movies only).
-        if ('${raw['kind']}' != 'movie') continue;
-        final title = '${raw['title'] ?? ''}';
-        final year = (raw['year'] as num?)?.toInt() ?? 0;
-        if (raw['value'] == true) {
-          await Store.recordWatched(Progress(id: '', title: title, kind: 'movie', position: 0, duration: 0, updated: DateTime.now().millisecondsSinceEpoch, year: year));
-        } else {
-          final key = Store.keyFor(kind: 'movie', title: title, year: year);
-          if (key != null) await Store.removeHistory(key);
+      } else if (op == 'watched.set' || op == 'watched.set_many') {
+        // Watch History, the same record the library and the cloud sync use. Movies and episodes; the plugin's permission
+        // was already checked in Python (pek_ui.set_watched), and Watched.set pushes the change to PEK Cloud shortly after.
+        final on = raw['value'] == true;
+        final list = op == 'watched.set_many' ? (raw['items'] is List ? raw['items'] as List : const []) : [raw];
+        final items = <Progress>[];
+        for (final it in list.take(300)) {
+          if (it is! Map) continue;
+          final p = _watchedItem(it);
+          if (p != null) items.add(p);
         }
+        if (items.isNotEmpty) await Watched.set(items, on);
       } else if (op == 'favorite.add') {
         await Store.addPluginFavorite(
           plugin: widget.pluginId,
@@ -416,13 +481,23 @@ class _PluginViewState extends State<PluginView> {
         return ListRow(title: '${n['s'] ?? ''}', subtitle: '${n['sub'] ?? ''}', autofocus: _af(n), onTap: on.isEmpty ? null : () => _send(on));
       case 'poster':
         final img = '${n['img'] ?? ''}';
-        return _PluginPoster(
-          title: '${n['s'] ?? ''}',
-          sub: '${n['sub'] ?? ''}',
-          image: img.isNotEmpty && PluginHosts.allows(_hosts, img) ? img : '',
-          badge: '${n['badge'] ?? ''}',
-          autofocus: _af(n),
-          onTap: on.isEmpty ? null : () => _send(on),
+        final ptitle = '${n['s'] ?? ''}';
+        final psub = '${n['sub'] ?? ''}';
+        final isMovie = '${n['k'] ?? 'movie'}' == 'movie';
+        final pyear = isMovie ? _posterYear(ptitle, psub, (n['yr'] as num?)?.toInt() ?? 0) : 0;
+        // Watched marks are the app's job, not the plugin's: the tick follows Watch History and repaints when it changes.
+        return ValueListenableBuilder<int>(
+          valueListenable: Store.changed,
+          builder: (context, _, __) => _PluginPoster(
+            title: ptitle,
+            sub: psub,
+            image: img.isNotEmpty && PluginHosts.allows(_hosts, img) ? img : '',
+            badge: '${n['badge'] ?? ''}',
+            watched: isMovie && _posterWatched(ptitle, pyear),
+            autofocus: _af(n),
+            onTap: on.isEmpty ? null : () => _send(on),
+            onLongPress: isMovie ? () => _togglePosterWatched(ptitle, pyear) : null,
+          ),
         );
       case 'episode':
         final eimg = '${n['img'] ?? ''}';
@@ -625,10 +700,12 @@ class _PluginEpisode extends StatelessWidget {
 /// loads from a host the plugin listed under permissions.network; without one (or when it fails) the tile shows the
 /// title on a plain surface.
 class _PluginPoster extends StatelessWidget {
-  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap});
+  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap, this.watched = false, this.onLongPress});
   final String title, sub, image, badge;
   final bool autofocus;
+  final bool watched; // in Watch History: a tick in the corner
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -644,6 +721,7 @@ class _PluginPoster extends StatelessWidget {
     return PekFocusable(
       autofocus: autofocus,
       onTap: onTap,
+      onLongPress: onLongPress,
       focusScale: p.isTv ? 1.07 : 1.03,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -659,6 +737,16 @@ class _PluginPoster extends StatelessWidget {
                     plain()
                   else
                     Image.network(image, fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => plain()),
+                  if (watched)
+                    Positioned(
+                      top: 6,
+                      right: 6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle),
+                        child: Icon(Icons.check, size: 0.95 * rem, color: t.bg),
+                      ),
+                    ),
                   if (badge.isNotEmpty)
                     Positioned(
                       top: 6,

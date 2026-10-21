@@ -252,6 +252,33 @@ class SkipSection extends StatelessWidget {
   }
 }
 
+// ====================================================================== Settings > Plugin posters
+
+/// Plugin posters get a watched tick from Watch History without the plugin doing anything. A poster that names no year can only be
+/// matched by its title; this switch turns that looser match off (an exact year match always stays on).
+class PluginPostersSection extends StatelessWidget {
+  const PluginPostersSection({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<int>(
+      valueListenable: Store.changed,
+      builder: (context, _, __) => Section(
+        title: 'Plugin posters',
+        hint: 'Movies you have watched get a tick in every plugin, and pressing and holding a poster marks or un-marks it. Plugins are never told which titles you watched.',
+        children: [
+          ToggleRow(
+            title: 'Match by title when a poster has no year',
+            subtitle: Store.pluginWatchedLoose ? 'On' : 'Off',
+            on: Store.pluginWatchedLoose,
+            onTap: () => Store.setPluginWatchedLoose(!Store.pluginWatchedLoose),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ====================================================================== Settings > Music: online art and lyrics
 
 class MusicOnlineSection extends StatefulWidget {

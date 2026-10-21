@@ -6,6 +6,7 @@ import 'api.dart';
 import 'detail.dart';
 import 'common.dart';
 import 'pages.dart';
+import 'store.dart';
 import 'tokens.dart';
 import 'weather.dart' show WeatherBadge;
 import 'widgets.dart';
@@ -171,11 +172,15 @@ class _LibraryPageState extends State<LibraryPage> {
 
   Widget _cell(BuildContext context, Object item, int i) {
     if (item is Movie) {
-      return PosterCard(
-        title: item.title,
-        subtitle: item.year > 0 ? '${item.year}' : '',
-        poster: Api.movieDetails(item.id),
-        onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: item))),
+      // A tick before the year once it is in Watch History (msub() in app_library.js).
+      return ValueListenableBuilder<int>(
+        valueListenable: Store.changed,
+        builder: (context, _, __) => PosterCard(
+          title: item.title,
+          subtitle: ('${movieWatched(item) ? '\u2713 ' : ''}${item.year > 0 ? item.year : ''}').trim(),
+          poster: Api.movieDetails(item.id),
+          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: item))),
+        ),
       );
     }
     final s = item as Show;

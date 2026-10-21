@@ -8,6 +8,7 @@ import 'detail.dart';
 import 'fields.dart';
 import 'store.dart';
 import 'tokens.dart';
+import 'watched.dart';
 import 'widgets.dart';
 
 // ====================================================================== Search (the web UI's search bar)
@@ -327,11 +328,14 @@ class _SearchPageState extends State<SearchPage> {
         children.add(heading('Movies'));
         children.add(grid([
           for (final m in _movies)
-            PosterCard(
-              title: m.title,
-              subtitle: m.year > 0 ? '${m.year}' : '',
-              poster: Api.movieDetails(m.id),
-              onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: m))),
+            ValueListenableBuilder<int>(
+              valueListenable: Store.changed,
+              builder: (context, _, __) => PosterCard(
+                title: m.title,
+                subtitle: ('${movieWatched(m) ? '\u2713 ' : ''}${m.year > 0 ? m.year : ''}').trim(),
+                poster: Api.movieDetails(m.id),
+                onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: m))),
+              ),
             ),
         ]));
       }
@@ -393,7 +397,10 @@ class HistoryPage extends StatelessWidget {
         ],
       ),
     );
-    if (yes == true) await Store.clearHistory();
+    if (yes == true) {
+      await Store.clearHistory();
+      Watched.syncSoon();
+    }
   }
 
   @override
@@ -414,7 +421,10 @@ class HistoryPage extends StatelessWidget {
               ListRow(
                 title: e.label,
                 subtitle: '${_when(e.at)}${e.count > 1 ? ' \u00b7 watched ${e.count} times' : ''}',
-                trailing: IconButton(tooltip: 'Remove', icon: const Icon(Icons.close), onPressed: () => Store.removeHistory(e.key)),
+                trailing: IconButton(tooltip: 'Remove', icon: const Icon(Icons.close), onPressed: () async {
+                  await Store.removeHistory(e.key);
+                  Watched.syncSoon();
+                }),
               ),
           ],
         ]);

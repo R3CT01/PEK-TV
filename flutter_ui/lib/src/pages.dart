@@ -359,6 +359,7 @@ class _SettingsPageState extends State<SettingsPage> {
       const TvModeSection(),
       const SubtitleSection(),
       const SkipSection(),
+      const PluginPostersSection(),
       const MusicOnlineSection(),
       const VideoOutputSection(),
       const AudioOutputSection(),

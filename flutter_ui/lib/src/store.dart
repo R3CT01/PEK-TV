@@ -207,6 +207,84 @@ class Store {
     _bump();
   }
 
+  static String? _watchedRaw;
+  static Set<String> _watchedSet = const {};
+  static Set<String> _watchedTitleSet = const {};
+
+  /// Keys (`m|title|year`, `e|show|season|episode`) of everything currently in Watch History; removed items are left out.
+  /// Cached until the history changes, so a grid of posters can ask once per card.
+  static Set<String> watchedKeys() {
+    final raw = _p.getString(_historyKey) ?? '{}';
+    if (_watchedRaw == raw) return _watchedSet;
+    final out = <String>{};
+    final titles = <String>{};
+    _map(_historyKey).forEach((k, v) {
+      if (v is! Map || v['deleted'] != null) return;
+      out.add(k);
+      if (k.startsWith('m|')) {
+        final parts = k.split('|');
+        if (parts.length >= 3) titles.add(parts.sublist(1, parts.length - 1).join('|'));
+      }
+    });
+    _watchedRaw = raw;
+    _watchedSet = out;
+    _watchedTitleSet = titles;
+    return out;
+  }
+
+  /// Normalized titles of the movies in Watch History, whatever their year (for posters that carry no year).
+  static Set<String> watchedMovieTitles() {
+    watchedKeys();
+    return _watchedTitleSet;
+  }
+
+  /// Every live `m|title|year` key for this title (a poster with no year can stand for any of them).
+  static List<String> watchedMovieKeysFor(String title) {
+    final t = _norm(title);
+    return [for (final k in watchedKeys()) if (k.startsWith('m|$t|') && k.indexOf('|', 3 + t.length) < 0) k];
+  }
+
+  /// Plugin posters: when a poster names no year, match it by title alone (Settings > Plugin posters). Per device.
+  static bool get pluginWatchedLoose => _p.getBool('pek_plugin_watched_loose') ?? true;
+  static Future<void> setPluginWatchedLoose(bool on) async {
+    await _p.setBool('pek_plugin_watched_loose', on);
+    _bump();
+  }
+
+  /// Is this movie / episode marked watched (the web UI's `_watchedLookup()`)? For an episode [showTitle] is the show's title.
+  static bool isWatched({required String kind, String title = '', String showTitle = '', int year = 0, int season = 0, int episode = 0}) {
+    final key = keyFor(kind: kind, title: title, showTitle: showTitle, year: year, season: season, episode: episode);
+    return key != null && watchedKeys().contains(key);
+  }
+
+  /// "Mark as watched / unwatched" for many items in one write and one repaint (the web UI's `_setWatched` / `_setSeasonWatched`,
+  /// and plugins). Marking watched adds an entry like finishing the item would (one already watched is left alone); marking
+  /// unwatched leaves a `{deleted, updated}` marker so the removal syncs too. Returns true when something changed.
+  static Future<bool> setWatched(Iterable<Progress> items, bool on) async {
+    final map = _map(_historyKey);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    var changed = false;
+    for (final p in items) {
+      final key = historyKey(p);
+      if (key == null) continue;
+      final old = map[key];
+      final alive = old is Map && old['deleted'] == null;
+      if (on) {
+        if (alive) continue;
+        map[key] = HistoryEntry(key: key, kind: p.kind, title: p.kind == 'episode' ? p.showTitle : p.title, year: p.year, season: p.season, episode: p.episode, at: now, count: 1, updated: now).toJson();
+      } else {
+        if (!alive) continue;
+        map[key] = {'deleted': 1, 'updated': now};
+      }
+      changed = true;
+    }
+    if (changed) {
+      await _p.setString(_historyKey, jsonEncode(map));
+      _bump();
+    }
+    return changed;
+  }
+
   /// Raw maps for cloud sync (history items, resume points).
   static Map<String, dynamic> historyRaw() => _map(_historyKey);
   static Map<String, dynamic> progressRaw() => _map(_progressKey);

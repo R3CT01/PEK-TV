@@ -6,6 +6,7 @@ import 'store.dart';
 import 'tokens.dart';
 import 'weather.dart' show weatherActions;
 import 'torrent.dart';
+import 'watched.dart';
 import 'widgets.dart';
 
 /// Opens the player. [resume] makes the player record progress for Resume Watching.
@@ -51,6 +52,23 @@ Progress episodeItem(Show s, Episode e) {
   return Progress(id: e.id, title: '${s.title} $label', kind: 'episode', position: 0, duration: 0, updated: 0, showTitle: s.title, season: e.season, episode: e.episode);
 }
 
+/// Is this episode in Watch History?
+bool episodeWatched(Show s, Episode e) => Store.isWatched(kind: 'episode', showTitle: s.title, season: e.season, episode: e.episode);
+
+bool movieWatched(Movie m) => Store.isWatched(kind: 'movie', title: m.title, year: m.year);
+
+/// Every episode of [seasons] is watched (and there is at least one): the web UI's `allSeen`.
+bool seasonsWatched(Show s, Iterable<Season> seasons) {
+  var any = false;
+  for (final se in seasons) {
+    for (final e in se.episodes) {
+      any = true;
+      if (!episodeWatched(s, e)) return false;
+    }
+  }
+  return any;
+}
+
 class MovieScreen extends StatelessWidget {
   const MovieScreen({super.key, required this.movie});
   final Movie movie;
@@ -71,6 +89,7 @@ class MovieScreen extends StatelessWidget {
       builder: (context, _, __) {
         final saved = Store.progressFor(movie.id);
         final fav = Store.isFavorite('m:${movie.id}');
+        final seen = movieWatched(movie);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -85,6 +104,7 @@ class MovieScreen extends StatelessWidget {
               ] else
                 PekButton(label: 'Play', primary: true, autofocus: true, onTap: () => playMedia(context, movieItem(movie))),
               PekButton(label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.movie(movie.id, movie.title, movie.year))),
+              PekButton(label: seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', onTap: () => Watched.set([movieItem(movie)], !seen)),
             ]),
           ],
         );
@@ -136,15 +156,27 @@ class _ShowScreenState extends State<ShowScreen> {
         valueListenable: Store.changed,
         builder: (context, _, __) {
           final fav = Store.isFavorite('s:${show.title}');
+          final allSeen = seasonsWatched(show, seasons);
+          final seasonSeen = seasons.isNotEmpty && seasonsWatched(show, [seasons[_season]]);
           return ListView(
             padding: EdgeInsets.fromLTRB(rem + p.safeX, 0, rem + p.safeX, rem),
             children: [
               FutureBuilder<Details>(future: details, builder: (_, snap) => Text(snap.data?.overview ?? '', maxLines: 4, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, height: 1.4))),
               SizedBox(height: 0.75 * rem),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: PekButton(compact: true, label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.show(show.title))),
-              ),
+              Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
+                PekButton(compact: true, label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.show(show.title))),
+                PekButton(
+                  compact: true,
+                  label: allSeen ? 'Mark show as unwatched' : 'Mark show as watched',
+                  onTap: () => Watched.set([for (final se in seasons) for (final e in se.episodes) episodeItem(show, e)], !allSeen),
+                ),
+                if (seasons.isNotEmpty)
+                  PekButton(
+                    compact: true,
+                    label: seasonSeen ? 'Mark season as unwatched' : 'Mark season as watched',
+                    onTap: () => Watched.set([for (final e in episodes) episodeItem(show, e)], !seasonSeen),
+                  ),
+              ]),
               SizedBox(height: 0.75 * rem),
               SizedBox(
                 height: 2.75 * rem,
@@ -156,7 +188,7 @@ class _ShowScreenState extends State<ShowScreen> {
                     compact: true,
                     primary: i == _season,
                     autofocus: i == 0,
-                    label: seasons[i].number == 0 ? 'Specials' : 'Season ${seasons[i].number}',
+                    label: (seasons[i].number == 0 ? 'Specials' : 'Season ${seasons[i].number}') + (seasonsWatched(show, [seasons[i]]) ? ' \u2713' : ''),
                     onTap: () => setState(() => _season = i),
                   ),
                 ),
@@ -176,6 +208,7 @@ class _ShowScreenState extends State<ShowScreen> {
     final rem = p.rem;
     final label = 'S${e.season.toString().padLeft(2, '0')}E${e.episode.toString().padLeft(2, '0')}';
     final saved = Store.progressFor(e.id);
+    final seen = episodeWatched(show, e);
     return Padding(
       padding: EdgeInsets.only(bottom: 0.5 * rem),
       child: PekFocusable(
@@ -184,11 +217,14 @@ class _ShowScreenState extends State<ShowScreen> {
         borderColor: t.border,
         padding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.7 * rem),
         onTap: () => playMedia(context, episodeItem(show, e), startSec: saved?.position ?? 0, nextFor: (cur) => nextEpisodeItem(show, cur.id)),
+        // Press and hold: mark this one episode watched / unwatched (the season and show buttons above do many at once).
+        onLongPress: () => Watched.set([episodeItem(show, e)], !seen),
         child: Row(children: [
           Icon(Icons.play_circle_outline, color: t.accent, size: 1.5 * rem),
           SizedBox(width: 0.75 * rem),
           Expanded(child: Text('$label  ${e.filename}', maxLines: 1, overflow: TextOverflow.ellipsis)),
           if (saved != null) Text(_fmt(saved.position), style: TextStyle(color: t.textMuted, fontSize: 0.85 * rem)),
+          if (seen) Padding(padding: EdgeInsets.only(left: 0.5 * rem), child: Icon(Icons.check_circle, color: t.accent, size: 1.25 * rem)),
         ]),
       ),
     );
