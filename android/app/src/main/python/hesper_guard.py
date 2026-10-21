@@ -497,6 +497,27 @@ def _where():
     return " < ".join(out) or "unknown"
 
 
+def _from_chaquopy_importer():
+    """True when Chaquopy's own importer is on the call stack. It extracts native modules (stdlib-armeabi-v7a and
+    friends) from the APK the first time something imports them, and that is a file write the plugin did not ask for.
+    The check is by module identity, so a plugin cannot fake it by naming a file importer.py."""
+    imp = sys.modules.get("importer")
+    d = getattr(imp, "__dict__", None)
+    if d is None:
+        return False
+    try:
+        f = sys._getframe(2)
+        n = 0
+        while f is not None and n < 40:
+            if f.f_globals is d:
+                return True
+            f = f.f_back
+            n += 1
+    except Exception:  # noqa: BLE001
+        pass
+    return False
+
+
 def _hook(event, args):
     if not getattr(_state, "active", False) or getattr(_state, "privileged", 0):
         return
@@ -516,6 +537,8 @@ def _hook(event, args):
             raise PermissionError("blocked by PEK plugin guard: unreadable path")
         writes = bool(flags & (os.O_WRONLY | os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_TRUNC)) \
             or (isinstance(mode, str) and any(c in mode for c in "wax+"))
+        if writes and _from_chaquopy_importer():
+            return
         if writes:
             raise PermissionError("blocked by PEK plugin guard: file writes to '%s' from %s (use pek_host.write_json)"
                                   % (os.path.basename(path), _where()))

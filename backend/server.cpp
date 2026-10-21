@@ -106,17 +106,32 @@ bool validNetHost(const std::string& h) {
 }
 
 std::string jsonEscape(const std::string& s) {
+    // Escapes control characters and swaps invalid UTF-8 for U+FFFD, so one odd file name can never make a whole
+    // list (movies, shows, ...) unreadable for the app.
     std::string out;
-    out.reserve(s.size());
-    for (char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            default: out += c;
+    out.reserve(s.size() + 8);
+    const size_t n = s.size();
+    for (size_t i = 0; i < n; ) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        if (c < 0x80) {
+            switch (c) {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    if (c < 0x20) { char b[8]; std::snprintf(b, sizeof b, "\\u%04x", c); out += b; }
+                    else out += static_cast<char>(c);
+            }
+            ++i;
+            continue;
         }
+        size_t len = (c >= 0xC2 && c <= 0xDF) ? 2 : (c >= 0xE0 && c <= 0xEF) ? 3 : (c >= 0xF0 && c <= 0xF4) ? 4 : 0;
+        bool ok = len != 0 && i + len <= n;
+        for (size_t k = 1; ok && k < len; ++k) ok = (static_cast<unsigned char>(s[i + k]) & 0xC0) == 0x80;
+        if (ok) { out.append(s, i, len); i += len; }
+        else { out += "\xEF\xBF\xBD"; ++i; }
     }
     return out;
 }

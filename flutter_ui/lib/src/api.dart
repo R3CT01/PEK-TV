@@ -18,7 +18,7 @@ class Api {
   static Future<dynamic> _getRaw(String path) async {
     final r = await _client.get(Uri.parse('$base$path')).timeout(const Duration(seconds: 20));
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode} for $path');
-    return jsonDecode(utf8.decode(r.bodyBytes));
+    return jsonDecode(utf8.decode(r.bodyBytes, allowMalformed: true));
   }
 
   /// POST a form and return the JSON object. The backend answers `{ok:false, error}` on failure; that text is what the person sees.
