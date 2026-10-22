@@ -15,6 +15,7 @@ import 'plugin_host.dart' show PluginHost;
 import 'plugin_install_ui.dart';
 import 'plugin_store.dart' show PluginInstaller;
 import 'plugin_store_ui.dart';
+import 'plugin_updates.dart';
 import 'plugin_ui.dart';
 import 'settings_extra.dart';
 import 'store.dart';
@@ -201,11 +202,18 @@ class _PluginsPageState extends State<PluginsPage> {
   void initState() {
     super.initState();
     PluginHost.changed.addListener(_reload); // the store installed, updated or removed something
+    PluginUpdates.github.addListener(_rebuild);
+    unawaited(PluginUpdates.check()); // also whenever this page opens, not only at start
+  }
+
+  void _rebuild() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     PluginHost.changed.removeListener(_reload);
+    PluginUpdates.github.removeListener(_rebuild);
     super.dispose();
   }
 
@@ -214,6 +222,7 @@ class _PluginsPageState extends State<PluginsPage> {
   }
 
   Future<void> _remove(PluginInfo pl) async {
+    if (pl.builtin || PluginInstaller.stockIds.contains(pl.folder)) return; // built-in plugins cannot be removed
     final p = context.pek;
     final yes = await showDialog<bool>(
       context: context,
@@ -259,14 +268,23 @@ class _PluginsPageState extends State<PluginsPage> {
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final pl in list)
               ListRow(
+                leading: PluginPicture(url: pl.icon),
                 title: pl.version.isEmpty ? pl.name : '${pl.name}  v${pl.version}',
-                subtitle: [PluginInstaller.sourceLabel(pl.folder) ?? '', pl.description].where((s) => s.isNotEmpty).join(' \u00b7 '),
+                subtitle: [
+                  PluginInstaller.sourceLabel(pl.folder) ?? (pl.builtin ? 'built in' : ''),
+                  if (PluginUpdates.github.value.containsKey(pl.folder)) 'update available: ${PluginUpdates.github.value[pl.folder]!.release.tag}',
+                  pl.description,
+                ].where((s) => s.isNotEmpty).join(' \u00b7 '),
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (pl.flutterScreen) ...[
                     PekButton(compact: true, primary: true, label: 'Open', onTap: () => openPluginScreen(context, pluginId: pl.folder, title: pl.navTab.isEmpty ? pl.name : pl.navTab)),
                     SizedBox(width: 0.5 * rem),
                   ],
-                  PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
+                  if (PluginUpdates.github.value.containsKey(pl.folder)) ...[
+                    PekButton(compact: true, primary: true, label: 'Update', onTap: () => PluginUpdates.openGithubUpdate(context, PluginUpdates.github.value[pl.folder]!)),
+                    SizedBox(width: 0.5 * rem),
+                  ],
+                  if (!(pl.builtin || PluginInstaller.stockIds.contains(pl.folder))) PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
                 ]),
               ),
             SizedBox(height: rem),
@@ -336,7 +354,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final rem = p.rem;
     return ListView(padding: widget.padding, children: [
       const Heading('Settings', weather: true),
-      Section(
+      SettingsGroup(title: 'Library', children: [Section(
         title: 'Media sources',
         hint: 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',
         children: [
@@ -353,21 +371,21 @@ class _SettingsPageState extends State<SettingsPage> {
             PekButton(label: 'Add network folder', onTap: _addNetFolder),
           ]),
         ],
-      ),
-      const AccountSection(),
-      const GithubInstallSection(),
-      const AppearanceSection(),
-      const LayoutSection(),
-      const TvModeSection(),
-      const SubtitleSection(),
-      const SkipSection(),
-      const PluginPostersSection(),
-      const ActivitySection(),
-      const MusicOnlineSection(),
-      const VideoOutputSection(),
-      const AudioOutputSection(),
-      Section(title: 'Classic UI', hint: 'Plugins that only have a web screen, skins and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
-      Section(title: 'App', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
+      )]),
+      const SettingsGroup(title: 'Account', children: [AccountSection()]),
+      const SettingsGroup(title: 'Appearance', children: [AppearanceSection(), LayoutSection(), ActivitySection()]),
+      const SettingsGroup(title: 'Playback', children: [SubtitleSection(), SkipSection(), MusicOnlineSection()]),
+      const SettingsGroup(title: 'Plugins', children: [GithubInstallSection(), PluginPostersSection()]),
+      SettingsGroup(title: 'Advanced', hint: 'Most people never need these.', children: [
+        const TvModeSection(),
+        const VideoOutputSection(),
+        const AudioOutputSection(),
+        const StorageSection(),
+        Section(title: 'Classic UI', hint: 'Skins and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
+      ]),
+      SettingsGroup(title: 'App', children: [
+        Section(title: 'Exit', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
+      ]),
     ]);
   }
 }

@@ -473,7 +473,8 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
 
                     if (!first) json_response += ",";
                     json_response += "{\"folder\": \"" + jsonEscape(folder_name) + "\", \"hasBackend\": " +
-                                      (has_backend ? "true" : "false") + "}";
+                                      (has_backend ? "true" : "false") +
+                                      ", \"builtin\": " + (pek_plugins::isReservedId(folder_name) ? "true" : "false") + "}";
                     first = false;
                 }
             }
@@ -503,6 +504,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     svr.Post("/api/plugins/install", [plugins_dir, outcomeJson](const httplib::Request& req, httplib::Response& res) {
         const std::string id = req.form.get_field("id");
         const bool dry = req.form.get_field("dry") == "1";
+        const bool official = req.form.get_field("official") == "1";   // a built-in plugin's update from the PEK Store (Official shelf)
         const auto paths = req.form.get_fields("path");
         const auto parts = req.form.get_files("file");
         pek_plugins::Outcome out;
@@ -513,7 +515,7 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
             std::vector<pek_plugins::InFile> files;
             files.reserve(parts.size());
             for (size_t i = 0; i < parts.size(); ++i) files.push_back({paths[i], parts[i].content});
-            out = pek_plugins::install(plugins_dir, id, files, dry);
+            out = pek_plugins::install(plugins_dir, id, files, dry, official);
         }
         res.status = out.ok ? 200 : 400;
         res.set_content(outcomeJson(out), "application/json");

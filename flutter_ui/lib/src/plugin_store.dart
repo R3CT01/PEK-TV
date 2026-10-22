@@ -46,7 +46,7 @@ class PekStoreApi {
   }
 
   /// Downloads an item and turns it into what the install screen needs. [onProgress] gets (chunk, of chunks).
-  static Future<PreparedPlugin> download(StoreItem item, {void Function(int, int)? onProgress}) async {
+  static Future<PreparedPlugin> download(StoreItem item, {void Function(int, int)? onProgress, bool official = false}) async {
     final parts = StringBuffer();
     for (var i = 0; i < item.chunks; i++) {
       onProgress?.call(i, item.chunks);
@@ -66,7 +66,10 @@ class PekStoreApi {
     } catch (_) {
       throw const StoreException('The download was damaged. Try again.');
     }
-    return PreparedPlugin.fromFiles(item.id, files);
+    final prep = PreparedPlugin.fromFiles(item.id, files);
+    // A built-in plugin's update from the Official shelf is the one case the server lets replace a built-in plugin.
+    if (official && PluginInstaller.stockIds.contains(item.id)) prep.official = true;
+    return prep;
   }
 
   /// The same 64-bit fingerprint as fingerprint() in www/plugin_store.js (two 32-bit FNV-style hashes).
@@ -92,8 +95,11 @@ class StoreException implements Exception {
 }
 
 class StoreItem {
-  const StoreItem({required this.id, required this.name, required this.version, required this.author, required this.description, required this.size, required this.fp, required this.chunks});
+  const StoreItem({required this.id, required this.name, required this.version, required this.author, required this.description, required this.size, required this.fp, required this.chunks, this.icon = ''});
   final String id, name, version, author, description, fp;
+
+  /// The plugin's picture as a small data: address (made by the store from plugin.json "icon"), '' = none.
+  final String icon;
   final int size, chunks;
 
   factory StoreItem.fromJson(Map<String, dynamic> j) => StoreItem(
@@ -105,7 +111,23 @@ class StoreItem {
         size: (j['size'] as num?)?.toInt() ?? 0,
         fp: '${j['fp'] ?? ''}',
         chunks: (j['chunks'] as num?)?.toInt() ?? 0,
+        icon: '${j['icon'] ?? ''}'.startsWith('data:image/') ? '${j['icon']}' : '',
       );
+
+  /// The picture's bytes, or null.
+  Uint8List? get iconBytes => dataUriBytes(icon);
+}
+
+/// Bytes of a `data:image/...;base64,...` address, or null.
+Uint8List? dataUriBytes(String uri) {
+  if (!uri.startsWith('data:image/')) return null;
+  final i = uri.indexOf('base64,');
+  if (i < 0) return null;
+  try {
+    return base64Decode(uri.substring(i + 7));
+  } catch (_) {
+    return null;
+  }
 }
 
 class PluginFile {
@@ -146,6 +168,24 @@ class PreparedPlugin {
   final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, live, watched, device
   final bool stream, hasBackend, hasFlutterScreen, hasWebScreen;
   final List<PluginFile> files;
+
+  /// Set for a built-in plugin's update downloaded from the Official shelf (sent to the server as official=1).
+  bool official = false;
+
+  /// The plugin's picture (plugin.json "icon"), read from its files, or null.
+  Uint8List? get iconBytes {
+    final f = files.where((f) => f.path == 'plugin.json').firstOrNull;
+    if (f == null) return null;
+    try {
+      final m = jsonDecode(utf8.decode(f.data, allowMalformed: true).replaceFirst('\uFEFF', ''));
+      final ic = m is Map ? m['icon'] : null;
+      if (ic is! String) return null;
+      final pf = files.where((x) => x.path == ic).firstOrNull;
+      return pf != null && pf.data.length < 200000 ? pf.data : null;
+    } catch (_) {
+      return null;
+    }
+  }
 
   static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'live', 'watched', 'device'];
   static final _host = RegExp(r'^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$');
@@ -259,6 +299,9 @@ class InstallResult {
 class PluginInstaller {
   static const _sourcesKey = 'pek_plugin_sources';
 
+  /// The plugins that ship with PEK TV: they cannot be removed and they update from the PEK Store's Official shelf.
+  static const stockIds = {'weather', 'tmdb-discover'};
+
   /// POST /api/plugins/install (a dry run first, to learn whether it is allowed and whether it replaces one).
   static Future<InstallResult> send(PreparedPlugin p, {required bool dry}) {
     if (dry) return _send(p, dry: true);
@@ -275,6 +318,7 @@ class PluginInstaller {
 
     field('id', p.id);
     if (dry) field('dry', '1');
+    if (p.official) field('official', '1');
     // Each file = a "path" field and a "file" part, in the same order (the server pairs them by position).
     for (final f in p.files) {
       field('path', f.path);
@@ -321,6 +365,7 @@ class PluginInstaller {
     if (s == 'community') return 'approved \u00b7 community store';
     if (s == 'zip') return 'third party \u00b7 from a .zip file';
     if (s is Map && s['type'] == 'github') return 'unverified \u00b7 from GitHub ${s['owner']}/${s['repo']}';
+    if (stockIds.contains(id)) return 'built in \u00b7 updates from the PEK Store';
     return null;
   }
 

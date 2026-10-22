@@ -1,3 +1,4 @@
+import 'plugin_updates.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -18,7 +19,6 @@ import 'plugin_host.dart' show PluginBack, PluginHost;
 import 'plugin_ui.dart';
 import 'store.dart';
 import 'tokens.dart';
-import 'torrent.dart';
 import 'weather.dart' show Weather;
 import 'widgets.dart';
 
@@ -34,7 +34,6 @@ const _navItems = <(String, String)>[
   ('favorites', 'Favorites'),
   ('duplicates', 'Duplicates'),
   ('unknown', 'Unknown'),
-  ('torrents', 'Torrents'),
   ('plugins', 'Plugins'),
   ('settings', 'Settings'),
 ];
@@ -46,7 +45,7 @@ const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outl
 const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
 
 /// Everything that is not a swipe page.
-const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'torrents', 'plugins', 'settings'];
+const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
 
 String _titleOf(String id) => _navItems.firstWhere((e) => e.$1 == id, orElse: () => ('', 'PEK TV')).$2;
 
@@ -122,6 +121,7 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _loadPluginScreens();
+    PluginUpdates.checkOnStartup(); // built-in plugins update from the PEK Store, GitHub ones are offered an update
     PluginHost.changed.addListener(_loadPluginScreens);
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) {
@@ -262,8 +262,6 @@ class _AppShellState extends State<AppShell> {
         return DuplicatesPage(padding: pad);
       case 'unknown':
         return UnknownPage(padding: pad);
-      case 'torrents':
-        return TorrentsPage(padding: pad);
       case 'plugins':
         return PluginsPage(padding: pad);
       case 'settings':
@@ -422,7 +420,6 @@ class _MorePage extends StatelessWidget {
     'favorites': 'Your saved movies and shows',
     'duplicates': 'Files that appear twice',
     'unknown': 'Files PEK TV could not sort',
-    'torrents': 'Play a magnet or .torrent link',
     'plugins': 'Installed plugins',
     'settings': 'Sources and app options',
   };
@@ -441,14 +438,14 @@ class _MorePage extends StatelessWidget {
     Widget grid(List<String> list) {
       final rows = (list.length / cols).ceil();
       return Column(children: [
-        for (var r = 0; r < rows; r++)
-          Padding(
-            padding: EdgeInsets.only(bottom: gap),
-            child: SizedBox(
+        for (var r = 0; r < rows; r++) ...[
+          // A thin line between rows and between the two columns, so each button reads as its own.
+          if (r > 0) ThinDivider(vertical: gap / 2),
+          SizedBox(
               height: tileH,
               child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                 for (var c = 0; c < cols; c++) ...[
-                  if (c > 0) SizedBox(width: gap),
+                  if (c > 0) Padding(padding: EdgeInsets.symmetric(horizontal: gap / 2), child: SizedBox(width: 1, child: ColoredBox(color: p.tokens.textMuted.withAlpha(60)))),
                   Expanded(
                     child: r * cols + c < list.length
                         ? PekCard(
@@ -463,7 +460,7 @@ class _MorePage extends StatelessWidget {
                 ],
               ]),
             ),
-          ),
+        ],
       ]);
     }
 
@@ -475,6 +472,7 @@ class _MorePage extends StatelessWidget {
         const Heading('More', weather: true),
         grid(main),
         if (plugins.isNotEmpty) ...[
+          const ThinDivider(),
           Padding(
             padding: EdgeInsets.only(top: 0.75 * rem, bottom: gap),
             child: Text('Plugins', style: TextStyle(fontSize: 1.3 * rem, fontWeight: FontWeight.w700, letterSpacing: -0.3)),

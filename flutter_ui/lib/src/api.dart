@@ -382,7 +382,7 @@ class Api {
     final out = <PluginInfo>[];
     for (final e in ((j['plugins'] as List?) ?? const [])) {
       final folder = '${(e as Map)['folder']}';
-      var name = folder, desc = '', version = '', navTab = '';
+      var name = folder, desc = '', version = '', navTab = '', icon = '';
       var flutterScreen = false;
       var streamer = false;
       try {
@@ -396,8 +396,10 @@ class Api {
         streamer = prov is Map && prov['stream'] == true; // can play a title another plugin hands over
         final ui = m['ui'];
         if (ui is Map) navTab = '${ui['navTab'] ?? ''}';
+        final ic = '${m['icon'] ?? ''}';
+        if (RegExp(r'^[A-Za-z0-9._-]{1,60}\.(png|jpe?g|webp|gif)$', caseSensitive: false).hasMatch(ic)) icon = '$base/plugins/${Uri.encodeComponent(folder)}/$ic';
       } catch (_) {}
-      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer));
+      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer, builtin: e['builtin'] == true, icon: icon));
     }
     return out;
   }
@@ -619,8 +621,14 @@ class DuplicatesResult {
 }
 
 class PluginInfo {
-  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false});
+  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false, this.builtin = false, this.icon = ''});
   final String folder, name, description, version;
+
+  /// Ships with PEK TV (weather, tmdb-discover): it cannot be removed, only updated from the PEK Store.
+  final bool builtin;
+
+  /// Address of the plugin's picture (plugin.json "icon"), '' = none.
+  final String icon;
   final bool hasBackend;
 
   /// plugin.json has a "flutter" entry: the plugin ships a Python screen (screen.py) this UI can draw.

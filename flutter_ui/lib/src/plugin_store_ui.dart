@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'art_cache.dart';
 import 'common.dart';
 import 'plugin_store.dart';
 import 'plugin_ui.dart';
@@ -90,7 +92,7 @@ class _ShelfPageState extends State<_ShelfPage> {
             builder: (c) => PluginInstallPage(
               title: it.name,
               shelf: widget.shelf,
-              load: (progress) => PekStoreApi.download(it, onProgress: progress),
+              load: (progress) => PekStoreApi.download(it, onProgress: progress, official: widget.shelf == 'official'),
               padding: c.pek.pagePad,
             ),
           ),
@@ -133,6 +135,7 @@ class _ShelfPageState extends State<_ShelfPage> {
             for (var i = 0; i < d.items.length; i++)
               ListRow(
                 autofocus: i == 0,
+                leading: PluginPicture(bytes: d.items[i].iconBytes),
                 title: d.items[i].name,
                 subtitle: [
                   if (d.items[i].version.isNotEmpty) 'v${d.items[i].version}',
@@ -303,7 +306,8 @@ class _InstallPageState extends State<PluginInstallPage> {
         ]);
       case _Stage.confirm:
         children.addAll([
-          Heading('${_replaced ? 'Update' : 'Install'} \u201c${prep!.name}\u201d?'),
+          if (prep!.iconBytes != null) Padding(padding: EdgeInsets.only(bottom: 0.6 * p.rem), child: PluginPicture(bytes: prep.iconBytes, size: 5 * p.rem)),
+          Heading('${_replaced ? 'Update' : 'Install'} \u201c${prep.name}\u201d?'),
           _panel(context, prep.describe(replaced: _replaced, shelf: widget.shelf, notice: widget.notice?.call(prep, _replaced) ?? const [])),
           SizedBox(height: p.rem),
           Wrap(spacing: 0.6 * p.rem, runSpacing: 0.6 * p.rem, children: [
@@ -337,5 +341,36 @@ class _InstallPageState extends State<PluginInstallPage> {
       canPop: _stage != _Stage.installing, // never walk away in the middle of writing files
       child: ListView(padding: widget.padding, children: children),
     );
+  }
+}
+
+
+/// A plugin's picture (its plugin.json "icon"): from bytes (the store list, the install screen) or from an address (an
+/// installed plugin, served by PEK TV's own server). Without one, the plugin's first letter on a plain tile, so every row
+/// lines up.
+class PluginPicture extends StatelessWidget {
+  const PluginPicture({super.key, this.bytes, this.url = '', this.size, this.letter = ''});
+  final Uint8List? bytes;
+  final String url;
+  final double? size;
+  final String letter;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final w = size ?? 2.8 * p.rem;
+    Widget fallback() => ColoredBox(
+          color: p.tokens.surface,
+          child: Center(child: Icon(Icons.extension_outlined, size: w * 0.5, color: p.tokens.textMuted)),
+        );
+    Widget child;
+    if (bytes != null) {
+      child = Image.memory(bytes!, fit: BoxFit.cover, width: w, height: w, gaplessPlayback: true, errorBuilder: (_, __, ___) => fallback());
+    } else if (url.isNotEmpty) {
+      child = ArtImage(url, fit: BoxFit.cover, width: w, height: w, cacheWidth: 160, errorBuilder: (_, __, ___) => fallback());
+    } else {
+      child = fallback();
+    }
+    return ClipRRect(borderRadius: BorderRadius.circular(w * 0.2), child: SizedBox(width: w, height: w, child: child));
   }
 }

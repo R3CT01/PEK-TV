@@ -70,6 +70,12 @@ inline bool isReservedId(const std::string& id) {
     return id == "weather" || id == "sample_scraper" || id == "sample_counter" || id == "tmdb-discover";
 }
 
+// The built-in plugins the PEK Store may update (an "official" install, see install() below). The two sample plugins are
+// retired and are never updated.
+inline bool isStockId(const std::string& id) {
+    return id == "weather" || id == "tmdb-discover";
+}
+
 // PEK's built-in TMDb access (a proxy that holds PEK's key) is for official plugins only.
 // A plugin installed from a .zip can't list it, so it can't borrow PEK's key.
 inline const char* reservedHost() { return "hesper-tmdb.aquariusibeats.workers.dev"; }
@@ -145,7 +151,7 @@ inline std::string checkRelativePath(const std::string& p) {
 }
 
 // Validates everything except the id. Returns "" if fine.
-inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalBytes) {
+inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalBytes, bool official = false) {
     totalBytes = 0;
     if (files.empty()) return "the plugin has no files";
     if (files.size() > kMaxFiles) return "too many files (limit " + std::to_string(kMaxFiles) + ")";
@@ -176,7 +182,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             if (f.data.compare(0, 3, "\xEF\xBB\xBF") == 0) a = 3;            // UTF-8 BOM
             while (a < f.data.size() && std::isspace(static_cast<unsigned char>(f.data[a]))) ++a;
             if (a >= f.data.size() || f.data[a] != '{') return "plugin.json is not a JSON object";
-            if (lowerCopy(f.data).find(reservedHost()) != std::string::npos)
+            if (!official && lowerCopy(f.data).find(reservedHost()) != std::string::npos)
                 return std::string(reservedHost()) + " is reserved for PEK's official plugins";
             hasFlutterEntry = lowerCopy(f.data).find("\"flutter\"") != std::string::npos;
         }
@@ -198,14 +204,17 @@ inline std::mutex& installMutex() {
 }
 
 // dryRun == true: run every check and report, write nothing.
+// official == true: the app is installing a built-in plugin's update that it downloaded from the PEK Store's Official shelf.
+// Only then may a built-in plugin (weather, tmdb-discover) be replaced and the reserved TMDb host be listed. Every other check
+// (paths, file types, sizes, Python only, screen.py) still applies.
 inline Outcome install(const std::string& pluginsDir, const std::string& id,
-                       const std::vector<InFile>& files, bool dryRun) {
+                       const std::vector<InFile>& files, bool dryRun, bool official = false) {
     Outcome out;
     out.id = id;
     if (!validId(id)) { out.error = "the plugin id must be 1-40 lowercase letters, digits, - or _"; return out; }
-    if (isReservedId(id)) { out.error = "\"" + id + "\" is a built-in plugin and can't be replaced"; return out; }
+    if (isReservedId(id) && !(official && isStockId(id))) { out.error = "\"" + id + "\" is a built-in plugin and can't be replaced"; return out; }
     size_t total = 0;
-    out.error = checkFiles(files, total);
+    out.error = checkFiles(files, total, official && isStockId(id));
     if (!out.error.empty()) return out;
     out.files = files.size();
     out.bytes = total;

@@ -136,6 +136,44 @@ class ArtCache {
     }
   }
 
+  /// Bytes the saved pictures take.
+  static Future<int> size() async {
+    await init();
+    final d = _imgDir;
+    if (d == null) return 0;
+    var total = 0;
+    try {
+      await for (final e in d.list()) {
+        if (e is File) total += await e.length();
+      }
+    } catch (_) {}
+    return total;
+  }
+
+  /// Deletes the saved pictures and the saved synopses (details.json). They are fetched again when needed; the saved
+  /// movie / show lists stay.
+  static Future<void> clear() async {
+    await init();
+    _known.clear();
+    final d = _imgDir;
+    if (d != null) {
+      try {
+        await for (final e in d.list()) {
+          try {
+            await e.delete();
+          } catch (_) {}
+        }
+      } catch (_) {}
+    }
+    final dd = _dataDir;
+    if (dd != null) {
+      try {
+        final f = File('${dd.path}/details.json');
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    }
+  }
+
   /// A file that would not decode (cut off, or not a picture): drop it so the next look-up downloads it again.
   static void forget(String url) {
     final f = _known.remove(url);

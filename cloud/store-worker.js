@@ -38,6 +38,7 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_states (state TEXT PRIMARY KEY, ret TEXT NOT NULL, created INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_sessions (token_hash TEXT PRIMARY KEY, gh_id TEXT NOT NULL, login TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
     try { await db.prepare("ALTER TABLE store_plugins ADD COLUMN kind TEXT NOT NULL DEFAULT 'plugin'").run(); } catch (e) { /* column already there */ }
+    try { await db.prepare("ALTER TABLE store_plugins ADD COLUMN icon TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* column already there */ }
     ready = true;
 }
 
@@ -185,7 +186,7 @@ async function ghSession(request, env, now) {
 
 function storeItem(r) {
     return { id: r.id, shelf: r.shelf, name: r.name, version: r.version, author: r.author, description: r.description,
-             kind: r.kind === 'skin' ? 'skin' : 'plugin', size: r.size, fp: r.fp, chunks: r.chunks, status: r.status, updated: r.updated };
+             kind: r.kind === 'skin' ? 'skin' : 'plugin', icon: r.icon || '', size: r.size, fp: r.fp, chunks: r.chunks, status: r.status, updated: r.updated };
 }
 
 async function storeList(url, env) {
@@ -224,6 +225,26 @@ async function storePutChunk(request, env, who) {
     return json({ ok: true });
 }
 
+// The plugin's picture: plugin.json \"icon\" names a png / jpg / webp file in the bundle. It is stored with the listing as a small
+// data: address (60 KB at most) so the store list shows it without downloading the plugin. '' = none (never an error).
+async function extractIcon(db, owner, id, fp, total) {
+    try {
+        const rows = await db.prepare('SELECT idx, data FROM store_chunks WHERE owner = ? AND id = ? AND fp = ? ORDER BY idx').bind(owner, id, fp).all();
+        const bundle = JSON.parse((rows.results || []).map(r => r.data).join(''));
+        const files = Array.isArray(bundle.files) ? bundle.files : [];
+        const pj = files.find(f => f && f.p === 'plugin.json');
+        if (!pj) return '';
+        const manifest = JSON.parse(atob(pj.d).replace(/^\uFEFF/, ''));
+        const name = manifest && typeof manifest.icon === 'string' ? manifest.icon : '';
+        const m = /\.(png|jpe?g|webp)$/i.exec(name);
+        if (!m) return '';
+        const f = files.find(x => x && x.p === name);
+        if (!f || typeof f.d !== 'string' || f.d.length > 80000) return '';   // base64: about 60 KB of picture
+        const mime = m[1].toLowerCase() === 'png' ? 'image/png' : m[1].toLowerCase() === 'webp' ? 'image/webp' : 'image/jpeg';
+        return 'data:' + mime + ';base64,' + f.d;
+    } catch (e) { return ''; }
+}
+
 // official = true only ever comes from the owner route.
 async function storeCommit(request, env, who, official) {
     const { body, err } = await readJson(request); if (err) return err;
@@ -248,12 +269,13 @@ async function storeCommit(request, env, who, official) {
     const status = official ? 'approved' : 'pending';          // community uploads wait for an owner
     // On Community the author is always the signed-in GitHub account, whatever plugin.json says.
     const author = official ? (shortText(body.author, 80) || who.login) : who.login;
+    const icon = kind === 'plugin' ? await extractIcon(db, who.id, body.id, body.fp, total) : '';
     await db.batch([
-        db.prepare('INSERT INTO store_plugins (id, shelf, name, version, author, description, size, fp, chunks, status, owner, updated, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+        db.prepare('INSERT INTO store_plugins (id, shelf, name, version, author, description, size, fp, chunks, status, owner, updated, kind, icon) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
             'ON CONFLICT(id) DO UPDATE SET shelf = excluded.shelf, name = excluded.name, version = excluded.version, author = excluded.author, ' +
-            'description = excluded.description, size = excluded.size, fp = excluded.fp, chunks = excluded.chunks, status = excluded.status, owner = excluded.owner, updated = excluded.updated, kind = excluded.kind')
+            'description = excluded.description, size = excluded.size, fp = excluded.fp, chunks = excluded.chunks, status = excluded.status, owner = excluded.owner, updated = excluded.updated, kind = excluded.kind, icon = excluded.icon')
             .bind(body.id, shelf, shortText(body.name, 80) || body.id, shortText(body.version, 40), author,
-                  shortText(body.description, 200), Math.floor(size), body.fp, total, status, who.id, now, kind),
+                  shortText(body.description, 200), Math.floor(size), body.fp, total, status, who.id, now, kind, icon),
         db.prepare('DELETE FROM store_chunks WHERE id = ? AND NOT EXISTS (SELECT 1 FROM store_plugins p WHERE p.id = store_chunks.id AND p.owner = store_chunks.owner AND p.fp = store_chunks.fp)')
             .bind(body.id)
     ]);

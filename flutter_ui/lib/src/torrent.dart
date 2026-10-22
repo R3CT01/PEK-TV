@@ -12,7 +12,6 @@ import 'fields.dart';
 import 'player.dart';
 import 'store.dart';
 import 'tokens.dart';
-import 'torrent_search.dart';
 import 'widgets.dart';
 
 /// What the C++ server says about one running torrent (GET /api/torrent/<hash>/status).
@@ -367,79 +366,5 @@ class _TorrentBufferCardState extends State<TorrentBufferCard> {
         ],
       ]),
     );
-  }
-}
-
-// ====================================================================== More > Torrents
-
-/// Search the sites you added (or a Torznab provider), or paste a magnet link / https .torrent link, and play it. A release
-/// streams through the built-in engine, shows a loading screen, and is remembered in Resume Watching like anything else.
-class TorrentsPage extends StatefulWidget {
-  const TorrentsPage({super.key, required this.padding});
-  final EdgeInsets padding;
-  @override
-  State<TorrentsPage> createState() => _TorrentsPageState();
-}
-
-class _TorrentsPageState extends State<TorrentsPage> {
-  final _link = TextEditingController();
-  final _name = TextEditingController();
-  late final Future<bool> _available = TorrentApi.available();
-  String _error = '';
-
-  @override
-  void dispose() {
-    _link.dispose();
-    _name.dispose();
-    super.dispose();
-  }
-
-  void _play() {
-    final src = _link.text.trim();
-    final ok = src.startsWith('magnet:?') || RegExp(r'^https://[^\s]+$').hasMatch(src);
-    if (!ok) {
-      setState(() => _error = 'Paste a magnet link (magnet:?\u2026) or an https link to a .torrent file.');
-      return;
-    }
-    setState(() => _error = '');
-    final raw = _name.text.trim().isNotEmpty ? _name.text.trim() : TorrentTitle.nameOf(src);
-    final parsed = TorrentTitle.parse(raw);
-    playTorrent(context, track: parsed.track(src));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pek;
-    final rem = p.rem;
-    final t = p.tokens;
-    return ListView(padding: widget.padding, children: [
-      const Heading('Torrents', weather: true),
-      FutureBuilder<bool>(
-        future: _available,
-        builder: (context, snap) {
-          final text = !snap.hasData
-              ? 'Checking the torrent engine\u2026'
-              : snap.data == true
-                  ? 'Torrent playback is built into this PEK TV.'
-                  : 'This build of PEK TV does not include the torrent engine, so releases cannot be played.';
-          return Padding(padding: EdgeInsets.only(bottom: rem), child: Text(text, style: TextStyle(color: t.textMuted)));
-        },
-      ),
-      const TorrentSearchSections(),
-      Section(
-        title: 'Play a release',
-        hint: 'Paste a magnet link or a .torrent link. It shows how far it has loaded, plays when enough is downloaded, and appears in Resume Watching.',
-        children: [
-          PekField(label: 'Magnet or .torrent link', controller: _link, hint: 'magnet:?xt=urn:btih:\u2026', onSubmitted: _play),
-          PekField(label: 'Title (optional, otherwise the name in the link)', controller: _name, onSubmitted: _play),
-          if (_error.isNotEmpty) Padding(padding: EdgeInsets.only(bottom: 0.75 * rem), child: Text(_error, style: const TextStyle(color: Colors.redAccent))),
-          Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Play', primary: true, onTap: _play)),
-        ],
-      ),
-      Text(
-        'Only play what you have the right to watch. A release named like "Show S02E05" or "Movie 2019" is matched to episodes and movies, so its watch history and resume point follow you to your other devices.',
-        style: TextStyle(color: t.textMuted, fontSize: 0.85 * rem),
-      ),
-    ]);
   }
 }

@@ -24,5 +24,6 @@
   },
   "flutter": {
     "screen": "screen.py"
-  }
+  },
+  "icon": "icon.png"
 }

@@ -187,3 +187,17 @@ Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.
 - `flutter_ui/pubspec.yaml` - adds `webview_flutter` / `webview_flutter_android` (trailer player); run `flutter pub get`
 - `backend/plugin_install.h` - a zip may contain `screen.py` instead of `ui.js`
 - `plugins/tmdb-discover/{screen.py,plugin.json}` - the port (1.6.0)
+
+## Plugin pictures, built-in plugins and updates (Fixes 4)
+- **Picture**: `plugin.json` `"icon": "icon.png"` (png / jpg / webp in the plugin folder, 256x256 recommended, under 60 KB). The Plugins page shows it
+  (served from `/plugins/<id>/<icon>`), the store worker copies it into the listing as a small data: address (`icon` column, added by itself
+  on the first request after you paste `cloud/store-worker.js`) so the store list and the install screen show it without downloading the plugin.
+- **Built-in plugins** (`weather`, `tmdb-discover`, `PluginInstaller.stockIds` / `isReservedId`) cannot be removed: no Remove button, and the
+  server refuses (`/api/plugins` now reports `builtin`).
+- **Updates** (`plugin_updates.dart`, checked 6 s after start and whenever the Plugins page opens):
+  built-in plugins update by themselves from the PEK Store Official shelf (an `official=1` install, the only way the server lets a built-in
+  plugin be replaced); plugins installed from GitHub are looked up again on GitHub and an **Update** button (with the permissions screen) appears
+  on the Plugins page when the latest release tag differs. The app copies built-in plugins from its own files at every start; it now leaves a
+  copy alone when the store's version is newer (`MainActivity.copyAssetDir`).
+- **Torrents**: the Torrents page and the in-app release search are gone. The engine (`TorrentApi`, loading screen, `pek_ui.play_torrent`) stays for
+  plugins with the `torrent` permission.

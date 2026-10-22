@@ -191,3 +191,45 @@ String formatTime(double s) {
   String two(int n) => n.toString().padLeft(2, '0');
   return h > 0 ? '$h:${two(m)}:${two(sec)}' : '$m:${two(sec)}';
 }
+
+
+/// A thin line between two settings (or two buttons): same colour as muted text, very light.
+class ThinDivider extends StatelessWidget {
+  const ThinDivider({super.key, this.vertical});
+  final double? vertical; // space above and below, default half a rem
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    return Padding(
+      padding: EdgeInsets.symmetric(vertical: vertical ?? 0.5 * p.rem),
+      child: SizedBox(height: 1, width: double.infinity, child: ColoredBox(color: p.tokens.textMuted.withAlpha(60))),
+    );
+  }
+}
+
+/// A category of settings: its name as a header, then its sections with a thin line between each.
+class SettingsGroup extends StatelessWidget {
+  const SettingsGroup({super.key, required this.title, this.hint, required this.children});
+  final String title;
+  final String? hint;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final rem = p.rem;
+    return Padding(
+      padding: EdgeInsets.only(top: 0.75 * rem, bottom: rem),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title.toUpperCase(), style: TextStyle(fontSize: 0.8 * rem, fontWeight: FontWeight.w700, letterSpacing: 1.2, color: p.tokens.accent)),
+        if (hint != null) Padding(padding: EdgeInsets.only(top: 0.2 * rem), child: Text(hint!, style: TextStyle(color: p.tokens.textMuted, fontSize: 0.85 * rem))),
+        SizedBox(height: 0.6 * rem),
+        for (var i = 0; i < children.length; i++) ...[
+          if (i > 0) const ThinDivider(),
+          children[i],
+        ],
+      ]),
+    );
+  }
+}

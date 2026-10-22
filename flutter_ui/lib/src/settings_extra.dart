@@ -1,3 +1,4 @@
+import 'art_cache.dart';
 import 'package:flutter/material.dart';
 
 import 'activity.dart';
@@ -381,6 +382,50 @@ class AppearanceSection extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+
+/// Settings > Advanced > Storage: how much the saved artwork takes, and a button to clear it.
+class StorageSection extends StatefulWidget {
+  const StorageSection({super.key});
+  @override
+  State<StorageSection> createState() => _StorageSectionState();
+}
+
+class _StorageSectionState extends State<StorageSection> {
+  late Future<int> _size = ArtCache.size();
+  bool _busy = false;
+
+  String _mb(int b) => b >= 1024 * 1024 ? '${(b / 1024 / 1024).toStringAsFixed(1)} MB' : '${(b / 1024).round()} KB';
+
+  Future<void> _clear() async {
+    setState(() => _busy = true);
+    await ArtCache.clear();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _size = ArtCache.size();
+    });
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Saved artwork cleared.')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Section(
+      title: 'Saved artwork',
+      hint: 'Posters and synopses are kept on this device so they show at once and work without internet. They are downloaded again when needed.',
+      children: [
+        FutureBuilder<int>(
+          future: _size,
+          builder: (context, snap) => Padding(
+            padding: EdgeInsets.only(bottom: 0.5 * context.pek.rem),
+            child: Text(snap.hasData ? 'Using ${_mb(snap.data!)}' : 'Checking\u2026', style: TextStyle(color: context.pek.tokens.textMuted)),
+          ),
+        ),
+        Align(alignment: Alignment.centerLeft, child: PekButton(label: _busy ? 'Clearing\u2026' : 'Clear saved artwork', onTap: _busy ? null : _clear)),
+      ],
     );
   }
 }

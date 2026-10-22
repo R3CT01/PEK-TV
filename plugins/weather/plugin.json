@@ -1,0 +1,13 @@
+{
+  "name": "Weather",
+  "version": "1.0.0",
+  "author": "PEK",
+  "description": "Current weather and a 5-day forecast for a city you pick. Celsius or Fahrenheit. No account or key needed.",
+  "icon": "icon.png",
+  "permissions": {
+    "network": ["api.open-meteo.com", "geocoding-api.open-meteo.com"],
+    "storage": true
+  },
+  "ui": { "navTab": "Weather" },
+  "flutter": { "screen": "screen.py" }
+}
