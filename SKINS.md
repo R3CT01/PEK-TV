@@ -71,3 +71,16 @@ Normal CSS that is loaded on top of PEK TV's own while the skin is in use. To ke
 No code of any kind (`.js`, `.py`, `.html`, `.svg`). Up to 60 files, 2 MB per file, 6 MB in total.
 The server (`backend/skin_install.h`) checks all of this again, so a hand-made request gets no
 more than the app does.
+
+## Making a skin in the Flutter app
+
+Settings → Appearance → **Make a skin** opens the Skin maker. Pick a starting look, change the accent, background, cards
+and text (the rest of the colours follow them; **More colours** sets each one by hand), set the corner size, name it and
+save. A made skin appears in the Appearance list next to the built-in ones, and every profile can choose it.
+
+- **Hold** any skin in the list to use it, edit it, start a new one from it, copy it as a `skin.json`, or delete it.
+- **Copy skin.json** gives the same file the web build installs from a .zip (put it in a folder next to an optional
+  `skin.css` and zip it).
+- **Paste skin.json** opens a skin made in the web build in the maker, ready to save. Only the name, description and
+  colours are used; a skin's own `skin.css` styling only works in the web build.
+- Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused.

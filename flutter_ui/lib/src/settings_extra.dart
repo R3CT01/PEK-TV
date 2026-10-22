@@ -1,10 +1,12 @@
 import 'art_cache.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'activity.dart';
 import 'api.dart';
 import 'common.dart';
 import 'mpv.dart';
+import 'skin_maker.dart';
 import 'skins.dart';
 import 'store.dart';
 import 'subtitles.dart';
@@ -364,22 +366,154 @@ class _MusicOnlineSectionState extends State<MusicOnlineSection> {
 class AppearanceSection extends StatelessWidget {
   const AppearanceSection({super.key});
 
+  Future<void> _dialog(BuildContext context, String title, List<Widget> Function(BuildContext) body) {
+    final p = context.pek;
+    return showDialog<void>(
+      context: context,
+      barrierColor: p.tokens.overlay,
+      builder: (c) => Dialog(
+        backgroundColor: p.tokens.glassStrong,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(p.tokens.radius), side: BorderSide(color: p.tokens.border)),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(1.5 * p.rem),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(title, style: TextStyle(fontSize: 1.25 * p.rem, fontWeight: FontWeight.w700)),
+            SizedBox(height: 0.9 * p.rem),
+            ...body(c),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  /// Hold a skin: use it, edit it (a made one) or start a new one from it, copy it as skin.json, delete it (a made one).
+  Future<void> _manage(BuildContext context, Skin s) {
+    final gap = SizedBox(height: 0.6 * context.pek.rem);
+    return _dialog(context, s.name, (c) => [
+          PekButton(label: 'Use this skin', primary: true, autofocus: true, onTap: () {
+            Navigator.pop(c);
+            Skins.set(s.id);
+          }),
+          gap,
+          if (s.custom)
+            PekButton(label: 'Edit', onTap: () {
+              Navigator.pop(c);
+              openSkinMaker(context, edit: s);
+            })
+          else
+            PekButton(label: 'Make my own from this', onTap: () {
+              Navigator.pop(c);
+              openSkinMaker(context, from: s);
+            }),
+          gap,
+          PekButton(label: 'Copy skin.json', onTap: () async {
+            Navigator.pop(c);
+            await Clipboard.setData(ClipboardData(text: SkinJson.toText(s)));
+            if (context.mounted) ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('skin.json copied.')));
+          }),
+          if (s.custom) ...[
+            gap,
+            PekButton(label: 'Delete', onTap: () {
+              Navigator.pop(c);
+              _confirmDelete(context, s);
+            }),
+          ],
+          gap,
+          PekButton(label: 'Close', onTap: () => Navigator.pop(c)),
+        ]);
+  }
+
+  Future<void> _confirmDelete(BuildContext context, Skin s) {
+    final p = context.pek;
+    return _dialog(context, 'Delete \u201c${s.name}\u201d?', (c) => [
+          Text('The skin is removed from this device. Profiles that use it go back to PEK Ember.', style: TextStyle(color: p.tokens.textMuted)),
+          SizedBox(height: 1.1 * p.rem),
+          Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
+            PekButton(label: 'Delete', primary: true, shrink: true, onTap: () {
+              Navigator.pop(c);
+              Skins.deleteCustom(s.id);
+            }),
+            PekButton(label: 'Cancel', shrink: true, autofocus: true, onTap: () => Navigator.pop(c)),
+          ]),
+        ]);
+  }
+
+  /// A skin.json pasted as text (one made in the web build, or copied from here) opens in the maker, ready to save.
+  Future<void> _import(BuildContext context) {
+    final p = context.pek;
+    final ctl = TextEditingController();
+    String? error;
+    return showDialog<void>(
+      context: context,
+      barrierColor: p.tokens.overlay,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setState) => Dialog(
+          backgroundColor: p.tokens.glassStrong,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(p.tokens.radius), side: BorderSide(color: p.tokens.border)),
+          child: SingleChildScrollView(
+            padding: EdgeInsets.all(1.5 * p.rem),
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Paste a skin.json', style: TextStyle(fontSize: 1.25 * p.rem, fontWeight: FontWeight.w700)),
+              SizedBox(height: 0.6 * p.rem),
+              Text('Only the name, description and colours are used. A skin\u2019s own styling (skin.css) only works in the web build.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.9 * p.rem)),
+              SizedBox(height: 0.9 * p.rem),
+              TextField(
+                controller: ctl,
+                maxLines: 6,
+                minLines: 4,
+                autocorrect: false,
+                enableSuggestions: false,
+                style: TextStyle(color: p.tokens.text, fontSize: 0.85 * p.rem),
+                decoration: InputDecoration(hintText: '{ "name": "My skin", "tokens": { ... } }', hintStyle: TextStyle(color: p.tokens.textMuted.withAlpha(180))),
+              ),
+              if (error != null) Padding(padding: EdgeInsets.only(top: 0.5 * p.rem), child: Text(error!, style: const TextStyle(color: Color(0xFFFF6B6B)))),
+              SizedBox(height: 1.1 * p.rem),
+              Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
+                PekButton(label: 'Import', primary: true, shrink: true, onTap: () {
+                  final skin = SkinJson.fromText(ctl.text);
+                  if (skin == null) {
+                    setState(() => error = 'That is not a skin.json with colours in it.');
+                    return;
+                  }
+                  Navigator.pop(c);
+                  openSkinMaker(context, from: skin);
+                }),
+                PekButton(label: 'Paste from clipboard', shrink: true, onTap: () async {
+                  final d = await Clipboard.getData(Clipboard.kTextPlain);
+                  if (d?.text != null) setState(() => ctl.text = d!.text!);
+                }),
+                PekButton(label: 'Cancel', shrink: true, autofocus: true, onTap: () => Navigator.pop(c)),
+              ]),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final t = context.pek.tokens;
+    final p = context.pek;
+    final t = p.tokens;
     return ListenableBuilder(
       listenable: Skins.changes,
       builder: (context, _) => Section(
         title: 'Appearance',
-        hint: 'The look of the app. Each profile keeps its own.',
+        hint: 'The look of the app. Each profile keeps its own. Hold a skin for more (edit, copy, delete).',
         children: [
           for (final s in Skins.all)
             ListRow(
               title: s.name,
-              subtitle: s.description,
+              subtitle: s.custom ? (s.description.isEmpty ? 'Made by you' : s.description) : s.description,
               onTap: () => Skins.set(s.id),
+              onLongPress: () => _manage(context, s),
               trailing: Icon(s.id == Skins.currentId ? Icons.check_circle : Icons.circle_outlined, color: s.id == Skins.currentId ? t.accent : t.textMuted),
             ),
+          SizedBox(height: 0.75 * p.rem),
+          Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
+            PekButton(label: 'Make a skin', primary: true, shrink: true, onTap: () => openSkinMaker(context)),
+            PekButton(label: 'Paste skin.json', shrink: true, onTap: () => _import(context)),
+          ]),
         ],
       ),
     );
