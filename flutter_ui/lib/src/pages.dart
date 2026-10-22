@@ -15,6 +15,7 @@ import 'plugin_host.dart' show PluginHost;
 import 'plugin_install_ui.dart';
 import 'plugin_store.dart' show PluginInstaller;
 import 'plugin_store_ui.dart';
+import 'plugin_pins.dart';
 import 'plugin_updates.dart';
 import 'plugin_ui.dart';
 import 'settings_extra.dart';
@@ -203,6 +204,7 @@ class _PluginsPageState extends State<PluginsPage> {
     super.initState();
     PluginHost.changed.addListener(_reload); // the store installed, updated or removed something
     PluginUpdates.github.addListener(_rebuild);
+    PluginPins.changed.addListener(_rebuild);
     unawaited(PluginUpdates.check()); // also whenever this page opens, not only at start
   }
 
@@ -214,11 +216,21 @@ class _PluginsPageState extends State<PluginsPage> {
   void dispose() {
     PluginHost.changed.removeListener(_reload);
     PluginUpdates.github.removeListener(_rebuild);
+    PluginPins.changed.removeListener(_rebuild);
     super.dispose();
   }
 
   void _reload() {
     if (mounted) setState(() => _list = Api.plugins());
+  }
+
+  Future<void> _togglePin(PluginInfo pl) async {
+    final wasPinned = PluginPins.isPinned(pl.folder);
+    final ok = await PluginPins.toggle(pl.folder);
+    if (!mounted) return;
+    final name = pl.navTab.isEmpty ? pl.name : pl.navTab;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+        content: Text(!ok ? 'You can pin up to ${PluginPins.max} plugins. Unpin one first.' : wasPinned ? 'Unpinned $name' : 'Pinned $name to More')));
   }
 
   Future<void> _remove(PluginInfo pl) async {
@@ -241,6 +253,7 @@ class _PluginsPageState extends State<PluginsPage> {
     final ok = await Api.uninstallPlugin(pl.folder).catchError((_) => false);
     if (ok) {
       await PluginInstaller.forgetSource(pl.folder);
+      unawaited(PluginPins.forget(pl.folder));
       unawaited(PluginBackup.forget(pl.folder)); // other devices stop offering it; nothing is deleted from them
       await PluginInstaller.changed(pl.folder); // closes its open screen and reloads the menu
     }
@@ -278,6 +291,8 @@ class _PluginsPageState extends State<PluginsPage> {
                 trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                   if (pl.flutterScreen) ...[
                     PekButton(compact: true, primary: true, label: 'Open', onTap: () => openPluginScreen(context, pluginId: pl.folder, title: pl.navTab.isEmpty ? pl.name : pl.navTab)),
+                    SizedBox(width: 0.5 * rem),
+                    PekButton(compact: true, label: PluginPins.isPinned(pl.folder) ? 'Unpin' : 'Pin', onTap: () => _togglePin(pl)),
                     SizedBox(width: 0.5 * rem),
                   ],
                   if (PluginUpdates.github.value.containsKey(pl.folder)) ...[

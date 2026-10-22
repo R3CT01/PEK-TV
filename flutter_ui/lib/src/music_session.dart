@@ -45,8 +45,13 @@ class MusicSession {
     }
   }
 
+  /// The restored song just started loading: tell Android about it now (see [MusicController.toggle]).
+  void refresh() => _onTrack();
+
   void _onTrack() {
     final t = _mc.current.value;
+    if (t != null && _mc.restoredIdle) return; // restored from the last session: no notification until Play
+
     if (t == null) {
       _debounce?.cancel();
       if (_live) {

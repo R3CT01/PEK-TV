@@ -1,3 +1,4 @@
+import 'plugin_pins.dart';
 import 'plugin_updates.dart';
 import 'dart:async';
 
@@ -75,20 +76,31 @@ class _AppShellState extends State<AppShell> {
   }
   List<PluginInfo> _pluginScreens = const []; // installed plugins that have a Python screen for this UI
 
-  /// The menu with one entry per plugin screen, just above Plugins (a plugin's own plugin.json ui.navTab names it).
+  /// Plugin screens the person pinned (Plugins page > Pin), in pin order. The rest are reached through Plugins.
+  List<PluginInfo> get _pinnedScreens {
+    final pins = PluginPins.all;
+    final out = <PluginInfo>[];
+    for (final f in pins) {
+      final pl = _pluginScreens.where((e) => e.folder == f).firstOrNull;
+      if (pl != null) out.add(pl);
+    }
+    return out;
+  }
+
+  /// The menu with one entry per pinned plugin screen, just above Plugins (a plugin's own plugin.json ui.navTab names it).
   List<(String, String)> get _nav {
     final i = _navItems.indexWhere((e) => e.$1 == 'plugins');
     return [
       ..._navItems.sublist(0, i),
-      for (final pl in _pluginScreens) ('plugin:${pl.folder}', pl.navTab.isEmpty ? pl.name : pl.navTab),
+      for (final pl in _pinnedScreens) ('plugin:${pl.folder}', pl.navTab.isEmpty ? pl.name : pl.navTab),
       ..._navItems.sublist(i),
     ];
   }
 
-  /// Same for the More page (phones).
+  /// Same for the More page (phones): the fixed screens with the Plugins button, then the pinned plugins, then Settings.
   List<String> get _more {
-    final i = _moreIds.indexOf('plugins');
-    return [..._moreIds.sublist(0, i), for (final pl in _pluginScreens) 'plugin:${pl.folder}', ..._moreIds.sublist(i)];
+    final i = _moreIds.indexOf('settings');
+    return [..._moreIds.sublist(0, i), for (final pl in _pinnedScreens) 'plugin:${pl.folder}', ..._moreIds.sublist(i)];
   }
 
   String _title(String id) {
@@ -111,6 +123,10 @@ class _AppShellState extends State<AppShell> {
     });
   }
 
+  void _pinsChanged() {
+    if (mounted) setState(() {});
+  }
+
   Timer? _weatherTimer;
   void _weatherSoon() {
     if (!Cloud.linked) return;
@@ -124,6 +140,8 @@ class _AppShellState extends State<AppShell> {
     _loadPluginScreens();
     PluginUpdates.checkOnStartup(); // built-in plugins update from the PEK Store, GitHub ones are offered an update
     PluginHost.changed.addListener(_loadPluginScreens);
+    PluginPins.changed.addListener(_pinsChanged);
+    Store.profile.addListener(_pinsChanged);
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) {
       unawaited(Cloud.sync());
@@ -145,6 +163,8 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     PluginHost.changed.removeListener(_loadPluginScreens);
+    PluginPins.changed.removeListener(_pinsChanged);
+    Store.profile.removeListener(_pinsChanged);
     PluginHost.changed.removeListener(_backupSoon);
     Weather.edited.removeListener(_weatherSoon);
     Layouts.edited.removeListener(_weatherSoon);
@@ -256,6 +276,7 @@ class _AppShellState extends State<AppShell> {
           ids: _more,
           titleOf: _title,
           icons: {for (final pl in _pluginScreens) if (pl.icon.isNotEmpty) 'plugin:${pl.folder}': pl.icon},
+          hints: {for (final pl in _pluginScreens) 'plugin:${pl.folder}': pl.description},
         );
       case 'search':
         return SearchPage(padding: pad);
@@ -432,8 +453,6 @@ class _MorePage extends StatelessWidget {
     'settings': 'Sources and app options',
   };
 
-  bool _isPluginTile(String id) => id.startsWith('plugin:') || id == 'plugins';
-
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
@@ -458,7 +477,11 @@ class _MorePage extends StatelessWidget {
                     child: r * cols + c < list.length
                         ? PekCard(
                             title: titleOf(list[r * cols + c]),
-                            leading: icons[list[r * cols + c]] == null ? null : PluginPicture(url: icons[list[r * cols + c]]!, size: 3.4 * rem),
+                            leading: list[r * cols + c].startsWith('plugin:')
+                                ? (icons[list[r * cols + c]] == null
+                                    ? SizedBox(width: 3.4 * rem, height: 3.4 * rem, child: Icon(Icons.extension_outlined, size: 2.2 * rem, color: p.tokens.textMuted))
+                                    : PluginPicture(url: icons[list[r * cols + c]]!, size: 3.4 * rem))
+                                : null,
                             subtitle: _hint[list[r * cols + c]] ?? hints[list[r * cols + c]],
                             titleMaxLines: 2,
                             subtitleMaxLines: 3,
@@ -473,21 +496,11 @@ class _MorePage extends StatelessWidget {
       ]);
     }
 
-    final main = [for (final id in ids) if (!_isPluginTile(id)) id];
-    final plugins = [for (final id in ids) if (_isPluginTile(id)) id];
     return ListView(
       padding: padding,
       children: [
         const Heading('More', weather: true),
-        grid(main),
-        if (plugins.isNotEmpty) ...[
-          const ThinDivider(),
-          Padding(
-            padding: EdgeInsets.only(top: 0.75 * rem, bottom: gap),
-            child: Text('Plugins', style: TextStyle(fontSize: 1.3 * rem, fontWeight: FontWeight.w700, letterSpacing: -0.3)),
-          ),
-          grid(plugins),
-        ],
+        grid(ids),
       ],
     );
   }

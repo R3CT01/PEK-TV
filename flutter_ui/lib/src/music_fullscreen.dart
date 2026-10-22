@@ -545,44 +545,54 @@ class _Bottom extends StatelessWidget {
     final rem = p.rem;
     final vh = p.size.height / 100, vw = p.size.width / 100;
     final accent = _accentOn(p.tokens);
-    final small = math.max(2.8 * rem, 7.4 * vh);
-    final main = math.max(3.6 * rem, 10 * vh);
-    final ic = math.max(1.5 * rem, 3.8 * vh);
+    final small0 = math.max(2.8 * rem, 7.4 * vh);
+    final main0 = math.max(3.6 * rem, 10 * vh);
+    final ic0 = math.max(1.5 * rem, 3.8 * vh);
+    final gap0 = 2.2 * vw;
 
-    Widget toggle(String label, IconData i, ValueNotifier<bool> on, VoidCallback tap) => ValueListenableBuilder<bool>(
-          valueListenable: on,
-          builder: (_, v, __) => _Fb(label: label, onTap: tap, width: small, height: small, background: v ? _glass : Colors.transparent, child: Icon(i, size: ic, color: v ? accent : Colors.white)),
-        );
-    Widget plain(String label, IconData i, VoidCallback tap) => _Fb(label: label, onTap: tap, width: small, height: small, background: Colors.transparent, child: Icon(i, size: ic, color: Colors.white));
+    return LayoutBuilder(builder: (context, box) {
+      // Five small buttons, the big Play button and six gaps must fit the width: on a narrow phone everything shrinks together
+      // instead of the row running off the edge (it used to overflow by a few dozen pixels).
+      final natural = 5 * small0 + main0 + 6 * gap0;
+      final avail = box.maxWidth.isFinite ? box.maxWidth : natural;
+      final k = natural > avail && natural > 0 ? avail / natural : 1.0;
+      final small = small0 * k, main = main0 * k, ic = ic0 * k, gap = gap0 * k;
 
-    return Column(mainAxisSize: MainAxisSize.min, children: [
-      const _SeekBar(),
-      SizedBox(height: 1.2 * vh),
-      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-        toggle('Shuffle', Icons.shuffle, _mc.shuffle, _mc.toggleShuffle),
-        SizedBox(width: 2.2 * vw),
-        plain('Previous', Icons.skip_previous, _mc.prev),
-        SizedBox(width: 2.2 * vw),
-        ValueListenableBuilder<bool>(
-          valueListenable: _mc.playing,
-          builder: (_, on, __) => _Fb(
-            label: on ? 'Pause' : 'Play',
-            onTap: _mc.toggle,
-            autofocus: true,
-            width: main,
-            height: main,
-            background: Colors.white,
-            child: Icon(on ? Icons.pause : Icons.play_arrow, size: math.max(1.9 * rem, 5 * vh), color: const Color(0xFF111111)),
+      Widget toggle(String label, IconData i, ValueNotifier<bool> on, VoidCallback tap) => ValueListenableBuilder<bool>(
+            valueListenable: on,
+            builder: (_, v, __) => _Fb(label: label, onTap: tap, width: small, height: small, background: v ? _glass : Colors.transparent, child: Icon(i, size: ic, color: v ? accent : Colors.white)),
+          );
+      Widget plain(String label, IconData i, VoidCallback tap) => _Fb(label: label, onTap: tap, width: small, height: small, background: Colors.transparent, child: Icon(i, size: ic, color: Colors.white));
+
+      return Column(mainAxisSize: MainAxisSize.min, children: [
+        const _SeekBar(),
+        SizedBox(height: 1.2 * vh),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          toggle('Shuffle', Icons.shuffle, _mc.shuffle, _mc.toggleShuffle),
+          SizedBox(width: gap),
+          plain('Previous', Icons.skip_previous, _mc.prev),
+          SizedBox(width: gap),
+          ValueListenableBuilder<bool>(
+            valueListenable: _mc.playing,
+            builder: (_, on, __) => _Fb(
+              label: on ? 'Pause' : 'Play',
+              onTap: _mc.toggle,
+              autofocus: true,
+              width: main,
+              height: main,
+              background: Colors.white,
+              child: Icon(on ? Icons.pause : Icons.play_arrow, size: math.max(1.9 * rem * k, 5 * vh * k), color: const Color(0xFF111111)),
+            ),
           ),
-        ),
-        SizedBox(width: 2.2 * vw),
-        plain('Next', Icons.skip_next, () => _mc.next()),
-        SizedBox(width: 2.2 * vw),
-        toggle('Repeat', Icons.repeat, _mc.repeat, _mc.toggleRepeat),
-        SizedBox(width: 2.2 * vw),
-        plain('Stop', Icons.stop, _mc.stop),
-      ]),
-    ]);
+          SizedBox(width: gap),
+          plain('Next', Icons.skip_next, () => _mc.next()),
+          SizedBox(width: gap),
+          toggle('Repeat', Icons.repeat, _mc.repeat, _mc.toggleRepeat),
+          SizedBox(width: gap),
+          plain('Stop', Icons.stop, _mc.stop),
+        ]),
+      ]);
+    });
   }
 }
 

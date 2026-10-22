@@ -7,6 +7,7 @@ import 'src/profile_pages.dart';
 import 'src/profiles.dart';
 import 'src/skins.dart';
 import 'src/mpv.dart';
+import 'src/music_controller.dart';
 import 'src/net.dart';
 import 'src/shell.dart';
 import 'src/store.dart';
@@ -20,6 +21,7 @@ Future<void> main() async {
   final phoneAsk = PekPlayer.isPhone();
   await Store.init();
   Profiles.load();
+  MusicController.instance.restore(); // the song the active profile was playing when the app closed
   Net.start(); // the green / red dot and offline mode (net.js)
   final phone = await phoneAsk;
   runApp(PekApp(isPhone: phone));
