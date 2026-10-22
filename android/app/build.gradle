@@ -12,6 +12,10 @@ kotlin {
     }
 }
 
+// -PpekAbi=arm64-v8a | armeabi-v7a (set by the workflow, one build per CPU type)
+def pekAbi = project.findProperty('pekAbi')
+def pekBaseCode = 16
+
 android {
     namespace 'com.pektv.app'
     compileSdk 36
@@ -22,11 +26,18 @@ android {
         // 36 = Android 16, the level Google Play requires for new apps and
         // updates from Aug 31, 2026.
         targetSdk 36
-        versionCode 16   // bump this by 1 for every release you publish
+        // bump pekBaseCode by 1 for every release you publish. Each CPU build gets its own versionCode (an install must
+        // never replace a 64-bit build with a 32-bit one or the reverse): 16 -> 161 (32-bit) and 162 (64-bit).
+        versionCode pekBaseCode * 10 + (pekAbi == 'arm64-v8a' ? 2 : (pekAbi == 'armeabi-v7a' ? 1 : 0))
         // CI passes -PpekVersionName=<tag>; local builds use 2.1.5
         versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '2.1.5')
 
-        // No ndk.abiFilters here: the CPU types are chosen by the splits block below (Gradle refuses both together).
+        // Chaquopy refuses to configure without ndk.abiFilters, and Gradle refuses abiFilters together with the
+        // `splits { abi }` block, so there are no splits: the workflow builds once per CPU with -PpekAbi=<abi>
+        // and every build holds exactly one CPU type (still no fat APK). No -PpekAbi (a local build) = both.
+        ndk {
+            abiFilters.addAll(pekAbi ? [pekAbi] : ['arm64-v8a', 'armeabi-v7a'])
+        }
         externalNativeBuild {
             cmake {
                 cppFlags '-std=c++17'
@@ -38,19 +49,6 @@ android {
 
     externalNativeBuild {
         cmake { path 'src/main/cpp/CMakeLists.txt' }
-    }
-
-    // One APK per CPU type instead of one fat APK holding both (Flutter, libmpv, Python and the torrent code were packed twice).
-    //   arm64-v8a    64-bit: nearly every phone, and current TVs and boxes
-    //   armeabi-v7a  32-bit: older phones and the many Android TV sticks that still run a 32-bit system
-    // No universal APK on purpose: that would be the big file again.
-    splits {
-        abi {
-            enable true
-            reset()
-            include 'armeabi-v7a', 'arm64-v8a'
-            universalApk false
-        }
     }
 
     // Release signing: CI supplies these as environment variables (from GitHub secrets).
@@ -74,7 +72,6 @@ android {
             applicationIdSuffix '.debug'
             versionNameSuffix '-debug'
             debuggable true
-            // Debug builds both armeabi-v7a (32-bit) and arm64-v8a (64-bit), same as release.
         }
         release {
             debuggable false
@@ -89,17 +86,6 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-    }
-}
-
-// Each CPU build needs its own versionCode (an install must never replace a 64-bit build with a 32-bit one or the reverse).
-// 64-bit gets the higher number, which is what stores and sideload updaters prefer when a device could run both.
-// Example: versionCode 16 -> 161 (32-bit) and 162 (64-bit).
-android.applicationVariants.all { variant ->
-    variant.outputs.each { output ->
-        def abi = output.getFilter('ABI')
-        def offset = abi == 'arm64-v8a' ? 2 : (abi == 'armeabi-v7a' ? 1 : 0)
-        output.versionCodeOverride = android.defaultConfig.versionCode * 10 + offset
     }
 }
 
