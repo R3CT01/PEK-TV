@@ -1,3 +1,4 @@
+import 'pin_grid.dart';
 import 'plugin_pins.dart';
 import 'plugin_updates.dart';
 import 'dart:async';
@@ -98,9 +99,15 @@ class _AppShellState extends State<AppShell> {
   }
 
   /// Same for the More page (phones): the fixed screens with the Plugins button, then the pinned plugins, then Settings.
+  /// Same for the More page (phones): the fixed screens, then the 10 pin slots as tiles of the same size
+  /// ('plugin:<folder>' for a pinned plugin, 'pin+:<n>' for an empty slot).
   List<String> get _more {
-    final i = _moreIds.indexOf('settings');
-    return [..._moreIds.sublist(0, i), for (final pl in _pinnedScreens) 'plugin:${pl.folder}', ..._moreIds.sublist(i)];
+    final pins = _pinnedScreens;
+    return [
+      ..._moreIds,
+      for (final pl in pins) 'plugin:${pl.folder}',
+      for (var i = pins.length; i < PluginPins.max; i++) 'pin+:$i',
+    ];
   }
 
   String _title(String id) {
@@ -274,6 +281,8 @@ class _AppShellState extends State<AppShell> {
           padding: pad,
           onOpen: _open,
           ids: _more,
+          pinned: _pinnedScreens,
+          available: _pluginScreens,
           titleOf: _title,
           icons: {for (final pl in _pluginScreens) if (pl.icon.isNotEmpty) 'plugin:${pl.folder}': pl.icon},
           hints: {for (final pl in _pluginScreens) 'plugin:${pl.folder}': pl.description},
@@ -434,10 +443,12 @@ class _KeepAliveState extends State<_KeepAlive> with AutomaticKeepAliveClientMix
 
 /// The "More" page: every screen that is not a swipe page, as tiles.
 class _MorePage extends StatelessWidget {
-  const _MorePage({required this.padding, required this.onOpen, required this.ids, required this.titleOf, this.hints = const {}, this.icons = const {}});
+  const _MorePage({required this.padding, required this.onOpen, required this.ids, required this.titleOf, this.pinned = const [], this.available = const [], this.hints = const {}, this.icons = const {}});
   final EdgeInsets padding;
   final void Function(String id) onOpen;
   final List<String> ids;
+  final List<PluginInfo> pinned; // plugin screens on the pin board
+  final List<PluginInfo> available; // every installed plugin screen (what the board's + slots offer)
   final String Function(String id) titleOf;
   final Map<String, String> hints; // plugin screens: their description
   final Map<String, String> icons; // plugin screens: the address of their picture (plugin.json "icon")
@@ -452,6 +463,19 @@ class _MorePage extends StatelessWidget {
     'plugins': 'Installed plugins',
     'settings': 'Sources and app options',
   };
+
+  Widget _pinTile(BuildContext context, String id, double rem, PekScope p) {
+    final pl = pinned.firstWhere((e) => 'plugin:${e.folder}' == id);
+    return PinTile(
+      title: titleOf(id),
+      subtitle: pl.description,
+      leading: pl.icon.isEmpty
+          ? SizedBox(width: 3.4 * rem, height: 3.4 * rem, child: Icon(Icons.extension_outlined, size: 2.2 * rem, color: p.tokens.textMuted))
+          : PluginPicture(url: pl.icon, size: 3.4 * rem),
+      onTap: () => onOpen(id),
+      onLongPress: () => PinActions.menu(context, pl, (_) => onOpen(id)),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -474,7 +498,11 @@ class _MorePage extends StatelessWidget {
                 for (var c = 0; c < cols; c++) ...[
                   if (c > 0) Padding(padding: EdgeInsets.symmetric(horizontal: gap / 2), child: SizedBox(width: 1, child: ColoredBox(color: p.tokens.textMuted.withAlpha(60)))),
                   Expanded(
-                    child: r * cols + c < list.length
+                    child: r * cols + c < list.length && list[r * cols + c].startsWith('pin+:')
+                        ? PinTile(onTap: () => PinActions.pick(context, available))
+                        : r * cols + c < list.length && pinned.any((e) => 'plugin:${e.folder}' == list[r * cols + c])
+                            ? _pinTile(context, list[r * cols + c], rem, p)
+                            : r * cols + c < list.length
                         ? PekCard(
                             title: titleOf(list[r * cols + c]),
                             leading: list[r * cols + c].startsWith('plugin:')

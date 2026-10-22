@@ -57,6 +57,7 @@ there are no lock-screen controls yet (those need native channel methods).
 - `android/settings.gradle`, `android/app/build.gradle` - conditional Flutter module include, Flutter maven repo
 
 ## Added later
+- Pin slots on the More page (`pin_grid.dart`): after the fixed buttons come 10 tiles the same size as the others. A pinned plugin shows its icon, name and description; empty ones show a faint plus. Tap / D-pad centre on an empty tile lists the installed plugins to pin; on a pinned one it opens it, and press-and-hold (long press, held centre button, or Menu) offers Open / Remove from pins. Pins are stored by `plugin_pins.dart` and also still shown in the TV sidebar.
 - Network folders (SMB / NFS / FTP / WebDAV / DLNA): Settings > Add network folder (`net_folders.dart`; the Wi-Fi multicast lock
   is the `setMulticast` call on `pek/host`).
 - Search (title, actor, genre, year; `library_pages.dart`) and Watch History (a permanent "finished" record kept in `Store`), both under More.
