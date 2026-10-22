@@ -16,6 +16,7 @@ import 'music.dart';
 import 'pages.dart';
 import 'plugin_backup.dart';
 import 'plugin_host.dart' show PluginBack, PluginHost;
+import 'plugin_store_ui.dart' show PluginPicture;
 import 'plugin_ui.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -249,7 +250,13 @@ class _AppShellState extends State<AppShell> {
       case 'music':
         return MusicPage(padding: pad);
       case 'more':
-        return _MorePage(padding: pad, onOpen: _open, ids: _more, titleOf: _title);
+        return _MorePage(
+          padding: pad,
+          onOpen: _open,
+          ids: _more,
+          titleOf: _title,
+          icons: {for (final pl in _pluginScreens) if (pl.icon.isNotEmpty) 'plugin:${pl.folder}': pl.icon},
+        );
       case 'search':
         return SearchPage(padding: pad);
       case 'history':
@@ -406,12 +413,13 @@ class _KeepAliveState extends State<_KeepAlive> with AutomaticKeepAliveClientMix
 
 /// The "More" page: every screen that is not a swipe page, as tiles.
 class _MorePage extends StatelessWidget {
-  const _MorePage({required this.padding, required this.onOpen, required this.ids, required this.titleOf, this.hints = const {}});
+  const _MorePage({required this.padding, required this.onOpen, required this.ids, required this.titleOf, this.hints = const {}, this.icons = const {}});
   final EdgeInsets padding;
   final void Function(String id) onOpen;
   final List<String> ids;
   final String Function(String id) titleOf;
   final Map<String, String> hints; // plugin screens: their description
+  final Map<String, String> icons; // plugin screens: the address of their picture (plugin.json "icon")
 
   static const _hint = {
     'search': 'Titles, actors, genres, years',
@@ -450,6 +458,7 @@ class _MorePage extends StatelessWidget {
                     child: r * cols + c < list.length
                         ? PekCard(
                             title: titleOf(list[r * cols + c]),
+                            leading: icons[list[r * cols + c]] == null ? null : PluginPicture(url: icons[list[r * cols + c]]!, size: 3.4 * rem),
                             subtitle: _hint[list[r * cols + c]] ?? hints[list[r * cols + c]],
                             titleMaxLines: 2,
                             subtitleMaxLines: 3,

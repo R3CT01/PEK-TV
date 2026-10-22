@@ -145,8 +145,9 @@ class PekButton extends StatelessWidget {
 
 /// `ui.card(title, subtitle)`: `.empty-state.focusable.sx-card`.
 class PekCard extends StatelessWidget {
-  const PekCard({super.key, required this.title, this.subtitle, this.onTap, this.autofocus = false, this.titleMaxLines, this.subtitleMaxLines});
+  const PekCard({super.key, required this.title, this.subtitle, this.onTap, this.autofocus = false, this.titleMaxLines, this.subtitleMaxLines, this.leading});
   final String title;
+  final Widget? leading; // a small picture shown before the title (plugin tiles)
   final String? subtitle;
   final int? titleMaxLines; // null = no limit
   final int? subtitleMaxLines; // null = no limit; longer text ends in an ellipsis
@@ -172,6 +173,8 @@ class PekCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (leading != null)
+              Padding(padding: EdgeInsets.only(bottom: 0.5 * rem), child: leading!),
             Text(title, maxLines: titleMaxLines, overflow: titleMaxLines == null ? null : TextOverflow.ellipsis, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w600, letterSpacing: -0.2)),
             if (subtitle != null && subtitle!.isNotEmpty) ...[
               SizedBox(height: 0.5 * rem),
