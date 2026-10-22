@@ -74,7 +74,7 @@ class PluginBackup {
   static const _maxRaw = 8 * 1024 * 1024;
 
   /// Shipped with PEK TV (kept in step with plugin_install.h and the worker); never backed up.
-  static const builtin = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
+  static const builtin = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover', 'skin-maker'];
   static final _validId = RegExp(r'^[a-z0-9][a-z0-9_-]{0,39}$');
   static bool validId(String id) => _validId.hasMatch(id);
 

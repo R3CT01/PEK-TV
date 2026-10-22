@@ -15,6 +15,8 @@ const MAX_PLUGIN_RAW = 8 * 1024 * 1024;    // bytes of plugin files
 const PLUGIN_CHUNK = 400000;               // chars per chunk (the app and the site use the same size)
 const MAX_PLUGIN_CHUNKS = 40;
 const BUILTIN_PLUGINS = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
+// Bundled with the app, but the OWNER may publish them on the Official shelf (so the app can update them). Nobody else may use these ids.
+const OWNER_ONLY_PLUGINS = ['skin-maker'];
 const BUILTIN_SKINS = ['default', 'green', 'neon'];
 const MAX_SKIN_RAW = 6 * 1024 * 1024;
 
@@ -75,7 +77,11 @@ async function limited(db, key, max, windowMs, now) {
 }
 function clientIp(request) { return request.headers.get('CF-Connecting-IP') || 'unknown'; }
 function goodId(id) { return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,39}$/.test(id); }
-function goodStoreId(id, kind) { return goodId(id) && (kind === 'skin' ? BUILTIN_SKINS : BUILTIN_PLUGINS).indexOf(id) === -1; }
+function goodStoreId(id, kind, official) {
+    if (!goodId(id)) return false;
+    if (kind !== 'skin' && OWNER_ONLY_PLUGINS.indexOf(id) !== -1) return official === true;   // owner route only
+    return (kind === 'skin' ? BUILTIN_SKINS : BUILTIN_PLUGINS).indexOf(id) === -1;
+}
 function goodFp(fp) { return typeof fp === 'string' && /^[a-f0-9]{8,64}$/.test(fp); }
 function shortText(v, max) { return typeof v === 'string' ? v.slice(0, max) : ''; }
 
@@ -251,7 +257,7 @@ async function storeCommit(request, env, who, official) {
     const db = env.DB, now = Date.now();
     const total = Number(body.total), size = Number(body.size);
     const kind = body.kind === 'skin' ? 'skin' : 'plugin';
-    if (!goodStoreId(body.id, kind) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
+    if (!goodStoreId(body.id, kind, official) || !goodFp(body.fp)) return json({ error: 'bad_plugin' }, 400);
     if (!Number.isInteger(total) || total < 1 || total > MAX_PLUGIN_CHUNKS) return json({ error: 'bad_plugin' }, 400);
     if (!Number.isFinite(size) || size < 1 || size > (kind === 'skin' ? MAX_SKIN_RAW : STORE_MAX_SIZE)) return json({ error: 'too_large' }, 413);
     const have = await db.prepare('SELECT COUNT(*) AS n FROM store_chunks WHERE owner = ? AND id = ? AND fp = ?').bind(who.id, body.id, body.fp).first();

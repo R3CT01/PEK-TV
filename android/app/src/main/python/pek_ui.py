@@ -213,7 +213,9 @@ def ctx():
     """What PEK TV tells the screen on every call: {"lang": "en-US", "region": "US", "tv": bool,
     "favorites": ["movie:603", ...], "streamers": [...], "watched": [...]}. A fresh dict each call; changing it does
     nothing. Prefer streamers() / is_watched(), which also check the plugin's permissions."""
-    return dict(_sess().ctx)
+    d = dict(_sess().ctx)
+    d.pop("skins", None)          # only skins() hands these out, and it needs the official "skins" permission
+    return d
 
 
 def background(work, done, fail=None):
@@ -402,6 +404,113 @@ def set_watched_many(items, value=True):
                       "season": int(it.get("season") or 0), "episode": int(it.get("episode") or 0)})
     if clean:
         s.effect("watched.set_many", items=clean, value=bool(value))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Skins (the official Skin maker only: plugin.json "skins": true, refused for any other plugin)
+# ---------------------------------------------------------------------------------------------------------
+
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+_SKIN_ID = re.compile(r"^(custom|pkg)-[a-z0-9_-]{1,60}$")
+_SKIN_TOKENS = ("bg", "bgElevated", "surface", "surfaceFocused", "border", "borderFocus", "text", "textMuted", "accent",
+                "accentGlow", "overlay", "shadow", "glassStrong")
+
+
+def _clean_tokens(tokens):
+    """Only known colour tokens (#rrggbb / #rrggbbaa) and a radius of 0-40, as text. Anything else is dropped."""
+    out = {}
+    if not isinstance(tokens, dict):
+        return out
+    for k in _SKIN_TOKENS:
+        v = tokens.get(k)
+        if isinstance(v, str) and _HEX.match(v.strip()):
+            out[k] = v.strip().lower()
+    r = tokens.get("radius")
+    try:
+        r = float(str(r).replace("px", "").strip())
+        out["radius"] = "%dpx" % max(0, min(40, round(r)))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def skins():
+    """The skins on this device: [{"id", "name", "description", "author", "custom", "current", "tokens"}]. "custom" is true
+    for ones made on this device (they can be edited and deleted). Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    out = []
+    for e in s.ctx.get("skins") or []:
+        if isinstance(e, dict) and e.get("id"):
+            out.append({"id": _s(e.get("id"), 80), "name": _s(e.get("name"), 80), "description": _s(e.get("description"), 300),
+                        "author": _s(e.get("author"), 80), "custom": bool(e.get("custom")), "current": bool(e.get("current")),
+                        "tokens": _clean_tokens(e.get("tokens"))})
+    return out
+
+
+def color_row(label, hint, hex_value, on=None, alpha=False, autofocus=""):
+    """A row with a colour swatch. Tapping it opens PEK's colour window; on(\"#rrggbb\") runs with the chosen colour
+    (\"#rrggbbaa\" when alpha=True). Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    v = _s(hex_value, 12)
+    return {"t": "color", "s": _s(label, 100), "sub": _s(hint, 200), "hex": v if _HEX.match(v) else "#000000",
+            "alpha": bool(alpha), "af": _s(autofocus, 100), "on": s.register(on, 1)}
+
+
+def slider(label, value, minimum, maximum, on=None, unit=""):
+    """A number slider. on(number) runs once when the finger lifts. Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    return {"t": "slider", "s": _s(label, 60), "v": float(value), "min": float(minimum), "max": float(maximum),
+            "unit": _s(unit, 6), "on": s.register(on, 1)}
+
+
+def skin_preview(tokens):
+    """A small copy of the app drawn with these skin tokens. Needs "skins": true."""
+    _sess().need("skins")
+    return {"t": "skinpreview", "tokens": _clean_tokens(tokens)}
+
+
+def skin_save(skin_id, name, description, tokens, use=False, author=""):
+    """Save a skin on this device (Settings > Appearance). skin_id is the id of a skin made here to replace, or \"\" for a
+    new one. PEK TV checks it again (readable text, ids) before it stores anything. Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    sid = _s(skin_id, 80)
+    if sid and not _SKIN_ID.match(sid):
+        raise ValueError("bad skin id")
+    t = _clean_tokens(tokens)
+    if not t:
+        raise ValueError("a skin needs colours")
+    s.effect("skin.save", id=sid, name=_s(name, 60), description=_s(description, 300), author=_s(author, 80),
+             tokens=t, use=bool(use))
+
+
+def skin_use(skin_id):
+    """Switch the app to a skin. Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    s.effect("skin.use", id=_s(skin_id, 80))
+
+
+def skin_delete(skin_id):
+    """Delete a skin made on this device. Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    sid = _s(skin_id, 80)
+    if not sid.startswith("custom-"):
+        raise ValueError("only skins you made can be deleted here")
+    s.effect("skin.delete", id=sid)
+
+
+def copy_skin_json(text):
+    """Put a skin.json on the clipboard. Needs "skins": true."""
+    s = _sess()
+    s.need("skins")
+    t = _s(text, 20000)
+    if t:
+        s.effect("clipboard.copy", text=t, note="skin.json copied.")
 
 
 def toast(message):

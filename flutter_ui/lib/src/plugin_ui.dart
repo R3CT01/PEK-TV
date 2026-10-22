@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -9,6 +10,8 @@ import 'activity.dart';
 import 'common.dart';
 import 'fields.dart';
 import 'plugin_host.dart';
+import 'skin_widgets.dart';
+import 'skins.dart';
 import 'settings_extra.dart' show ToggleRow;
 import 'store.dart';
 import 'torrent.dart';
@@ -346,6 +349,17 @@ class _PluginViewState extends State<PluginView> {
           episode: episode,
         );
         unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId, image: _artwork('${raw['image'] ?? ''}'))));
+      } else if (op == 'clipboard.copy') {
+        // Text the plugin asked to copy (the Skin maker's skin.json). Short text only; the person is told it was copied.
+        final text = '${raw['text'] ?? ''}';
+        if (text.isNotEmpty && text.length <= 20000) {
+          await Clipboard.setData(ClipboardData(text: text));
+          _toast('${raw['note'] ?? 'Copied.'}');
+        }
+      } else if (op.startsWith('skin.')) {
+        // Skins are PEK's official Skin maker's job; Python already checked its permission, and this is a second lock.
+        if (widget.pluginId != 'skin-maker') continue;
+        await _skinEffect(op, raw);
       } else if (op == 'toast') {
         _toast('${raw['text'] ?? ''}');
       } else if (op == 'exit') {
@@ -356,6 +370,34 @@ class _PluginViewState extends State<PluginView> {
           unawaited(Navigator.maybePop(context));
         }
       }
+    }
+  }
+
+  /// skin.save / skin.use / skin.delete from the Skin maker plugin. Only skins made here (id "custom-...") can be changed or
+  /// removed: a built-in or installed skin is never touched, and a colour set that is hard to read is refused again here.
+  Future<void> _skinEffect(String op, Map raw) async {
+    final id = '${raw['id'] ?? ''}';
+    if (op == 'skin.use') {
+      if (Skins.all.any((s) => s.id == id)) await Skins.set(id);
+    } else if (op == 'skin.delete') {
+      if (id.startsWith('custom-') && Skins.customSkins.any((s) => s.id == id)) await Skins.deleteCustom(id);
+    } else if (op == 'skin.save') {
+      final tokens = SkinJson.tokensFrom((raw['tokens'] is Map ? Map<String, dynamic>.from(raw['tokens'] as Map) : const <String, dynamic>{}));
+      if (tokens == null) {
+        _toast('That skin has no colours in it.');
+        return;
+      }
+      if (SkinJson.unreadable(tokens)) {
+        _toast('The text would be hard to read on those colours.');
+        return;
+      }
+      final name = '${raw['name'] ?? ''}'.trim();
+      final saveId = id.startsWith('custom-') ? id : Skins.newId();
+      final skin = Skin(saveId, name.isEmpty ? 'My skin' : (name.length > 60 ? name.substring(0, 60) : name), '${raw['description'] ?? ''}'.trim(), tokens,
+          custom: true, author: '${raw['author'] ?? ''}');
+      await Skins.saveCustom(skin);
+      if (raw['use'] == true) await Skins.set(skin.id);
+      _toast(raw['use'] == true ? '${skin.name} saved and in use.' : '${skin.name} saved. Pick it under Settings > Appearance.');
     }
   }
 
@@ -551,6 +593,38 @@ class _PluginViewState extends State<PluginView> {
       case 'toggle':
         final checked = n['on_'] == true;
         return ToggleRow(title: '${n['s'] ?? ''}', on: checked, onTap: () => _send(on, value: !checked));
+      case 'color':
+        final hex = '${n['hex'] ?? '#000000'}';
+        final col = SkinJson.parseColor(hex) ?? const Color(0xFF000000);
+        final withAlpha = n['alpha'] == true;
+        return ListRow(
+          title: '${n['s'] ?? ''}',
+          subtitle: '${n['sub'] ?? ''}  \u00b7  $hex',
+          autofocus: _af(n),
+          onTap: on.isEmpty
+              ? null
+              : () async {
+                  final c = await pickColor(context, title: '${n['s'] ?? ''}', initial: col, alpha: withAlpha);
+                  if (c != null && mounted) _send(on, value: SkinJson.hex(c, alpha: withAlpha));
+                },
+          trailing: Container(
+            width: 2.4 * rem,
+            height: 2.4 * rem,
+            decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(10), border: Border.all(color: t.text.withAlpha(90), width: 1.5)),
+          ),
+        );
+      case 'slider':
+        return _PluginSlider(
+          label: '${n['s'] ?? ''}',
+          value: ((n['v'] as num?) ?? 0).toDouble(),
+          min: ((n['min'] as num?) ?? 0).toDouble(),
+          max: ((n['max'] as num?) ?? 100).toDouble(),
+          unit: '${n['unit'] ?? ''}',
+          onDone: on.isEmpty ? null : (v) => _send(on, value: v),
+        );
+      case 'skinpreview':
+        final tk = SkinJson.tokensFrom((n['tokens'] is Map ? Map<String, dynamic>.from(n['tokens'] as Map) : const <String, dynamic>{}));
+        return tk == null ? const SizedBox.shrink() : SkinPreview(tokens: tk);
       case 'provider':
         final logo = '${n['logo'] ?? ''}';
         final logoOk = logo.isNotEmpty && PluginHosts.allows(_hosts, logo);
@@ -941,5 +1015,51 @@ class _SearchBarState extends State<_SearchBar> {
           ),
       ]),
     );
+  }
+}
+
+
+/// `ui.slider`: a number slider. It moves smoothly on its own and tells the plugin once, when the finger lifts.
+class _PluginSlider extends StatefulWidget {
+  const _PluginSlider({required this.label, required this.value, required this.min, required this.max, required this.unit, this.onDone});
+  final String label, unit;
+  final double value, min, max;
+  final ValueChanged<double>? onDone;
+
+  @override
+  State<_PluginSlider> createState() => _PluginSliderState();
+}
+
+class _PluginSliderState extends State<_PluginSlider> {
+  late double _v = widget.value;
+
+  @override
+  void didUpdateWidget(covariant _PluginSlider old) {
+    super.didUpdateWidget(old);
+    if (old.value != widget.value) _v = widget.value;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final lo = widget.min, hi = widget.max <= widget.min ? widget.min + 1 : widget.max;
+    return Row(children: [
+      SizedBox(width: 6 * p.rem, child: Text(widget.label, style: TextStyle(color: t.textMuted, fontSize: 0.9 * p.rem))),
+      Expanded(
+        child: Slider(
+          value: _v.clamp(lo, hi).toDouble(),
+          min: lo,
+          max: hi,
+          divisions: (hi - lo).round().clamp(1, 200),
+          activeColor: t.accent,
+          inactiveColor: t.border,
+          label: '${_v.round()}${widget.unit}',
+          onChanged: (v) => setState(() => _v = v.roundToDouble()),
+          onChangeEnd: widget.onDone == null ? null : (v) => widget.onDone!(v.roundToDouble()),
+        ),
+      ),
+      SizedBox(width: 3.5 * p.rem, child: Text('${_v.round()}${widget.unit}', style: TextStyle(color: t.textMuted))),
+    ]);
   }
 }

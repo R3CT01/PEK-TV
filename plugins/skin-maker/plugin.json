@@ -1,0 +1,12 @@
+{
+  "name": "Skin Maker",
+  "version": "1.0.0",
+  "author": "PEK",
+  "description": "Make your own look for PEK TV: pick an accent, background, cards and text, set the corner size, preview it live and save it. Start from any skin, from one accent colour, or from a pasted skin.json.",
+  "icon": "icon.png",
+  "permissions": {
+    "skins": true
+  },
+  "ui": {},
+  "flutter": { "screen": "screen.py" }
+}

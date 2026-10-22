@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pek_tv_ui/src/plugin_store.dart' show PluginFile, StoreException;
-import 'package:pek_tv_ui/src/skin_builder.dart';
 import 'package:pek_tv_ui/src/skin_install.dart';
+
+import 'skin_zip_writer.dart';
 
 PluginFile f(String path, String text) => PluginFile(path, Uint8List.fromList(utf8.encode(text)));
 Uint8List zipOf(List<PluginFile> files, {String folder = 'x'}) => SkinZipWriter.write(folder, files);
@@ -19,55 +20,6 @@ void expectRefused(Uint8List zip, Pattern message) {
 
 void main() {
   const ok = '{"name":"X","tokens":{"bg":"#101010","text":"#f0f0f0","accent":"#ff8800"}}';
-
-  group('SkinBuilder', () {
-    test('four colours -> skin -> zip -> prepare gives the same skin back', () {
-      final b = SkinBuilder('Sunset').colors(bg: '#1a0f14', surface: '#2a1820', text: '#fff1e8', accent: '#ffb347').corners(14).by('Me');
-      final prep = SkinInstaller.prepare(b.zip(), fileName: 'sunset.zip');
-      expect(prep.id, 'sunset');
-      expect(prep.skinId, 'pkg-sunset');
-      expect(prep.name, 'Sunset');
-      expect(prep.author, 'Me');
-      expect(prep.tokens.accent, const Color(0xFFFFB347));
-      expect(prep.tokens.radius, 14);
-      expect(prep.hasCss, false);
-    });
-
-    test('one accent is enough, light or dark', () {
-      final dark = SkinBuilder.fromAccent('Ocean', const Color(0xFF38BDF8)).build();
-      final light = SkinBuilder.fromAccent('Paper', const Color(0xFF38BDF8), dark: false).build();
-      expect(dark.tokens.bg.computeLuminance(), lessThan(0.5));
-      expect(light.tokens.bg.computeLuminance(), greaterThan(0.5));
-    });
-
-    test('a hue alone makes a skin', () {
-      expect(() => SkinBuilder.fromHue('Moss', 140).build(), returnsNormally);
-    });
-
-    test('unreadable text is refused unless forced', () {
-      SkinBuilder bad() => SkinBuilder('Bad').colors(bg: '#222222', surface: '#222222', text: '#2a2a2a', accent: '#ffffff');
-      expect(() => bad().build(), throwsA(isA<SkinBuildException>()));
-      expect(() => bad().force().build(), returnsNormally);
-    });
-
-    test('a built-in id is refused', () {
-      expect(() => SkinBuilder('Neon').colors(accent: '#00ffff').build(), throwsA(isA<SkinBuildException>()));
-    });
-
-    test('css and extra files go in the zip and are checked', () {
-      final b = SkinBuilder.fromAccent('Styled', const Color(0xFFFF0066)).css('.card{border-radius:8px}');
-      final prep = SkinInstaller.prepare(b.zip(), fileName: 's.zip');
-      expect(prep.hasCss, true);
-      expect(() => SkinBuilder.fromAccent('Evil', const Color(0xFFFF0066)).css('@import "a.css";').zip(), throwsA(isA<SkinBuildException>()));
-    });
-
-    test('skin.json keeps hand-set tokens (bgImage, glass) and the glow', () {
-      final j = jsonDecode(SkinBuilder.fromAccent('Glow', const Color(0xFFFF0066)).glow().token('glass', 'rgba(1, 2, 3, 0.4)').skinJson()) as Map;
-      final tokens = j['tokens'] as Map;
-      expect(tokens['glass'], 'rgba(1, 2, 3, 0.4)');
-      expect(tokens['bgImage'], startsWith('radial-gradient('));
-    });
-  });
 
   group('SkinInstaller.prepare', () {
     test('skin.json at the top of the zip or inside one folder', () {

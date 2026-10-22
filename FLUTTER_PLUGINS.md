@@ -173,6 +173,19 @@ Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.
 - Still web-UI only: the system file picker, finding network devices from inside the zip picker (add the device as a media
   source in Settings, then it shows up under the picker's start list), and installing a *skin* from a zip or GitHub.
 
+## Skin Maker (bundled, official)
+`plugins/skin-maker` replaces the Skin maker that used to be hard-coded in the app (`skin_maker.dart`, `skin_builder.dart`). It has a
+`screen.py` and an icon like any plugin, and it is built in: no Remove button, and it updates from the PEK Store Official shelf.
+What it needed from the host, all in `pek_ui`:
+- Permission **`skins`**, reserved: `pek_flutter.OFFICIAL_SKIN_PLUGINS = {"skin-maker"}`; any other plugin that asks for it is refused when it opens.
+- `ui.skins()` (the skins on the device, as hex tokens), `ui.skin_save / skin_use / skin_delete`, `ui.copy_skin_json`.
+- Widgets: `ui.color_row` (a swatch that opens PEK's colour window), `ui.slider`, `ui.skin_preview` (drawn by `skin_widgets.dart`).
+- Effects `skin.save`, `skin.use`, `skin.delete`, `clipboard.copy`. `plugin_ui.dart` only runs `skin.*` for `skin-maker`, only touches skins made on
+  the device (`custom-...`), and refuses unreadable colours again. Built-in and installed skins are never changed by a plugin.
+- Settings > Appearance opens it with `launch` `{"type": "skin", "id": <skin id>, "mode": "edit" | "from" | "paste"}`.
+- The store: `skin-maker` is in `PluginInstaller.stockIds`, `isReservedId` / `isStockId` (backend), `PluginBackup.builtin` and `MainActivity.stockPlugins`.
+  In `cloud/store-worker.js` the id is **owner-only** (`OWNER_ONLY_PLUGINS`): only the owner route may publish it, nobody else can take the id.
+
 ## Files
 - `android/app/src/main/python/pek_ui.py` - what a screen imports (builders + host calls)
 - `android/app/src/main/python/pek_flutter.py` - sessions, guarded calls, background jobs, effects

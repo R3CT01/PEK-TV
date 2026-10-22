@@ -624,7 +624,7 @@ class PluginInfo {
   const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false, this.builtin = false, this.icon = ''});
   final String folder, name, description, version;
 
-  /// Ships with PEK TV (weather, tmdb-discover): it cannot be removed, only updated from the PEK Store.
+  /// Ships with PEK TV (weather, tmdb-discover, skin-maker): it cannot be removed, only updated from the PEK Store.
   final bool builtin;
 
   /// Address of the plugin's picture (plugin.json "icon"), '' = none.

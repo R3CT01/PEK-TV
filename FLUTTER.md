@@ -140,5 +140,5 @@ more, but the server still serves it; it can be deleted in a later step.
   It reuses the plugin zip reader (`PluginZip.read`), the zip picker and the GitHub flow (`plugin_install_ui.dart`, now with a `skin:` switch;
   `PekGithub.downloadBytes` is the shared download). Colours and corner size are stored on the device like made skins (id `pkg-<slug>`);
   `skin.css` is checked but not drawn. GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
-- **`SkinBuilder`** (`skin_builder.dart`) makes skins from code and writes installable .zips; `tools/make_skin.py` does the same from the command line. See SKINS.md.
+- The Skin maker is the bundled `skin-maker` plugin (`plugins/skin-maker`); `tools/make_skin.py` makes skins and installable .zips from the command line. The app keeps only what the plugin needs drawn (`skin_widgets.dart`: colour window, preview). See SKINS.md.
 - Tests: `flutter test test/skin_install_test.dart`.

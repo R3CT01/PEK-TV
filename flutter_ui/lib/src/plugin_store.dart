@@ -165,7 +165,7 @@ class PreparedPlugin {
   final String id, name, version, author, description, navTab;
   final PluginWarning? warning;
   final List<String> network;
-  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, live, watched, device
+  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, live, watched, device, skins
   final bool stream, hasBackend, hasFlutterScreen, hasWebScreen;
   final List<PluginFile> files;
 
@@ -187,7 +187,7 @@ class PreparedPlugin {
     }
   }
 
-  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'live', 'watched', 'device'];
+  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'live', 'watched', 'device', 'skins'];
   static final _host = RegExp(r'^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$');
   static final _ip = RegExp(r'^[\d.]+$');
 
@@ -273,6 +273,7 @@ class PreparedPlugin {
       if (perms.contains('torrent')) 'Can search for releases and start torrent streams through PEK TV (it never sees your provider key). Streams download and upload from your connection.',
       if (perms.contains('favorites')) 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).',
       if (perms.contains('watched')) 'Can see which movies and episodes you have marked as watched and mark them watched or unwatched (it sees nothing else from your history).',
+      if (perms.contains('skins')) 'Can add, change and delete the skins you made, and switch the skin in use. Only PEK\u2019s official Skin maker may ask for this.',
       if (perms.contains('device')) 'Can see what this device can play (which video codecs its hardware decodes, screen size, HDR support) so it can pick releases that run smoothly. No identifiers.',
       if (perms.contains('providers')) 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.',
       if (perms.contains('plugins')) 'Can list your plugins that play titles and open one of them when you tap a button.',
@@ -300,7 +301,7 @@ class PluginInstaller {
   static const _sourcesKey = 'pek_plugin_sources';
 
   /// The plugins that ship with PEK TV: they cannot be removed and they update from the PEK Store's Official shelf.
-  static const stockIds = {'weather', 'tmdb-discover'};
+  static const stockIds = {'weather', 'tmdb-discover', 'skin-maker'};
 
   /// POST /api/plugins/install (a dry run first, to learn whether it is allowed and whether it replaces one).
   static Future<InstallResult> send(PreparedPlugin p, {required bool dry}) {

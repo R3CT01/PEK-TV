@@ -225,6 +225,24 @@ class SkinJson {
     );
   }
 
+  /// The colours as #rrggbb / #rrggbbaa (CSS order) and the radius as "14px": what the Skin maker plugin reads and writes.
+  static Map<String, String> tokensToHex(PekTokens t) => {
+        'bg': hex(t.bg),
+        'bgElevated': hex(t.bgElevated),
+        'surface': hex(t.surface),
+        'surfaceFocused': hex(t.surfaceFocused),
+        'border': hex(t.border),
+        'borderFocus': hex(t.borderFocus),
+        'text': hex(t.text),
+        'textMuted': hex(t.textMuted),
+        'accent': hex(t.accent),
+        'accentGlow': hex(t.accentGlow),
+        'overlay': hex(t.overlay),
+        'shadow': hex(t.shadow),
+        'glassStrong': hex(t.glassStrong),
+        'radius': '${t.radius.round()}px',
+      };
+
   static Map<String, String> tokensTo(PekTokens t) {
     final dark = t.bg.computeLuminance() < 0.5;
     String rgba(Color c) => 'rgba(${c.red}, ${c.green}, ${c.blue}, ${(c.alpha / 255).toStringAsFixed(2)})';

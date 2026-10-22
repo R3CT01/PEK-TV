@@ -74,20 +74,28 @@ more than the app does.
 
 ## Making a skin in the Flutter app
 
-Settings → Appearance → **Make a skin** opens the Skin maker. Pick a starting look, change the accent, background, cards
-and text (the rest of the colours follow them; **More colours** sets each one by hand), set the corner size, name it and
-save. A made skin appears in the Appearance list next to the built-in ones, and every profile can choose it.
+The Skin maker is **PEK's official, bundled plugin `skin-maker`** (`plugins/skin-maker`, with its own icon). It is no longer
+built into the app. Settings → Appearance → **Make a skin** (or Plugins → Skin Maker → Open) opens it. Pick a starting look,
+change the accent, background, cards and text (the rest of the colours follow them; **More colours** sets each one by hand), set
+the corner size, name it and save. A made skin appears in the Appearance list next to the built-in ones, and every profile can choose it.
 
-- **Hold** any skin in the list to use it, edit it, start a new one from it, copy it as a `skin.json`, or delete it.
+- **From one accent colour** makes a whole skin from one colour (dark or light) or one hue.
+- **Hold** any skin in the Appearance list to use it, edit it, start a new one from it, copy it as a `skin.json`, or delete it.
+  Edit / "Make my own from this" open the plugin on that skin.
 - **Copy skin.json** gives the same file the web build installs from a .zip (put it in a folder next to an optional
   `skin.css` and zip it).
 - **Paste skin.json** opens a skin made in the web build in the maker, ready to save. Only the name, description and
   colours are used; a skin's own `skin.css` styling only works in the web build.
-- Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused.
+- Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused
+  (in the plugin, and again by the app before it stores anything).
+
+It cannot be removed, and it updates from the PEK Store's Official shelf like Weather and TMDb Discover. The plugin only describes
+the screen; it asks the app to save, use or delete a skin through the `skins` permission, which only this official plugin may use.
+See FLUTTER_PLUGINS.md ("Skin Maker").
 
 ## Making skins from code
 
-Three ways, all giving the same `skin.json` / .zip, so a skin made by any of them installs in the web build and in the Flutter app.
+Two ways, all giving the same `skin.json` / .zip, so a skin made by any of them installs in the web build and in the Flutter app.
 
 **1. From the command line: `tools/make_skin.py`** (Python 3, no packages). It works out the colours you leave out, refuses
 text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` (+ `skin.css`) into a .zip.
@@ -109,23 +117,7 @@ tools/make_skin.py validate dist/sunset.zip
 `--file image.png` add styling and images, `--force` allows low-contrast text. A batch file is a list of
 `{"name", "accent", "bg", "surface", "text", "radius", "mode", "hue", "glow", "tokens": {...}, "css"}`.
 
-**2. From Dart: `SkinBuilder`** (`flutter_ui/lib/src/skin_builder.dart`).
-
-```dart
-final sunset = SkinBuilder('Sunset')
-    .colors(bg: '#1a0f14', surface: '#2a1820', text: '#fff1e8', accent: '#ffb347')
-    .corners(14)
-    .by('Me');
-await sunset.save();             // shows up in Settings > Appearance
-final zip = sunset.zip();        // an installable .zip
-final json = sunset.skinJson();  // the skin.json text
-
-final ocean = SkinBuilder.fromAccent('Ocean', const Color(0xFF38BDF8));   // one accent
-final moss = SkinBuilder.fromHue('Moss', 140, dark: false);              // one hue
-await SkinBuilder.installAll([ocean, moss]);
-```
-
-**3. By hand**: write `skin.json` as above.
+**2. By hand**: write `skin.json` as above.
 
 ## Installing skins in the Flutter app
 

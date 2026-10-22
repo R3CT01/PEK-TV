@@ -67,13 +67,13 @@ constexpr size_t kMaxDepth       = 6;
 // Plugins that ship with PEK. They can't be replaced or removed here (on Android
 // the app also re-copies them from its assets on every launch).
 inline bool isReservedId(const std::string& id) {
-    return id == "weather" || id == "sample_scraper" || id == "sample_counter" || id == "tmdb-discover";
+    return id == "weather" || id == "sample_scraper" || id == "sample_counter" || id == "tmdb-discover" || id == "skin-maker";
 }
 
 // The built-in plugins the PEK Store may update (an "official" install, see install() below). The two sample plugins are
 // retired and are never updated.
 inline bool isStockId(const std::string& id) {
-    return id == "weather" || id == "tmdb-discover";
+    return id == "weather" || id == "tmdb-discover" || id == "skin-maker";
 }
 
 // PEK's built-in TMDb access (a proxy that holds PEK's key) is for official plugins only.

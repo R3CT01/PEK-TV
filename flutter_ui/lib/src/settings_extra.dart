@@ -8,7 +8,7 @@ import 'common.dart';
 import 'mpv.dart';
 import 'plugin_github.dart' show PekGithub;
 import 'plugin_install_ui.dart' show openGithubInstall, openZipInstall;
-import 'skin_maker.dart';
+import 'plugin_ui.dart' show openPluginScreen;
 import 'skins.dart';
 import 'store.dart';
 import 'subtitles.dart';
@@ -366,6 +366,9 @@ class _MusicOnlineSectionState extends State<MusicOnlineSection> {
 // ====================================================================== Settings > Appearance (skins)
 
 class AppearanceSection extends StatelessWidget {
+  /// The bundled plugin that makes skins.
+  static const skinMakerId = 'skin-maker';
+
   const AppearanceSection({super.key});
 
   Future<void> _dialog(BuildContext context, String title, List<Widget> Function(BuildContext) body) {
@@ -400,12 +403,12 @@ class AppearanceSection extends StatelessWidget {
           if (s.custom && !s.installed) // an installed skin is replaced when it is installed again, so changes go in a copy
             PekButton(label: 'Edit', onTap: () {
               Navigator.pop(c);
-              openSkinMaker(context, edit: s);
+              AppearanceSection.openSkinMaker(context, edit: s);
             })
           else
             PekButton(label: 'Make my own from this', onTap: () {
               Navigator.pop(c);
-              openSkinMaker(context, from: s);
+              AppearanceSection.openSkinMaker(context, from: s);
             }),
           gap,
           PekButton(label: 'Copy skin.json', onTap: () async {
@@ -440,56 +443,26 @@ class AppearanceSection extends StatelessWidget {
         ]);
   }
 
-  /// A skin.json pasted as text (one made in the web build, or copied from here) opens in the maker, ready to save.
-  Future<void> _import(BuildContext context) {
-    final p = context.pek;
-    final ctl = TextEditingController();
-    String? error;
-    return showDialog<void>(
-      context: context,
-      barrierColor: p.tokens.overlay,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setState) => Dialog(
-          backgroundColor: p.tokens.glassStrong,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(p.tokens.radius), side: BorderSide(color: p.tokens.border)),
-          child: SingleChildScrollView(
-            padding: EdgeInsets.all(1.5 * p.rem),
-            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Paste a skin.json', style: TextStyle(fontSize: 1.25 * p.rem, fontWeight: FontWeight.w700)),
-              SizedBox(height: 0.6 * p.rem),
-              Text('Only the name, description and colours are used. A skin\u2019s own styling (skin.css) only works in the web build.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.9 * p.rem)),
-              SizedBox(height: 0.9 * p.rem),
-              TextField(
-                controller: ctl,
-                maxLines: 6,
-                minLines: 4,
-                autocorrect: false,
-                enableSuggestions: false,
-                style: TextStyle(color: p.tokens.text, fontSize: 0.85 * p.rem),
-                decoration: InputDecoration(hintText: '{ "name": "My skin", "tokens": { ... } }', hintStyle: TextStyle(color: p.tokens.textMuted.withAlpha(180))),
-              ),
-              if (error != null) Padding(padding: EdgeInsets.only(top: 0.5 * p.rem), child: Text(error!, style: const TextStyle(color: Color(0xFFFF6B6B)))),
-              SizedBox(height: 1.1 * p.rem),
-              Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
-                PekButton(label: 'Import', primary: true, shrink: true, onTap: () {
-                  final skin = SkinJson.fromText(ctl.text);
-                  if (skin == null) {
-                    setState(() => error = 'That is not a skin.json with colours in it.');
-                    return;
-                  }
-                  Navigator.pop(c);
-                  openSkinMaker(context, from: skin);
-                }),
-                PekButton(label: 'Paste from clipboard', shrink: true, onTap: () async {
-                  final d = await Clipboard.getData(Clipboard.kTextPlain);
-                  if (d?.text != null) setState(() => ctl.text = d!.text!);
-                }),
-                PekButton(label: 'Cancel', shrink: true, autofocus: true, onTap: () => Navigator.pop(c)),
-              ]),
-            ]),
-          ),
-        ),
-      ),
+  /// The Skin maker is the bundled "skin-maker" plugin (plugins/skin-maker): a Python screen the app draws. [edit] changes a
+  /// skin made earlier, [from] starts a new one from a skin, [paste] opens its "paste a skin.json" box.
+  static Future<void> openSkinMaker(BuildContext context, {Skin? edit, Skin? from, bool paste = false}) async {
+    final plugins = await Api.plugins().catchError((_) => <PluginInfo>[]);
+    if (!context.mounted) return;
+    final ok = plugins.any((p) => p.folder == AppearanceSection.skinMakerId && p.flutterScreen);
+    if (!ok) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('The Skin maker plugin is not installed. Get it from Plugins > the plugin store.')));
+      return;
+    }
+    final target = edit ?? from;
+    await openPluginScreen(
+      context,
+      pluginId: AppearanceSection.skinMakerId,
+      title: 'Skin maker',
+      launch: paste
+          ? {'type': 'skin', 'id': 'paste', 'mode': 'paste'}
+          : target == null
+              ? null
+              : {'type': 'skin', 'id': target.id, 'mode': edit != null ? 'edit' : 'from', 'title': target.name},
     );
   }
 
@@ -529,8 +502,8 @@ class AppearanceSection extends StatelessWidget {
             ),
           SizedBox(height: 0.75 * p.rem),
           Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
-            PekButton(label: 'Make a skin', primary: true, shrink: true, onTap: () => openSkinMaker(context)),
-            PekButton(label: 'Paste skin.json', shrink: true, onTap: () => _import(context)),
+            PekButton(label: 'Make a skin', primary: true, shrink: true, onTap: () => AppearanceSection.openSkinMaker(context)),
+            PekButton(label: 'Paste skin.json', shrink: true, onTap: () => AppearanceSection.openSkinMaker(context, paste: true)),
             PekButton(label: 'Install skin from .zip', shrink: true, onTap: () => openZipInstall(context, skin: true)),
             PekButton(label: 'Install skin from GitHub', shrink: true, onTap: () => _github(context)),
           ]),

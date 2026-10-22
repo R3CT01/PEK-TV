@@ -158,7 +158,7 @@ class MainActivity : Activity() {
 
     // The built-in plugins are copied from the app on every launch. One the PEK Store updated to a NEWER version is left alone,
     // otherwise the older copy inside the app would undo the update each time the app starts.
-    private val stockPlugins = setOf("weather", "tmdb-discover")
+    private val stockPlugins = setOf("weather", "tmdb-discover", "skin-maker")
 
     private fun versionParts(v: String): List<Int> = v.trim().trimStart('v', 'V').split('.', '-', '+').map { it.takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0 }
 
