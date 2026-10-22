@@ -195,25 +195,28 @@ jobs:
             fi
           fi
 
-      - name: Collect + verify apk
+      # Two APKs come out of the build: one 64-bit (arm64-v8a) and one 32-bit (armeabi-v7a).
+      - name: Collect + verify apks
         run: |
           mkdir -p dist
-          SRC=$(ls android/app/build/outputs/apk/$BUILD_TYPE/*.apk | head -1)
-          OUT="dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}.apk"
-          cp "$SRC" "$OUT"
-          echo "APK_PATH=$OUT" >> "$GITHUB_ENV"
-          if [ "$WANT_TORRENT" = true ]; then
-            # The stub in torrent.cpp contains this text; a real libtorrent build does not.
-            TMP=$(mktemp -d); unzip -q -o "$OUT" 'lib/*/libpek.so' -d "$TMP"
-            for so in "$TMP"/lib/*/libpek.so; do
-              if strings "$so" | grep -q "Torrent support is not built into this PEK TV"; then
-                echo "::error::$so was built WITHOUT libtorrent (stub). Not publishing."; exit 1
-              fi
-            done
-            echo "Torrent engine verified in apk"
-          fi
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs "$OUT" | head -5
+          for ABI in arm64-v8a armeabi-v7a; do
+            SRC=$(ls android/app/build/outputs/apk/$BUILD_TYPE/*-$ABI-*.apk 2>/dev/null | head -1)
+            [ -n "$SRC" ] || { echo "::error::No $ABI apk was built"; exit 1; }
+            OUT="dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}-${ABI}.apk"
+            cp "$SRC" "$OUT"
+            if [ "$WANT_TORRENT" = true ]; then
+              # The stub in torrent.cpp contains this text; a real libtorrent build does not.
+              TMP=$(mktemp -d); unzip -q -o "$OUT" 'lib/*/libpek.so' -d "$TMP"
+              for so in "$TMP"/lib/*/libpek.so; do
+                if strings "$so" | grep -q "Torrent support is not built into this PEK TV"; then
+                  echo "::error::$so ($ABI) was built WITHOUT libtorrent (stub). Not publishing."; exit 1
+                fi
+              done
+              echo "Torrent engine verified in $ABI apk"
+            fi
+            "$APKSIGNER" verify --print-certs "$OUT" | head -5
+          done
           ls -lh dist
 
       - uses: actions/upload-artifact@v4
@@ -232,3 +235,4 @@ jobs:
           prerelease: true
           generate_release_notes: true
           files: dist/*.apk
+
