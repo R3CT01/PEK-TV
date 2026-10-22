@@ -38,11 +38,11 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // The launch theme paints the PEK splash colour for the first instant; behind the app itself the window is black.
-        window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
+        window.setBackgroundDrawable(ColorDrawable(getColor(R.color.pek_splash_bg)))
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.BLACK)
+            setBackgroundColor(getColor(R.color.pek_splash_bg))
             setPadding(48, 48, 48, 48)
         }
         status = TextView(this).apply {
@@ -71,16 +71,19 @@ class MainActivity : Activity() {
             File(root, "plugins/sample_counter").deleteRecursively()   // retired built-in; older installs still have a copy
             var ready = false
             try {
-                copyAssetDir("hesper", root)
+                if (assetsNeedCopy(root)) {
+                    copyAssetDir("hesper", root)
+                    markAssetsCopied(root)
+                }
                 NativeBridge.startServer(root.absolutePath)
                 startPythonPlugins(File(root, "plugins"))
-                for (i in 0 until 50) {
+                for (i in 0 until 125) {
                     try {
                         Socket().use { it.connect(InetSocketAddress("127.0.0.1", 8080), 200) }
                         ready = true
                         break
                     } catch (e: Exception) {
-                        Thread.sleep(100)
+                        Thread.sleep(40)
                     }
                 }
             } catch (e: Throwable) {
@@ -180,6 +183,25 @@ class MainActivity : Activity() {
             val bundled = assets.open("$assetPath/plugin.json").use { it.readBytes().toString(Charsets.UTF_8) }
             newerThan(manifestVersion(installed.readText()), manifestVersion(bundled))
         } catch (e: Exception) { false }
+    }
+
+    // The built-in files (www, plugins, skins, cacert.pem) only change when the app itself is installed or updated, so they are
+    // copied once per install instead of on every launch (that copy was most of the black start-up screen). A marker file next to
+    // them remembers which install they came from. Any plugin the PEK Store installed lives in the same folder and is untouched.
+    private fun installStamp(): String = try {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        "${pi.lastUpdateTime}"
+    } catch (e: Exception) { "" }
+
+    private fun assetsNeedCopy(root: File): Boolean {
+        val stamp = installStamp()
+        if (stamp.isEmpty()) return true
+        val marker = File(root, ".assets_stamp")
+        return !(marker.isFile && File(root, "plugins").isDirectory && marker.readText().trim() == stamp)
+    }
+
+    private fun markAssetsCopied(root: File) {
+        try { File(root, ".assets_stamp").writeText(installStamp()) } catch (e: Exception) { /* copied again next time */ }
     }
 
     private fun copyAssetDir(assetPath: String, dest: File) {
