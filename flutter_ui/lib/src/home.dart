@@ -25,7 +25,6 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('PEK TV'),
         children: [
           SimpleDialogOption(onPressed: () => Navigator.pop(c, 'refresh'), child: const Text('Refresh library')),
-          SimpleDialogOption(onPressed: () => Navigator.pop(c, 'classic'), child: const Text('Switch to classic UI')),
           SimpleDialogOption(onPressed: () => Navigator.pop(c, 'exit'), child: const Text('Exit')),
         ],
       ),
@@ -37,9 +36,6 @@ class _HomeScreenState extends State<HomeScreen> {
           _movies = Api.movies();
           _shows = Api.shows();
         });
-        break;
-      case 'classic':
-        await PekPlayer.classicUi();
         break;
       case 'exit':
         await PekPlayer.exitApp();
@@ -101,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (snap.connectionState != ConnectionState.done) return const Center(child: CircularProgressIndicator());
         if (snap.hasError) return Center(child: Text('Could not load movies: ${snap.error}'));
         final items = snap.data ?? const [];
-        if (items.isEmpty) return const Center(child: Text('No movies yet. Add a source in the classic UI, then refresh.'));
+        if (items.isEmpty) return const Center(child: Text('No movies yet. Add a source folder in Settings, then refresh.'));
         return _grid(
           count: items.length,
           builder: (i) {

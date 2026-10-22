@@ -358,7 +358,7 @@ class PluginInstaller {
   /// The raw remembered source (a String or a Map), or null.
   static Object? sourceOf(String id) => Store.jsonMap(_sourcesKey, scoped: false)[id];
 
-  /// null when nothing is known (built in, or installed in the classic UI).
+  /// null when nothing is known (built in).
   static String? sourceLabel(String id) {
     final s = sourceOf(id);
     if (s == 'official') return 'PEK Store official';

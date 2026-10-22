@@ -126,3 +126,10 @@ Large 6 %). Both belong to the device, not to a profile, like the web UI. The 10
 - Video shows through the transparent Flutter surface. Flutter's Impeller renderer is switched off in `AndroidManifest.xml`
   (`io.flutter.embedding.android.EnableImpeller`) because its Vulkan path can paint an opaque black frame over the video.
   The `PEK playback: vo=...` line in logcat (MpvController) says whether mpv itself is producing video.
+
+## Flutter is the only UI (classic UI fallback removed)
+`MainActivity` is now only the start-up activity: it copies the app's files and built-in plugins, starts the C++ server and the Python
+plugins, waits for the server, opens `FlutterHostActivity` and finishes. No web view, no `PekBridge`, no `pek_classic` / `web_ui`
+switch, no "Open classic UI" buttons. If the server does not start, or the Flutter screen cannot open, a plain message with a
+**Try again** button is shown. `SplashOverlay.kt` (it drew over the web view) is gone. The `www/` folder is not used by the app any
+more, but the server still serves it; it can be deleted in a later step.

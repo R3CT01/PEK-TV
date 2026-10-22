@@ -160,7 +160,7 @@ class PluginZip {
     if (hasAt('skin.json')) {
       throw StoreException(hasAt('plugin.json')
           ? 'This zip has both plugin.json and skin.json, so PEK TV can\u2019t tell whether it is a plugin or a skin.'
-          : 'This is a skin, not a plugin. Install skins from the classic UI (Settings \u2192 Skins).');
+          : 'This is a skin, not a plugin. PEK TV does not install skins.');
     }
     var prefix = '', folder = '';
     if (!has('plugin.json')) {

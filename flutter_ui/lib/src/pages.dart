@@ -187,7 +187,7 @@ class UnknownPage extends StatelessWidget {
 // ====================================================================== Plugins
 
 /// Lists the installed plugins, opens the ones that have a Python screen for this UI (plugin.json "flutter") and
-/// removes them. A plugin that only has a ui.js (JavaScript for the web UI's sandbox) opens through the classic UI.
+/// removes them.
 class PluginsPage extends StatefulWidget {
   const PluginsPage({super.key, required this.padding});
   final EdgeInsets padding;
@@ -287,8 +287,6 @@ class _PluginsPageState extends State<PluginsPage> {
                   if (!(pl.builtin || PluginInstaller.stockIds.contains(pl.folder))) PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
                 ]),
               ),
-            SizedBox(height: rem),
-            PekButton(label: 'Open plugins in the classic UI', onTap: PekPlayer.classicUi),
           ]);
         },
       ),
@@ -381,7 +379,6 @@ class _SettingsPageState extends State<SettingsPage> {
         const VideoOutputSection(),
         const AudioOutputSection(),
         const StorageSection(),
-        Section(title: 'Classic UI', hint: 'Skins and layouts still live in the classic UI.', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Open classic UI', onTap: PekPlayer.classicUi))]),
       ]),
       SettingsGroup(title: 'App', children: [
         Section(title: 'Exit', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),

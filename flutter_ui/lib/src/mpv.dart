@@ -115,7 +115,6 @@ class PekPlayer {
     } catch (_) {}
   }
 
-  static Future<void> classicUi() => _host.invokeMethod('classicUi');
   static Future<void> exitApp() => _host.invokeMethod('exit');
 }
 

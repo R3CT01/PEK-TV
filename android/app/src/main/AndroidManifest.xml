@@ -79,8 +79,7 @@
              Remove this line to try Impeller again once video is confirmed to show through. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
 
-        <!-- Launcher entry. The PEK splash video plays inside this activity, on top of the app while it loads
-             (see SplashOverlay.kt); controls are locked until the video is done. -->
+        <!-- Launcher entry. It only gets the app ready (files, server, Python plugins) and opens the Flutter UI. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -93,8 +92,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Flutter UI host. Its Kotlin class is only compiled in when flutter_ui/ has been generated; without it
-             this entry is harmless and MainActivity falls back to the web UI. -->
+        <!-- The app's one UI: Flutter (flutter_ui/). MainActivity opens it once the server is up. -->
         <activity
             android:name=".flutter.FlutterHostActivity"
             android:exported="false"
