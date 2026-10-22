@@ -71,7 +71,7 @@ there are no lock-screen controls yet (those need native channel methods).
 - **Layouts** (`layouts.dart`): Classic, Top bar, Wall, Compact (menu position and poster size, TV/tablet) plus a poster-size setting that phones also get. Per profile.
 - **Torrent search** (`torrent_search.dart`): search the https sites you list (address with `{q}`), fetched through the existing `/api/torrent/fetch` route, plus an optional Torznab provider; results are filtered and ranked like the web engine.
 - **Torrents** (`torrent.dart`): More > Torrents plays a magnet / .torrent link with a loading screen (peers, speed, progress), a loading card inside the player while it buffers or scrubs, and Resume Watching that restarts the same release (also from other devices).
-- **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance).
+- **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance). Skins made or installed are kept per profile and saved to the cloud account with the rest of the profile's data (`k|<id>` items plus the `s|skin` setting, see SKINS.md), so a sign-in puts them back.
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
 - **Dashboard** (`dashboard.dart`, `store.dart`): the same grid as the web UI. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Customize (or press and hold a tile) to move, resize, remove, add widgets or reset. Saved per profile in the web UI's `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
@@ -139,6 +139,6 @@ more, but the server still serves it; it can be deleted in a later step.
 - **Install skin from .zip / GitHub** (`skin_install.dart`, `skin_install_ui.dart`, Settings > Appearance): ports of `www/skin_installer.js` and `backend/skin_install.h`.
   It reuses the plugin zip reader (`PluginZip.read`), the zip picker and the GitHub flow (`plugin_install_ui.dart`, now with a `skin:` switch;
   `PekGithub.downloadBytes` is the shared download). Colours and corner size are stored on the device like made skins (id `pkg-<slug>`);
-  `skin.css` is checked but not drawn. GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
+  a skin with a `skin.css` is refused (no CSS in skins, here and in `SkinBuilder` / `tools/make_skin.py`). GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
 - The Skin maker is the bundled `skin-maker` plugin (`plugins/skin-maker`); `tools/make_skin.py` makes skins and installable .zips from the command line. The app keeps only what the plugin needs drawn (`skin_widgets.dart`: colour window, preview). See SKINS.md.
-- Tests: `flutter test test/skin_install_test.dart`.
+- Tests: `flutter test test/skin_install_test.dart test/skin_sync_test.dart`.

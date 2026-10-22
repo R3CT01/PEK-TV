@@ -2,15 +2,13 @@
 // PEK skin installer (header-only, reuses the plugin installer's helpers).
 //
 // A skin is a .zip with skin.json (name, author, description, version, tokens) and,
-// optionally, skin.css plus images and fonts. The web UI unpacks the zip itself and
+// optionally, images and fonts. A skin.css (any .css file) is refused. The web UI unpacks the zip itself and
 // sends the files to POST /api/skins/install. Everything that decides what ends up on
 // disk is checked HERE, so a hand-made request gets no more than the UI does:
 //   - the skin id is a short, safe folder name, and not a bundled skin
 //   - every file path is relative, plain and stays inside the skin folder
-//   - only data files are accepted: JSON, CSS, images, fonts, text. Never code
-//     (.js, .py, .html, .svg ...), so a skin can restyle PEK but never run anything
-//   - skin.css may not @import anything or load anything from the network, and may not
-//     use backslash escapes (they could hide those rules)
+//   - only data files are accepted: JSON, images, fonts, text. Never code
+//     (.js, .py, .html, .svg ...) and never CSS: a skin is colours and a corner size
 //   - a plugin is not a skin: plugin.json, ui.js and backend.py are refused here, and the
 //     plugin installer (plugin_install.h) refuses a zip that has skin.json
 //   - size and file-count limits
@@ -39,41 +37,11 @@ inline bool isReservedId(const std::string& id) {
 
 inline bool allowedExtension(const std::string& ext) {
     static const std::set<std::string> ok = {
-        "json", "css", "md", "txt",
+        "json", "md", "txt",
         "png", "jpg", "jpeg", "gif", "webp", "ico",
         "woff", "woff2", "ttf", "otf"
     };
     return ok.count(ext) > 0;
-}
-
-// Returns "" if the stylesheet is fine, otherwise the reason.
-inline std::string checkCss(const std::string& path, const std::string& css) {
-    const std::string c = pek_plugins::lowerCopy(css);
-    if (c.find('\\') != std::string::npos)
-        return path + " uses a backslash escape, which skins can't use";
-    static const char* banned[] = { "@import", "expression(", "javascript:", "-moz-binding", "behavior:", "<script", "</style" };
-    for (const char* b : banned)
-        if (c.find(b) != std::string::npos)
-            return path + " uses something skins can't use (" + b + ")";
-    size_t pos = 0;
-    while ((pos = c.find("url(", pos)) != std::string::npos) {
-        const size_t end = c.find(')', pos + 4);
-        if (end == std::string::npos) return path + " has an unfinished url()";
-        std::string arg = c.substr(pos + 4, end - pos - 4);
-        pos = end;
-        size_t a = 0, b = arg.size();
-        while (a < b && (std::isspace(static_cast<unsigned char>(arg[a])) || arg[a] == '"' || arg[a] == '\'')) ++a;
-        while (b > a && (std::isspace(static_cast<unsigned char>(arg[b - 1])) || arg[b - 1] == '"' || arg[b - 1] == '\'')) --b;
-        arg = arg.substr(a, b - a);
-        if (arg.empty() || arg[0] == '#') continue;
-        if (arg.compare(0, 11, "data:image/") == 0 || arg.compare(0, 10, "data:font/") == 0 ||
-            arg.compare(0, 21, "data:application/font") == 0 || arg.compare(0, 23, "data:application/x-font") == 0) continue;
-        if (arg.find(':') != std::string::npos || arg.compare(0, 2, "//") == 0)
-            return path + " loads something from outside the skin (" + arg.substr(0, 40) + ")";
-        if (arg[0] == '/' || arg.find("..") != std::string::npos)
-            return path + " points outside the skin folder (" + arg.substr(0, 40) + ")";
-    }
-    return "";
 }
 
 // Validates everything except the id. Returns "" if fine.
@@ -97,6 +65,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
 
         const std::string ext = pek_plugins::extensionOf(f.path);
         if (ext == "js" || ext == "py") return "skins can't contain code: " + f.path;
+        if (ext == "css") return "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css file and try again.";
         if (!allowedExtension(ext)) return "file type not allowed in skins: " + f.path;
 
         if (f.path == "skin.json") {
@@ -108,11 +77,7 @@ inline std::string checkFiles(const std::vector<InFile>& files, size_t& totalByt
             if (a >= f.data.size() || f.data[a] != '{') return "skin.json is not a JSON object";
             if (f.data.find("\"name\"") == std::string::npos) return "skin.json needs a \"name\"";
             if (pek_plugins::lowerCopy(f.data).find("url(") != std::string::npos)
-                return "skin.json can't use url(). Put images in skin.css, and use a plain gradient for bgImage.";
-        }
-        if (ext == "css") {
-            why = checkCss(f.path, f.data);
-            if (!why.empty()) return why;
+                return "skin.json can't use url(). Use a plain gradient for bgImage.";
         }
     }
     if (!hasManifest) return "skin.json is missing";

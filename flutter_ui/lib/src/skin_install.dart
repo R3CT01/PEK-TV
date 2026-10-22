@@ -16,7 +16,6 @@ class PreparedSkin {
     required this.description,
     required this.version,
     required this.tokenCount,
-    required this.hasCss,
     required this.tokens,
     required this.files,
     required this.skipped,
@@ -28,8 +27,6 @@ class PreparedSkin {
   final String name, author, description, version;
   final int tokenCount;
 
-  /// The skin has a skin.css. The Flutter UI cannot draw CSS, so it only uses the colours and the corner size.
-  final bool hasCss;
   final PekTokens tokens;
   final List<PluginFile> files;
   final int skipped;
@@ -40,12 +37,12 @@ class PreparedSkin {
   String get skinId => '${Skins.installedPrefix}$id';
 
   PreparedSkin withSource(Map<String, dynamic> s) => PreparedSkin(
-        id: id, name: name, author: author, description: description, version: version, tokenCount: tokenCount, hasCss: hasCss,
+        id: id, name: name, author: author, description: description, version: version, tokenCount: tokenCount,
         tokens: tokens, files: files, skipped: skipped, source: s,
       );
 
   PreparedSkin withId(String newId) => PreparedSkin(
-        id: newId, name: name, author: author, description: description, version: version, tokenCount: tokenCount, hasCss: hasCss,
+        id: newId, name: name, author: author, description: description, version: version, tokenCount: tokenCount,
         tokens: tokens, files: files, skipped: skipped, source: source,
       );
 }
@@ -53,13 +50,10 @@ class PreparedSkin {
 /// Skins from a .zip or from GitHub. Flutter twin of `www/skin_installer.js` (opening the zip) and `backend/skin_install.h`
 /// (what a skin may contain), with the same rules and the same messages:
 ///  - skin.json at the top of the zip or inside one folder, a zip is a plugin or a skin, never both
-///  - data files only (json, css, md, txt, images, fonts), never code; up to 60 files, 2 MB each, 6 MB in total
-///  - skin.css may not @import, use backslash escapes, or load anything from outside the skin
+///  - data files only (json, md, txt, images, fonts), never code and never CSS (skin.css is refused); up to 60 files, 2 MB each, 6 MB in total
 ///
-/// The web UI hands the files to the server, which keeps them on disk and serves skin.css. This app keeps the colours in
-/// its own store (`Skins`), so nothing is sent to the server: [checkFiles] is the gate here. Skin.css is checked like the
-/// server would, so a skin is accepted or refused the same way in both builds, but only the colours and the corner size
-/// are used (a Flutter screen cannot apply CSS).
+/// A skin is its colours and its corner size. This app keeps them in its own store (`Skins`), so nothing is sent to the server:
+/// [checkFiles] is the gate here.
 class SkinInstaller {
   static const maxFiles = 60;
   static const maxFileBytes = 2 * 1024 * 1024;
@@ -71,7 +65,10 @@ class SkinInstaller {
   /// The web UI's built-in skin ids plus this app's own, so a skin cannot pose as one of them.
   static const reservedIds = {'default', 'green', 'neon', 'ember', 'minimal', 'light', 'netflix'};
 
-  static const _allowed = {'json', 'css', 'md', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'woff', 'woff2', 'ttf', 'otf'};
+  /// Why a skin with a stylesheet is refused (the server and the web UI say the same).
+  static const noCss = "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css file and try again.";
+
+  static const _allowed = {'json', 'md', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'ico', 'woff', 'woff2', 'ttf', 'otf'};
   static const notASkin = 'This is a plugin, not a skin. Install it from Plugins.';
 
   // ------------------------------------------------------------------ checks (backend/skin_install.h)
@@ -102,30 +99,6 @@ class SkinInstaller {
     return '';
   }
 
-  /// '' when the stylesheet is fine, else the reason (`checkCss`).
-  static String checkCss(String path, String css) {
-    final c = css.toLowerCase();
-    if (c.contains('\\')) return "$path uses a backslash escape, which skins can't use";
-    for (final b in const ['@import', 'expression(', 'javascript:', '-moz-binding', 'behavior:', '<script', '</style']) {
-      if (c.contains(b)) return "$path uses something skins can't use ($b)";
-    }
-    final trim = RegExp('^[\\s"\']+|[\\s"\']+\$');
-    var pos = 0;
-    while (true) {
-      pos = c.indexOf('url(', pos);
-      if (pos < 0) return '';
-      final end = c.indexOf(')', pos + 4);
-      if (end < 0) return '$path has an unfinished url()';
-      final arg = c.substring(pos + 4, end).replaceAll(trim, '');
-      pos = end;
-      if (arg.isEmpty || arg.startsWith('#')) continue;
-      if (arg.startsWith('data:image/') || arg.startsWith('data:font/') || arg.startsWith('data:application/font') || arg.startsWith('data:application/x-font')) continue;
-      final shown = arg.length > 40 ? arg.substring(0, 40) : arg;
-      if (arg.contains(':') || arg.startsWith('//')) return '$path loads something from outside the skin ($shown)';
-      if (arg.startsWith('/') || arg.contains('..')) return '$path points outside the skin folder ($shown)';
-    }
-  }
-
   /// '' when every file is allowed, else the reason (`checkFiles`).
   static String checkFiles(List<PluginFile> files) {
     if (files.isEmpty) return 'the skin has no files';
@@ -133,7 +106,7 @@ class SkinInstaller {
     final seen = <String>{};
     var total = 0, manifest = false;
     for (final f in files) {
-      var why = checkPath(f.path);
+      final why = checkPath(f.path);
       if (why.isNotEmpty) return why;
       if (!seen.add(f.path.toLowerCase())) return 'the same file appears twice: ${f.path}';
       if (f.data.length > maxFileBytes) return '${f.path} is too large (limit 2 MB per file)';
@@ -142,6 +115,7 @@ class SkinInstaller {
       if (f.path == 'plugin.json' || f.path == 'ui.js' || f.path == 'backend.py') return notASkin;
       final ext = _ext(f.path);
       if (ext == 'js' || ext == 'py') return "skins can't contain code: ${f.path}";
+      if (ext == 'css') return noCss;
       if (!_allowed.contains(ext)) return 'file type not allowed in skins: ${f.path}';
       if (f.path == 'skin.json') {
         manifest = true;
@@ -149,11 +123,7 @@ class SkinInstaller {
         final text = utf8.decode(f.data, allowMalformed: true).replaceFirst('\uFEFF', '').trimLeft();
         if (!text.startsWith('{')) return 'skin.json is not a JSON object';
         if (!text.contains('"name"')) return 'skin.json needs a "name"';
-        if (text.toLowerCase().contains('url(')) return "skin.json can't use url(). Put images in skin.css, and use a plain gradient for bgImage.";
-      }
-      if (ext == 'css') {
-        why = checkCss(f.path, utf8.decode(f.data, allowMalformed: true));
-        if (why.isNotEmpty) return why;
+        if (text.toLowerCase().contains('url(')) return "skin.json can't use url(). Use a plain gradient for bgImage.";
       }
     }
     return manifest ? '' : 'skin.json is missing';
@@ -228,7 +198,7 @@ class SkinInstaller {
     final tokenMap = (tokensRaw as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
     final tokens = SkinJson.tokensFrom(tokenMap);
     if (tokens == null) {
-      throw const StoreException('This skin has no colours or corner size that this app can use. Skins that only have a skin.css work in the web build.');
+      throw const StoreException('This skin has no colours or corner size that this app can use.');
     }
     if (SkinJson.unreadable(tokens)) {
       throw const StoreException('This skin would make the text hard to read (its text colour is too close to its background or cards).');
@@ -240,7 +210,6 @@ class SkinInstaller {
       description: str(raw['description'], 200),
       version: str(raw['version'], 20),
       tokenCount: tokenMap.length,
-      hasCss: files.any((f) => f.path == 'skin.css'),
       tokens: tokens,
       files: files,
       skipped: skipped,

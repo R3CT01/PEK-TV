@@ -24,7 +24,6 @@ A skin can't run code and can't reach the network.
 my-skin.zip
 └── my-skin/            (the folder is optional; skin.json can also sit at the top of the zip)
     ├── skin.json       (required)
-    ├── skin.css        (optional)
     └── images, fonts   (optional)
 ```
 
@@ -57,17 +56,16 @@ a zip with the same id again updates the skin.
 | `tokens` | no | colours and sizes, see the bundled `skins/neon/skin.json` for every token |
 | `tokens.bgImage` | no | a plain CSS gradient drawn behind the app, like the default Ember look. No `url()`. If a skin sets `bg` and no `bgImage`, its background is flat |
 
-## skin.css (optional)
+## No CSS
 
-Normal CSS that is loaded on top of PEK TV's own while the skin is in use. To keep skins safe:
-
-- no `@import`, and no `url()` that points to the network (`https://…`, `//…`) or outside the skin folder
-- `url()` may point to a file inside the skin folder, or be a `data:image/…` / `data:font/…` link
-- no backslash escapes (they could hide the rules above)
+A skin is its colours and its corner size, nothing more. **A skin that contains a `skin.css` (any `.css` file) is refused**: by
+Install skin from .zip / GitHub in the app, by the server and the web build's installer, by `SkinBuilder` and by
+`tools/make_skin.py`. The message is "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css
+file and try again."
 
 ## Allowed files and limits
 
-`json`, `css`, `md`, `txt`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `ico`, `woff`, `woff2`, `ttf`, `otf`.
+`json`, `md`, `txt`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `ico`, `woff`, `woff2`, `ttf`, `otf`.
 No code of any kind (`.js`, `.py`, `.html`, `.svg`). Up to 60 files, 2 MB per file, 6 MB in total.
 The server (`backend/skin_install.h`) checks all of this again, so a hand-made request gets no
 more than the app does.
@@ -82,10 +80,9 @@ the corner size, name it and save. A made skin appears in the Appearance list ne
 - **From one accent colour** makes a whole skin from one colour (dark or light) or one hue.
 - **Hold** any skin in the Appearance list to use it, edit it, start a new one from it, copy it as a `skin.json`, or delete it.
   Edit / "Make my own from this" open the plugin on that skin.
-- **Copy skin.json** gives the same file the web build installs from a .zip (put it in a folder next to an optional
-  `skin.css` and zip it).
+- **Copy skin.json** gives the same file the web build installs from a .zip (put it in a folder and zip it).
 - **Paste skin.json** opens a skin made in the web build in the maker, ready to save. Only the name, description and
-  colours are used; a skin's own `skin.css` styling only works in the web build.
+  colours are used.
 - Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused
   (in the plugin, and again by the app before it stores anything).
 
@@ -98,7 +95,7 @@ See FLUTTER_PLUGINS.md ("Skin Maker").
 Two ways, all giving the same `skin.json` / .zip, so a skin made by any of them installs in the web build and in the Flutter app.
 
 **1. From the command line: `tools/make_skin.py`** (Python 3, no packages). It works out the colours you leave out, refuses
-text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` (+ `skin.css`) into a .zip.
+text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` into a .zip. It does **not** accept a `skin.css` (PEK TV runs on Flutter, which draws a skin from its colours and corner size only): `--css` is gone, a `"css"` field in a batch file is an error, and `validate` refuses a zip that contains a `skin.css`.
 
 ```
 # four colours, the rest follows
@@ -113,9 +110,9 @@ tools/make_skin.py batch skins.json --out dist/
 tools/make_skin.py validate dist/sunset.zip
 ```
 
-`--print` shows the skin.json without writing a file, `--folder` writes a skin folder instead of a .zip, `--css file.css` and
-`--file image.png` add styling and images, `--force` allows low-contrast text. A batch file is a list of
-`{"name", "accent", "bg", "surface", "text", "radius", "mode", "hue", "glow", "tokens": {...}, "css"}`.
+`--print` shows the skin.json without writing a file, `--folder` writes a skin folder instead of a .zip, `--file image.png` adds an
+extra file, `--force` allows low-contrast text. A batch file is a list of
+`{"name", "accent", "bg", "surface", "text", "radius", "mode", "hue", "glow", "tokens": {...}}`.
 
 **2. By hand**: write `skin.json` as above.
 
@@ -127,6 +124,22 @@ source code), the same checks (`flutter_ui/lib/src/skin_install.dart`, a port of
 `www/skin_installer.js`), and the same confirm screen. A skin from GitHub is labelled "unverified". Installing the same
 skin again updates it; hold it in the list to remove it.
 
-What differs: the Flutter UI cannot draw CSS, so an installed skin gives the app its **colours and corner size** only
-(`skin.css`, `bgImage` and the glass tokens are checked but not drawn). A skin with no colours or radius in `skin.json` is refused
-there with a message saying to use the web build. The skin is kept on the device (not in the server's `skins/` folder).
+What differs: an installed skin gives the app its **colours and corner size** only (`bgImage` and the glass tokens are checked but
+not drawn). A skin with no colours or radius in `skin.json` is refused there. The skin is kept on the device (not in the server's `skins/` folder).
+
+## Skins in the cloud (per profile)
+
+When a cloud account is signed in, each profile's skins are saved to the account: the ones made in the Skin maker (or pasted
+from a skin.json) and the ones installed from a .zip or GitHub, plus which skin the profile has chosen. Nothing to switch on: the
+normal sync (at start, every 5 minutes after a change, and when a profile is opened) sends a new, changed or deleted skin.
+
+- **Per profile.** Every profile has its own list of skins; one profile's skins are not in another's. (Before this, all profiles on a
+  device shared one list; a profile that was using one of those skins keeps that skin.) The built-in skins are the same for everyone.
+- **Restore.** Signing in on a new device, or again after signing out, brings back every skin and the chosen skin of each profile
+  when the profile is opened (signing out removes them from the device; the cloud keeps them).
+- **Newest wins.** Changing the same skin on two devices keeps the newer change. Deleting a skin deletes it on the other devices too,
+  unless it was changed after the delete.
+- **What is stored:** the name, author, version, description, the colours, the corner size and, for an installed skin, where it came
+  from (GitHub skins stay labelled "unverified"). Up to 50 skins per profile. Nothing else from a skin zip is kept in the cloud.
+- **Needs the new worker:** redeploy `cloud/worker.js` first (see cloud/DEPLOY.md). Until then the skins stay on the device and are
+  sent once the worker is updated.

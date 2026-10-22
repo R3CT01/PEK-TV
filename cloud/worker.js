@@ -31,7 +31,7 @@
 //   POST   /v1/auth/confirm  { password }                      -> { ok }   (re-checks the signed-in account's password, e.g. to reset a forgotten profile passcode; rate limited)
 //   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted,avatar,pin}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins;
 //                                                                  avatar = built-in picture id or a small photo, pin = salted passcode hash, both optional)
-//   POST   /v1/sync          push changed items (history, progress, favorites, settings) of ONE profile ({ profile, since, ... }), pull newer ones
+//   POST   /v1/sync          push changed items (history, progress, favorites, settings, skins) of ONE profile ({ profile, since, ... }), pull newer ones
 //   GET    /v1/plugins                                          -> { ok, plugins: [{id,name,version,size,fp,updated,deleted,chunks}] }
 //   POST   /v1/plugins/chunk   { id, fp, index, total, data }   -> { ok }      (one piece of a plugin backup)
 //   POST   /v1/plugins/commit  { id, fp, total, name, version, size, updated } -> { ok, stored }  (finishes a backup)
@@ -558,9 +558,11 @@ function cleanItem(it, now, kind) {
     if (!it || typeof it !== 'object') return null;
     if (typeof it.key !== 'string' || !it.key || it.key.length > MAX_KEY) return null;
     // history keys start m| / e| (movie / episode), favorites are f|movie:<id> or f|tv:<id>,
-    // settings are s|dashboard, s|look or s|weather (small choices that follow the profile)
+    // settings are s|dashboard, s|look, s|weather or s|skin (small choices that follow the profile),
+    // skins are k|<skin id>: k|custom-... (made in the app's Skin maker) or k|pkg-... (installed from a .zip / GitHub)
     if (kind === 'f' ? !/^f\|(movie|tv):\d{1,10}$/.test(it.key)
-        : kind === 's' ? !/^s\|(dashboard|look|weather)$/.test(it.key)
+        : kind === 's' ? !/^s\|(dashboard|look|weather|skin)$/.test(it.key)
+        : kind === 'k' ? !/^k\|(custom-[a-z0-9]{1,20}|pkg-[a-z0-9][a-z0-9_-]{0,39})$/.test(it.key)
         : !/^[me]\|/.test(it.key)) return null;
     const updated = Number(it.updated);
     if (!Number.isFinite(updated) || updated <= 0) return null;
@@ -682,7 +684,7 @@ async function handleSync(request, env, userId) {
 
     // ---- push: last writer wins per item, by the item's own "updated" time
     const pushed = [];
-    for (const [kind, field] of [['h', 'history'], ['p', 'progress'], ['f', 'favorites'], ['s', 'settings']]) {
+    for (const [kind, field] of [['h', 'history'], ['p', 'progress'], ['f', 'favorites'], ['s', 'settings'], ['k', 'skins']]) {
         const list = Array.isArray(body[field]) ? body[field] : [];
         for (const raw of list) pushed.push([kind, raw]);
     }
@@ -714,16 +716,16 @@ async function handleSync(request, env, userId) {
     ).bind(acct, since, PAGE).all();
     const results = rows.results || [];
 
-    const out = { history: [], progress: [], favorites: [], settings: [] };
+    const out = { history: [], progress: [], favorites: [], settings: [], skins: [] };
     let cursor = since;
     for (const r of results) {
         let data = {};
         try { data = JSON.parse(r.data); } catch (e) { /* keep {} */ }
         const item = { key: r.key, data, updated: r.updated, deleted: r.deleted ? 1 : 0 };
-        (r.kind === 'h' ? out.history : r.kind === 'f' ? out.favorites : r.kind === 's' ? out.settings : out.progress).push(item);
+        (r.kind === 'h' ? out.history : r.kind === 'f' ? out.favorites : r.kind === 's' ? out.settings : r.kind === 'k' ? out.skins : out.progress).push(item);
         if (r.srv > cursor) cursor = r.srv;
     }
-    return json({ ok: true, profile, cursor, more: results.length === PAGE, history: out.history, progress: out.progress, favorites: out.favorites, settings: out.settings });
+    return json({ ok: true, profile, cursor, more: results.length === PAGE, history: out.history, progress: out.progress, favorites: out.favorites, settings: out.settings, skins: out.skins });
 }
 
 // ---------------------------------------------------------------- plugin backup handlers
@@ -818,7 +820,7 @@ async function handleExport(env, acct) {
         let data = {};
         try { data = JSON.parse(r.data); } catch (e) { /* keep {} */ }
         const profile = r.owner === acct ? 'p1' : r.owner.slice(acct.length + 1);
-        return { profile, kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : r.kind === 's' ? 'settings' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
+        return { profile, kind: r.kind === 'h' ? 'history' : r.kind === 'f' ? 'favorites' : r.kind === 's' ? 'settings' : r.kind === 'k' ? 'skins' : 'progress', key: r.key, data, updated: r.updated, deleted: !!r.deleted };
     });
     const pr = await env.DB.prepare('SELECT id, name, color, updated, deleted, avatar, pin FROM profiles WHERE acct = ? ORDER BY updated').bind(acct).all();
     const profiles = (pr.results || []).map(r => ({ id: r.id, name: r.name, color: r.color, updated: r.updated, deleted: !!r.deleted, avatar: r.avatar || '', hasPasscode: !!r.pin }));   // the passcode hash is not exported

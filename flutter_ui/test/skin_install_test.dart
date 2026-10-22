@@ -29,9 +29,9 @@ void main() {
 
     test('refuses code, network css, @import and path tricks', () {
       expectRefused(zipOf([f('skin.json', ok), f('evil.js', '1')]), "can't contain code");
-      expectRefused(zipOf([f('skin.json', ok), f('skin.css', 'a{background:url(https://evil/x.png)}')]), 'outside the skin');
-      expectRefused(zipOf([f('skin.json', ok), f('skin.css', '@import "a.css";')]), '@import');
-      expectRefused(zipOf([f('skin.json', ok), f('skin.css', 'a{content:"\\41"}')]), 'backslash');
+      expectRefused(zipOf([f('skin.json', ok), f('skin.css', 'a{background:url(https://evil/x.png)}')]), 'CSS');
+      expectRefused(zipOf([f('skin.json', ok), f('skin.css', '@import "a.css";')]), 'CSS');
+      expectRefused(zipOf([f('skin.json', ok), f('skin.css', 'a{content:"\\41"}')]), 'CSS');
       expectRefused(zipOf([f('skin.json', ok), f('icon.svg', '<svg/>')]), 'file type not allowed');
     });
 

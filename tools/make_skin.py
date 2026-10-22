@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """make_skin.py - make PEK TV skins from code.
 
-Builds skin.json (and, optionally, skin.css) for the web UI and the Flutter UI, runs the same safety checks as
-backend/skin_install.h, and packs an installable .zip:
+Builds skin.json for the Flutter UI, runs the same safety checks as backend/skin_install.h, and packs an
+installable .zip:
 
     my-skin.zip
     └── my-skin/
-        ├── skin.json
-        └── skin.css   (only when you pass --css)
+        └── skin.json
+
+The Flutter UI draws skins from their colours and corner size only, so skin.css is not accepted any more: not when
+making a skin, and not when checking one (`validate` refuses a zip that has a skin.css).
 
 The colour maths is the same as `SkinJson.derive` in flutter_ui/lib/src/skins.dart, so a skin made here looks the same
 as one made in the app's Skin maker.
@@ -32,7 +34,7 @@ Examples
     make_skin.py new --name Test --accent '#ff00aa' --print
 
 Spec file (batch): [{"name": "Sunset", "accent": "#ffb347", "bg": "...", "surface": "...", "text": "...", "radius": 14,
-                     "mode": "dark", "hue": 30, "glow": true, "tokens": {"textMuted": "#aaa"}, "css": "path/or/text.css"}]
+                     "mode": "dark", "hue": 30, "glow": true, "tokens": {"textMuted": "#aaa"}}]
 """
 import argparse, colorsys, json, math, os, re, sys, zipfile
 
@@ -40,7 +42,10 @@ import argparse, colorsys, json, math, os, re, sys, zipfile
 MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES, MAX_MANIFEST = 60, 2 * 1024 * 1024, 6 * 1024 * 1024, 16 * 1024
 MAX_PATH, MAX_DEPTH = 120, 6
 RESERVED_IDS = {"default", "green", "neon", "ember", "minimal", "light", "netflix"}   # web + Flutter built-ins
-ALLOWED_EXT = {"json", "css", "md", "txt", "png", "jpg", "jpeg", "gif", "webp", "ico", "woff", "woff2", "ttf", "otf"}
+ALLOWED_EXT = {"json", "md", "txt", "png", "jpg", "jpeg", "gif", "webp", "ico", "woff", "woff2", "ttf", "otf"}
+
+
+NO_CSS = "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css file and try again."
 
 
 class SkinError(Exception):
@@ -224,10 +229,8 @@ def build(spec):
                 "description": str(spec.get("description") or "")[:200], "pek_api": 1, "tokens": tokens}
     files = {"skin.json": (json.dumps(manifest, indent=2, ensure_ascii=False) + "\n").encode("utf-8")}
 
-    css = spec.get("css")
-    if css:
-        text = open(css, encoding="utf-8").read() if os.path.isfile(css) else str(css)
-        files["skin.css"] = text.encode("utf-8")
+    if spec.get("css"):
+        raise SkinError(NO_CSS)
     for extra in spec.get("files") or []:                      # extra images / fonts: paths on disk
         files[os.path.basename(extra)] = open(extra, "rb").read()
     check_files(files)
@@ -252,33 +255,6 @@ def check_path(p):
     return ""
 
 
-def check_css(path, css):
-    c = css.lower()
-    if "\\" in c:
-        return path + " uses a backslash escape, which skins can't use"
-    for b in ("@import", "expression(", "javascript:", "-moz-binding", "behavior:", "<script", "</style"):
-        if b in c:
-            return "%s uses something skins can't use (%s)" % (path, b)
-    pos = 0
-    while True:
-        pos = c.find("url(", pos)
-        if pos < 0:
-            return ""
-        end = c.find(")", pos + 4)
-        if end < 0:
-            return path + " has an unfinished url()"
-        arg = c[pos + 4:end].strip(" \t\r\n\"'")
-        pos = end
-        if not arg or arg[0] == "#":
-            continue
-        if arg.startswith(("data:image/", "data:font/", "data:application/font", "data:application/x-font")):
-            continue
-        if ":" in arg or arg.startswith("//"):
-            return "%s loads something from outside the skin (%s)" % (path, arg[:40])
-        if arg[0] == "/" or ".." in arg:
-            return "%s points outside the skin folder (%s)" % (path, arg[:40])
-
-
 def check_files(files):
     """files: {path: bytes}. Raises SkinError with the server's wording."""
     if not files: raise SkinError("the skin has no files")
@@ -295,6 +271,7 @@ def check_files(files):
         if path in ("plugin.json", "ui.js", "backend.py"):
             raise SkinError("this is a plugin, not a skin. Install it from Settings -> Plugins.")
         ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+        if ext == "css": raise SkinError(NO_CSS)
         if ext in ("js", "py"): raise SkinError("skins can't contain code: " + path)
         if ext not in ALLOWED_EXT: raise SkinError("file type not allowed in skins: " + path)
         if path == "skin.json":
@@ -304,14 +281,11 @@ def check_files(files):
             if not text.startswith("{"): raise SkinError("skin.json is not a JSON object")
             if '"name"' not in text: raise SkinError('skin.json needs a "name"')
             if "url(" in text.lower():
-                raise SkinError("skin.json can't use url(). Put images in skin.css, and use a plain gradient for bgImage.")
+                raise SkinError("skin.json can't use url(). Use a plain gradient for bgImage.")
             try:
                 json.loads(text)
             except ValueError:
                 raise SkinError("skin.json is not valid JSON")
-        if ext == "css":
-            why = check_css(path, data.decode("utf-8", "replace"))
-            if why: raise SkinError(why)
     if not has_manifest: raise SkinError("skin.json is missing")
 
 
@@ -364,7 +338,7 @@ def pack(sid, files, out_zip):
 # ---------------------------------------------------------------- command line
 def spec_from_args(a):
     spec = {k: getattr(a, k) for k in ("name", "id", "author", "version", "description", "bg", "surface", "text", "accent",
-                                       "radius", "hue", "css") if getattr(a, k, None) is not None}
+                                       "radius", "hue") if getattr(a, k, None) is not None}
     spec["mode"] = "light" if a.light else "dark"
     spec["glow"], spec["force"] = a.glow, a.force
     spec["files"] = a.file or []
@@ -377,7 +351,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("new", help="make one skin")
     n.add_argument("--name", required=True)
-    for f in ("id", "author", "version", "description", "bg", "surface", "text", "accent", "css"):
+    for f in ("id", "author", "version", "description", "bg", "surface", "text", "accent"):
         n.add_argument("--" + f)
     n.add_argument("--radius", type=float, help="corner size in px, 0-40 (default 16)")
     n.add_argument("--hue", type=float, help="0-360; makes the accent and the surfaces when you give nothing else")
@@ -401,7 +375,7 @@ def main(argv=None):
             check_files(files)
             if sid in RESERVED_IDS: raise SkinError('"%s" is the id of a skin that ships with PEK TV' % sid)
             m = json.loads(files["skin.json"].decode("utf-8").lstrip("\ufeff"))
-            print("OK  id=%s  name=%s  files=%d  tokens=%d  css=%s" % (sid, m.get("name"), len(files), len(m.get("tokens") or {}), "skin.css" in files))
+            print("OK  id=%s  name=%s  files=%d  tokens=%d" % (sid, m.get("name"), len(files), len(m.get("tokens") or {})))
             return 0
         specs = json.load(open(a.spec, encoding="utf-8")) if a.cmd == "batch" else [spec_from_args(a)]
         if isinstance(specs, dict): specs = [specs]

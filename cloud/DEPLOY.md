@@ -106,6 +106,12 @@ their data simply becomes the original profile (`p1`).
   others (it never mixes anyone's data), so a late deploy is safe.
 - Removing a profile in the app also removes that profile's data from the cloud.
 
+## Skins (saved per profile)
+
+Redeploy the worker (step B2) to let the app save skins to the account. Nothing else to do: skins are stored as
+`k|<skin id>` items of the profile (kind `k` in the existing `items` table, so no migration) and the chosen skin as the
+`s|skin` setting. An app that is newer than the worker keeps its skins on the device and sends them once the worker is updated.
+
 ## Sign-in codes (every sign-in needs one)
 
 Deploy the worker (step B2) and update the app together. The new worker answers a correct password

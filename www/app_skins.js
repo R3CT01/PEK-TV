@@ -65,7 +65,7 @@ class MainAppSkinsMethods {
             ...this._githubNotice(si, 'skin'),
             [p.version ? `Version ${p.version}` : null, p.author ? `by ${p.author}` : null].filter(Boolean).join(' \u00b7 '),
             p.description,
-            p.tokenCount ? `Sets ${p.tokenCount} colours and sizes` + (p.hasCss ? ' and adds its own styling.' : '.') : (p.hasCss ? 'Adds its own styling.' : null),
+            p.tokenCount ? `Sets ${p.tokenCount} colours and sizes.` : null,
             si.replaced ? 'This replaces the version you already have.' : null,
             'A skin only changes how PEK TV looks. It can\u2019t run code or reach the network.'
         ].filter(Boolean);

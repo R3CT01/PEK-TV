@@ -51,7 +51,7 @@ class Store {
   /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
   static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
     if (id == 'p1') {
-      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dashboard_v3', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dashboard_v3', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_custom_skins', 'pek_skin_tombs', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
         if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs' || k == 'pek_plugin_favs_v1')) continue;
         await _p.remove(k);
       }

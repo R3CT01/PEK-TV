@@ -322,7 +322,7 @@ def _json_text(name, desc, author, tokens):
 
 
 def _import():
-    """Pasted skin.json text -> the draft. Only the name, description and colours are used (skin.css is web-only)."""
+    """Pasted skin.json text -> the draft. Only the name, description and colours are used."""
     try:
         j = json.loads(S["paste"])
     except ValueError:
@@ -498,7 +498,7 @@ def _paste_view():
     ui.set_back(lambda: _go("list"))
     rows = [
         ui.heading("Paste a skin.json"),
-        ui.text("Only the name, description and colours are used. A skin\u2019s own styling (skin.css) only works in the web build."),
+        ui.text("Only the name, description and colours are used."),
         ui.text_input("skin.json", S["paste"], lambda v: S.update({"paste": v}), placeholder='{ "name": "My skin", "tokens": { ... } }',
                       key="skin-paste", on_submit=lambda v: (S.update({"paste": v}), _import())),
     ]

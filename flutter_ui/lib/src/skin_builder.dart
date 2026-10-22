@@ -82,7 +82,6 @@ class SkinBuilder {
   double _radius = 16;
   bool _dark = true;
   bool _force = false, _glowOn = false;
-  String? _css;
   final Map<String, String> _tokenOverrides = {};
   final Map<String, List<int>> _extraFiles = {};
 
@@ -149,13 +148,7 @@ class SkinBuilder {
     return this;
   }
 
-  /// Styling for the web build (skin.css). The Flutter UI does not use it. Checked with the installer's CSS rules.
-  SkinBuilder css(String css) {
-    _css = css;
-    return this;
-  }
-
-  /// An extra file for the zip (an image or font that skin.css refers to), by its path inside the skin.
+  /// An extra file for the zip (an image or font), by its path inside the skin. A .css file is refused when the skin is built.
   SkinBuilder file(String path, List<int> bytes) {
     _extraFiles[path] = bytes;
     return this;
@@ -254,12 +247,11 @@ class SkinBuilder {
     });
   }
 
-  /// The files of the skin (skin.json, skin.css when there is one, and the extra files), checked like an install.
+  /// The files of the skin (skin.json and the extra files), checked like an install: a skin.css is refused.
   List<PluginFile> files() {
     build();
     final out = <PluginFile>[
       PluginFile('skin.json', Uint8List.fromList(utf8.encode('${skinJson()}\n'))),
-      if (_css != null) PluginFile('skin.css', Uint8List.fromList(utf8.encode(_css!))),
       for (final e in _extraFiles.entries) PluginFile(e.key, Uint8List.fromList(e.value)),
     ];
     final why = SkinInstaller.checkFiles(out);
@@ -267,7 +259,7 @@ class SkinBuilder {
     return out;
   }
 
-  /// An installable .zip: `<id>/skin.json` (+ skin.css and the extra files). The web build installs it, and so does
+  /// An installable .zip: `<id>/skin.json` (+ the extra files). The web build installs it, and so does
   /// Settings > Appearance > Install from .zip.
   Uint8List zip() {
     final folder = skinId.replaceFirst(Skins.installedPrefix, '');

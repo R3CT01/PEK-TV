@@ -11,6 +11,7 @@ import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
 import 'layouts.dart' show Layouts;
+import 'skins.dart' show Skins;
 import 'weather.dart' show Weather;
 
 /// The answer of one cloud call.
@@ -316,7 +317,7 @@ class Cloud {
   static bool hasLocalChanges() {
     if (!linked) return false;
     final a = _collectPush();
-    return a.history.length + a.progress.length + a.favorites.length + a.settings.length > 0 || _hasUnresolvedFavorites;
+    return a.history.length + a.progress.length + a.favorites.length + a.settings.length + a.skins.length > 0 || _hasUnresolvedFavorites;
   }
 
   /// [light] skips the profile round trip (a stop-of-playback sync only needs to push what changed).
@@ -351,13 +352,13 @@ class Cloud {
       }
       await _resolveFavorites();
       final all = _collectPush();
-      final pushed = all.history.length + all.progress.length + all.favorites.length + all.settings.length;
+      final pushed = all.history.length + all.progress.length + all.favorites.length + all.settings.length + all.skins.length;
       var anyChange = false;
       CloudResult? fail;
       for (var n = 1; n <= _maxRounds; n++) {
         final chunk = all.take(_chunk);
         final cursor = int.tryParse(Store.strGet('pek_sync_cursor') ?? '') ?? 0;
-        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites, 'settings': chunk.settings}, withToken: true);
+        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites, 'settings': chunk.settings, 'skins': chunk.skins}, withToken: true);
         if (r.status == 404 && r.body['error'] == 'unknown_profile') {
           fail = const CloudResult(ok: false, error: 'unknown_profile');
           break;
@@ -371,7 +372,7 @@ class Cloud {
           fail = const CloudResult(ok: false, error: 'cloud_outdated');
           break;
         }
-        _markPushed(chunk, settingsStored: r.body['settings'] is List); // an older cloud ignores settings: keep them for later
+        _markPushed(chunk, settingsStored: r.body['settings'] is List, skinsStored: r.body['skins'] is List); // an older cloud ignores settings and skins: keep them for later
         if (await _applyRemote(r.body)) anyChange = true;
         await Store.strSet('pek_sync_cursor', '${r.body['cursor'] ?? cursor}');
         final more = r.body['more'] == true || all.isNotEmpty;
@@ -618,14 +619,33 @@ class Cloud {
       final o = _settingRead(n);
       if (o != null) settings.add({'key': 's|$n', 'data': o, 'updated': _int(m['u']), 'deleted': 0});
     }
-    return _All(history, progress, favorites, settings);
+    // Skins (made in the Skin maker, or installed from a .zip / GitHub): one item `k|<id>` each, a deleted skin is a removal marker.
+    // They follow the profile, so signing in on a new device brings them back.
+    final skins = <Map<String, dynamic>>[];
+    final sk = seen['k'] is Map ? Map<String, dynamic>.from(seen['k'] as Map) : <String, dynamic>{};
+    for (final k in Skins.customSkins) {
+      if (!Skins.validId(k.id) || k.updated <= 0) continue;
+      final key = 'k|${k.id}';
+      if (_int(sk[key]) == k.updated) continue;
+      var d = Skins.syncValue(k);
+      if (jsonEncode(d).length > _skinBudget) d = {...d, 'desc': '', 'src': null}..removeWhere((_, v) => v == null);
+      if (jsonEncode(d).length > _skinBudget) continue;
+      skins.add({'key': key, 'data': d, 'updated': k.updated, 'deleted': 0});
+    }
+    Skins.tombs().forEach((id, u) {
+      final key = 'k|$id';
+      if (Skins.validId(id) && u > 0 && _int(sk[key]) != u) skins.add({'key': key, 'data': <String, dynamic>{}, 'updated': u, 'deleted': 1});
+    });
+    return _All(history, progress, favorites, settings, skins);
   }
+
+  static const _skinBudget = 1900; // the cloud keeps 2000 characters per item
 
   // ---------------------------------------------------------------- settings (port of trackSettings in www/sync.js)
 
   static const _baseTs = 1; // a value that was on the device before it ever synced: it loses to anything already in the cloud
 
-  static const _skeys = ['dashboard', 'look', 'weather'];
+  static const _skeys = ['dashboard', 'look', 'weather', 'skin'];
   static const _dashBudget = 1900; // same size limit as the web UI's DATA_BUDGET
 
   /// What this device has now for one setting (null when nothing was ever chosen).
@@ -635,6 +655,9 @@ class Cloud {
         return Store.dashboardChosen ? _dashValue(Store.dashboardItems()) : null;
       case 'look':
         return Layouts.syncValue();
+      case 'skin':
+        final id = Store.strGet('pek_skin');
+        return id == null || id.isEmpty ? null : {'id': id};
       default:
         return Weather.syncValue();
     }
@@ -655,6 +678,10 @@ class Cloud {
         return o is Map && o['list'] is List ? _dashValue(Store.cleanDashboard(o['list'])) : null;
       case 'look':
         return Layouts.cleanSync(o);
+      case 'skin':
+        // a built-in skin, or one of the profile's own skins (it arrives in the same sync; until then the app shows PEK Ember)
+        final id = o is Map ? '${o['id'] ?? ''}' : '';
+        return Skins.builtIn.any((s) => s.id == id) || Skins.validId(id) ? {'id': id} : null;
       default:
         return Weather.cleanSync(o);
     }
@@ -667,6 +694,8 @@ class Cloud {
         unawaited(Store.applyDashboardFromCloud(Store.cleanDashboard(o['list'])));
       case 'look':
         Layouts.applySynced(o);
+      case 'skin':
+        unawaited(Skins.set('${o['id']}'));
       default:
         Weather.applySynced(o);
     }
@@ -694,7 +723,7 @@ class Cloud {
     return meta;
   }
 
-  static void _markPushed(_Chunk chunk, {bool settingsStored = false}) {
+  static void _markPushed(_Chunk chunk, {bool settingsStored = false, bool skinsStored = false}) {
     final seen = _seen();
     final sh = seen['h'] as Map<String, dynamic>;
     final sp = seen['p'] as Map<String, dynamic>;
@@ -709,6 +738,13 @@ class Cloud {
       sf['${it['key']}'] = it['updated'];
     }
     seen['f'] = sf;
+    if (skinsStored) {
+      final sk = seen['k'] is Map ? Map<String, dynamic>.from(seen['k'] as Map) : <String, dynamic>{};
+      for (final it in chunk.skins) {
+        sk['${it['key']}'] = it['updated'];
+      }
+      seen['k'] = sk;
+    }
     if (settingsStored) {
       final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
       for (final it in chunk.settings) {
@@ -1024,7 +1060,17 @@ class Cloud {
     if (tombChanged) await Store.writeFavTombs(tombs);
     await Store.setJsonMap('pek_sync_pendingf', newPendingF);
 
-    // settings: the cloud's dashboard / look / weather, unless this device changed it more recently
+    // skins: this profile's skins from the cloud (before the settings, so the chosen skin can be one of them)
+    final remoteK = resp['skins'];
+    if (remoteK is List) {
+      final res = await Skins.applyCloud(listOf(remoteK));
+      if (res.changed) changed = true;
+      final sk = seen['k'] is Map ? Map<String, dynamic>.from(seen['k'] as Map) : <String, dynamic>{};
+      res.inSync.forEach((k, u) => sk[k] = u);
+      seen['k'] = sk;
+    }
+
+    // settings: the cloud's dashboard / look / weather / skin, unless this device changed it more recently
     final remoteS = resp['settings'];
     if (remoteS is List) {
       final ss = seen['s'] is Map ? Map<String, dynamic>.from(seen['s'] as Map) : <String, dynamic>{};
@@ -1071,21 +1117,23 @@ class _P {
 }
 
 class _Chunk {
-  _Chunk(this.history, this.progress, this.favorites, this.settings);
+  _Chunk(this.history, this.progress, this.favorites, this.settings, this.skins);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
   final List<Map<String, dynamic>> settings;
+  final List<Map<String, dynamic>> skins;
 }
 
 class _All {
-  _All(this.history, this.progress, this.favorites, this.settings);
+  _All(this.history, this.progress, this.favorites, this.settings, this.skins);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
   final List<Map<String, dynamic>> settings;
+  final List<Map<String, dynamic>> skins;
 
-  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty || settings.isNotEmpty;
+  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty || settings.isNotEmpty || skins.isNotEmpty;
 
   /// Up to [max] items (history first), removed from this list.
   _Chunk take(int max) {
@@ -1097,6 +1145,8 @@ class _All {
     favorites.removeRange(0, f.length);
     final s = settings.take(max - h.length - p.length - f.length).toList();
     settings.removeRange(0, s.length);
-    return _Chunk(h, p, f, s);
+    final k = skins.take(max - h.length - p.length - f.length - s.length).toList();
+    skins.removeRange(0, k.length);
+    return _Chunk(h, p, f, s, k);
   }
 }

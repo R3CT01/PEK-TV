@@ -2,7 +2,7 @@
 // PEK TV: skin installer (data side; the screens are in app_skins.js).
 //
 // A skin is a .zip with skin.json (name, author, description, version, tokens) and, optionally,
-// skin.css plus images and fonts. It works like a plugin install:
+// images and fonts. A skin.css (any .css file) is refused. It works like a plugin install:
 //
 //   prepare(f)   unpacks the zip in memory, finds skin.json, reads name / author / description
 //   check(p)     asks the server to check it WITHOUT installing (dry run)
@@ -11,10 +11,12 @@
 //
 // A zip is either a plugin or a skin, never both: a plugin zip (plugin.json) is refused here,
 // and plugin_installer.js refuses a skin zip (skin.json). The server (skin_install.h) checks
-// the same thing again, plus the file types and what skin.css may load.
+// the same thing again, plus the file types.
 // ============================================================
 
 const PekSkinInstaller = (() => {
+
+    const NO_CSS = "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css file and try again.";
 
     // Skins that ship with PEK TV (kept in step with skin_install.h). They can't be replaced or removed.
     const BUILTIN = ['default', 'green', 'neon'];
@@ -84,6 +86,7 @@ const PekSkinInstaller = (() => {
         }
 
         const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+        if (files.some(f => /\.css$/i.test(f.path))) throw new Error(NO_CSS);
         const id = slug(folder) || slug(raw.name) || slug(file.name) || 'skin';
         if (isBuiltin(id)) throw new Error(`\u201c${id}\u201d is the id of a skin that ships with PEK TV. Rename the skin (or the folder inside the zip) and try again.`);
 
@@ -94,7 +97,6 @@ const PekSkinInstaller = (() => {
             description: str(raw.description, 200),
             version: str(raw.version, 20),
             tokenCount: raw.tokens ? Object.keys(raw.tokens).length : 0,
-            hasCss: files.some(f => f.path === 'skin.css'),
             files,
             skipped
         };
@@ -102,6 +104,7 @@ const PekSkinInstaller = (() => {
 
     // For a skin downloaded from the Skin Store: the files are already in memory, so there is no zip to open.
     function prepareFiles(id, files) {
+        if (Array.isArray(files) && files.some(f => /\.css$/i.test(f.path))) throw new Error(NO_CSS);
         if (!Array.isArray(files) || !files.some(f => f.path === 'skin.json')) throw new Error('the download has no skin.json');
         let raw;
         try { raw = JSON.parse(new TextDecoder('utf-8').decode(files.find(f => f.path === 'skin.json').data).replace(/^\uFEFF/, '')); }
@@ -112,7 +115,6 @@ const PekSkinInstaller = (() => {
             id,
             name: str(raw.name, 60), author: str(raw.author, 80), description: str(raw.description, 200), version: str(raw.version, 20),
             tokenCount: raw.tokens && typeof raw.tokens === 'object' ? Object.keys(raw.tokens).length : 0,
-            hasCss: files.some(f => f.path === 'skin.css'),
             files, skipped: 0
         };
     }

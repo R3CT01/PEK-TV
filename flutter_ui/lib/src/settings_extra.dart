@@ -490,7 +490,7 @@ class AppearanceSection extends StatelessWidget {
       listenable: Skins.changes,
       builder: (context, _) => Section(
         title: 'Appearance',
-        hint: 'The look of the app. Each profile keeps its own. Hold a skin for more (edit, copy, delete). A skin from a .zip or GitHub gives this app its colours and corner size; its own styling (skin.css) only works in the web build.',
+        hint: 'The look of the app. Each profile keeps its own. Hold a skin for more (edit, copy, delete). A skin from a .zip or GitHub gives this app its colours and corner size. A skin with a skin.css is refused.',
         children: [
           for (final s in Skins.all)
             ListRow(

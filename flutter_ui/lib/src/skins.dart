@@ -8,7 +8,7 @@ import 'store.dart';
 import 'tokens.dart';
 
 class Skin {
-  const Skin(this.id, this.name, this.description, this.tokens, {this.custom = false, this.author = '', this.version = '', this.source});
+  const Skin(this.id, this.name, this.description, this.tokens, {this.custom = false, this.author = '', this.version = '', this.source, this.updated = 0});
   final String id;
   final String name;
   final String description;
@@ -22,12 +22,15 @@ class Skin {
   /// A skin from GitHub is shown as "unverified", like the web UI (`PekSkinSources`).
   final Map<String, dynamic>? source;
 
+  /// When this skin last changed (ms since epoch). The cloud keeps the newest copy of each skin; 0 = a built-in.
+  final int updated;
+
   bool get fromGithub => source?['type'] == 'github';
   bool get installed => id.startsWith(Skins.installedPrefix);
 
-  Skin copyWith({String? id, String? name, String? description, PekTokens? tokens, String? author, String? version, Map<String, dynamic>? source}) =>
+  Skin copyWith({String? id, String? name, String? description, PekTokens? tokens, String? author, String? version, Map<String, dynamic>? source, int? updated}) =>
       Skin(id ?? this.id, name ?? this.name, description ?? this.description, tokens ?? this.tokens,
-          custom: custom, author: author ?? this.author, version: version ?? this.version, source: source ?? this.source);
+          custom: custom, author: author ?? this.author, version: version ?? this.version, source: source ?? this.source, updated: updated ?? this.updated);
 }
 
 /// The built-in skins (the colours of skins/*/skin.json and style.css). Each profile remembers its own.
@@ -70,40 +73,89 @@ class Skins {
   // ---------------------------------------------------------------- the skins people made
 
   static const _customKey = 'pek_custom_skins';
+  static const _tombKey = 'pek_skin_tombs';
+
+  /// Most skins one profile keeps (made or installed). The cloud copy is capped the same way.
+  static const maxCustom = 50;
 
   /// Ids of skins installed from a .zip or GitHub start with this (made ones start with "custom-"). The id after it is
   /// the same slug the web UI uses (folder name, else skin name), so installing the same skin again updates it.
   static const installedPrefix = 'pkg-';
   static List<Skin>? _custom;
+  static String? _customFor;
+  static String? _customRaw; // what the stored list looked like when [_custom] was read or written
 
-  /// The skins made in the Skin maker. Shared by every profile on the device; each profile still picks its own.
-  static List<Skin> get customSkins => _custom ??= _loadCustom();
+  /// What the cloud accepts as a skin id (the worker checks the same shape).
+  static final _idRe = RegExp(r'^(custom-[a-z0-9]{1,20}|pkg-[a-z0-9][a-z0-9_-]{0,39})$');
+  static bool validId(String id) => _idRe.hasMatch(id);
 
-  /// The built-in skins, then the ones made here.
+  /// The skins this profile made or installed. Each profile has its own list (the cloud keeps it per profile and puts
+  /// it back after a sign-in); the built-in skins are shared.
+  static List<Skin> get customSkins {
+    final pid = Store.profileId;
+    // Read again when another profile is active, or when the stored list changed behind our back (signing in to another
+    // account wipes it).
+    if (_custom == null || _customFor != pid || Store.strGet(_customKey) != _customRaw) {
+      _customFor = pid;
+      _customRaw = Store.strGet(_customKey);
+      _custom = _loadCustom();
+    }
+    return _custom!;
+  }
+
+  /// The built-in skins, then the ones this profile has.
   static List<Skin> get all => [...builtIn, ...customSkins];
 
   static List<Skin> _loadCustom() {
     final out = <Skin>[];
     try {
-      final raw = Store.strGet(_customKey, scoped: false);
-      if (raw == null || raw.isEmpty) return out;
+      final raw = Store.strGet(_customKey);
+      if (raw == null || raw.isEmpty) return _inheritInUse(out);
       for (final e in jsonDecode(raw) as List) {
         if (e is! Map) continue;
-        final id = '${e['id'] ?? ''}';
-        if (!id.startsWith('custom-') && !id.startsWith(installedPrefix)) continue;
-        final tokens = SkinJson.tokensFrom((e['tokens'] as Map?)?.cast<String, dynamic>() ?? const {});
-        if (tokens == null) continue;
-        out.add(Skin(id, '${e['name'] ?? 'My skin'}', '${e['description'] ?? ''}', tokens,
-            custom: true, author: '${e['author'] ?? ''}', version: '${e['version'] ?? ''}', source: (e['source'] as Map?)?.cast<String, dynamic>()));
+        final s = _fromStored(e);
+        if (s != null) out.add(s);
       }
     } catch (_) {}
     return out;
   }
 
-  static Future<void> _saveCustom() => Store.strSet(
-        _customKey,
-        jsonEncode([
-          for (final s in customSkins)
+  static Skin? _fromStored(Map e) {
+    final id = '${e['id'] ?? ''}';
+    if (!id.startsWith('custom-') && !id.startsWith(installedPrefix)) return null;
+    final tokens = SkinJson.tokensFrom((e['tokens'] as Map?)?.cast<String, dynamic>() ?? const {});
+    if (tokens == null) return null;
+    final u = e['updated'];
+    return Skin(id, '${e['name'] ?? 'My skin'}', '${e['description'] ?? ''}', tokens,
+        custom: true,
+        author: '${e['author'] ?? ''}',
+        version: '${e['version'] ?? ''}',
+        source: (e['source'] as Map?)?.cast<String, dynamic>(),
+        updated: u is num && u > 0 ? u.toInt() : 1); // a skin from before skins synced: older than anything in the cloud
+  }
+
+  /// Skins used to be shared by every profile on the device. A profile with no list of its own yet (not the first one, which
+  /// owns the old list) keeps the one it was using, so it does not drop back to PEK Ember.
+  static List<Skin> _inheritInUse(List<Skin> out) {
+    if (Store.profileId == 'p1') return out;
+    final use = Store.strGet('pek_skin') ?? '';
+    if (!use.startsWith('custom-') && !use.startsWith(installedPrefix)) return out;
+    try {
+      final raw = Store.strGet(_customKey, scoped: false); // the first profile's list is stored under the plain key
+      if (raw == null) return out;
+      for (final e in jsonDecode(raw) as List) {
+        if (e is Map && '${e['id']}' == use) {
+          final s = _fromStored(e);
+          if (s != null) out.add(s);
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
+  static Future<void> _saveCustom(List<Skin> list) {
+    final text = jsonEncode([
+          for (final s in list)
             {
               'id': s.id,
               'name': s.name,
@@ -112,34 +164,170 @@ class Skins {
               'description': s.description,
               'tokens': SkinJson.tokensTo(s.tokens),
               if (s.source != null) 'source': s.source,
+              'updated': s.updated,
             },
-        ]),
-        scoped: false,
-      );
+        ]);
+    _customRaw = text;
+    return Store.strSet(_customKey, text);
+  }
+
+  /// Skins deleted here: id -> when. Kept so the delete reaches the cloud and the other devices.
+  static Map<String, int> tombs() => {
+        for (final e in Store.jsonMap(_tombKey).entries)
+          if (e.value is num) e.key: (e.value as num).toInt(),
+      };
+
+  static Future<void> _saveTombs(Map<String, int> t) => Store.setJsonMap(_tombKey, t);
 
   /// A free id for a new skin.
   static String newId() => 'custom-${DateTime.now().millisecondsSinceEpoch.toRadixString(36)}';
 
-  /// Adds a skin or replaces the one with the same id. When it is the skin in use, the app repaints at once.
+  /// Adds a skin or replaces the one with the same id, stamped with the time now. When it is the skin in use, the app
+  /// repaints at once. The next cloud sync puts it in the account.
   static Future<void> saveCustom(Skin skin) async {
     final list = [...customSkins];
     final i = list.indexWhere((s) => s.id == skin.id);
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final stamped = skin.copyWith(updated: i >= 0 && list[i].updated >= now ? list[i].updated + 1 : now);
     if (i >= 0) {
-      list[i] = skin;
+      list[i] = stamped;
     } else {
-      list.add(skin);
+      list.add(stamped);
     }
     _custom = list;
-    await _saveCustom();
+    await _saveCustom(list);
+    final t = tombs();
+    if (t.remove(skin.id) != null) await _saveTombs(t);
     changes.value++;
   }
 
-  /// Deletes a made skin. A profile that was using it goes back to PEK Ember.
+  /// Deletes a skin. A profile that was using it goes back to PEK Ember. The delete follows the skin to the cloud.
   static Future<void> deleteCustom(String id) async {
-    _custom = customSkins.where((s) => s.id != id).toList();
-    await _saveCustom();
+    final had = customSkins.any((s) => s.id == id);
+    final rest = customSkins.where((s) => s.id != id).toList();
+    _custom = rest;
+    await _saveCustom(rest);
+    if (had) {
+      final t = tombs();
+      t[id] = DateTime.now().millisecondsSinceEpoch;
+      await _saveTombs(t);
+    }
     if (Store.strGet('pek_skin') == id) await Store.strSet('pek_skin', 'ember');
     changes.value++;
+  }
+
+  // ---------------------------------------------------------------- cloud copy (item `k|<id>` of the profile)
+
+  static String _clip(Object? v, int max) {
+    final t = '${v ?? ''}'.replaceAll(RegExp(r'[\u0000-\u001F\u007F]'), ' ').trim();
+    return t.length > max ? t.substring(0, max) : t;
+  }
+
+  /// A skin as the cloud stores it: the name, the details and the colours as one string of #rrggbbaa values.
+  /// The cloud keeps 2000 characters per item; this stays far under that.
+  static Map<String, dynamic> syncValue(Skin s) {
+    final t = s.tokens;
+    final colors = [t.bg, t.bgElevated, t.surface, t.surfaceFocused, t.border, t.borderFocus, t.text, t.textMuted, t.accent, t.accentGlow, t.overlay, t.shadow, t.glassStrong]; // = SkinJson.colorKeys
+    final src = s.source;
+    return {
+      'name': _clip(s.name, 60),
+      'desc': _clip(s.description, 200),
+      'author': _clip(s.author, 80),
+      'ver': _clip(s.version, 20),
+      'c': [for (final c in colors) SkinJson.hex(c, alpha: true).substring(1)].join(),
+      'r': s.tokens.radius.round(),
+      if (src != null)
+        'src': {
+          'type': src['type'] == 'github' ? 'github' : 'zip',
+          if (src['type'] == 'github') ...{'owner': _clip(src['owner'], 60), 'repo': _clip(src['repo'], 80), 'tag': _clip(src['tag'], 60), 'kind': _clip(src['kind'], 10)},
+        },
+    };
+  }
+
+  /// A skin from a cloud item, or null when it is not a usable one. Nothing from the cloud is trusted: ids, sizes and colours are checked.
+  static Skin? cleanSync(String id, dynamic d, int updated) {
+    if (!validId(id) || d is! Map) return null;
+    final c = '${d['c'] ?? ''}';
+    final keys = SkinJson.colorKeys;
+    if (c.length != keys.length * 8 || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(c)) return null;
+    final r = d['r'];
+    final map = <String, dynamic>{
+      for (var i = 0; i < keys.length; i++) keys[i]: '#${c.substring(i * 8, i * 8 + 8)}',
+      'radius': '${(r is num ? r.toDouble() : 16.0).clamp(0.0, 40.0).round()}px',
+    };
+    final tokens = SkinJson.tokensFrom(map);
+    if (tokens == null) return null;
+    final name = _clip(d['name'], 60);
+    Map<String, dynamic>? source;
+    final sr = d['src'];
+    if (sr is Map) {
+      source = sr['type'] == 'github'
+          ? {'type': 'github', 'owner': _clip(sr['owner'], 60), 'repo': _clip(sr['repo'], 80), 'tag': _clip(sr['tag'], 60), 'kind': _clip(sr['kind'], 10)}
+          : {'type': 'zip'};
+    }
+    return Skin(id, name.isEmpty ? 'My skin' : name, _clip(d['desc'], 200), tokens,
+        custom: true, author: _clip(d['author'], 80), version: _clip(d['ver'], 20), source: source, updated: updated);
+  }
+
+  /// Takes in the skins the cloud sent for this profile. A skin the cloud has a newer copy of is replaced; one deleted in the
+  /// cloud is deleted here unless it was changed here since. Returns whether anything changed here, and which cloud items
+  /// this device now has in the same state (so they are not sent back).
+  static Future<({bool changed, Map<String, int> inSync})> applyCloud(List<Map<String, dynamic>> items) async {
+    final inSync = <String, int>{};
+    var changed = false;
+    var list = [...customSkins];
+    final t = tombs();
+    var tombsChanged = false;
+    for (final r in items) {
+      final key = '${r['key']}';
+      if (!key.startsWith('k|')) continue;
+      final id = key.substring(2);
+      if (!validId(id)) continue;
+      final ru = r['updated'] is num ? (r['updated'] as num).toInt() : 0;
+      if (ru <= 0) continue;
+      final gone = r['deleted'] == true || (r['deleted'] is num && r['deleted'] != 0);
+      final i = list.indexWhere((s) => s.id == id);
+      final lu = i >= 0 ? list[i].updated : 0;
+      final tu = t[id] ?? 0;
+      if (gone) {
+        if (i >= 0 && ru > lu) {
+          list.removeAt(i);
+          changed = true;
+          inSync[key] = ru;
+        } else if (i < 0) {
+          if (tu > 0 && tu <= ru) {
+            t.remove(id);
+            tombsChanged = true;
+          }
+          if (tu <= ru) inSync[key] = ru;
+        }
+        continue;
+      }
+      if (i >= 0) {
+        if (ru == lu) inSync[key] = ru;
+        if (ru <= lu) continue; // ours is newer: it gets sent
+      } else {
+        if (tu >= ru) continue; // deleted here after the cloud's copy was made: the delete gets sent
+        if (list.length >= maxCustom) continue;
+      }
+      final skin = cleanSync(id, r['data'], ru);
+      if (skin == null) continue;
+      if (i >= 0) {
+        list[i] = skin;
+      } else {
+        list.add(skin);
+        if (t.remove(id) != null) tombsChanged = true;
+      }
+      changed = true;
+      inSync[key] = ru;
+    }
+    if (changed) {
+      _custom = list;
+      await _saveCustom(list);
+    }
+    if (tombsChanged) await _saveTombs(t);
+    if (changed) changes.value++;
+    return (changed: changed, inSync: inSync);
   }
 
   /// Bumped when the skin changes (the whole app repaints with the new tokens).
@@ -165,7 +353,7 @@ class Skins {
 /// skin.json <-> tokens, in the same shape the web UI's skins use (colours as #rrggbb / #rrggbbaa / rgba(), radius as "14px"),
 /// so a skin made here can be installed in the web build and the other way round.
 class SkinJson {
-  static const _colorKeys = ['bg', 'bgElevated', 'surface', 'surfaceFocused', 'border', 'borderFocus', 'text', 'textMuted', 'accent', 'accentGlow', 'overlay', 'shadow', 'glassStrong'];
+  static const colorKeys = ['bg', 'bgElevated', 'surface', 'surfaceFocused', 'border', 'borderFocus', 'text', 'textMuted', 'accent', 'accentGlow', 'overlay', 'shadow', 'glassStrong'];
 
   static String hex(Color c, {bool alpha = false}) {
     String two(int v) => v.toRadixString(16).padLeft(2, '0');
@@ -201,7 +389,7 @@ class SkinJson {
     final base = (bg ?? Skins.ember.bg).computeLuminance() < 0.5 ? Skins.ember : PekTokens.light;
     Color pick(String k, Color d) => j[k] is String ? (parseColor(j[k] as String) ?? d) : d;
     var any = false;
-    for (final k in _colorKeys) {
+    for (final k in colorKeys) {
       if (j[k] is String && parseColor(j[k] as String) != null) any = true;
     }
     if (!any && j['radius'] == null) return null;
