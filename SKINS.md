@@ -84,3 +84,57 @@ save. A made skin appears in the Appearance list next to the built-in ones, and 
 - **Paste skin.json** opens a skin made in the web build in the maker, ready to save. Only the name, description and
   colours are used; a skin's own `skin.css` styling only works in the web build.
 - Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused.
+
+## Making skins from code
+
+Three ways, all giving the same `skin.json` / .zip, so a skin made by any of them installs in the web build and in the Flutter app.
+
+**1. From the command line: `tools/make_skin.py`** (Python 3, no packages). It works out the colours you leave out, refuses
+text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` (+ `skin.css`) into a .zip.
+
+```
+# four colours, the rest follows
+tools/make_skin.py new --name Sunset --bg '#1a0f14' --surface '#2a1820' --text '#fff1e8' --accent '#ffb347' --radius 14
+
+# one accent is enough (dark by default, --light for a light skin); a hue works too; --glow adds a background glow (web only)
+tools/make_skin.py new --name Ocean --accent '#38bdf8'
+tools/make_skin.py new --name Moss --hue 140 --light
+
+# many skins from one JSON list, then check one
+tools/make_skin.py batch skins.json --out dist/
+tools/make_skin.py validate dist/sunset.zip
+```
+
+`--print` shows the skin.json without writing a file, `--folder` writes a skin folder instead of a .zip, `--css file.css` and
+`--file image.png` add styling and images, `--force` allows low-contrast text. A batch file is a list of
+`{"name", "accent", "bg", "surface", "text", "radius", "mode", "hue", "glow", "tokens": {...}, "css"}`.
+
+**2. From Dart: `SkinBuilder`** (`flutter_ui/lib/src/skin_builder.dart`).
+
+```dart
+final sunset = SkinBuilder('Sunset')
+    .colors(bg: '#1a0f14', surface: '#2a1820', text: '#fff1e8', accent: '#ffb347')
+    .corners(14)
+    .by('Me');
+await sunset.save();             // shows up in Settings > Appearance
+final zip = sunset.zip();        // an installable .zip
+final json = sunset.skinJson();  // the skin.json text
+
+final ocean = SkinBuilder.fromAccent('Ocean', const Color(0xFF38BDF8));   // one accent
+final moss = SkinBuilder.fromHue('Moss', 140, dark: false);              // one hue
+await SkinBuilder.installAll([ocean, moss]);
+```
+
+**3. By hand**: write `skin.json` as above.
+
+## Installing skins in the Flutter app
+
+Settings > Appearance has **Install skin from .zip** and **Install skin from GitHub**, the same flow as the web build:
+the same zip picker (this device, library folders and network folders), the same GitHub lookup (latest release `.zip`, else the
+source code), the same checks (`flutter_ui/lib/src/skin_install.dart`, a port of `backend/skin_install.h` and
+`www/skin_installer.js`), and the same confirm screen. A skin from GitHub is labelled "unverified". Installing the same
+skin again updates it; hold it in the list to remove it.
+
+What differs: the Flutter UI cannot draw CSS, so an installed skin gives the app its **colours and corner size** only
+(`skin.css`, `bgImage` and the glass tokens are checked but not drawn). A skin with no colours or radius in `skin.json` is refused
+there with a message saying to use the web build. The skin is kept on the device (not in the server's `skins/` folder).

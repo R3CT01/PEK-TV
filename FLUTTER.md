@@ -101,7 +101,7 @@ Plugins > Open, or its own entry in the menu / More page.
 Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the same warning and permissions screens as the web UI (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
 
 ## Still only in the classic UI
-Plugins that only have a `ui.js`, skins (the store's skin shelf and installable skin packages), installing from GitHub or a .zip, plugin dashboard tiles for plugins that only have a `ui.js` (plugins with a Python screen get a tile).
+Plugins that only have a `ui.js`, the store's skin shelf, plugin dashboard tiles for plugins that only have a `ui.js` (plugins with a Python screen get a tile).
 
 ## TV mode (port of `www/tv_mode.js`)
 Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,
@@ -133,3 +133,11 @@ plugins, waits for the server, opens `FlutterHostActivity` and finishes. No web 
 switch, no "Open classic UI" buttons. If the server does not start, or the Flutter screen cannot open, a plain message with a
 **Try again** button is shown. `SplashOverlay.kt` (it drew over the web view) is gone. The `www/` folder is not used by the app any
 more, but the server still serves it; it can be deleted in a later step.
+
+## Skin install and skin builder
+- **Install skin from .zip / GitHub** (`skin_install.dart`, `skin_install_ui.dart`, Settings > Appearance): ports of `www/skin_installer.js` and `backend/skin_install.h`.
+  It reuses the plugin zip reader (`PluginZip.read`), the zip picker and the GitHub flow (`plugin_install_ui.dart`, now with a `skin:` switch;
+  `PekGithub.downloadBytes` is the shared download). Colours and corner size are stored on the device like made skins (id `pkg-<slug>`);
+  `skin.css` is checked but not drawn. GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
+- **`SkinBuilder`** (`skin_builder.dart`) makes skins from code and writes installable .zips; `tools/make_skin.py` does the same from the command line. See SKINS.md.
+- Tests: `flutter test test/skin_install_test.dart`.

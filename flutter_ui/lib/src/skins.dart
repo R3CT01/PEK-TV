@@ -8,15 +8,26 @@ import 'store.dart';
 import 'tokens.dart';
 
 class Skin {
-  const Skin(this.id, this.name, this.description, this.tokens, {this.custom = false, this.author = ''});
+  const Skin(this.id, this.name, this.description, this.tokens, {this.custom = false, this.author = '', this.version = '', this.source});
   final String id;
   final String name;
   final String description;
   final PekTokens tokens;
 
-  /// Made in the Skin maker (or pasted from a skin.json): can be edited, copied and deleted.
+  /// Made in the Skin maker, pasted from a skin.json, or installed from a .zip / GitHub: can be edited, copied and deleted.
   final bool custom;
-  final String author;
+  final String author, version;
+
+  /// Where an installed skin came from: null (made here), {'type': 'zip'} or {'type': 'github', 'owner', 'repo', 'tag'}.
+  /// A skin from GitHub is shown as "unverified", like the web UI (`PekSkinSources`).
+  final Map<String, dynamic>? source;
+
+  bool get fromGithub => source?['type'] == 'github';
+  bool get installed => id.startsWith(Skins.installedPrefix);
+
+  Skin copyWith({String? id, String? name, String? description, PekTokens? tokens, String? author, String? version, Map<String, dynamic>? source}) =>
+      Skin(id ?? this.id, name ?? this.name, description ?? this.description, tokens ?? this.tokens,
+          custom: custom, author: author ?? this.author, version: version ?? this.version, source: source ?? this.source);
 }
 
 /// The built-in skins (the colours of skins/*/skin.json and style.css). Each profile remembers its own.
@@ -59,6 +70,10 @@ class Skins {
   // ---------------------------------------------------------------- the skins people made
 
   static const _customKey = 'pek_custom_skins';
+
+  /// Ids of skins installed from a .zip or GitHub start with this (made ones start with "custom-"). The id after it is
+  /// the same slug the web UI uses (folder name, else skin name), so installing the same skin again updates it.
+  static const installedPrefix = 'pkg-';
   static List<Skin>? _custom;
 
   /// The skins made in the Skin maker. Shared by every profile on the device; each profile still picks its own.
@@ -75,10 +90,11 @@ class Skins {
       for (final e in jsonDecode(raw) as List) {
         if (e is! Map) continue;
         final id = '${e['id'] ?? ''}';
-        if (!id.startsWith('custom-')) continue;
+        if (!id.startsWith('custom-') && !id.startsWith(installedPrefix)) continue;
         final tokens = SkinJson.tokensFrom((e['tokens'] as Map?)?.cast<String, dynamic>() ?? const {});
         if (tokens == null) continue;
-        out.add(Skin(id, '${e['name'] ?? 'My skin'}', '${e['description'] ?? ''}', tokens, custom: true, author: '${e['author'] ?? ''}'));
+        out.add(Skin(id, '${e['name'] ?? 'My skin'}', '${e['description'] ?? ''}', tokens,
+            custom: true, author: '${e['author'] ?? ''}', version: '${e['version'] ?? ''}', source: (e['source'] as Map?)?.cast<String, dynamic>()));
       }
     } catch (_) {}
     return out;
@@ -87,7 +103,16 @@ class Skins {
   static Future<void> _saveCustom() => Store.strSet(
         _customKey,
         jsonEncode([
-          for (final s in customSkins) {'id': s.id, 'name': s.name, 'author': s.author, 'description': s.description, 'tokens': SkinJson.tokensTo(s.tokens)},
+          for (final s in customSkins)
+            {
+              'id': s.id,
+              'name': s.name,
+              'author': s.author,
+              'version': s.version,
+              'description': s.description,
+              'tokens': SkinJson.tokensTo(s.tokens),
+              if (s.source != null) 'source': s.source,
+            },
         ]),
         scoped: false,
       );
@@ -229,7 +254,7 @@ class SkinJson {
   static String toText(Skin skin) => const JsonEncoder.withIndent('  ').convert({
         'name': skin.name,
         'author': skin.author.isEmpty ? 'PEK TV' : skin.author,
-        'version': '1.0.0',
+        'version': skin.version.isEmpty ? '1.0.0' : skin.version,
         'description': skin.description,
         'pek_api': 1,
         'tokens': tokensTo(skin.tokens),

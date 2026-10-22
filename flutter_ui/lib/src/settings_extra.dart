@@ -6,6 +6,8 @@ import 'activity.dart';
 import 'api.dart';
 import 'common.dart';
 import 'mpv.dart';
+import 'plugin_github.dart' show PekGithub;
+import 'plugin_install_ui.dart' show openGithubInstall, openZipInstall;
 import 'skin_maker.dart';
 import 'skins.dart';
 import 'store.dart';
@@ -395,7 +397,7 @@ class AppearanceSection extends StatelessWidget {
             Skins.set(s.id);
           }),
           gap,
-          if (s.custom)
+          if (s.custom && !s.installed) // an installed skin is replaced when it is installed again, so changes go in a copy
             PekButton(label: 'Edit', onTap: () {
               Navigator.pop(c);
               openSkinMaker(context, edit: s);
@@ -413,7 +415,7 @@ class AppearanceSection extends StatelessWidget {
           }),
           if (s.custom) ...[
             gap,
-            PekButton(label: 'Delete', onTap: () {
+            PekButton(label: s.installed ? 'Remove' : 'Delete', onTap: () {
               Navigator.pop(c);
               _confirmDelete(context, s);
             }),
@@ -425,11 +427,11 @@ class AppearanceSection extends StatelessWidget {
 
   Future<void> _confirmDelete(BuildContext context, Skin s) {
     final p = context.pek;
-    return _dialog(context, 'Delete \u201c${s.name}\u201d?', (c) => [
-          Text('The skin is removed from this device. Profiles that use it go back to PEK Ember.', style: TextStyle(color: p.tokens.textMuted)),
+    return _dialog(context, '${s.installed ? 'Remove' : 'Delete'} \u201c${s.name}\u201d?', (c) => [
+          Text('The skin is removed from this device. Profiles that use it go back to PEK Ember.${s.installed ? ' You can install it again from its .zip or GitHub.' : ''}', style: TextStyle(color: p.tokens.textMuted)),
           SizedBox(height: 1.1 * p.rem),
           Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
-            PekButton(label: 'Delete', primary: true, shrink: true, onTap: () {
+            PekButton(label: s.installed ? 'Remove' : 'Delete', primary: true, shrink: true, onTap: () {
               Navigator.pop(c);
               Skins.deleteCustom(s.id);
             }),
@@ -491,6 +493,22 @@ class AppearanceSection extends StatelessWidget {
     );
   }
 
+  /// Under the skin's name: its description, and where it came from when it was installed (GitHub skins are "unverified").
+  String _subtitle(Skin s) {
+    final text = s.custom ? (s.description.isEmpty ? (s.installed ? 'Installed' : 'Made by you') : s.description) : s.description;
+    if (s.fromGithub) return '$text \u00b7 Unverified, from GitHub: ${s.source?['owner']}/${s.source?['repo']}';
+    if (s.installed && s.author.isNotEmpty) return '$text \u00b7 by ${s.author}';
+    return text;
+  }
+
+  Future<void> _github(BuildContext context) async {
+    if (!PekGithub.enabled) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Installing from GitHub is switched off in Settings.')));
+      return;
+    }
+    await openGithubInstall(context, skin: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
@@ -499,12 +517,12 @@ class AppearanceSection extends StatelessWidget {
       listenable: Skins.changes,
       builder: (context, _) => Section(
         title: 'Appearance',
-        hint: 'The look of the app. Each profile keeps its own. Hold a skin for more (edit, copy, delete).',
+        hint: 'The look of the app. Each profile keeps its own. Hold a skin for more (edit, copy, delete). A skin from a .zip or GitHub gives this app its colours and corner size; its own styling (skin.css) only works in the web build.',
         children: [
           for (final s in Skins.all)
             ListRow(
               title: s.name,
-              subtitle: s.custom ? (s.description.isEmpty ? 'Made by you' : s.description) : s.description,
+              subtitle: _subtitle(s),
               onTap: () => Skins.set(s.id),
               onLongPress: () => _manage(context, s),
               trailing: Icon(s.id == Skins.currentId ? Icons.check_circle : Icons.circle_outlined, color: s.id == Skins.currentId ? t.accent : t.textMuted),
@@ -513,6 +531,8 @@ class AppearanceSection extends StatelessWidget {
           Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
             PekButton(label: 'Make a skin', primary: true, shrink: true, onTap: () => openSkinMaker(context)),
             PekButton(label: 'Paste skin.json', shrink: true, onTap: () => _import(context)),
+            PekButton(label: 'Install skin from .zip', shrink: true, onTap: () => openZipInstall(context, skin: true)),
+            PekButton(label: 'Install skin from GitHub', shrink: true, onTap: () => _github(context)),
           ]),
         ],
       ),

@@ -103,8 +103,8 @@ class PekGithub {
     return GithubRelease(owner: owner, repo: repo, tag: tag, options: options);
   }
 
-  /// Downloads one option through the server and unpacks it like a picked .zip.
-  static Future<PreparedPlugin> download(GithubRelease rel, GithubOption opt) async {
+  /// Downloads one option through the server and returns the zip's bytes (a plugin or a skin: the caller unpacks it).
+  static Future<Uint8List> downloadBytes(GithubRelease rel, GithubOption opt) async {
     http.Response r;
     try {
       r = await http.post(Uri.parse('${Api.base}/api/plugins/github-zip'), body: {'owner': rel.owner, 'repo': rel.repo, 'url': opt.url}).timeout(const Duration(seconds: 90));
@@ -119,7 +119,12 @@ class PekGithub {
       } catch (_) {}
       throw StoreException(msg.isEmpty ? 'The download failed.' : msg);
     }
-    final Uint8List bytes = r.bodyBytes;
+    return r.bodyBytes;
+  }
+
+  /// Downloads one option through the server and unpacks it like a picked .zip.
+  static Future<PreparedPlugin> download(GithubRelease rel, GithubOption opt) async {
+    final bytes = await downloadBytes(rel, opt);
     var prep = PluginZip.prepare(bytes, fileName: opt.kind == 'asset' ? opt.label : '${rel.repo}.zip');
     // A source zip unpacks into a folder named after the commit, which changes every time: use the repository name so
     // a later update replaces the same plugin.

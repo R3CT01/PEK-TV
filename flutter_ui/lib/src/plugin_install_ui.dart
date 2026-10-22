@@ -10,6 +10,8 @@ import 'plugin_store.dart';
 import 'plugin_store_ui.dart';
 import 'plugin_zip.dart';
 import 'settings_extra.dart' show ToggleRow;
+import 'skin_install.dart';
+import 'skin_install_ui.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -37,16 +39,19 @@ Widget _muted(BuildContext context, String t) {
 
 /// Plugins > Install from .zip: pick a plugin .zip on this device or on a network folder, then the usual install screens.
 /// Same as `startPluginInstall` in `www/app_plugins.js`. Nothing is installed until the person confirms on the permissions screen.
-Future<void> openZipInstall(BuildContext context) {
+///
+/// [skin] true: the same picker, but the file is opened as a skin (Settings > Appearance > Install skin from .zip).
+Future<void> openZipInstall(BuildContext context, {bool skin = false}) {
   return Navigator.push<void>(
     context,
-    MaterialPageRoute<void>(builder: (_) => SubScreen(title: 'Install from .zip', body: Builder(builder: (c) => _ZipPicker(padding: c.pek.pagePad)))),
+    MaterialPageRoute<void>(builder: (_) => SubScreen(title: 'Install from .zip', body: Builder(builder: (c) => _ZipPicker(padding: c.pek.pagePad, skin: skin)))),
   );
 }
 
 class _ZipPicker extends StatefulWidget {
-  const _ZipPicker({required this.padding});
+  const _ZipPicker({required this.padding, this.skin = false});
   final EdgeInsets padding;
+  final bool skin;
   @override
   State<_ZipPicker> createState() => _ZipPickerState();
 }
@@ -95,6 +100,19 @@ class _ZipPickerState extends State<_ZipPicker> {
       final bytes = await ZipPicker.fetch(e.path);
       if (!mounted) return;
       setState(() => _loading = false);
+      if (widget.skin) {
+        await Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+            builder: (_) => SubScreen(
+              title: e.name,
+              body: Builder(builder: (c) => SkinInstallPage(load: () async => SkinInstaller.prepare(bytes, fileName: e.name), padding: c.pek.pagePad)),
+            ),
+          ),
+        );
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
       await Navigator.push<void>(
         context,
         MaterialPageRoute<void>(
@@ -126,7 +144,9 @@ class _ZipPickerState extends State<_ZipPicker> {
     if (l == null) {
       children.addAll([
         const Heading('Install from .zip'),
-        _muted(context, 'Choose the plugin\u2019s .zip file. You will see what it asks for before anything is installed.'),
+        _muted(context, widget.skin
+            ? 'Choose the skin\u2019s .zip file. You will see what it is before anything is installed.'
+            : 'Choose the plugin\u2019s .zip file. You will see what it asks for before anything is installed.'),
         ListRow(autofocus: true, title: 'This device', subtitle: 'Downloads and other folders on this device', onTap: () => _go('@local')),
         for (final s in _sources) ListRow(title: s, subtitle: 'Media source', onTap: () => _go(s)),
       ]);
@@ -159,22 +179,25 @@ class _ZipPickerState extends State<_ZipPicker> {
 
 /// Plugins > Install from GitHub: type owner/repo, pick a release file, then the usual install screens.
 /// Same as `openGithubInstall` in `www/github_install.js`. PEK TV lists nothing: the person types the name.
-Future<void> openGithubInstall(BuildContext context) {
+///
+/// [skin] true: the release file is opened as a skin (Settings > Appearance > Install skin from GitHub).
+Future<void> openGithubInstall(BuildContext context, {bool skin = false}) {
   if (!PekGithub.enabled) {
     ScaffoldMessenger.maybeOf(context)?.showSnackBar(const SnackBar(content: Text('Installing from GitHub is switched off in Settings.')));
     return Future<void>.value();
   }
   return Navigator.push<void>(
     context,
-    MaterialPageRoute<void>(builder: (_) => SubScreen(title: 'Install from GitHub', body: Builder(builder: (c) => _GithubFlow(padding: c.pek.pagePad)))),
+    MaterialPageRoute<void>(builder: (_) => SubScreen(title: 'Install from GitHub', body: Builder(builder: (c) => _GithubFlow(padding: c.pek.pagePad, skin: skin)))),
   );
 }
 
 enum _GhStage { warn, enter, pick }
 
 class _GithubFlow extends StatefulWidget {
-  const _GithubFlow({required this.padding});
+  const _GithubFlow({required this.padding, this.skin = false});
   final EdgeInsets padding;
+  final bool skin;
   @override
   State<_GithubFlow> createState() => _GithubFlowState();
 }
@@ -201,7 +224,7 @@ class _GithubFlowState extends State<_GithubFlow> {
     if (_busy) return;
     final parsed = PekGithub.parseRepo(_text.text);
     if (parsed == null) {
-      setState(() => _error = 'Type it like owner/repo, for example someone/my-plugin.');
+      setState(() => _error = 'Type it like owner/repo, for example someone/${widget.skin ? 'my-skin' : 'my-plugin'}.');
       return;
     }
     setState(() {
@@ -252,6 +275,23 @@ class _GithubFlowState extends State<_GithubFlow> {
   }
 
   Future<void> _install(GithubRelease rel, GithubOption opt) {
+    if (widget.skin) {
+      return Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SubScreen(
+            title: '${rel.owner}/${rel.repo}',
+            body: Builder(
+              builder: (c) => SkinInstallPage(
+                load: () => SkinInstaller.fromGithub(rel, opt),
+                notice: (prep, existing) => skinGithubNotice(rel.owner, rel.repo, rel.tag, opt.size, prep, existing, source: opt.kind == 'source'),
+                padding: c.pek.pagePad,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return Navigator.push<void>(
       context,
       MaterialPageRoute<void>(
@@ -280,12 +320,18 @@ class _GithubFlowState extends State<_GithubFlow> {
       case _GhStage.warn:
         children.addAll([
           const Heading('Before you install from GitHub'),
-          _panel(context, const [
-            'This installs a plugin straight from a GitHub repository that you name.',
-            'PEK TV did not make, review or approve these plugins, and they are not part of the PEK Store. Each one is published by its own developer, who is responsible for it.',
-            'PEK TV still runs it in a sandbox and shows you what it asks for before anything is installed, but it cannot check what the plugin really does. Only install plugins from developers you trust.',
-            'Make sure you have the right to use whatever the plugin gives you access to.',
-          ]),
+          _panel(context, widget.skin
+              ? const [
+                  'This installs a skin straight from a GitHub repository that you name.',
+                  'PEK TV did not make, review or approve these skins. Each one is published by its own developer, who is responsible for it.',
+                  'A skin can only change how PEK TV looks: it can\u2019t run code or reach the network, and PEK TV shows you what it is before anything is installed.',
+                ]
+              : const [
+                  'This installs a plugin straight from a GitHub repository that you name.',
+                  'PEK TV did not make, review or approve these plugins, and they are not part of the PEK Store. Each one is published by its own developer, who is responsible for it.',
+                  'PEK TV still runs it in a sandbox and shows you what it asks for before anything is installed, but it cannot check what the plugin really does. Only install plugins from developers you trust.',
+                  'Make sure you have the right to use whatever the plugin gives you access to.',
+                ]),
           SizedBox(height: p.rem),
           Wrap(spacing: 0.6 * p.rem, runSpacing: 0.6 * p.rem, children: [
             PekButton(label: 'I understand, continue', primary: true, autofocus: true, onTap: _accept),
@@ -295,12 +341,14 @@ class _GithubFlowState extends State<_GithubFlow> {
       case _GhStage.enter:
         children.addAll([
           const Heading('Install from GitHub'),
-          _muted(context, 'Type the developer\u2019s GitHub name, a slash, and the plugin\u2019s repository name, like someone/my-plugin. Pasting a github.com link works too.'),
+          _muted(context, widget.skin
+              ? 'Type the developer\u2019s GitHub name, a slash, and the skin\u2019s repository name, like someone/my-skin. Pasting a github.com link works too.'
+              : 'Type the developer\u2019s GitHub name, a slash, and the plugin\u2019s repository name, like someone/my-plugin. Pasting a github.com link works too.'),
           PekField(label: 'GitHub repository', controller: _text, hint: 'owner/repo', autofocus: true, onSubmitted: _find),
-          _muted(context, 'These plugins are unverified: PEK TV does not review them.'),
+          _muted(context, widget.skin ? 'These skins are unverified: PEK TV does not review them.' : 'These plugins are unverified: PEK TV does not review them.'),
           if (_error.isNotEmpty) Padding(padding: EdgeInsets.only(bottom: p.rem), child: _panel(context, [_error])),
           if (_note.isNotEmpty) _muted(context, _note),
-          Wrap(children: [PekButton(label: _busy ? 'Working\u2026' : 'Find plugin', primary: true, onTap: _busy ? null : _find)]),
+          Wrap(children: [PekButton(label: _busy ? 'Working\u2026' : (widget.skin ? 'Find skin' : 'Find plugin'), primary: true, onTap: _busy ? null : _find)]),
         ]);
       case _GhStage.pick:
         final rel = _release!;
@@ -344,8 +392,8 @@ class _GithubInstallSectionState extends State<GithubInstallSection> {
   Widget build(BuildContext context) {
     final on = PekGithub.enabled;
     return Section(
-      title: 'Plugins from GitHub',
-      hint: 'Lets you install a plugin by typing its GitHub name (Plugins > Install from GitHub). These plugins are not reviewed by PEK TV.',
+      title: 'Plugins and skins from GitHub',
+      hint: 'Lets you install a plugin or a skin by typing its GitHub name (Plugins > Install from GitHub, Appearance > Install skin from GitHub). They are not reviewed by PEK TV.',
       children: [ToggleRow(title: 'Install from GitHub', subtitle: on ? 'On' : 'Off', on: on, onTap: _flip)],
     );
   }
