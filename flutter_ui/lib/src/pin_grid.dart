@@ -76,12 +76,13 @@ class PinActions {
 
 /// A More tile for one pin slot. Same size, padding and look as [PekCard]; the empty look is translucent with a plus.
 class PinTile extends StatefulWidget {
-  const PinTile({super.key, required this.onTap, this.onLongPress, this.title, this.subtitle, this.leading});
+  const PinTile({super.key, required this.onTap, this.onLongPress, this.title, this.subtitle, this.leading, this.fill});
   final VoidCallback onTap;
   final VoidCallback? onLongPress; // null = empty slot
   final String? title;
   final String? subtitle;
   final Widget? leading;
+  final Widget? fill; // full-bleed picture: fills the whole tile, the name sits on a dark strip along the bottom
 
   @override
   State<PinTile> createState() => _PinTileState();
@@ -146,7 +147,7 @@ class _PinTileState extends State<PinTile> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 100),
           clipBehavior: Clip.antiAlias,
-          padding: EdgeInsets.all(pad),
+          padding: widget.fill != null && !empty ? EdgeInsets.zero : EdgeInsets.all(pad),
           decoration: BoxDecoration(
             color: _focus ? Color.alphaBlend(t.surfaceFocused, base) : base,
             borderRadius: BorderRadius.circular(t.radius),
@@ -154,6 +155,28 @@ class _PinTileState extends State<PinTile> {
           ),
           child: empty
               ? Center(child: Icon(Icons.add, size: 3 * rem, color: t.textMuted.withAlpha(110)))
+              : widget.fill != null
+              ? Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    widget.fill!,
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0x00000000), Color(0xCC000000)]),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(0.75 * rem, 1.5 * rem, 0.75 * rem, 0.6 * rem),
+                          child: Text(widget.title!, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 1.0 * rem, fontWeight: FontWeight.w600, color: Colors.white, letterSpacing: -0.2)),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,

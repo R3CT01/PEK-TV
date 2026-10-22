@@ -349,15 +349,24 @@ class _InstallPageState extends State<PluginInstallPage> {
 /// installed plugin, served by PEK TV's own server). Without one, the plugin's first letter on a plain tile, so every row
 /// lines up.
 class PluginPicture extends StatelessWidget {
-  const PluginPicture({super.key, this.bytes, this.url = '', this.size, this.letter = ''});
+  const PluginPicture({super.key, this.bytes, this.url = '', this.size, this.letter = '', this.expand = false});
   final Uint8List? bytes;
   final String url;
   final double? size;
   final String letter;
+  final bool expand; // true: fill whatever space the parent gives (square corners; the parent clips), at a sharper decode size
 
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
+    if (expand) {
+      return SizedBox.expand(
+        child: url.isEmpty
+            ? ColoredBox(color: p.tokens.surface, child: Center(child: Icon(Icons.extension_outlined, size: 3 * p.rem, color: p.tokens.textMuted)))
+            : ArtImage(url, fit: BoxFit.cover, width: double.infinity, height: double.infinity, cacheWidth: 480,
+                errorBuilder: (_, __, ___) => ColoredBox(color: p.tokens.surface, child: Center(child: Icon(Icons.extension_outlined, size: 3 * p.rem, color: p.tokens.textMuted)))),
+      );
+    }
     final w = size ?? 2.8 * p.rem;
     Widget fallback() => ColoredBox(
           color: p.tokens.surface,

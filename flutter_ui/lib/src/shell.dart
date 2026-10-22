@@ -469,9 +469,8 @@ class _MorePage extends StatelessWidget {
     return PinTile(
       title: titleOf(id),
       subtitle: pl.description,
-      leading: pl.icon.isEmpty
-          ? SizedBox(width: 3.4 * rem, height: 3.4 * rem, child: Icon(Icons.extension_outlined, size: 2.2 * rem, color: p.tokens.textMuted))
-          : PluginPicture(url: pl.icon, size: 3.4 * rem),
+      fill: pl.icon.isEmpty ? null : PluginPicture(url: pl.icon, expand: true),
+      leading: pl.icon.isEmpty ? SizedBox(width: 3.4 * rem, height: 3.4 * rem, child: Icon(Icons.extension_outlined, size: 2.2 * rem, color: p.tokens.textMuted)) : null,
       onTap: () => onOpen(id),
       onLongPress: () => PinActions.menu(context, pl, (_) => onOpen(id)),
     );
