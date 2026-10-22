@@ -182,29 +182,36 @@ jobs:
             T="-PpekTorrent=true"
           fi
 
-          if ! gradle $TASK $COMMON $T; then
-            if [ "$WANT_TORRENT" = true ]; then
-              # Do NOT silently drop torrents: that produces the "cannot play torrents" apk.
-              echo "::warning::Full build failed - retrying without SMB but KEEPING torrent"
-              rm -rf libsmb2 app/.cxx app/build
-              gradle $TASK $COMMON $T
-            else
-              echo "::warning::Full build failed - retrying without optional native libs"
-              rm -rf libsmb2 libtorrent boost app/.cxx app/build
-              gradle $TASK $COMMON
+          # One build per CPU type (Chaquopy needs ndk.abiFilters, which can't be combined with APK splits).
+          mkdir -p ../dist
+          for ABI in arm64-v8a armeabi-v7a; do
+            echo "::group::Build $ABI"
+            if ! gradle $TASK $COMMON $T -PpekAbi=$ABI; then
+              if [ "$WANT_TORRENT" = true ]; then
+                # Do NOT silently drop torrents: that produces the "cannot play torrents" apk.
+                echo "::warning::Full build failed - retrying without SMB but KEEPING torrent"
+                rm -rf libsmb2 app/.cxx app/build
+                gradle $TASK $COMMON $T -PpekAbi=$ABI
+              else
+                echo "::warning::Full build failed - retrying without optional native libs"
+                rm -rf libsmb2 libtorrent boost app/.cxx app/build
+                gradle $TASK $COMMON -PpekAbi=$ABI
+              fi
             fi
-          fi
+            SRC=$(ls app/build/outputs/apk/$BUILD_TYPE/*.apk 2>/dev/null | head -1)
+            [ -n "$SRC" ] || { echo "::error::No $ABI apk was built"; exit 1; }
+            cp "$SRC" "../dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}-${ABI}.apk"
+            rm -rf app/build/outputs/apk
+            echo "::endgroup::"
+          done
 
       # Two APKs come out of the build: one 64-bit (arm64-v8a) and one 32-bit (armeabi-v7a).
-      - name: Collect + verify apks
+      - name: Verify apks
         run: |
-          mkdir -p dist
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
           for ABI in arm64-v8a armeabi-v7a; do
-            SRC=$(ls android/app/build/outputs/apk/$BUILD_TYPE/*-$ABI-*.apk 2>/dev/null | head -1)
-            [ -n "$SRC" ] || { echo "::error::No $ABI apk was built"; exit 1; }
             OUT="dist/PEK-TV-${VERSION_NAME}-${BUILD_TYPE}-${ABI}.apk"
-            cp "$SRC" "$OUT"
+            [ -f "$OUT" ] || { echo "::error::$OUT missing"; exit 1; }
             if [ "$WANT_TORRENT" = true ]; then
               # The stub in torrent.cpp contains this text; a real libtorrent build does not.
               TMP=$(mktemp -d); unzip -q -o "$OUT" 'lib/*/libpek.so' -d "$TMP"
