@@ -479,7 +479,8 @@ class ArtistScreen extends StatelessWidget {
   }
 }
 
-/// A slim bar above the bottom tabs while something plays. Tap = Now Playing.
+/// A slim bar above the bottom tabs while something plays (like Spotify's): the song, previous / play-pause / next and a thin
+/// progress line. Tapping the bar does nothing; the full-screen player only opens from the expand button.
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
@@ -492,28 +493,44 @@ class MiniPlayer extends StatelessWidget {
       valueListenable: _mc.current,
       builder: (context, cur, _) {
         if (cur == null) return const SizedBox.shrink();
-        return GestureDetector(
-          onTap: () => openNowPlaying(context),
-          child: Container(
-            margin: EdgeInsets.fromLTRB(0.75 * rem, 0, 0.75 * rem, 0.5 * rem),
-            padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
-            decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18)),
-            child: Row(children: [
-              Art(url: Api.trackArt(cur), size: 2.5 * rem, radius: 10),
-              SizedBox(width: 0.75 * rem),
-              Expanded(
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                  Text(cur.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  Text(cur.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.85 * rem)),
-                ]),
+        return Container(
+          margin: EdgeInsets.fromLTRB(0.75 * rem, 0, 0.75 * rem, 0.5 * rem),
+          decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Padding(
+              padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
+              child: Row(children: [
+                Art(url: Api.trackArt(cur), size: 2.5 * rem, radius: 10),
+                SizedBox(width: 0.75 * rem),
+                Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    Text(cur.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    Text(cur.artist, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.85 * rem)),
+                  ]),
+                ),
+                IconButton(tooltip: 'Previous', visualDensity: VisualDensity.compact, onPressed: () => _mc.prev(), icon: const Icon(Icons.skip_previous)),
+                ValueListenableBuilder<bool>(
+                  valueListenable: _mc.playing,
+                  builder: (_, on, __) => IconButton(tooltip: on ? 'Pause' : 'Play', visualDensity: VisualDensity.compact, onPressed: _mc.toggle, icon: Icon(on ? Icons.pause : Icons.play_arrow)),
+                ),
+                IconButton(tooltip: 'Next', visualDensity: VisualDensity.compact, onPressed: () => _mc.next(), icon: const Icon(Icons.skip_next)),
+                IconButton(tooltip: 'Full screen', visualDensity: VisualDensity.compact, onPressed: () => openNowPlaying(context), icon: const Icon(Icons.open_in_full, size: 20)),
+              ]),
+            ),
+            ValueListenableBuilder<double>(
+              valueListenable: _mc.position,
+              builder: (_, pos, __) => ValueListenableBuilder<double>(
+                valueListenable: _mc.duration,
+                builder: (_, dur, __) => LinearProgressIndicator(
+                  value: dur > 0 ? (pos / dur).clamp(0.0, 1.0) : 0,
+                  minHeight: 2,
+                  color: t.accent,
+                  backgroundColor: t.textMuted.withAlpha(50),
+                ),
               ),
-              ValueListenableBuilder<bool>(
-                valueListenable: _mc.playing,
-                builder: (_, on, __) => IconButton(onPressed: _mc.toggle, icon: Icon(on ? Icons.pause : Icons.play_arrow)),
-              ),
-              IconButton(onPressed: () => _mc.next(), icon: const Icon(Icons.skip_next)),
-            ]),
-          ),
+            ),
+          ]),
         );
       },
     );

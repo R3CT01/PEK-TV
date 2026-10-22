@@ -21,7 +21,7 @@ import 'tokens.dart';
 ///  * the big cover + title on the LEFT, time-synced lyrics (toggle) on the RIGHT,
 ///  * a Browse button in the top-right opens a side panel (Queue / Albums / Artists / Songs) to pick something else
 ///    without leaving the screen,
-///  * on a phone it turns the screen to landscape while it is open.
+///  * on a phone it opens upright; the rotate button in the top bar turns it sideways and back.
 ///
 /// Touch, and D-pad / keyboard: arrows move the focus, OK presses, Back closes the Browse panel (or steps out of an
 /// album / artist inside it) and then the screen. "L" toggles the lyrics. Left / Right on the seek bar skips.
@@ -75,7 +75,8 @@ class _MusicFullScreenState extends State<MusicFullScreen> {
   bool _panel = false;
   bool _everOpened = false;
   bool _chromeSet = false;
-  bool _landscapeLocked = false;
+  bool _phone = false; // a phone: opens upright, the rotate button turns it sideways
+  bool _sideways = false;
 
   @override
   void initState() {
@@ -88,19 +89,24 @@ class _MusicFullScreenState extends State<MusicFullScreen> {
     super.didChangeDependencies();
     if (_chromeSet) return;
     _chromeSet = true;
-    // A phone turns to landscape while the player is open (PekAndroid.musicFullscreen in the web UI). A TV already is.
-    // The system bars are already hidden by the host activity, so only the orientation is handled here.
-    _landscapeLocked = !context.pek.tvDevice;
-    if (_landscapeLocked) SystemChrome.setPreferredOrientations(const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
+    // A phone opens the player upright, like Spotify's; the rotate button in the top bar turns it sideways (and back).
+    // A TV already is landscape. The system bars are already hidden by the host activity, so only the orientation is handled.
+    _phone = !context.pek.tvDevice;
+    if (_phone) SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
   }
 
   @override
   void dispose() {
     _mc.current.removeListener(_closeWhenStopped);
-    if (_landscapeLocked) SystemChrome.setPreferredOrientations(const []);
+    if (_phone) SystemChrome.setPreferredOrientations(const []);
     _mainScope.dispose();
     _panelScope.dispose();
     super.dispose();
+  }
+
+  void _rotate() {
+    setState(() => _sideways = !_sideways);
+    SystemChrome.setPreferredOrientations(_sideways ? const [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight] : const [DeviceOrientation.portraitUp]);
   }
 
   void _closeWhenStopped() {
@@ -163,7 +169,7 @@ class _MusicFullScreenState extends State<MusicFullScreen> {
                 IgnorePointer(child: DecoratedBox(decoration: BoxDecoration(gradient: _lyrics ? _scrimLyrics : _scrimPlain))),
                 ExcludeFocus(
                   excluding: _panel,
-                  child: FocusScope(node: _mainScope, child: _Screen(track: cur, lyrics: _lyrics, panelOpen: _panel, onClose: () => Navigator.of(context).maybePop(), onLyrics: () => _setLyrics(!_lyrics), onBrowse: () => _setPanel(!_panel))),
+                  child: FocusScope(node: _mainScope, child: _Screen(track: cur, lyrics: _lyrics, panelOpen: _panel, onClose: () => Navigator.of(context).maybePop(), onLyrics: () => _setLyrics(!_lyrics), onBrowse: () => _setPanel(!_panel), onRotate: _phone ? _rotate : null)),
                 ),
                 _shade(),
                 if (_everOpened) _panelLayer(p),
@@ -356,10 +362,11 @@ class _FbState extends State<_Fb> {
 // ============================================================================================ the player layer
 
 class _Screen extends StatelessWidget {
-  const _Screen({required this.track, required this.lyrics, required this.panelOpen, required this.onClose, required this.onLyrics, required this.onBrowse});
+  const _Screen({required this.track, required this.lyrics, required this.panelOpen, required this.onClose, required this.onLyrics, required this.onBrowse, this.onRotate});
   final Track track;
   final bool lyrics, panelOpen;
   final VoidCallback onClose, onLyrics, onBrowse;
+  final VoidCallback? onRotate;
 
   @override
   Widget build(BuildContext context) {
@@ -376,7 +383,7 @@ class _Screen extends StatelessWidget {
     return Padding(
       padding: padding,
       child: Column(children: [
-        _TopBar(track: track, lyrics: lyrics, panelOpen: panelOpen, onClose: onClose, onLyrics: onLyrics, onBrowse: onBrowse),
+        _TopBar(track: track, lyrics: lyrics, panelOpen: panelOpen, onClose: onClose, onLyrics: onLyrics, onBrowse: onBrowse, onRotate: onRotate),
         Expanded(child: LayoutBuilder(builder: (context, c) => _Main(track: track, lyrics: lyrics, box: c))),
         SizedBox(height: 1.2 * vh),
         const _Bottom(),
@@ -386,10 +393,11 @@ class _Screen extends StatelessWidget {
 }
 
 class _TopBar extends StatelessWidget {
-  const _TopBar({required this.track, required this.lyrics, required this.panelOpen, required this.onClose, required this.onLyrics, required this.onBrowse});
+  const _TopBar({required this.track, required this.lyrics, required this.panelOpen, required this.onClose, required this.onLyrics, required this.onBrowse, this.onRotate});
   final Track track;
   final bool lyrics, panelOpen;
   final VoidCallback onClose, onLyrics, onBrowse;
+  final VoidCallback? onRotate;
 
   @override
   Widget build(BuildContext context) {
@@ -399,15 +407,16 @@ class _TopBar extends StatelessWidget {
     final h = math.max(2.6 * rem, 6.4 * vh);
     final icon = math.max(1.2 * rem, 3 * vh);
     final short = p.size.height < 430; // @media (max-height: 430px): icons only
+    final iconsOnly = short || p.size.width < 520; // an upright phone has no room for the words
     Widget pill(String label, IconData ic, bool on, VoidCallback tap) => _Fb(
           label: label,
           onTap: tap,
           background: on ? Colors.white : _glass,
           height: h,
-          padding: EdgeInsets.symmetric(horizontal: 1.1 * vh + (short ? 0 : 0.5 * rem)),
+          padding: EdgeInsets.symmetric(horizontal: 1.1 * vh + (iconsOnly ? 0 : 0.5 * rem)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
             Icon(ic, size: icon, color: on ? const Color(0xFF111111) : Colors.white),
-            if (!short) ...[SizedBox(width: 0.5 * rem), Text(label, style: TextStyle(fontSize: math.max(0.8 * rem, 2 * vh), fontWeight: FontWeight.w700, color: on ? const Color(0xFF111111) : Colors.white))],
+            if (!iconsOnly) ...[SizedBox(width: 0.5 * rem), Text(label, style: TextStyle(fontSize: math.max(0.8 * rem, 2 * vh), fontWeight: FontWeight.w700, color: on ? const Color(0xFF111111) : Colors.white))],
           ]),
         );
     return Row(children: [
@@ -422,6 +431,10 @@ class _TopBar extends StatelessWidget {
       ),
       _Fb(label: 'Add to playlist', onTap: () => addToPlaylistSheet(context, [track]), width: h, height: h, child: Icon(Icons.playlist_add, size: icon * 1.1, color: Colors.white)),
       SizedBox(width: 0.6 * p.size.width / 100 + 4),
+      if (onRotate != null) ...[
+        _Fb(label: 'Rotate screen', onTap: onRotate!, width: h, height: h, child: Icon(Icons.screen_rotation, size: icon * 1.05, color: Colors.white)),
+        SizedBox(width: 0.6 * p.size.width / 100 + 4),
+      ],
       pill('Lyrics', Icons.lyrics_outlined, lyrics, onLyrics),
       SizedBox(width: 0.6 * p.size.width / 100 + 4),
       pill('Browse', Icons.queue_music, panelOpen, onBrowse),

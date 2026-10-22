@@ -94,8 +94,27 @@ class ArtCache {
     if (!_cacheable(url)) return Future.value(null);
     final k = _known[url];
     if (k != null) return Future.value(k);
-    return _inflight.putIfAbsent(url, () => _limited(() => _fetch(url)).whenComplete(() => _inflight.remove(url)));
+    return _inflight.putIfAbsent(url, () => _withRetry(url).whenComplete(() => _inflight.remove(url)));
   }
+
+  /// A try gives up after 4 seconds (the 6th try used to sit for 20 s and block the other pictures, actors included);
+  /// a failed picture is asked for again, up to 3 times. The pause between tries happens outside the queue, so a
+  /// failing picture never holds a place that another one could use.
+  static const _tryTimeouts = [Duration(seconds: 4), Duration(seconds: 4), Duration(seconds: 6)];
+  static final Set<String> _gone = HashSet(); // answers that will not change (404 ...): not asked again this run
+
+  static Future<File?> _withRetry(String url) async {
+    for (var i = 0; i < _tryTimeouts.length; i++) {
+      if (_gone.contains(url)) return null;
+      final f = await _limited(() => _fetch(url, _tryTimeouts[i]));
+      if (f != null) return f;
+      if (i < _tryTimeouts.length - 1) await Future<void>.delayed(Duration(milliseconds: 500 * (i + 1)));
+    }
+    return null;
+  }
+
+  /// Whether a failed picture is worth asking for again later (false after a 404 and the like).
+  static bool retryable(String url) => !_gone.contains(url);
 
   static Future<T> _limited<T>(Future<T> Function() job) async {
     if (_running >= _parallel) {
@@ -112,7 +131,7 @@ class ArtCache {
     }
   }
 
-  static Future<File?> _fetch(String url) async {
+  static Future<File?> _fetch(String url, Duration timeout) async {
     await init();
     final d = _imgDir;
     if (d == null) return null;
@@ -124,7 +143,8 @@ class ArtCache {
       }
     } catch (_) {}
     try {
-      final r = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 20));
+      final r = await _client.get(Uri.parse(url)).timeout(timeout);
+      if (r.statusCode == 404 || r.statusCode == 403 || r.statusCode == 410) _gone.add(url);
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
       final tmp = File('${f.path}.part');
       await tmp.writeAsBytes(r.bodyBytes, flush: true);
@@ -236,9 +256,16 @@ class ArtImage extends StatefulWidget {
 }
 
 class _ArtImageState extends State<ArtImage> {
+  /// A picture that would not load is asked for again after 4, 6, 8 and 10 seconds (the covers used to stay empty until the
+  /// app was restarted). The error picture only shows once the last try has failed.
+  static const _maxRetries = 4;
+
   File? _file;
   Future<File?>? _pending;
   bool _fileBroken = false;
+  int _retries = 0;
+  int _gen = 0;
+  Timer? _retryTimer;
 
   @override
   void initState() {
@@ -250,9 +277,17 @@ class _ArtImageState extends State<ArtImage> {
   void didUpdateWidget(ArtImage old) {
     super.didUpdateWidget(old);
     if (old.url != widget.url) {
+      _retryTimer?.cancel();
+      _retries = 0;
       _fileBroken = false;
       _resolve();
     }
+  }
+
+  @override
+  void dispose() {
+    _retryTimer?.cancel();
+    super.dispose();
   }
 
   void _resolve() {
@@ -260,14 +295,37 @@ class _ArtImageState extends State<ArtImage> {
     _pending = _file == null ? ArtCache.file(widget.url) : null;
   }
 
+  /// Both the disk copy and the network picture failed: try the whole thing again shortly.
+  void _scheduleRetry() {
+    if (_retries >= _maxRetries || (_retryTimer?.isActive ?? false) || !ArtCache.retryable(widget.url)) return;
+    _retryTimer = Timer(Duration(seconds: 4 + 2 * _retries), () {
+      if (!mounted) return;
+      setState(() {
+        _retries++;
+        _gen++;
+        _fileBroken = false;
+        _resolve();
+      });
+    });
+  }
+
+  Widget _failed(BuildContext context, Object e, StackTrace? st) {
+    if (_retries < _maxRetries && ArtCache.retryable(widget.url)) {
+      _scheduleRetry();
+      return const SizedBox.shrink();
+    }
+    return widget.errorBuilder?.call(context, e, st) ?? const SizedBox.shrink();
+  }
+
   Widget _network() => Image.network(
         widget.url,
+        key: ValueKey('net$_gen'),
         fit: widget.fit,
         cacheWidth: widget.cacheWidth,
         width: widget.width,
         height: widget.height,
         gaplessPlayback: true,
-        errorBuilder: widget.errorBuilder,
+        errorBuilder: _failed,
       );
 
   Widget _disk(File f) => Image.file(
@@ -293,6 +351,7 @@ class _ArtImageState extends State<ArtImage> {
     final f = _file;
     if (f != null) return _disk(f);
     return FutureBuilder<File?>(
+      key: ValueKey('fb$_gen'),
       future: _pending,
       builder: (context, snap) {
         if (snap.connectionState != ConnectionState.done) return const SizedBox.shrink();

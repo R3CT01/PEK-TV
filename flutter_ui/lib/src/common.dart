@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'music.dart' show MiniPlayer;
+import 'music_controller.dart';
 import 'tokens.dart';
 import 'weather.dart' show WeatherBadge, weatherActions;
 import 'widgets.dart';
@@ -51,6 +53,18 @@ class _InSubScreen extends InheritedWidget {
   bool updateShouldNotify(_InSubScreen o) => false;
 }
 
+/// The mini player under a pushed screen. Takes the bottom safe area only while a song is loaded, so nothing is added when
+/// no music plays.
+class _SubMiniPlayer extends StatelessWidget {
+  const _SubMiniPlayer();
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<Object?>(
+        valueListenable: MusicController.instance.current,
+        builder: (context, cur, _) => cur == null ? const SizedBox.shrink() : const SafeArea(top: false, child: MiniPlayer()),
+      );
+}
+
 /// A page pushed from the More page (or opened from the sidebar on wide screens): back arrow + scrolling body.
 class SubScreen extends StatelessWidget {
   const SubScreen({super.key, required this.title, required this.body});
@@ -82,6 +96,8 @@ class SubScreen extends StatelessWidget {
             )
           : AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: p.tokens.text, title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 1.1 * p.rem, fontWeight: FontWeight.w600)), actions: weatherActions(context)),
       body: body,
+      // The music player stays up on every screen pushed over the tabs (a plugin's screen, an album ...).
+      bottomNavigationBar: const _SubMiniPlayer(),
     )));
   }
 }
