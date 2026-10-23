@@ -31,7 +31,7 @@ Settings; a tap opens that screen on top and Back returns. On a TV the sidebar l
   a port of `www/music_fullscreen.js`)
 - Playlists (`playlists.dart` store per profile, `playlist_ui.dart`): Music > Playlists tab, playlist page (Play / Shuffle / Add to queue / Rename / Delete, drag to reorder), press-and-hold a song for Play next / Add to queue / Add to playlist, "Add to playlist" on album pages and in the full-screen player, "Save as playlist" for the queue. Not synced to the cloud yet.
 - Duplicates, Unknown, Plugins (list + remove), Settings (media sources + folder picker)
-- Settings > Subtitles (automatic look-up on / off, language, Test), Video output (match refresh rate, HDR) and Audio output
+- Settings > Subtitles (automatic look-up on / off, language drop-down), Video output (match refresh rate, HDR) and Audio output
   (Dolby / DTS passthrough). Subtitles are also found automatically while a library movie / episode plays, and the player's
   audio / subtitle menu has a "Find subtitles online" list (`subtitles.dart`, port of `www/subtitles.js`).
 
@@ -142,3 +142,17 @@ more, but the server still serves it; it can be deleted in a later step.
   a skin with a `skin.css` is refused (no CSS in skins, here and in `SkinBuilder` / `tools/make_skin.py`). GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
 - The Skin maker is the bundled `skin-maker` plugin (`plugins/skin-maker`); `tools/make_skin.py` makes skins and installable .zips from the command line. The app keeps only what the plugin needs drawn (`skin_widgets.dart`: colour window, preview). See SKINS.md.
 - Tests: `flutter test test/skin_install_test.dart test/skin_sync_test.dart`.
+
+## Dashboard widgets (Add widget)
+Customize > Add widget lists every widget that is not on the dashboard yet, in groups. `flutter_ui/lib/src/dash_widgets.dart` holds the
+newer ones; each loads its own data and keeps itself up to date:
+- Music: **Now Playing** (cover, title, artist, progress, shuffle / previous / play / next / repeat; tap = full-screen player),
+  **Playlists** and **Albums** (rows of covers).
+- Weather and time: Clock, Weather and **Forecast** (a horizontal, scrollable row: next 24 hours or next 7 days, toggled with Hourly / Daily;
+  Open-Meteo, same city and unit as Weather, cached for offline).
+- Movies and shows: Continue Watching, **Up Next** (the next unwatched episode of each show you are watching), Recently Added, **Recently Watched**, **TV Shows**, Favorites, **Library** (counts tile), **Surprise me** (random movie tile).
+- Plugins: **Pinned plugins** (a row of the icons pinned on the More page) and a shortcut tile for each installed plugin with a screen.
+
+To add one: write the widget in `dash_widgets.dart`, add its type to `Store.dashTypes` and `Store.dashGroups` (and `Store.dashIsTile` if it is a
+small tile), then add a `case` for it in `_DashboardPageState._widget` (`dashboard.dart`). The layout syncs to the profile like before
+(`s|dashboard`); the classic web UI does not know the new types.

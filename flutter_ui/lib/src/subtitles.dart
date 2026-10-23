@@ -43,9 +43,6 @@ class Subs {
   }
 
   static Future<Map<String, dynamic>> download(String id) => Api.postForm('/api/subtitles/fetch', {'id': id});
-
-  /// Settings > Subtitles > Test: a search for a well-known film proves the service answers.
-  static Future<List<SubResult>> test() => search(title: 'The Matrix', year: 1999);
 }
 
 class SubResult {

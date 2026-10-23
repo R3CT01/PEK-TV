@@ -270,7 +270,7 @@ class _AppShellState extends State<AppShell> {
     }
     switch (id) {
       case 'dashboard':
-        return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'));
+        return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'), onOpenMusic: () => _open('music'));
       case 'movies':
       case 'shows':
         return LibraryPage(key: ValueKey(id), tab: id, title: _titleOf(id), padding: pad);

@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'clock.dart';
 import 'common.dart';
+import 'dash_widgets.dart';
 import 'detail.dart';
+import 'plugin_pins.dart';
 import 'plugin_ui.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -15,10 +17,13 @@ import 'widgets.dart';
 /// Customize (or press and hold a tile) = edit mode: move, resize or remove widgets, Add widget, Reset. The layout is saved per
 /// profile and syncs to the profile's other devices as `s|dashboard` (same item as the web UI, see Cloud).
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key, required this.padding, required this.onOpenResume, required this.onOpenFavorites});
+  const DashboardPage({super.key, required this.padding, required this.onOpenResume, required this.onOpenFavorites, this.onOpenMusic});
   final EdgeInsets padding;
   final VoidCallback onOpenResume;
   final VoidCallback onOpenFavorites;
+
+  /// Goes to the Music page (the music widgets' "See all" and empty states).
+  final VoidCallback? onOpenMusic;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -64,6 +69,8 @@ class _DashboardPageState extends State<DashboardPage> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
       backgroundColor: context.pek.tokens.glassStrong,
       builder: (c) => _AddWidget(plugins: _plugins),
     );
@@ -73,9 +80,9 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     final p = context.pek;
     final rem = p.rem;
-    return ValueListenableBuilder<int>(
-      valueListenable: Store.changed,
-      builder: (context, _, __) {
+    return ListenableBuilder(
+      listenable: Listenable.merge([Store.changed, PluginPins.changed]),
+      builder: (context, _) {
         final items = Store.dashboardItems();
         return ListView(
           padding: widget.padding,
@@ -202,6 +209,70 @@ class _DashboardPageState extends State<DashboardPage> {
           span: span,
           full: false,
         );
+      case 'nowplaying':
+        return (w: NowPlayingCard(onLongPress: _startEdit, onOpenMusic: widget.onOpenMusic), span: 1, full: true);
+      case 'forecast':
+        return (w: ForecastCard(onLongPress: _startEdit), span: 1, full: true);
+      case 'albums':
+        return (w: AlbumsRow(onLongPress: _startEdit, onOpenMusic: widget.onOpenMusic), span: 1, full: true);
+      case 'playlists':
+        return (w: PlaylistsRow(onLongPress: _startEdit, onOpenMusic: widget.onOpenMusic), span: 1, full: true);
+      case 'stats':
+        return (w: LibraryStatsTile(onLongPress: _startEdit), span: span, full: false);
+      case 'surprise':
+        return (w: SurpriseTile(onLongPress: _startEdit), span: span, full: false);
+      case 'pinned':
+        final pinned = <PluginInfo>[
+          for (final f in PluginPins.all)
+            for (final e in plugins)
+              if (e.folder == f) e,
+        ];
+        if (pinned.isEmpty) return null; // nothing pinned: nothing to show (pin plugins from the Plugins page)
+        return (w: PinnedPluginsRow(plugins: pinned, onLongPress: _startEdit), span: 1, full: true);
+      case 'shows':
+        final list = shows.reversed.take(12).toList();
+        if (list.isEmpty) return null;
+        return _row(context, 'TV Shows', null, [
+          for (final s in list)
+            PosterCard(
+              title: s.title,
+              subtitle: '${s.episodeCount} episodes',
+              poster: Api.showDetails(s.title),
+              onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShowScreen(show: s))),
+            ),
+        ]);
+      case 'upnext':
+        final next = _upNext(shows);
+        if (next.isEmpty) return null;
+        return _row(context, 'Up Next', null, [
+          for (final (show, ep) in next)
+            PosterCard(
+              title: show.title,
+              subtitle: 'S${ep.season.toString().padLeft(2, '0')}E${ep.episode.toString().padLeft(2, '0')}',
+              poster: Api.showDetails(show.title),
+              onTap: () => playMedia(context, episodeItem(show, ep)),
+            ),
+        ]);
+      case 'watched':
+        final cells = <Widget>[];
+        final seenShows = <String>{};
+        for (final h in Store.history()) {
+          if (cells.length >= 12) break;
+          if (h.kind == 'movie') {
+            final m = movies.where((e) => Store.normalize(e.title) == Store.normalize(h.title) && e.year == h.year).firstOrNull;
+            if (m == null) continue; // watched somewhere else (a plugin): nothing to open here
+            cells.add(PosterCard(title: m.title, subtitle: m.year > 0 ? '${m.year}' : '', poster: Api.movieDetails(m.id), onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: m)))));
+          } else {
+            final key = Store.normalize(h.title);
+            if (!seenShows.add(key)) continue; // one card per show, its latest episode
+            final sh = shows.where((e) => Store.normalize(e.title) == key).firstOrNull;
+            if (sh == null) continue;
+            final label = h.season > 0 && h.episode > 0 ? 'S${h.season.toString().padLeft(2, '0')}E${h.episode.toString().padLeft(2, '0')}' : 'Watched';
+            cells.add(PosterCard(title: sh.title, subtitle: label, poster: Api.showDetails(sh.title), onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShowScreen(show: sh)))));
+          }
+        }
+        if (cells.isEmpty) return null;
+        return _row(context, 'Recently Watched', null, cells);
       case 'continue':
         final items = Store.resumeItems().take(12).toList();
         if (items.isEmpty) return null;
@@ -248,6 +319,29 @@ class _DashboardPageState extends State<DashboardPage> {
         return _row(context, 'Favorites', widget.onOpenFavorites, cells);
     }
     return null;
+  }
+
+  /// Up Next: for each show with something in Watch History, the first episode after the last one watched that is not watched
+  /// and not already in Continue Watching. The show watched most recently comes first.
+  List<(Show, Episode)> _upNext(List<Show> shows) {
+    final lastAt = <String, int>{};
+    for (final h in Store.history()) {
+      if (h.kind == 'episode') lastAt.putIfAbsent(Store.normalize(h.title), () => h.at); // history is newest first
+    }
+    final found = <(Show, Episode, int)>[];
+    for (final sh in shows) {
+      final at = lastAt[Store.normalize(sh.title)];
+      if (at == null) continue;
+      final eps = [for (final se in sh.seasons) ...se.episodes]..sort((a, b) => a.season != b.season ? a.season.compareTo(b.season) : a.episode.compareTo(b.episode));
+      final last = eps.lastIndexWhere((e) => episodeWatched(sh, e));
+      for (var i = last + 1; i < eps.length; i++) {
+        if (episodeWatched(sh, eps[i])) continue;
+        if (Store.progressFor(eps[i].id) == null) found.add((sh, eps[i], at));
+        break;
+      }
+    }
+    found.sort((a, b) => b.$3.compareTo(a.$3));
+    return [for (final f in found.take(12)) (f.$1, f.$2)];
   }
 
   /// One widget: a heading (tap = see all) and a horizontal row of posters.
@@ -316,8 +410,8 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 }
 
-/// "Add a widget" (`_renderDashAdd`): the built-in widgets that are not on the dashboard, a shortcut for each installed plugin
-/// that has a screen in this app, and Reset to default.
+/// "Add a widget" (`_renderDashAdd`): every built-in widget that is not on the dashboard yet, in groups (Music, Weather and time,
+/// Movies and shows, Plugins), a shortcut for each installed plugin that has a screen in this app, and Reset to default.
 class _AddWidget extends StatelessWidget {
   const _AddWidget({required this.plugins});
   final Future<List<PluginInfo>> plugins;
@@ -333,29 +427,55 @@ class _AddWidget extends StatelessWidget {
         builder: (context, snap) {
           final on = Store.dashboardItems();
           final have = {for (final w in on) w.id};
+          Widget label(String text) => Padding(
+                padding: EdgeInsets.only(top: 0.9 * rem, bottom: 0.3 * rem),
+                child: Text(text.toUpperCase(), style: TextStyle(fontSize: 0.78 * rem, letterSpacing: 1.1, fontWeight: FontWeight.w700, color: p.tokens.textMuted)),
+              );
           final rows = <Widget>[];
-          for (final t in Store.dashDefault.where((t) => !have.contains(t))) {
-            rows.add(ListRow(
-              title: Store.dashTypes[t]!.$1,
-              subtitle: Store.dashTypes[t]!.$2,
-              onTap: () {
-                Store.setDashboardItems([...on, DashItem(t, t)]);
-                Navigator.pop(context);
-              },
-            ));
+          var first = true;
+          for (final (group, types) in Store.dashGroups) {
+            final left = [for (final t in types) if (!have.contains(t)) t];
+            if (left.isEmpty) continue;
+            rows.add(label(group));
+            for (final t in left) {
+              rows.add(ListRow(
+                autofocus: first,
+                title: Store.dashTypes[t]!.$1,
+                subtitle: Store.dashTypes[t]!.$2,
+                trailing: Icon(Icons.add_circle_outline, color: p.tokens.accent),
+                onTap: () {
+                  Store.setDashboardItems([...on, DashItem(t, t)]);
+                  Navigator.pop(context);
+                },
+              ));
+              first = false;
+            }
           }
-          for (final pl in (snap.data ?? const <PluginInfo>[]).where((e) => e.folder != 'weather' && e.flutterScreen && RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(e.folder) && !have.contains('plugin:${e.folder}'))) {
-            rows.add(ListRow(
-              title: pl.name,
-              subtitle: 'Plugin shortcut',
-              onTap: () {
-                Store.setDashboardItems([...on, DashItem('plugin:${pl.folder}', 'plugin', folder: pl.folder)]);
-                Navigator.pop(context);
-              },
-            ));
+          final shortcuts = (snap.data ?? const <PluginInfo>[])
+              .where((e) => e.folder != 'weather' && e.flutterScreen && RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(e.folder) && !have.contains('plugin:${e.folder}'))
+              .toList();
+          if (shortcuts.isNotEmpty) {
+            rows.add(label('Plugin shortcuts'));
+            for (final pl in shortcuts) {
+              rows.add(ListRow(
+                autofocus: first,
+                title: pl.name,
+                subtitle: 'A tile that opens ${pl.name}',
+                trailing: Icon(Icons.add_circle_outline, color: p.tokens.accent),
+                onTap: () {
+                  Store.setDashboardItems([...on, DashItem('plugin:${pl.folder}', 'plugin', folder: pl.folder)]);
+                  Navigator.pop(context);
+                },
+              ));
+              first = false;
+            }
+          } else if (snap.connectionState != ConnectionState.done) {
+            rows.add(Padding(padding: EdgeInsets.only(top: 0.6 * rem), child: Text('Looking for plugins\u2026', style: TextStyle(color: p.tokens.textMuted))));
           }
           if (rows.isEmpty) rows.add(Text('Everything is already on your dashboard.', style: TextStyle(color: p.tokens.textMuted)));
+          rows.add(label('Layout'));
           rows.add(ListRow(
+            autofocus: first,
             title: 'Reset to default layout',
             subtitle: 'Clock, weather, continue watching, recently added, favorites',
             onTap: () {
@@ -365,10 +485,9 @@ class _AddWidget extends StatelessWidget {
           ));
           return SafeArea(
             child: SingleChildScrollView(
-              padding: EdgeInsets.all(rem),
+              padding: EdgeInsets.fromLTRB(rem, 0, rem, rem),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('Add a widget', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700)),
-                SizedBox(height: rem),
                 ...rows,
               ]),
             ),

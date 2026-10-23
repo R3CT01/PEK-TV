@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'activity.dart';
 import 'api.dart';
 import 'common.dart';
+import 'fields.dart' show PekDropdown;
 import 'mpv.dart';
 import 'plugin_github.dart' show PekGithub;
 import 'plugin_install_ui.dart' show openGithubInstall, openZipInstall;
@@ -174,36 +175,17 @@ class SubtitleSection extends StatefulWidget {
 }
 
 class _SubtitleSectionState extends State<SubtitleSection> {
-  bool _testing = false;
-  String _msg = '';
-
-  Future<void> _test() async {
-    if (_testing) return;
-    setState(() {
-      _testing = true;
-      _msg = '';
-    });
-    String msg;
-    try {
-      final list = await Subs.test();
-      msg = list.isNotEmpty ? 'Subtitle service is working.' : 'Connected, but the test search found nothing.';
-    } catch (e) {
-      msg = e is ApiError ? e.message : 'The test failed.';
-    }
-    if (mounted) {
-      setState(() {
-        _testing = false;
-        _msg = msg;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
     final rem = p.rem;
-    final current = Store.subsLang.split(',').first.trim().toLowerCase();
+    final saved = Store.subsLang.split(',').first.trim().toLowerCase();
+    // A saved language that is not in the list (set on another device) still shows, so the field is never blank.
+    final items = <(String, String)>[
+      if (saved.isNotEmpty && !Subs.languages.any((e) => e.$1 == saved)) (saved, saved.toUpperCase()),
+      ...Subs.languages,
+    ];
     return Section(
       title: 'Subtitles',
       hint: 'Finds subtitles online for anything that plays without its own. Nothing to set up. Pick the language you want.',
@@ -217,21 +199,15 @@ class _SubtitleSectionState extends State<SubtitleSection> {
           },
         ),
         Padding(padding: EdgeInsets.symmetric(vertical: 0.5 * rem), child: Text('Language', style: TextStyle(color: t.textMuted))),
-        Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
-          for (final (code, name) in Subs.languages)
-            PekButton(
-              label: name,
-              compact: true,
-              primary: current == code,
-              onTap: () async {
-                await Store.setSubsLang(code);
-                if (mounted) setState(() {});
-              },
-            ),
-        ]),
-        SizedBox(height: 0.75 * rem),
-        Align(alignment: Alignment.centerLeft, child: PekButton(label: _testing ? 'Testing\u2026' : 'Test', onTap: _testing ? null : _test)),
-        if (_msg.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.5 * rem), child: Text(_msg, style: TextStyle(color: t.textMuted))),
+        PekDropdown<String>(
+          label: 'Subtitle language',
+          value: saved,
+          items: items,
+          onChanged: (code) async {
+            await Store.setSubsLang(code);
+            if (mounted) setState(() {});
+          },
+        ),
       ],
     );
   }

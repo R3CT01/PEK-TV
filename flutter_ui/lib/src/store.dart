@@ -428,11 +428,30 @@ class Store {
     'recent': ('Recently Added', 'Newest movies in your library'),
     'favorites': ('Favorites', 'Your saved movies and shows'),
     'plugin': ('Plugin', 'A shortcut to a plugin'),
+    // Added with the Add widget list (dash_widgets.dart). The web UI does not know these and drops them if it saves the layout.
+    'nowplaying': ('Now Playing', 'The song that is playing, with controls'),
+    'forecast': ('Forecast', 'Scroll through the next hours or days'),
+    'albums': ('Albums', 'A row of albums from your music'),
+    'playlists': ('Playlists', 'Your playlists in a row'),
+    'shows': ('TV Shows', 'A row of shows from your library'),
+    'pinned': ('Pinned plugins', 'The plugins you pinned, as a row of icons'),
+    'stats': ('Library', 'How many movies, shows and songs you have'),
+    'surprise': ('Surprise me', 'Opens a random movie from your library'),
+    'upnext': ('Up Next', 'The next episode of the shows you are watching'),
+    'watched': ('Recently Watched', 'What you finished lately'),
   };
   static const dashDefault = ['clock', 'weather', 'continue', 'recent', 'favorites'];
 
+  /// What the Add widget list offers, in groups (the built-in widgets; plugin shortcuts are listed under them).
+  static const dashGroups = <(String, List<String>)>[
+    ('Music', ['nowplaying', 'playlists', 'albums']),
+    ('Weather and time', ['clock', 'weather', 'forecast']),
+    ('Movies and shows', ['continue', 'upnext', 'recent', 'watched', 'shows', 'favorites', 'stats', 'surprise']),
+    ('Plugins', ['pinned']),
+  ];
+
   /// Tiles (a small box, 1 or 2 columns wide) versus rows of posters (full width): `tile: true` in DASH_TYPES.
-  static bool dashIsTile(String type) => type == 'clock' || type == 'weather' || type == 'plugin';
+  static bool dashIsTile(String type) => const {'clock', 'weather', 'plugin', 'stats', 'surprise'}.contains(type);
 
   static List<DashItem> dashboardDefault() => [for (final t in dashDefault) DashItem(t, t)];
 

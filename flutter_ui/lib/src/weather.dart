@@ -136,6 +136,56 @@ class Weather {
     }
   }
 
+  // ---- forecast (the dashboard's Forecast widget): next hours and next days, same free source, no key ----
+  static const _kFc = 'pek_weather_forecast';
+
+  /// The last good forecast for [label] (shown at once and when offline), or null.
+  static WeatherForecast? lastForecast(String label) {
+    try {
+      final o = jsonDecode(Store.strGet(_kFc, scoped: false) ?? 'null');
+      if (o is Map && o['city'] == label) return WeatherForecast.fromJson(o);
+    } catch (_) {}
+    return null;
+  }
+
+  /// A fresh forecast, or null when offline (callers fall back to [lastForecast]).
+  static Future<WeatherForecast?> fetchForecast(double lat, double lon, String label) async {
+    try {
+      final r = await _c
+          .get(Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon'
+              '&hourly=temperature_2m,weather_code,precipitation_probability,is_day'
+              '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+              '&timezone=auto&forecast_days=7'))
+          .timeout(const Duration(seconds: 8));
+      if (r.statusCode != 200) return null;
+      final j = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+      final f = WeatherForecast.fromApi(label, j);
+      if (f.hours.isEmpty && f.days.isEmpty) return null;
+      await Store.strSet(_kFc, jsonEncode(f.toJson()), scoped: false);
+      return f;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// A temperature with just the degree sign (\u00b0), in the chosen unit: "65\u00b0".
+  static String degrees(double tempC) => '${unit == 'C' ? tempC.round() : (tempC * 9 / 5 + 32).round()}\u00b0';
+
+  /// The icon for an Open-Meteo weather code ([day] false = after dark).
+  static IconData iconFor(int code, {bool day = true}) {
+    if (code == 0 || code == 1) return day ? Icons.wb_sunny : Icons.nightlight_round;
+    if (code == 2) return day ? Icons.wb_cloudy : Icons.nights_stay;
+    if (code == 3) return Icons.cloud;
+    if (code == 45 || code == 48) return Icons.blur_on;
+    if (code >= 51 && code <= 57) return Icons.grain;
+    if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) return Icons.water_drop;
+    if ((code >= 71 && code <= 77) || code == 85 || code == 86) return Icons.ac_unit;
+    if (code >= 95) return Icons.flash_on;
+    return Icons.cloud_queue;
+  }
+
+  static String describe(int code) => _codes[code] ?? 'Clear';
+
   // ---- header badge (top right of every main page, like .weather-badge in the web UI) ----
   /// Text the badge shows, e.g. "65\u00b0F". One value for every page, so only one request is made.
   static final ValueNotifier<String> badge = ValueNotifier('--\u00b0');
@@ -405,5 +455,112 @@ class _WeatherSettingsScreenState extends State<WeatherSettingsScreen> {
         ),
       ]),
     );
+  }
+}
+
+/// One hour of the forecast. [time] is local to the city, like "2026-10-22T14:00".
+class ForecastHour {
+  const ForecastHour({required this.time, required this.tempC, required this.code, required this.day, required this.rain});
+  final String time;
+  final double tempC;
+  final int code;
+  final bool day;
+  final int rain; // chance of rain, percent
+
+  int get hour => int.tryParse(time.length >= 13 ? time.substring(11, 13) : '') ?? 0;
+}
+
+/// One day of the forecast. [date] is like "2026-10-22".
+class ForecastDay {
+  const ForecastDay({required this.date, required this.hiC, required this.loC, required this.code, required this.rain});
+  final String date;
+  final double hiC, loC;
+  final int code;
+  final int rain;
+}
+
+/// The hourly and daily forecast for one city (Open-Meteo), as the dashboard's Forecast widget shows it.
+class WeatherForecast {
+  const WeatherForecast({required this.city, required this.utcOffset, required this.hours, required this.days});
+  final String city;
+  final int utcOffset; // seconds: how far the city's clock is from UTC
+  final List<ForecastHour> hours;
+  final List<ForecastDay> days;
+
+  static double _d(dynamic v) => v is num ? v.toDouble() : 0;
+  static int _i(dynamic v) => v is num ? v.round() : 0;
+
+  factory WeatherForecast.fromApi(String city, Map j) {
+    final h = j['hourly'] is Map ? j['hourly'] as Map : const {};
+    final d = j['daily'] is Map ? j['daily'] as Map : const {};
+    List l(Map m, String k) => m[k] is List ? m[k] as List : const [];
+    final ht = l(h, 'time');
+    final dt = l(d, 'time');
+    return WeatherForecast(
+      city: city,
+      utcOffset: _i(j['utc_offset_seconds']),
+      hours: [
+        for (var i = 0; i < ht.length; i++)
+          ForecastHour(
+            time: '${ht[i]}',
+            tempC: _d(i < l(h, 'temperature_2m').length ? l(h, 'temperature_2m')[i] : 0),
+            code: _i(i < l(h, 'weather_code').length ? l(h, 'weather_code')[i] : 0),
+            day: _i(i < l(h, 'is_day').length ? l(h, 'is_day')[i] : 1) != 0,
+            rain: _i(i < l(h, 'precipitation_probability').length ? l(h, 'precipitation_probability')[i] : 0),
+          ),
+      ],
+      days: [
+        for (var i = 0; i < dt.length; i++)
+          ForecastDay(
+            date: '${dt[i]}',
+            hiC: _d(i < l(d, 'temperature_2m_max').length ? l(d, 'temperature_2m_max')[i] : 0),
+            loC: _d(i < l(d, 'temperature_2m_min').length ? l(d, 'temperature_2m_min')[i] : 0),
+            code: _i(i < l(d, 'weather_code').length ? l(d, 'weather_code')[i] : 0),
+            rain: _i(i < l(d, 'precipitation_probability_max').length ? l(d, 'precipitation_probability_max')[i] : 0),
+          ),
+      ],
+    );
+  }
+
+  factory WeatherForecast.fromJson(Map o) => WeatherForecast(
+        city: '${o['city']}',
+        utcOffset: _i(o['off']),
+        hours: [
+          for (final e in (o['h'] as List? ?? const []))
+            if (e is List && e.length >= 5) ForecastHour(time: '${e[0]}', tempC: _d(e[1]), code: _i(e[2]), day: _i(e[3]) != 0, rain: _i(e[4])),
+        ],
+        days: [
+          for (final e in (o['d'] as List? ?? const []))
+            if (e is List && e.length >= 5) ForecastDay(date: '${e[0]}', hiC: _d(e[1]), loC: _d(e[2]), code: _i(e[3]), rain: _i(e[4])),
+        ],
+      );
+
+  Map<String, dynamic> toJson() => {
+        'city': city,
+        'off': utcOffset,
+        'h': [for (final e in hours) [e.time, e.tempC, e.code, e.day ? 1 : 0, e.rain]],
+        'd': [for (final e in days) [e.date, e.hiC, e.loC, e.code, e.rain]],
+      };
+
+  /// The city's clock right now, as "2026-10-22T14:00" (rounded down to the hour): what the hourly times are compared with.
+  String get nowHour {
+    final w = DateTime.now().toUtc().add(Duration(seconds: utcOffset));
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${w.year.toString().padLeft(4, '0')}-${two(w.month)}-${two(w.day)}T${two(w.hour)}:00';
+  }
+
+  /// Today's date in the city, "2026-10-22".
+  String get today => nowHour.substring(0, 10);
+
+  /// The next [count] hours, starting with the current one.
+  List<ForecastHour> nextHours([int count = 24]) {
+    final n = nowHour;
+    return [for (final h in hours) if (h.time.compareTo(n) >= 0) h].take(count).toList();
+  }
+
+  /// The days from today on.
+  List<ForecastDay> upcomingDays() {
+    final t = today;
+    return [for (final d in days) if (d.date.compareTo(t) >= 0) d];
   }
 }
