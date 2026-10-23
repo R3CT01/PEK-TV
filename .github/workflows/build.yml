@@ -101,7 +101,7 @@ jobs:
         run: |
           A=android/app/src/main/assets/hesper
           mkdir -p "$A"
-          cp -r www plugins skins "$A/"
+          cp -r plugins skins "$A/"
           curl -fsSL https://curl.se/ca/cacert.pem -o "$A/cacert.pem"
           find "$A" -name __pycache__ -type d -prune -exec rm -rf {} +
           rm -rf "$A"/plugins/*/data

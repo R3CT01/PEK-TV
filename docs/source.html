@@ -23,7 +23,7 @@
 <h2 id="branches">One branch</h2>
 <p>Everything lives on <code>main</code>: the backend, the Flutter UI, the Android host, plugins, skins, cloud workers, the build workflow and these docs. There is no separate branch per platform, so a change to shared code (<code>backend/</code>, <code>flutter_ui/</code>, <code>plugins/</code>, <code>skins/</code> or <code>cloud/</code>) is made once.</p>
 <div class="tablewrap"><table><thead><tr><th>Part</th><th>Folder</th><th>Build guide</th></tr></thead><tbody><tr><td>C++ backend</td><td><code>backend/</code></td><td><a href='build.html#backend'>The backend</a></td></tr><tr><td>Android app (Kotlin host, libmpv, Chaquopy, JNI)</td><td><code>android/</code></td><td><a href='build.html#android'>The Android app</a></td></tr></tbody></table></div>
-<div class="note"><p>Shared code stays in <code>backend/</code> and <code>flutter_ui/</code>. A new platform gets its own runner folder (for example <code>linux/</code> or <code>windows/</code>) and its own workflow file, next to <code>android/</code> and <code>build.yml</code>. Android is the only one today.</p></div>
+<div class="note"><p>Shared code stays in <code>backend/</code> and <code>flutter_ui/</code>. A new platform gets its own runner folder (for example <code>linux/</code> or <code>windows/</code>) and its own workflow file, next to <code>android/</code> and <code>build_android.yml</code>. Android is the only one today.</p></div>
 
 <h2 id="layout">Repository layout</h2>
 <pre><code>backend/          C++ server + embedded Python (dev.sh builds it). API only, no web pages
@@ -36,7 +36,7 @@ skins/            bundled skins: default (PEK Ember), green, neon
 cloud/            Cloudflare Workers: PEK Cloud (sync, accounts, subtitles) and the PEK Store
 tools/            sync_providers.js, make_skin.py, providers.json
 docs/             this site (GitHub Pages)
-.github/workflows/build.yml   the Android APK build
+.github/workflows/build_android.yml   the Android APK build
 FLUTTER.md  FLUTTER_PLUGINS.md  PLUGINS.md  SKINS.md  MUSIC.md  SUBTITLES.md  LOCAL_METADATA.md   reference docs</code></pre>
 
 <h2 id="arch">How the parts fit</h2>
