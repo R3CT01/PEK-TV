@@ -65,15 +65,19 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _add() async {
-    setState(() => _plugins = _loadPlugins()); // a plugin installed since the page opened
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      backgroundColor: context.pek.tokens.glassStrong,
-      builder: (c) => _AddWidget(plugins: _plugins),
-    );
+    _plugins = _loadPlugins(); // a plugin installed since the page opened
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        backgroundColor: context.pek.tokens.glassStrong,
+        builder: (c) => _AddWidget(plugins: _plugins),
+      );
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open the widget list: $e')));
+    }
   }
 
   @override
@@ -90,14 +94,18 @@ class _DashboardPageState extends State<DashboardPage> {
             Heading(
               'Dashboard',
               weather: true,
-              trailing: _edit
-                  ? Row(mainAxisSize: MainAxisSize.min, children: [
-                      PekButton(compact: true, primary: true, label: 'Done', onTap: () => setState(() => _edit = false)),
-                      SizedBox(width: 0.5 * rem),
-                      PekButton(compact: true, label: 'Add widget', onTap: _add),
-                    ])
-                  : PekButton(compact: true, label: 'Customize', onTap: _startEdit),
+              // Done and Add widget used to sit in this line next to the weather pill; on a phone they did not fit, so the part
+              // that stuck out could not be tapped. While editing they get their own line below (see the Wrap).
+              trailing: _edit ? null : PekButton(compact: true, label: 'Customize', onTap: _startEdit),
             ),
+            if (_edit)
+              Padding(
+                padding: EdgeInsets.only(bottom: 0.75 * rem),
+                child: Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
+                  PekButton(compact: true, shrink: true, label: 'Add widget', primary: true, autofocus: true, onTap: _add),
+                  PekButton(compact: true, shrink: true, label: 'Done', onTap: () => setState(() => _edit = false)),
+                ]),
+              ),
             if (_edit)
               Padding(
                 padding: EdgeInsets.only(bottom: rem),
