@@ -154,7 +154,9 @@ class Weather {
       final r = await _c
           .get(Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon'
               '&hourly=temperature_2m,weather_code,precipitation_probability,is_day'
-              '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max'
+              '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,'
+              'apparent_temperature_max,apparent_temperature_min,wind_speed_10m_max,wind_gusts_10m_max,'
+              'wind_direction_10m_dominant,precipitation_sum,uv_index_max,sunrise,sunset'
               '&timezone=auto&forecast_days=7'))
           .timeout(const Duration(seconds: 8));
       if (r.statusCode != 200) return null;
@@ -185,6 +187,25 @@ class Weather {
   }
 
   static String describe(int code) => _codes[code] ?? 'Clear';
+
+  /// A wind speed (given in km/h) in the chosen unit: "12 mph" (Fahrenheit) or "19 km/h" (Celsius).
+  static String speed(double kmh) => unit == 'C' ? '${kmh.round()} km/h' : '${(kmh * 0.621371).round()} mph';
+
+  /// A rain or snow amount (given in mm) in the chosen unit: "0.3 in" or "7.6 mm".
+  static String amount(double mm) {
+    if (unit == 'C') return '${mm < 10 ? mm.toStringAsFixed(1) : mm.round().toString()} mm';
+    final i = mm / 25.4;
+    return '${i < 0.01 && i > 0 ? '<0.01' : i.toStringAsFixed(2)} in';
+  }
+
+  /// The compass point the wind comes from, for a direction in degrees: "NW".
+  static String compass(double deg) {
+    const p = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    return p[(((deg % 360) + 360) % 360 / 22.5 + 0.5).floor() % 16];
+  }
+
+  /// A word for a UV index.
+  static String uvLabel(double uv) => uv < 3 ? 'Low' : (uv < 6 ? 'Moderate' : (uv < 8 ? 'High' : (uv < 11 ? 'Very high' : 'Extreme')));
 
   // ---- header badge (top right of every main page, like .weather-badge in the web UI) ----
   /// Text the badge shows, e.g. "65\u00b0F". One value for every page, so only one request is made.
@@ -470,13 +491,35 @@ class ForecastHour {
   int get hour => int.tryParse(time.length >= 13 ? time.substring(11, 13) : '') ?? 0;
 }
 
-/// One day of the forecast. [date] is like "2026-10-22".
+/// One day of the forecast. [date] is like "2026-10-22". The fields after [rain] are null when the cached forecast is older
+/// than the details (the next refresh fills them in).
 class ForecastDay {
-  const ForecastDay({required this.date, required this.hiC, required this.loC, required this.code, required this.rain});
+  const ForecastDay({
+    required this.date,
+    required this.hiC,
+    required this.loC,
+    required this.code,
+    required this.rain,
+    this.feelsHiC,
+    this.feelsLoC,
+    this.windKmh,
+    this.gustKmh,
+    this.windDir,
+    this.precipMm,
+    this.uv,
+    this.sunrise,
+    this.sunset,
+  });
   final String date;
   final double hiC, loC;
   final int code;
   final int rain;
+  final double? feelsHiC, feelsLoC; // "feels like" high and low
+  final double? windKmh, gustKmh; // strongest wind and gust of the day
+  final double? windDir; // degrees the wind comes from
+  final double? precipMm; // rain + snow total
+  final double? uv; // highest UV index
+  final String? sunrise, sunset; // local to the city, like "2026-10-22T07:12"
 }
 
 /// The hourly and daily forecast for one city (Open-Meteo), as the dashboard's Forecast widget shows it.
@@ -517,10 +560,22 @@ class WeatherForecast {
             loC: _d(i < l(d, 'temperature_2m_min').length ? l(d, 'temperature_2m_min')[i] : 0),
             code: _i(i < l(d, 'weather_code').length ? l(d, 'weather_code')[i] : 0),
             rain: _i(i < l(d, 'precipitation_probability_max').length ? l(d, 'precipitation_probability_max')[i] : 0),
+            feelsHiC: _n(l(d, 'apparent_temperature_max'), i),
+            feelsLoC: _n(l(d, 'apparent_temperature_min'), i),
+            windKmh: _n(l(d, 'wind_speed_10m_max'), i),
+            gustKmh: _n(l(d, 'wind_gusts_10m_max'), i),
+            windDir: _n(l(d, 'wind_direction_10m_dominant'), i),
+            precipMm: _n(l(d, 'precipitation_sum'), i),
+            uv: _n(l(d, 'uv_index_max'), i),
+            sunrise: _s(l(d, 'sunrise'), i),
+            sunset: _s(l(d, 'sunset'), i),
           ),
       ],
     );
   }
+
+  static double? _n(List l, int i) => i < l.length && l[i] is num ? (l[i] as num).toDouble() : null;
+  static String? _s(List l, int i) => i < l.length && l[i] is String ? l[i] as String : null;
 
   factory WeatherForecast.fromJson(Map o) => WeatherForecast(
         city: '${o['city']}',
@@ -531,7 +586,24 @@ class WeatherForecast {
         ],
         days: [
           for (final e in (o['d'] as List? ?? const []))
-            if (e is List && e.length >= 5) ForecastDay(date: '${e[0]}', hiC: _d(e[1]), loC: _d(e[2]), code: _i(e[3]), rain: _i(e[4])),
+            if (e is List && e.length >= 5)
+              ForecastDay(
+                date: '${e[0]}',
+                hiC: _d(e[1]),
+                loC: _d(e[2]),
+                code: _i(e[3]),
+                rain: _i(e[4]),
+                // Older caches have just the first five values.
+                feelsHiC: e.length >= 14 ? _n(e, 5) : null,
+                feelsLoC: e.length >= 14 ? _n(e, 6) : null,
+                windKmh: e.length >= 14 ? _n(e, 7) : null,
+                gustKmh: e.length >= 14 ? _n(e, 8) : null,
+                windDir: e.length >= 14 ? _n(e, 9) : null,
+                precipMm: e.length >= 14 ? _n(e, 10) : null,
+                uv: e.length >= 14 ? _n(e, 11) : null,
+                sunrise: e.length >= 14 ? _s(e, 12) : null,
+                sunset: e.length >= 14 ? _s(e, 13) : null,
+              ),
         ],
       );
 
@@ -539,7 +611,9 @@ class WeatherForecast {
         'city': city,
         'off': utcOffset,
         'h': [for (final e in hours) [e.time, e.tempC, e.code, e.day ? 1 : 0, e.rain]],
-        'd': [for (final e in days) [e.date, e.hiC, e.loC, e.code, e.rain]],
+        'd': [
+          for (final e in days) [e.date, e.hiC, e.loC, e.code, e.rain, e.feelsHiC, e.feelsLoC, e.windKmh, e.gustKmh, e.windDir, e.precipMm, e.uv, e.sunrise, e.sunset],
+        ],
       };
 
   /// The city's clock right now, as "2026-10-22T14:00" (rounded down to the hour): what the hourly times are compared with.

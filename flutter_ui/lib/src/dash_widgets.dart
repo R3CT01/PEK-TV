@@ -275,12 +275,12 @@ class _ForecastCardState extends State<ForecastCard> {
     return dt == null ? d.date : _days[dt.weekday - 1];
   }
 
-  Widget _card(BuildContext context, {required String label, required IconData icon, required String top, String? bottom, required int rain}) {
+  Widget _card(BuildContext context, {required String label, required IconData icon, required String top, String? bottom, required int rain, VoidCallback? onTap}) {
     final p = context.pek;
     final t = p.tokens;
     final rem = p.rem;
     return PekFocusable(
-      onTap: _open,
+      onTap: onTap ?? _open,
       radius: 14,
       background: t.surfaceFocused.withAlpha(90),
       padding: EdgeInsets.symmetric(horizontal: 0.4 * rem, vertical: 0.8 * rem),
@@ -296,6 +296,38 @@ class _ForecastCardState extends State<ForecastCard> {
         Text(rain >= 10 ? '$rain%' : ' ', maxLines: 1, style: TextStyle(fontSize: 0.78 * rem, color: t.textMuted)),
       ]),
     );
+  }
+
+  /// A day card: high and low spelled out ("H 65\u00b0" / "L 48\u00b0"); tap = the details of that day.
+  Widget _dayCard(BuildContext context, ForecastDay d, int index, bool h12) => _card(
+        context,
+        label: _dayLabel(d, index),
+        icon: Weather.iconFor(d.code),
+        top: 'H ${Weather.degrees(d.hiC)}',
+        bottom: 'L ${Weather.degrees(d.loC)}',
+        rain: d.rain,
+        onTap: () => _showDay(context, d, index, h12),
+      );
+
+  void _showDay(BuildContext context, ForecastDay d, int index, bool h12) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      backgroundColor: context.pek.tokens.glassStrong,
+      builder: (c) => _DayDetails(day: d, title: _dayTitle(d, index), h12: h12),
+    );
+  }
+
+  static const _longDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  static const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  String _dayTitle(ForecastDay d, int index) {
+    final dt = DateTime.tryParse(d.date);
+    if (dt == null) return d.date;
+    final name = '${_longDays[dt.weekday - 1]}, ${_months[dt.month - 1]} ${dt.day}';
+    return index == 0 ? 'Today \u00b7 $name' : name;
   }
 
   @override
@@ -316,7 +348,7 @@ class _ForecastCardState extends State<ForecastCard> {
       if (daily) {
         final ds = f.upcomingDays();
         for (var i = 0; i < ds.length; i++) {
-          cards.add(_card(context, label: _dayLabel(ds[i], i), icon: Weather.iconFor(ds[i].code), top: Weather.degrees(ds[i].hiC), bottom: Weather.degrees(ds[i].loC), rain: ds[i].rain));
+          cards.add(_dayCard(context, ds[i], i, h12));
         }
       } else {
         final hs = f.nextHours(24);
@@ -332,13 +364,16 @@ class _ForecastCardState extends State<ForecastCard> {
         child: Text(_failed ? 'Could not load the forecast. Check your connection.' : (_loading ? 'Loading the forecast\u2026' : 'No forecast yet.'), style: TextStyle(color: t.textMuted)),
       );
     } else {
-      body = SizedBox(
-        height: 10.2 * rem,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          itemCount: cards.length,
-          separatorBuilder: (_, __) => SizedBox(width: 0.6 * rem),
-          itemBuilder: (_, i) => SizedBox(width: cardW, child: cards[i]),
+      // No fixed height: the row is as tall as its tallest card, so a bigger phone font can never overflow it.
+      body = SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: IntrinsicHeight(
+          child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            for (var i = 0; i < cards.length; i++) ...[
+              if (i > 0) SizedBox(width: 0.6 * rem),
+              SizedBox(width: cardW, child: cards[i]),
+            ],
+          ]),
         ),
       );
     }
@@ -362,6 +397,69 @@ class _ForecastCardState extends State<ForecastCard> {
           body,
         ]),
       ),
+    );
+  }
+}
+
+/// The details of one forecast day, in a bottom sheet: high / low, feels like, rain, wind, UV, sunrise and sunset.
+class _DayDetails extends StatelessWidget {
+  const _DayDetails({required this.day, required this.title, required this.h12});
+  final ForecastDay day;
+  final String title;
+  final bool h12;
+
+  /// "07:12" or "7:12 AM" from "2026-10-22T07:12".
+  String _clock(String iso) {
+    if (iso.length < 16) return iso;
+    final h = int.tryParse(iso.substring(11, 13)) ?? 0;
+    final m = iso.substring(14, 16);
+    if (!h12) return '${h.toString().padLeft(2, '0')}:$m';
+    return '${h % 12 == 0 ? 12 : h % 12}:$m ${h < 12 ? 'AM' : 'PM'}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    final d = day;
+    final rows = <(IconData, String, String)>[
+      (Icons.thermostat, 'Feels like', d.feelsHiC != null && d.feelsLoC != null ? '${Weather.degrees(d.feelsHiC!)} / ${Weather.degrees(d.feelsLoC!)}' : ''),
+      (Icons.water_drop, 'Chance of rain', '${d.rain}%'),
+      (Icons.umbrella, 'Precipitation', d.precipMm != null ? Weather.amount(d.precipMm!) : ''),
+      (Icons.air, 'Wind', d.windKmh != null ? '${Weather.speed(d.windKmh!)}${d.windDir != null ? ' ${Weather.compass(d.windDir!)}' : ''}' : ''),
+      (Icons.storm, 'Wind gusts', d.gustKmh != null ? Weather.speed(d.gustKmh!) : ''),
+      (Icons.wb_sunny_outlined, 'UV index', d.uv != null ? '${d.uv!.round()} \u00b7 ${Weather.uvLabel(d.uv!)}' : ''),
+      (Icons.wb_twilight, 'Sunrise', d.sunrise != null ? _clock(d.sunrise!) : ''),
+      (Icons.nights_stay_outlined, 'Sunset', d.sunset != null ? _clock(d.sunset!) : ''),
+    ].where((r) => r.$3.isNotEmpty).toList();
+    return SingleChildScrollView(
+      padding: EdgeInsets.fromLTRB(1.25 * rem, 0, 1.25 * rem, 1.5 * rem),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, style: TextStyle(fontSize: 1.2 * rem, fontWeight: FontWeight.w700)),
+        SizedBox(height: 0.9 * rem),
+        Row(children: [
+          Icon(Weather.iconFor(d.code), size: 2.8 * rem, color: t.accent),
+          SizedBox(width: 0.9 * rem),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('H ${Weather.degrees(d.hiC)}  \u00b7  L ${Weather.degrees(d.loC)}', style: TextStyle(fontSize: 1.5 * rem, fontWeight: FontWeight.w700)),
+              Text(Weather.describe(d.code), style: TextStyle(fontSize: 0.95 * rem, color: t.textMuted)),
+            ]),
+          ),
+        ]),
+        SizedBox(height: 1 * rem),
+        for (final r in rows)
+          Padding(
+            padding: EdgeInsets.symmetric(vertical: 0.5 * rem),
+            child: Row(children: [
+              Icon(r.$1, size: 1.3 * rem, color: t.textMuted),
+              SizedBox(width: 0.75 * rem),
+              Expanded(child: Text(r.$2, style: TextStyle(fontSize: 0.95 * rem, color: t.textMuted))),
+              Text(r.$3, style: TextStyle(fontSize: 1 * rem, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+      ]),
     );
   }
 }
