@@ -21,6 +21,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- In-app updates (app_update.dart / AppUpdater.kt): installing the newer PEK TV apk the app downloaded from GitHub.
+         The person still has to allow "Install unknown apps" for PEK TV once, and Android confirms the update. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <!-- Lets the app install on TVs/sticks with no touchscreen -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -101,6 +105,11 @@
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.PEK.Launch" />
+
+        <!-- PackageInstaller reports the outcome of an in-app update here (AppUpdater.kt). -->
+        <receiver
+            android:name=".InstallResultReceiver"
+            android:exported="false" />
 
         <service
             android:name=".MusicService"

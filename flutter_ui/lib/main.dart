@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'src/activity.dart';
+import 'src/app_update.dart';
 import 'src/api.dart';
 import 'src/cloud.dart';
 import 'src/profile_pages.dart';
@@ -60,7 +61,19 @@ class _Boot extends StatefulWidget {
 }
 
 class _BootState extends State<_Boot> {
-  late Future<bool> _ready = Api.waitForServer();
+  late Future<bool> _ready = _start();
+
+  // A newer PEK TV on GitHub (app_update.dart). Looked for while the server starts, so it adds no waiting when up to date;
+  // "Not now" hides the screen for this run only, it is back at the next start.
+  AppRelease? _update;
+  bool _later = false;
+
+  Future<bool> _start() async {
+    final check = AppUpdate.check(); // gives up after a few seconds; any problem = no update screen
+    final ok = await Api.waitForServer();
+    _update = await check;
+    return ok;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,6 +88,9 @@ class _BootState extends State<_Boot> {
           );
         }
         if (snap.data == true) {
+          if (_update != null && !_later) {
+            return AppUpdateScreen(release: _update!, onLater: () => setState(() => _later = true));
+          }
           // With an account, "Who's watching?" comes first; the app below is rebuilt for each profile.
           return ListenableBuilder(
             listenable: Listenable.merge([Profiles.changes, Cloud.changes]),
@@ -87,7 +103,7 @@ class _BootState extends State<_Boot> {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const Text('The PEK server did not start.'),
               SizedBox(height: rem),
-              PekButtonRetry(onTap: () => setState(() => _ready = Api.waitForServer())),
+              PekButtonRetry(onTap: () => setState(() => _ready = _start())),
             ]),
           ),
         );

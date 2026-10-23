@@ -17,6 +17,7 @@ import android.os.Process
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
+import com.pektv.app.AppUpdater
 import com.pektv.app.MediaPermissions
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
@@ -45,6 +46,8 @@ import java.util.concurrent.Executors
  *                                    fullscreen, destroy
  *   pek/mpv/events  (EventChannel)   {event: time|state|tracks|ended, data: {...}}  - same payloads the web UI got
  *   pek/host        (MethodChannel)  exit, isPhone, setMulticast, dirs
+ *   pek/update      (MethodChannel)  info, install(path), openInstallSettings -> AppUpdater (app_update.dart: the "new version" screen);
+ *                                    status {status, message} comes back from the installer
  *   pek/output      (MethodChannel)  Settings > Video / Audio output: video, setMatchRate, setHdr, audio, setPassthrough
  *   pek/music       (MethodChannel)  meta, state, end -> FlutterMusic (background play, lock-screen controls);
  *                                    remote {action} comes back the other way (next, prev, stop)
@@ -58,6 +61,7 @@ class FlutterHostActivity : FlutterActivity() {
     private var events: EventChannel.EventSink? = null
     private var music: FlutterMusic? = null
     private var musicChannel: MethodChannel? = null
+    private var updateChannel: MethodChannel? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
@@ -333,6 +337,28 @@ class FlutterHostActivity : FlutterActivity() {
             override fun onCancel(arguments: Any?) { events = null }
         })
 
+        // "New version available" screen (app_update.dart). The apk is copied into a PackageInstaller session, which can take a
+        // moment for a large file, so install() runs on the worker pool and answers later.
+        updateChannel = MethodChannel(messenger, "pek/update").also { ch ->
+            AppUpdater.onStatus = { status, message ->
+                runOnUiThread { ch.invokeMethod("status", mapOf("status" to status, "message" to message)) }
+            }
+            ch.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "info" -> result.success(AppUpdater.info(applicationContext))
+                    "openInstallSettings" -> result.success(AppUpdater.openInstallSettings(this))
+                    "install" -> {
+                        val path = call.argument<String>("path") ?: ""
+                        pluginPool.execute {
+                            val err = AppUpdater.install(applicationContext, path)
+                            runOnUiThread { result.success(err) }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
         MethodChannel(messenger, "pek/host").setMethodCallHandler { call, result ->
             when (call.method) {
                 // The same test as MainActivity.phone: false on Android TV / leanback boxes (html.pek-tv in the web UI).
@@ -367,6 +393,8 @@ class FlutterHostActivity : FlutterActivity() {
 
     override fun onDestroy() {
         pluginPool.shutdown()
+        AppUpdater.onStatus = null
+        updateChannel = null
         events = null
         setMulticast(false)
         music?.destroy()          // also stops MusicService: without this activity there is no queue to control
