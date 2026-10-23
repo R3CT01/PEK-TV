@@ -1,4 +1,4 @@
-# PEK TV - Flutter UI (phase 1, Android)
+# PEK TV - Flutter UI
 
 The C++ server, the Python plugins, libmpv and the cloud workers are unchanged. Only the screen layer is new:
 
@@ -12,9 +12,17 @@ MainActivity (unchanged boot: assets, server on :8080, plugins, splash)
 ## Build
 1. `cd flutter_ui && flutter pub get`   (generates `flutter_ui/.android/`, which switches the Flutter build on)
 2. Build the Android project as usual. Step 1 is required: the app has no other UI.
-3. CI: `.github/workflows/build.yml` runs steps 1 automatically when `flutter_ui/pubspec.yaml` exists.
+3. CI: `.github/workflows/build.yml` (the Android build) runs step 1 automatically when `flutter_ui/pubspec.yaml` exists.
 
 The Flutter UI is the only UI.
+
+## One branch, one folder per platform
+Everything lives on `main`. `flutter_ui/` (screens) and `backend/` (C++ server) are shared; each platform has its own host folder
+next to them. Today that is `android/` with its workflow `.github/workflows/build.yml`. A new platform adds its own folder (for
+example `linux/` or `windows/`) and its own workflow file; it does not need a branch. A host has to provide what Android's host
+does: start the backend on `127.0.0.1:8080`, and answer the `pek/*` platform channels (`pek/mpv`, `pek/music`, `pek/host`,
+`pek/plugins`, `pek/output`) that `flutter_ui/lib/src/` calls. Some pieces here are Android-only today (the Kotlin side of those
+channels, `webview_flutter_android` for plugin trailers).
 
 ## What the Flutter UI has now
 Swipe navigation on phones and tablets: **Home, Movies, Shows, Music and More are pages you swipe between** (or tap in the

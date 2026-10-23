@@ -33,7 +33,7 @@
 
 <section><div class="wrap"><h2>Development outline</h2><p class="sub">Where PEK TV has been and where it is going. It is in beta, so expect rough edges.</p>
 <ol class="steps">
-<li class="done"><b>Core.</b> C++ backend with embedded Python, web UI, library scanner, NFO and artwork support, network sources.</li>
+<li class="done"><b>Core.</b> C++ backend with embedded Python, Flutter UI, library scanner, NFO and artwork support, network sources.</li>
 <li class="done"><b>Plugins.</b> Sandbox, permissions, the Python backend guard, install from .zip, then the three trust tiers (Official, PEK Store, GitHub).</li>
 <li class="done"><b>Look and feel.</b> Skins and the skin installer, PEK Ember default look, TV mode, performance mode.</li>
 <li class="done"><b>Accounts.</b> PEK Cloud: profiles, sync of history, resume points, favorites and settings; optional invite-only sign-up.</li>
@@ -55,10 +55,10 @@
 </div>
 <div class="note"><b>About the artwork in these screenshots.</b> The movie and show posters, episode stills and album covers shown are <b>stand-ins</b>: plain generated gradient images with a title on them, made for these screenshots. They are not the official artwork. Real posters, stills and album covers are copyrighted by their owners, so none are included here. The titles, descriptions, episode text, artist names and album and song titles shown are invented sample entries for demonstration only. All titles and names mentioned are the property of their respective owners, and PEK TV is not affiliated with or endorsed by them. In normal use PEK TV shows artwork from your own files or fetches it from TMDB for your own library.</div>
 </div></section>
-<section><div class="wrap"><h2>Read the code</h2><p class="sub">PEK TV lives in one repository with two branches.</p>
+<section><div class="wrap"><h2>Read the code</h2><p class="sub">PEK TV lives in one repository on one branch, <code>main</code>.</p>
 <div class="grid">
-<div class="card reveal"><h3><code>main</code></h3><p>Backend, web UI, plugins, skins and cloud workers. Runs on Linux, Windows (MSYS2 / WSL) and Android through Termux.</p></div>
-<div class="card reveal"><h3><code>android</code></h3><p>Everything in main plus the Android app (Kotlin, libmpv, Chaquopy) and the GitHub Actions build.</p></div>
+<div class="card reveal"><h3>Backend and UI</h3><p>The C++ backend (<code>backend/</code>) and the Flutter UI (<code>flutter_ui/</code>), shared by every platform, plus plugins, skins and cloud workers.</p></div>
+<div class="card reveal"><h3>Android app</h3><p>The Kotlin host (<code>android/</code>: libmpv, Chaquopy, JNI) and the GitHub Actions build. More platforms are added to this same branch.</p></div>
 </div>
 <div class="btns" style="margin-top:22px"><a class="btn" href="source.html">Source documentation</a></div></div></section>
 </main>

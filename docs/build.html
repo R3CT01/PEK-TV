@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Building PEK TV</title>
-<meta name="description" content="How to build PEK TV on both branches: the main branch with dev.sh and the android branch with GitHub Actions.">
+<meta name="description" content="How to build PEK TV from the single main branch: the backend with dev.sh and the Android app with GitHub Actions.">
 <meta name="theme-color" content="#140b07">
 <link rel="icon" href="assets/favicon.png">
 <link rel="stylesheet" href="assets/style.css">
@@ -15,14 +15,15 @@
 <button class="menu-btn" aria-expanded="false" aria-label="Menu">Menu</button>
 <nav><a href="index.html">Home</a><a href="build.html" aria-current="page">Build</a><a href="plugins.html">Plugins</a><a href="source.html">Source</a><a href="https://github.com/R3CT01/PEK-TV" rel="noopener">GitHub &#8599;</a></nav>
 </div></header>
-<main><div class="wrap doc"><aside class="toc"><b>On this page</b><a href="#main">Main branch</a><a href="#android">Android branch</a><a href="#cloud">PEK Cloud</a><a href="#checks">Checks</a></aside><article>
+<main><div class="wrap doc"><aside class="toc"><b>On this page</b><a href="#backend">Backend</a><a href="#android">Android app</a><a href="#cloud">PEK Cloud</a><a href="#checks">Checks</a></aside><article>
 <span class="tag">Build guide</span>
 <h1>Building PEK TV</h1>
-<p>PEK TV has two branches and each builds in its own way. Pick the one you need.</p>
-<div class="tablewrap"><table><thead><tr><th>Branch</th><th>Builds</th><th>How</th><th>Output</th></tr></thead><tbody><tr><td><code>main</code></td><td>The backend (C++) and the web UI</td><td><code>backend/dev.sh</code> on Termux, Linux or MSYS2 / WSL</td><td><code>bin/pek</code>, served at <code>http://localhost:8080</code></td></tr><tr><td><code>android</code></td><td>The Android app (APK)</td><td>GitHub Actions, <code>.github/workflows/build.yml</code></td><td><code>PEK-TV-&lt;version&gt;-&lt;type&gt;.apk</code></td></tr></tbody></table></div>
+<p>PEK TV lives on one branch, <code>main</code>. The same checkout builds every part, so there is nothing to switch or keep in step. Pick the part you need.</p>
+<div class="tablewrap"><table><thead><tr><th>Part</th><th>Folder</th><th>How</th><th>Output</th></tr></thead><tbody><tr><td>Backend (C++)</td><td><code>backend/</code></td><td><code>backend/dev.sh</code> on Termux, Linux or MSYS2 / WSL</td><td><code>bin/pek</code>, the API on <code>http://localhost:8080</code></td></tr><tr><td>Android app (APK)</td><td><code>android/</code> + <code>flutter_ui/</code></td><td>GitHub Actions, <code>.github/workflows/build.yml</code></td><td><code>PEK-TV-&lt;version&gt;-&lt;type&gt;.apk</code></td></tr></tbody></table></div>
+<div class="note"><p>Android is the only app build today. The Flutter screens in <code>flutter_ui/</code> and the backend in <code>backend/</code> are shared, so another platform is added to this same branch as its own folder and workflow file next to <code>android/</code> and <code>build.yml</code>.</p></div>
 
-<h2 id="main">The main branch</h2>
-<p>The web UI in <code>www/</code> needs no build step: edit it and restart. Only the C++ backend in <code>backend/</code> is compiled.</p>
+<h2 id="backend">The backend</h2>
+<p>There is no web page to build any more: the screens are the Flutter app in <code>flutter_ui/</code> (see <code>FLUTTER.md</code>), and the server only answers API requests. Only the C++ backend in <code>backend/</code> is compiled.</p>
 <h3>You need</h3>
 <ul>
 <li>A C++17 compiler (<code>g++</code> or <code>clang</code>), Python 3 with its development files (<code>python3-config</code>), and OpenSSL headers. The search-site fetcher needs HTTPS, so OpenSSL is required.</li>
@@ -34,7 +35,7 @@
 bash dev.sh            # build to bin/pek, then run it
 ./dev.sh --run         # skip the build, run the last binary</code></pre>
 <p>Use <code>bash dev.sh</code> on Android shared storage, where files cannot be made executable. The script runs the binary from a copy in your home folder because Android blocks executing files on shared storage. <code>bin/</code> is created in the nearest parent folder that already has one, otherwise next to the script.</p>
-<p>Then open <a href="http://localhost:8080">http://localhost:8080</a>. Edits to <code>www/</code> or a plugin only need a restart; rebuild only when a <code>.cpp</code> file changes.</p>
+<p>The server then listens on <code>http://localhost:8080</code> for the app. Edits to a plugin only need a restart; rebuild only when a <code>.cpp</code> file changes.</p>
 
 <h3>Optional libraries (auto-detected)</h3>
 <p>Discovery, FTP, WebDAV and DLNA / UPnP always work. SMB, NFS and torrents are built in only when their headers are found, so the same script behaves the same on Termux, Linux and Windows.</p>
@@ -42,15 +43,15 @@ bash dev.sh            # build to bin/pek, then run it
 <p><code>1</code> means required (the build fails if it is missing) and <code>0</code> means skip. The old <code>HESPER_*</code> names still work. Without libtorrent, searching still works and playing a torrent reports that it is not built in.</p>
 
 <h3>Environment variables</h3>
-<div class="tablewrap"><table><thead><tr><th>Variable</th><th>What it does</th></tr></thead><tbody><tr><td><code>TMDB_API_KEY</code></td><td>Your own TMDb key, if you do not use PEK's built-in access</td></tr><tr><td><code>TMDB_PROXY_URL</code></td><td>Use a different TMDb proxy address</td></tr><tr><td><code>PEK_BIND</code> / <code>PEK_TOKEN</code></td><td>Open PEK TV to other devices, for example <code>PEK_BIND=0.0.0.0 PEK_TOKEN=choose-a-secret</code>, then browse to <code>http://&lt;device-ip&gt;:8080/?token=choose-a-secret</code>. By default it only answers the device it runs on</td></tr><tr><td><code>PEK_TRUSTED_PLUGINS</code></td><td>Comma-separated plugin ids you wrote yourself and want to run unguarded while developing</td></tr><tr><td><code>PEK_ALLOW_PLUGIN_BACKEND=0</code></td><td>Refuse plugin <code>.py</code> files (for a store build)</td></tr><tr><td><code>PEK_ALLOW_GITHUB=0</code></td><td>Disable install-from-GitHub</td></tr><tr><td><code>PEK_SUBS_URL</code></td><td>Address of the subtitle worker, if it is not on the sync address</td></tr></tbody></table></div>
+<div class="tablewrap"><table><thead><tr><th>Variable</th><th>What it does</th></tr></thead><tbody><tr><td><code>TMDB_API_KEY</code></td><td>Your own TMDb key, if you do not use PEK's built-in access</td></tr><tr><td><code>TMDB_PROXY_URL</code></td><td>Use a different TMDb proxy address</td></tr><tr><td><code>PEK_BIND</code> / <code>PEK_TOKEN</code></td><td>Open PEK TV to other devices, for example <code>PEK_BIND=0.0.0.0 PEK_TOKEN=choose-a-secret</code>, then connect to <code>http://&lt;device-ip&gt;:8080/?token=choose-a-secret</code>. By default it only answers the device it runs on</td></tr><tr><td><code>PEK_TRUSTED_PLUGINS</code></td><td>Comma-separated plugin ids you wrote yourself and want to run unguarded while developing</td></tr><tr><td><code>PEK_ALLOW_PLUGIN_BACKEND=0</code></td><td>Refuse plugin <code>.py</code> files (for a store build)</td></tr><tr><td><code>PEK_ALLOW_GITHUB=0</code></td><td>Disable install-from-GitHub</td></tr><tr><td><code>PEK_SUBS_URL</code></td><td>Address of the subtitle worker, if it is not on the sync address</td></tr></tbody></table></div>
 
-<h2 id="android">The android branch</h2>
-<p>The Android app is a Kotlin shell around the same backend and UI. It uses <b>libmpv</b> as its only video player and <b>Chaquopy</b> to run the plugin Python backends. Targets: minSdk 26, compileSdk and targetSdk 36, ABIs <code>armeabi-v7a</code> and <code>arm64-v8a</code>, application id <code>com.pektv.app</code>.</p>
+<h2 id="android">The Android app</h2>
+<p>The Android app is a Kotlin host around the same backend. It starts the C++ server through JNI, shows the Flutter UI from <code>flutter_ui/</code>, uses <b>libmpv</b> as its only video player and <b>Chaquopy</b> to run the plugin Python backends. Targets: minSdk 26, compileSdk and targetSdk 36, ABIs <code>armeabi-v7a</code> and <code>arm64-v8a</code>, application id <code>com.pektv.app</code>.</p>
 <p>It is built by GitHub Actions, so you do not need Android Studio. The repository has no Gradle wrapper; the workflow installs Gradle 8.10.2 and JDK 17.</p>
 <h3>What the workflow does</h3>
 <ol>
 <li>Works out the version name: the tag without its <code>v</code>, or the <code>versionName</code> in <code>android/app/build.gradle</code> plus <code>-dev.&lt;run number&gt;</code>.</li>
-<li>Copies <code>www</code>, <code>plugins</code> and <code>skins</code> into the app's assets (without caches or plugin <code>data/</code> folders).</li>
+<li>Runs <code>flutter pub get</code> in <code>flutter_ui/</code>, which generates the Flutter module the Gradle build includes, then copies <code>plugins</code> and <code>skins</code> into the app's assets (without caches or plugin <code>data/</code> folders).</li>
 <li>Builds OpenSSL (cached), clones libsmb2 for SMB, and optionally libtorrent and Boost headers.</li>
 <li>Builds the APK. If the full build fails it retries without the optional native libraries (SMB, torrent).</li>
 <li>Verifies the signature, uploads the APK as an artifact (kept 30 days), and can publish a GitHub pre-release.</li>
@@ -69,15 +70,16 @@ git push origin v0.1.4-beta.1</code></pre>
 base64 -w0 pek-release.jks     # paste the output into PEK_KEYSTORE_BASE64</code></pre>
 <p>In the repository go to <b>Settings &rarr; Secrets and variables &rarr; Actions</b> and add:</p>
 <div class="tablewrap"><table><thead><tr><th>Secret</th><th>Value</th></tr></thead><tbody><tr><td><code>PEK_KEYSTORE_BASE64</code></td><td>the base64 text of the keystore</td></tr><tr><td><code>PEK_KEYSTORE_PASSWORD</code></td><td>the keystore password</td></tr><tr><td><code>PEK_KEY_ALIAS</code></td><td>the alias (<code>pek</code> above)</td></tr><tr><td><code>PEK_KEY_PASSWORD</code></td><td>the key password</td></tr></tbody></table></div>
-<div class="note warn"><p>Never commit the keystore. The <code>android</code> branch's <code>.gitignore</code> already excludes <code>*.jks</code>, <code>*.keystore</code> and <code>keystore.b64</code>.</p></div>
-<p>When you add or edit a streaming provider in <code>www/providers.js</code>, run <code>node tools/sync_providers.js</code> to regenerate the allow-list in <code>MainActivity.kt</code> and the <code>&lt;queries&gt;</code> in <code>AndroidManifest.xml</code>.</p>
+<div class="note warn"><p>Never commit the keystore. The repository's <code>.gitignore</code> already excludes <code>*.jks</code>, <code>*.keystore</code> and <code>keystore.b64</code>.</p></div>
+<p>When you add or edit a streaming service, change <code>tools/providers.json</code> and run <code>node tools/sync_providers.js</code> from the project root. It regenerates the package allow-list in <code>FlutterHostActivity.kt</code>, the <code>&lt;queries&gt;</code> in <code>AndroidManifest.xml</code> and the Python provider table in <code>pek_providers.py</code>.</p>
 
 <h2 id="cloud">PEK Cloud (optional)</h2>
 <p>Accounts, sync, subtitles and the PEK Store run on Cloudflare Workers with a D1 database, and email codes are sent through Brevo. A phone browser is enough to deploy it. The full step-by-step guides are <code>cloud/DEPLOY.md</code> and <code>cloud/STORE-DEPLOY.md</code> in the repository. Sign-up can be made invite-only with single-use codes (<code>INVITE_ONLY=1</code> and an <code>ADMIN_KEY</code>); accounts that already exist are not affected.</p>
 
 <h2 id="checks">Checks before you push</h2>
-<pre><code>for f in www/*.js plugins/*/*.js cloud/*.js; do node --check "$f"; done
-python3 -m py_compile backend/hesper_guard.py plugins/*/backend.py</code></pre>
+<pre><code>for f in cloud/*.js tools/*.js; do node --check "$f"; done
+python3 -m py_compile backend/hesper_guard.py plugins/*/*.py
+cd flutter_ui &amp;&amp; flutter analyze &amp;&amp; flutter test</code></pre>
 </article></div></main>
 <footer><div class="wrap">
 <p><b>PEK TV</b> is made by PEK Industries. Source: <a href="https://github.com/R3CT01/PEK-TV">github.com/R3CT01/PEK-TV</a>. See the <code>LICENCE</code> file in the repository for what you may and may not do with the code.</p>

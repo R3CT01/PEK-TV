@@ -45,7 +45,7 @@
 
 <h2 id="permissions">Permissions</h2>
 <div class="tablewrap"><table><thead><tr><th>Permission</th><th>What it allows</th></tr></thead><tbody><tr><td><code>network</code></td><td>List of https host names (no IPs, no <code>localhost</code>). <code>*.x.com</code> matches subdomains. Poster art and the YouTube player only load from listed hosts.</td></tr><tr><td><code>storage</code></td><td>A small private key/value store (256 KB) and read access to <code>plugins/&lt;id&gt;/data/</code>.</td></tr><tr><td><code>library</code></td><td>Lets the Python backend call <code>pek_host.library_titles()</code>: titles and years only, never file names or folders.</td></tr><tr><td><code>torrent</code></td><td><code>pek.torrent.info / search / play</code>. The plugin never sees the provider address or key.</td></tr><tr><td><code>favorites</code></td><td><code>pek.favorites.list / add / remove</code>: the shared Favorites tab.</td></tr><tr><td><code>providers</code></td><td><code>ui.providerButton</code>: a &ldquo;Watch on &lt;service&gt;&rdquo; button.</td></tr><tr><td><code>plugins</code></td><td><code>pek.plugins.streamers / open</code>: hand a title to another plugin that can stream it.</td></tr><tr><td><code>live</code></td><td><code>pek.live.play</code> and live sessions (channel switcher, guide, now / next banner).</td></tr></tbody></table></div>
-<div class="note"><p><b>Android branch:</b> the installer also accepts <code>watched</code> and <code>device</code>. The bridge that exposes <code>pek.watched</code> and <code>pek.device</code> to plugin code is not wired into the sandbox yet, so treat both as planned.</p></div>
+<div class="note"><p><b>Android:</b> the installer also accepts <code>watched</code> and <code>device</code>. The bridge that exposes <code>pek.watched</code> and <code>pek.device</code> to plugin code is not wired into the sandbox yet, so treat both as planned.</p></div>
 
 <h2 id="ui">The UI API (<code>ui.js</code>)</h2>
 <p>Your UI runs in a sandboxed iframe with no access to the page, PEK TV's API, cookies or storage. You get one global, <code>pek</code> (the older name <code>hesper</code> still works).</p>
@@ -97,7 +97,7 @@ def run():
 <h3>Live streams</h3>
 <p>With <code>"live": true</code>, <code>pek.live.play({url, title})</code> opens PEK's player on an http(s) stream (not this device, no credentials in the URL). Add a <code>channel</code> id and PEK TV opens a <i>live session</i> with a now / next banner, a channel switcher and a guide. You register one function with <code>pek.live.onQuery</code> and answer four questions: <code>list</code>, <code>now</code>, <code>guide</code> and <code>url</code>.</p>
 <h3>Launching and favorites</h3>
-<p><code>pek.onLaunch(fn)</code> runs when PEK TV opens your plugin on a title (from Favorites or another plugin). Streaming services and their Android packages are listed in <code>www/providers.js</code>.</p>
+<p><code>pek.onLaunch(fn)</code> runs when PEK TV opens your plugin on a title (from Favorites or another plugin). Streaming services and their Android packages are listed in <code>tools/providers.json</code> (run <code>node tools/sync_providers.js</code> after changing it).</p>
 <p>The full reference is <a href="https://github.com/R3CT01/PEK-TV/blob/main/PLUGINS.md"><code>PLUGINS.md</code></a> in the repository.</p>
 
 <h2 id="bundled">Plugins in the repository</h2>
