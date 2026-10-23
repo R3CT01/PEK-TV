@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'api.dart' show Details;
@@ -265,6 +267,14 @@ class PosterCard extends StatefulWidget {
 
 class _PosterCardState extends State<PosterCard> {
   bool _failed = false;
+  int _failures = 0;
+  Timer? _retry;
+
+  @override
+  void dispose() {
+    _retry?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +310,17 @@ class _PosterCardState extends State<PosterCard> {
                         cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
                         errorBuilder: (_, __, ___) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
-                            if (mounted && !_failed) setState(() => _failed = true);
+                            if (mounted && !_failed) {
+                              setState(() => _failed = true);
+                              // The picture would not load (after the image's own retries): show the title card, then
+                              // try the picture again after 8, 16 and 24 s instead of staying blank until Refresh.
+                              if (++_failures <= 3) {
+                                _retry?.cancel();
+                                _retry = Timer(Duration(seconds: 8 * _failures), () {
+                                  if (mounted) setState(() => _failed = false);
+                                });
+                              }
+                            }
                           });
                           return const SizedBox.shrink();
                         },

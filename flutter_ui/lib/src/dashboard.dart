@@ -357,6 +357,8 @@ class _DashboardPageState extends State<DashboardPage> {
     final p = context.pek;
     final rem = p.rem;
     final w = p.compact ? 110.0 : (p.isTv ? 8 * rem : 150.0);
+    // Room under the poster for the title and the subtitle line (about 2.6 rem), growing with the phone's text size.
+    final textRoom = (0.4 + 2.7 * MediaQuery.textScalerOf(context).scale(1.0)) * rem;
     return (
       full: true,
       span: 1,
@@ -367,7 +369,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ]),
         SizedBox(height: 0.75 * rem),
         SizedBox(
-          height: w * 1.5 + 0.5 * rem,
+          height: w * 1.5 + textRoom,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             clipBehavior: Clip.none,

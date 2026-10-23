@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'art_cache.dart';
 import 'player.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -161,7 +162,7 @@ class _ShowScreenState extends State<ShowScreen> {
           return ListView(
             padding: EdgeInsets.fromLTRB(rem + p.safeX, 0, rem + p.safeX, rem),
             children: [
-              FutureBuilder<Details>(future: details, builder: (_, snap) => Text(snap.data?.overview ?? '', maxLines: 4, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, height: 1.4))),
+              FutureBuilder<Details>(future: details, builder: (_, snap) => ExpandableText(snap.data?.overview ?? '', maxLines: 4)),
               SizedBox(height: 0.75 * rem),
               Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
                 PekButton(compact: true, label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.show(show.title))),
@@ -216,7 +217,8 @@ class _ShowScreenState extends State<ShowScreen> {
         background: t.surface,
         borderColor: t.border,
         padding: EdgeInsets.symmetric(horizontal: rem, vertical: 0.7 * rem),
-        onTap: () => playMedia(context, episodeItem(show, e), startSec: saved?.position ?? 0, nextFor: (cur) => nextEpisodeItem(show, cur.id)),
+        // Opens the episode page (picture, full synopsis, Play / Continue); Play is on that page.
+        onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => EpisodeScreen(show: show, episode: e))),
         // Press and hold: mark this one episode watched / unwatched (the season and show buttons above do many at once).
         onLongPress: () => Watched.set([episodeItem(show, e)], !seen),
         child: Row(children: [
@@ -227,6 +229,137 @@ class _ShowScreenState extends State<ShowScreen> {
           if (seen) Padding(padding: EdgeInsets.only(left: 0.5 * rem), child: Icon(Icons.check_circle, color: t.accent, size: 1.25 * rem)),
         ]),
       ),
+    );
+  }
+}
+
+/// A synopsis cut to [maxLines] with a "Show more" / "Show less" switch (shown only when the text really is cut).
+class ExpandableText extends StatefulWidget {
+  const ExpandableText(this.text, {super.key, this.maxLines = 4});
+  final String text;
+  final int maxLines;
+
+  @override
+  State<ExpandableText> createState() => _ExpandableTextState();
+}
+
+class _ExpandableTextState extends State<ExpandableText> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.text.isEmpty) return const SizedBox.shrink();
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    final style = TextStyle(color: t.textMuted, height: 1.4);
+    return LayoutBuilder(builder: (context, c) {
+      final painter = TextPainter(
+        text: TextSpan(text: widget.text, style: DefaultTextStyle.of(context).style.merge(style)),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        maxLines: widget.maxLines,
+      )..layout(maxWidth: c.maxWidth);
+      final cut = painter.didExceedMaxLines;
+      painter.dispose();
+      if (!cut) return Text(widget.text, style: style);
+      return PekFocusable(
+        radius: 8,
+        padding: EdgeInsets.symmetric(vertical: 0.25 * rem),
+        onTap: () => setState(() => _open = !_open),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(widget.text, maxLines: _open ? null : widget.maxLines, overflow: _open ? TextOverflow.visible : TextOverflow.ellipsis, style: style),
+          SizedBox(height: 0.25 * rem),
+          Text(_open ? 'Show less' : 'Show more', style: TextStyle(color: t.accent, fontWeight: FontWeight.w600)),
+        ]),
+      );
+    });
+  }
+}
+
+/// One episode: its still picture, title, the whole synopsis, and Play / Continue / Mark as watched.
+class EpisodeScreen extends StatelessWidget {
+  const EpisodeScreen({super.key, required this.show, required this.episode});
+  final Show show;
+  final Episode episode;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final rem = p.rem;
+    final e = episode;
+    final label = 'S${e.season.toString().padLeft(2, '0')}E${e.episode.toString().padLeft(2, '0')}';
+    final info = Api.episodeDetails(show.title, e.season, e.episode);
+    Widget noPicture() => Center(child: Icon(Icons.movie_outlined, color: t.textMuted, size: 2.5 * rem));
+    final still = ClipRRect(
+      borderRadius: BorderRadius.circular(t.radius),
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: ColoredBox(
+          color: t.surface,
+          child: FutureBuilder<EpisodeInfo>(
+            future: info,
+            builder: (_, snap) {
+              final url = snap.data?.still ?? '';
+              if (url.isEmpty) return noPicture();
+              return ArtImage(url, fit: BoxFit.cover, cacheWidth: 800, errorBuilder: (_, __, ___) => noPicture());
+            },
+          ),
+        ),
+      ),
+    );
+    final body = ValueListenableBuilder<int>(
+      valueListenable: Store.changed,
+      builder: (context, _, __) {
+        final saved = Store.progressFor(e.id);
+        final seen = episodeWatched(show, e);
+        final item = episodeItem(show, e);
+        void play(double start) => playMedia(context, item, startSec: start, nextFor: (cur) => nextEpisodeItem(show, cur.id));
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            FutureBuilder<EpisodeInfo>(
+              future: info,
+              builder: (_, snap) {
+                final done = snap.connectionState == ConnectionState.done;
+                final name = snap.data?.name ?? '';
+                final overview = snap.data?.overview ?? '';
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: TextStyle(color: t.accent, fontWeight: FontWeight.w700)),
+                    SizedBox(height: 0.25 * rem),
+                    Text(name.isEmpty ? e.filename : name, style: TextStyle(fontSize: 1.5 * rem, fontWeight: FontWeight.w800)),
+                    SizedBox(height: 0.75 * rem),
+                    // The whole synopsis: no line limit here.
+                    Text(overview.isNotEmpty ? overview : (done ? 'No description available.' : 'Loading...'), style: TextStyle(color: t.textMuted, height: 1.4)),
+                  ],
+                );
+              },
+            ),
+            SizedBox(height: 1.25 * rem),
+            Wrap(spacing: 0.75 * rem, runSpacing: 0.75 * rem, children: [
+              if (saved != null) ...[
+                PekButton(label: 'Continue ${_fmt(saved.position)}', primary: true, autofocus: true, onTap: () => play(saved.position)),
+                PekButton(label: 'Start over', onTap: () => play(0)),
+              ] else
+                PekButton(label: 'Play', primary: true, autofocus: true, onTap: () => play(0)),
+              PekButton(label: seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', onTap: () => Watched.set([item], !seen)),
+            ]),
+          ],
+        );
+      },
+    );
+    return Scaffold(
+      backgroundColor: t.bg,
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, title: Text(show.title), actions: weatherActions(context)),
+      body: p.narrow
+          ? SingleChildScrollView(padding: EdgeInsets.all(rem), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [still, SizedBox(height: rem), body]))
+          : Padding(
+              padding: EdgeInsets.fromLTRB(2 * rem + p.safeX, rem, 2 * rem + p.safeX, rem),
+              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [SizedBox(width: 26 * rem, child: still), SizedBox(width: 2 * rem), Expanded(child: SingleChildScrollView(child: body))]),
+            ),
     );
   }
 }

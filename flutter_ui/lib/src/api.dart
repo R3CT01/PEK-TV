@@ -134,26 +134,60 @@ class Api {
         return Details(overview: (j['overview'] ?? '') as String, poster: abs((j['poster'] ?? '') as String));
       });
 
+  static final Map<String, Future<EpisodeInfo>> _episodeInfo = {};
+
+  /// Title, synopsis and still picture of one episode: the library's own .nfo / thumbnail first, else TMDb (the server
+  /// does that). Kept for this run; a lookup that failed is asked again the next time the page opens.
+  static Future<EpisodeInfo> episodeDetails(String show, int season, int episode) {
+    final key = '$show|$season|$episode';
+    return _episodeInfo.putIfAbsent(key, () async {
+      try {
+        final j = await _get('/api/episode-details?show=${Uri.encodeQueryComponent(show)}&season=$season&episode=$episode');
+        return EpisodeInfo(name: '${j['name'] ?? ''}', overview: '${j['overview'] ?? ''}', still: abs('${j['still'] ?? ''}'));
+      } catch (_) {
+        _episodeInfo.remove(key);
+        return const EpisodeInfo(name: '', overview: '', still: '');
+      }
+    });
+  }
+
   /// Lookups that failed or came back without a poster (e.g. while offline): [forgetFailedDetails] lets them run again.
   static final Set<String> _noArt = {};
+
+  /// A lookup that fails (the server is busy scanning, the TMDb proxy is slow or rate-limiting a screenful of requests) is
+  /// tried again after 2 s and 6 s, and one that still has nothing is forgotten after a short rest, so the next time the
+  /// screen is built it asks again. Before, the first failure was kept until Refresh, which left posters blank.
+  static const _detailRetryWaits = [Duration(seconds: 2), Duration(seconds: 6)];
+
+  static void _forgetDetailSoon(String key, Duration after) {
+    _noArt.add(key);
+    Timer(after, () {
+      _details.remove(key);
+      _noArt.remove(key);
+    });
+  }
 
   static Future<Details> _cachedDetails(String key, Future<Details> Function() load) => _details.putIfAbsent(key, () async {
         final saved = await _savedDetail(key);
         if (saved != null) return saved; // looked up in an earlier run: no request, works offline
-        return _pool.run(() async {
+        Object? lastError;
+        for (var attempt = 0; attempt <= _detailRetryWaits.length; attempt++) {
           try {
-            final d = await load();
+            final d = await _pool.run(load);
             if (d.poster.isEmpty) {
-              _noArt.add(key);
+              _forgetDetailSoon(key, const Duration(seconds: 60)); // no picture (yet): ask again later
             } else {
+              _noArt.remove(key);
               unawaited(_saveDetail(key, d));
             }
             return d;
-          } catch (_) {
-            _noArt.add(key);
-            rethrow;
+          } catch (e) {
+            lastError = e;
+            if (attempt < _detailRetryWaits.length) await Future<void>.delayed(_detailRetryWaits[attempt]);
           }
-        });
+        }
+        _forgetDetailSoon(key, const Duration(seconds: 20));
+        throw lastError!;
       });
 
   // ---- details kept on disk: synopsis + poster address per title. Only pictures from the internet are kept (a poster the
@@ -536,6 +570,14 @@ class Details {
   const Details({required this.overview, required this.poster});
   final String overview;
   final String poster;
+}
+
+/// One episode's title, full synopsis and still picture address (any of them may be empty).
+class EpisodeInfo {
+  const EpisodeInfo({required this.name, required this.overview, required this.still});
+  final String name;
+  final String overview;
+  final String still;
 }
 
 class Movie {

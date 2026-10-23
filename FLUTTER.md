@@ -58,6 +58,7 @@ Resume progress, favorites and the dashboard layout are stored on the device wit
 - Pin slots on the More page (`pin_grid.dart`): after the fixed buttons come 10 tiles the same size as the others. A pinned plugin shows its icon, name and description; empty ones show a faint plus. Tap / D-pad centre on an empty tile lists the installed plugins to pin; on a pinned one it opens it, and press-and-hold (long press, held centre button, or Menu) offers Open / Remove from pins. Pins are stored by `plugin_pins.dart` and also still shown in the TV sidebar.
 - Network folders (SMB / NFS / FTP / WebDAV / DLNA): Settings > Add network folder (`net_folders.dart`; the Wi-Fi multicast lock
   is the `setMulticast` call on `pek/host`).
+- Show page: the synopsis is cut to 4 lines with **Show more / Show less** (`ExpandableText`, `detail.dart`). Tapping an episode opens its page (`EpisodeScreen`): the episode's still picture, title and the whole synopsis from `/api/episode-details` (`Api.episodeDetails`; the library's own .nfo / thumbnail first, then TMDb), with Play / Continue / Start over and Mark as watched. Press and hold an episode row still marks just that one.
 - Search (title, actor, genre, year; `library_pages.dart`) and Watch History (a permanent "finished" record kept in `Store`), both under More.
 - Skip Intro / Skip Recap (`skip.dart`: file chapters, then the online database) and Up next (last 5 minutes of an episode, 5 s countdown
   when it ends) in the player. Settings > Skip intro and recap.
@@ -119,6 +120,7 @@ Large 6 %). Both belong to the device, not to a profile. The 10-foot look:
   folder, about 300 MB, oldest removed first). Synopsis + poster address per title are kept in `details.json` for 30 days
   (internet pictures only), and the last movie / show lists in `movies.json` / `shows.json` (used when the server cannot answer).
   Pictures from the local server (127.0.0.1) are not copied.
+- A poster / synopsis lookup that fails is tried again after 2 s and 6 s, and one that still fails (or finds no picture) is forgotten after 20 s (60 s) so the next time the screen is built it asks again; a picture that will not load is retried after 8, 16 and 24 s (`Api._cachedDetails`, `PosterCard`). Refresh is no longer needed to get blank posters back.
 - Video shows through the transparent Flutter surface. Flutter's Impeller renderer is switched off in `AndroidManifest.xml`
   (`io.flutter.embedding.android.EnableImpeller`) because its Vulkan path can paint an opaque black frame over the video.
   The `PEK playback: vo=...` line in logcat (MpvController) says whether mpv itself is producing video.
