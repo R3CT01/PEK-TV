@@ -38,7 +38,7 @@ Widget _muted(BuildContext context, String t) {
 // ============================================================================ Install from a .zip file
 
 /// Plugins > Install from .zip: pick a plugin .zip on this device or on a network folder, then the usual install screens.
-/// Same as `startPluginInstall` in `www/app_plugins.js`. Nothing is installed until the person confirms on the permissions screen.
+/// Nothing is installed until the person confirms on the permissions screen.
 ///
 /// [skin] true: the same picker, but the file is opened as a skin (Settings > Appearance > Install skin from .zip).
 Future<void> openZipInstall(BuildContext context, {bool skin = false}) {
@@ -178,7 +178,7 @@ class _ZipPickerState extends State<_ZipPicker> {
 // ============================================================================ Install from GitHub
 
 /// Plugins > Install from GitHub: type owner/repo, pick a release file, then the usual install screens.
-/// Same as `openGithubInstall` in `www/github_install.js`. PEK TV lists nothing: the person types the name.
+/// PEK TV lists nothing: the person types the name.
 ///
 /// [skin] true: the release file is opened as a skin (Settings > Appearance > Install skin from GitHub).
 Future<void> openGithubInstall(BuildContext context, {bool skin = false}) {

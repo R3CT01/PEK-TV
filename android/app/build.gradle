@@ -97,6 +97,9 @@ chaquopy {
     }
 }
 
+// Branding artwork (launcher icon, TV banner, splash videos) lives in the repo's top-level assets/ folder.
+android.sourceSets.main.res.srcDir new File(rootDir, '../assets/android/res')
+
 // Flutter UI: only wired in when the module has been generated (see settings.gradle).
 def flutterOn = new File(rootDir, '../flutter_ui/.android/include_flutter.groovy').exists()
 if (flutterOn) {

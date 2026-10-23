@@ -448,7 +448,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  // Look of www/player.js: dark glass buttons (rgba(28,24,21,.58) + 1px light border), warm off-white highlight,
+  // Look of the player: dark glass buttons (rgba(28,24,21,.58) + 1px light border), warm off-white highlight,
   // 4px seek track with a 12px knob and halo, time on the left, transport in the middle, tracks + exit on the right.
   static const _glass = Color(0xB31C1815); // flat fill, no blur / border / shadow: cheap to draw on weak boxes
   static const _fg = Color(0xFFF6F2EC);

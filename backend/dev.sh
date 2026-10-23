@@ -19,8 +19,8 @@
 # source folder. For TMDb: export TMDB_API_KEY=your_key (before running).
 #
 # Search sites: this version adds /api/torrent/sites, /site, /allow and /fetch (torrent_routes.cpp).
-# They fetch pages over HTTPS, so OpenSSL is REQUIRED (checked below). Edit www/search_sites.js and restart;
-# rebuild only when .cpp files change.
+# They fetch pages over HTTPS, so OpenSSL is REQUIRED (checked below). The search sites themselves are set in the
+# app (Settings); rebuild only when .cpp files change.
 
 set -e
 # old HESPER_* switches still work
@@ -75,6 +75,5 @@ RUN_COPY="$HOME/.pek_run"
 cp "$ROOT/bin/pek" "$RUN_COPY"
 chmod +x "$RUN_COPY"
 
-echo "==> Search sites: edit www/search_sites.js (restart to apply)"
 echo "==> Running (Ctrl+C to stop)"
 "$RUN_COPY"

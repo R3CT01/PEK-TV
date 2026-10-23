@@ -19,7 +19,7 @@ import dev.jdtech.mpv.MPVLib
 import org.json.JSONObject
 
 /**
- * libmpv engine for the Music tab (www/music_player.js, MpvEngine).
+ * libmpv engine for the Music tab (the Music tab's engine).
  *
  * Audio only: no video output and no surface, so it is separate from [MpvController] (the video player) and owns its
  * own mpv instance. One instance plays one song; loading the next song (or stopping) destroys it and starts a new

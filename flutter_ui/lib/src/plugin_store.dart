@@ -11,14 +11,14 @@ import 'api.dart';
 import 'plugin_host.dart';
 import 'store.dart';
 
-/// The PEK Store, Flutter side: the data half of `www/plugin_store.js` + `www/plugin_installer.js`.
+/// The PEK Store: the data half of the plugin store and installer screens.
 ///
 ///   list(shelf)      the plugins on the 'official' or 'community' shelf (the PEK Store worker, same one the web UI uses)
 ///   download(item)   fetches the chunks, checks the fingerprint, unpacks the files and reads plugin.json
 ///   check / install  hand the files to PEK TV's own server (/api/plugins/install). The server's safety checks decide
 ///                    what is allowed; nothing here installs anything by itself, the person confirms on a screen first.
 class PekStoreApi {
-  /// The PEK Store worker (the same address as PEK_STORE_API in www/plugin_store.js). See cloud/STORE-DEPLOY.md.
+  /// The PEK Store worker. See cloud/STORE-DEPLOY.md.
   static const base = 'https://pek-store.aquariusibeats.workers.dev';
   static final http.Client _client = http.Client();
 
@@ -72,7 +72,7 @@ class PekStoreApi {
     return prep;
   }
 
-  /// The same 64-bit fingerprint as fingerprint() in www/plugin_store.js (two 32-bit FNV-style hashes).
+  /// A 64-bit fingerprint of an item (two 32-bit FNV-style hashes).
   static String fingerprint(String s) {
     const m = 0xFFFFFFFF;
     var h1 = 0x811c9dc5;
@@ -165,7 +165,7 @@ class PreparedPlugin {
   final String id, name, version, author, description, navTab;
   final PluginWarning? warning;
   final List<String> network;
-  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, live, watched, device, skins
+  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, watched, skins
   final bool stream, hasBackend, hasFlutterScreen, hasWebScreen;
   final List<PluginFile> files;
 
@@ -187,7 +187,7 @@ class PreparedPlugin {
     }
   }
 
-  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'live', 'watched', 'device', 'skins'];
+  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'watched', 'skins'];
   static final _host = RegExp(r'^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$');
   static final _ip = RegExp(r'^[\d.]+$');
 
@@ -274,10 +274,8 @@ class PreparedPlugin {
       if (perms.contains('favorites')) 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).',
       if (perms.contains('watched')) 'Can see which movies and episodes you have marked as watched and mark them watched or unwatched (it sees nothing else from your history).',
       if (perms.contains('skins')) 'Can add, change and delete the skins you made, and switch the skin in use. Only PEK\u2019s official Skin maker may ask for this.',
-      if (perms.contains('device')) 'Can see what this device can play (which video codecs its hardware decodes, screen size, HDR support) so it can pick releases that run smoothly. No identifiers.',
       if (perms.contains('providers')) 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.',
       if (perms.contains('plugins')) 'Can list your plugins that play titles and open one of them when you tap a button.',
-      if (perms.contains('live')) 'Can play live TV streams from web addresses in PEK TV\u2019s player. The stream\u2019s server sees your internet address.',
       if (stream) 'Offers itself as a way to play movies and shows, so other plugins can show a \u201cPlay with $name\u201d button.',
       if (navTab.isNotEmpty) 'Adds a \u201c$navTab\u201d entry to PEK TV.',
       if (hasFlutterScreen) 'Its screen is Python code that runs in the same sandbox when you open it. It can only draw the screen and ask PEK TV for the things listed here.',

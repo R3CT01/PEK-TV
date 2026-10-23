@@ -26,7 +26,7 @@ class CloudResult {
   final bool changed;
 }
 
-/// Port of www/sync.js: the household account (email + password) of the PEK Cloud worker (cloud/worker.js) and the
+/// The household account (email + password) of the PEK Cloud worker (cloud/worker.js) and the
 /// two-way sync of watch history and resume points. Each profile syncs its own data under the account.
 ///
 /// Library favorites sync too. The cloud keys favorites by TMDb id (`f|movie:603`), so each favorite is looked up once through
@@ -641,7 +641,7 @@ class Cloud {
 
   static const _skinBudget = 1900; // the cloud keeps 2000 characters per item
 
-  // ---------------------------------------------------------------- settings (port of trackSettings in www/sync.js)
+  // ---------------------------------------------------------------- settings
 
   static const _baseTs = 1; // a value that was on the device before it ever synced: it loses to anything already in the cloud
 

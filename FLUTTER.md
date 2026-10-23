@@ -11,11 +11,10 @@ MainActivity (unchanged boot: assets, server on :8080, plugins, splash)
 
 ## Build
 1. `cd flutter_ui && flutter pub get`   (generates `flutter_ui/.android/`, which switches the Flutter build on)
-2. Build the Android project as usual. Without step 1 the app builds exactly as before (web UI only).
+2. Build the Android project as usual. Step 1 is required: the app has no other UI.
 3. CI: `.github/workflows/build.yml` runs steps 1 automatically when `flutter_ui/pubspec.yaml` exists.
 
-The Flutter UI opens by default when it is compiled in. **More (⋮) > Switch to classic UI** goes back to the web UI and
-remembers it (`web_ui` in the `pek_player` prefs).
+The Flutter UI is the only UI.
 
 ## What the Flutter UI has now
 Swipe navigation on phones and tablets: **Home, Movies, Shows, Music and More are pages you swipe between** (or tap in the
@@ -27,23 +26,14 @@ Settings; a tap opens that screen on top and Back returns. On a TV the sidebar l
 - Player: libmpv engine, audio + subtitle pick, buffering, auto-hiding controls, records progress for Resume Watching
 - Resume Watching, Favorites (long-press a poster to remove)
 - Music: Albums / Artists / Songs, search, album and artist pages, queue, shuffle / repeat, mini player, full-screen player
-  (cover + title on the left, time-synced lyrics on the right, a Browse panel with Queue / Albums / Artists / Songs; `music_fullscreen.dart`,
-  a port of `www/music_fullscreen.js`)
+  (cover + title on the left, time-synced lyrics on the right, a Browse panel with Queue / Albums / Artists / Songs; `music_fullscreen.dart`)
 - Playlists (`playlists.dart` store per profile, `playlist_ui.dart`): Music > Playlists tab, playlist page (Play / Shuffle / Add to queue / Rename / Delete, drag to reorder), press-and-hold a song for Play next / Add to queue / Add to playlist, "Add to playlist" on album pages and in the full-screen player, "Save as playlist" for the queue. Not synced to the cloud yet.
 - Duplicates, Unknown, Plugins (list + remove), Settings (media sources + folder picker)
 - Settings > Subtitles (automatic look-up on / off, language drop-down), Video output (match refresh rate, HDR) and Audio output
   (Dolby / DTS passthrough). Subtitles are also found automatically while a library movie / episode plays, and the player's
-  audio / subtitle menu has a "Find subtitles online" list (`subtitles.dart`, port of `www/subtitles.js`).
+  audio / subtitle menu has a "Find subtitles online" list (`subtitles.dart`).
 
-Resume progress, favorites and the dashboard layout are stored on the device with `shared_preferences` (`store.dart`). The web
-UI kept these in the WebView's localStorage, which Flutter cannot read, so they start empty in the Flutter UI.
-
-## Not ported yet (still in the classic UI)
-Profiles and sync / sign-in, Watch History, global search, plugin screens (they are JavaScript that runs in the web UI's
-sandbox), the plugin store, skins and layouts, Clock / Weather / plugin tiles on the dashboard, network folders (SMB, NFS, FTP,
-DLNA), skip intro / next episode, torrent loading
-display, lyrics. Music plays through the same libmpv engine as video, so it stops when the app goes to the background and
-there are no lock-screen controls yet (those need native channel methods).
+Resume progress, favorites and the dashboard layout are stored on the device with `shared_preferences` (`store.dart`). 
 
 ## Files
 - `flutter_ui/lib/src/api.dart` - HTTP client for the existing routes
@@ -66,7 +56,7 @@ there are no lock-screen controls yet (those need native channel methods).
 - Lyrics in the full-screen player (`lyrics.dart`, shown by `music_fullscreen.dart`) and Settings > Music > Online art & lyrics.
 
 ## Added in phase 3
-- **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (same hash as the web UI), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Like the web UI, profiles need a signed-in account.
+- **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (hashed), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Profiles need a signed-in account.
 - **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign up / sign in with the emailed 6-digit code, forgot password, sign out (asks first), delete account. Watch history, resume points and favorites sync per profile through the existing worker; the profile list syncs too. Favorites are keyed by TMDb id, looked up once through the same TMDb worker the backend uses.
 - **Layouts** (`layouts.dart`): Classic, Top bar, Wall, Compact (menu position and poster size, TV/tablet) plus a poster-size setting that phones also get. Per profile.
 - **Torrent search** (`torrent_search.dart`): search the https sites you list (address with `{q}`), fetched through the existing `/api/torrent/fetch` route, plus an optional Torznab provider; results are filtered and ranked like the web engine.
@@ -74,24 +64,24 @@ there are no lock-screen controls yet (those need native channel methods).
 - **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance). Skins made or installed are kept per profile and saved to the cloud account with the rest of the profile's data (`k|<id>` items plus the `s|skin` setting, see SKINS.md), so a sign-in puts them back.
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
-- **Dashboard** (`dashboard.dart`, `store.dart`): the same grid as the web UI. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Customize (or press and hold a tile) to move, resize, remove, add widgets or reset. Saved per profile in the web UI's `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
+- **Dashboard** (`dashboard.dart`, `store.dart`): a grid. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Customize (or press and hold a tile) to move, resize, remove, add widgets or reset. Saved per profile in the `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
 - **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. The weather tile looks like the web one (big temperature, "condition \u00b7 city" under it). Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
 
-- **Clock settings** (`clock.dart`): tap the Clock tile for 24-hour time, Show date and a time zone list (each zone shows the time it has now). Same 38 zones and the same "day \u00b7 zone" line as the web UI; kept on the device, not synced. Zones are computed from built-in daylight-saving rules (US/Canada, EU/UK, Sydney, Auckland, Cairo), so there is no extra package; the rules need a look only if a country changes its clocks.
-- **Online / offline mode** (`net.dart`, port of `www/net.js`): a 10px dot in the top right corner (green online, red offline), a "Back online" / "Offline mode" notice, and a check every 30 s (8 s while offline) and whenever the app returns to the front. Back online: poster lookups that failed are asked again, the profile syncs and the weather refreshes. The local library works the same either way.
+- **Clock settings** (`clock.dart`): tap the Clock tile for 24-hour time, Show date and a time zone list (each zone shows the time it has now). 38 zones with a "day \u00b7 zone" line; kept on the device, not synced. Zones are computed from built-in daylight-saving rules (US/Canada, EU/UK, Sydney, Auckland, Cairo), so there is no extra package; the rules need a look only if a country changes its clocks.
+- **Online / offline mode** (`net.dart`): a 10px dot in the top right corner (green online, red offline), a "Back online" / "Offline mode" notice, and a check every 30 s (8 s while offline) and whenever the app returns to the front. Back online: poster lookups that failed are asked again, the profile syncs and the weather refreshes. The local library works the same either way.
 
-## Watched / unwatched (port of `_setWatched` in `www/app_library.js`)
+## Watched / unwatched
 Movie page: **Mark as watched / unwatched**. Show page: **Mark show ...**, **Mark season ...** and a tick on each watched episode (press and hold
 an episode to toggle just that one); movie posters show a tick before the year. Everything uses Watch History (`Store.setWatched`), so the
 Watch History page, plugins and PEK Cloud agree. A change is pushed to the worker about 2 s later (`watched.dart`); removals go up as
 `{deleted}` markers, which `cloud/worker.js` already stores for `m|` and `e|` keys, so the worker needed no change. Plugins with the `watched`
 permission can check / set movies and episodes (see `FLUTTER_PLUGINS.md`). Plugin movie posters also get the tick and press-and-hold toggle automatically (Settings > Plugin posters).
 
-## Background activity line and loading ring (ports of `www/activity.js` and `www/busy.js`)
+## Background activity line and loading ring
 `activity.dart`: a small, non-focusable status line bottom right ("Scanning your media folders...", "Syncing watch history...", "Loading your library...",
 "Searching releases: ...", "Installing ...", "Starting stream: ..."), hidden while a video plays or the keyboard is open, and lifted above the phone's bottom bar
 and the mini player. Settings > Background activity: Off / Basic / Detailed (Detailed adds plugin loading / starting). `Activity.begin / update / end / note / track`.
-The ring (`Busy`, `BusyRing`) appears over the screen when a request to the PEK TV server takes more than 0.5 s (poll-style lookups are ignored, same list as busy.js).
+The ring (`Busy`, `BusyRing`) appears over the screen when a request to the PEK TV server takes more than 0.5 s (poll-style lookups are ignored, same list as the activity line).
 Not shown: plugin network requests (the Python side makes them, so the app can't see them).
 
 ## Plugin screens (Python)
@@ -99,14 +89,11 @@ Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `F
 Plugins > Open, or its own entry in the menu / More page.
 
 ## Plugin store
-Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the same warning and permissions screens as the web UI (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
+Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the warning and permissions screens (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
 
-## Still only in the classic UI
-Plugins that only have a `ui.js`, the store's skin shelf, plugin dashboard tiles for plugins that only have a `ui.js` (plugins with a Python screen get a tile).
-
-## TV mode (port of `www/tv_mode.js`)
+## TV mode
 Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,
-Large 6 %). Both belong to the device, not to a profile, like the web UI. The 10-foot look is the web `html.pek-tv` rules:
+Large 6 %). Both belong to the device, not to a profile. The 10-foot look:
 - rem follows the screen width (1920 wide = 30 px) and TV-safe margins are applied by `PekScope.safeX / safeY` (pages, sidebar, top bar,
   sub-screen app bar, detail pages).
 - Bold 0.2rem focus ring plus the 1.07 poster lift (`PekFocusable`), 3rem buttons / list rows / text fields, poster grid minimum 9rem
@@ -132,11 +119,10 @@ Large 6 %). Both belong to the device, not to a profile, like the web UI. The 10
 `MainActivity` is now only the start-up activity: it copies the app's files and built-in plugins, starts the C++ server and the Python
 plugins, waits for the server, opens `FlutterHostActivity` and finishes. No web view, no `PekBridge`, no `pek_classic` / `web_ui`
 switch, no "Open classic UI" buttons. If the server does not start, or the Flutter screen cannot open, a plain message with a
-**Try again** button is shown. `SplashOverlay.kt` (it drew over the web view) is gone. The `www/` folder is not used by the app any
-more, but the server still serves it; it can be deleted in a later step.
+**Try again** button is shown. `SplashOverlay.kt` (it drew over the web view) is gone. The old `www/` web UI folder has been deleted and the server no longer serves pages: it is API only.
 
 ## Skin install and skin builder
-- **Install skin from .zip / GitHub** (`skin_install.dart`, `skin_install_ui.dart`, Settings > Appearance): ports of `www/skin_installer.js` and `backend/skin_install.h`.
+- **Install skin from .zip / GitHub** (`skin_install.dart`, `skin_install_ui.dart`, Settings > Appearance): same checks as `backend/skin_install.h`.
   It reuses the plugin zip reader (`PluginZip.read`), the zip picker and the GitHub flow (`plugin_install_ui.dart`, now with a `skin:` switch;
   `PekGithub.downloadBytes` is the shared download). Colours and corner size are stored on the device like made skins (id `pkg-<slug>`);
   a skin with a `skin.css` is refused (no CSS in skins, here and in `SkinBuilder` / `tools/make_skin.py`). GitHub skins are labelled unverified. The Settings > Plugins and skins from GitHub switch covers both.
@@ -155,4 +141,4 @@ newer ones; each loads its own data and keeps itself up to date:
 
 To add one: write the widget in `dash_widgets.dart`, add its type to `Store.dashTypes` and `Store.dashGroups` (and `Store.dashIsTile` if it is a
 small tile), then add a `case` for it in `_DashboardPageState._widget` (`dashboard.dart`). The layout syncs to the profile like before
-(`s|dashboard`); the classic web UI does not know the new types.
+(`s|dashboard`).

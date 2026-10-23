@@ -6,7 +6,7 @@
 //   GET /api/trailer/stream?id=..&k=v|a     a byte-range proxy of that stream, so the page can use a plain <video>.
 //
 // The look-up runs HERE, on the same connection as the video (a stream address only works for the IP that asked for it),
-// and the page never talks to YouTube or googlevideo itself. www/plugin_sandbox.js falls back to the YouTube frame
+// and the page never talks to YouTube or googlevideo itself. The player can fall back to the YouTube frame
 // whenever this answers anything but ok:true, so nothing breaks if YouTube changes its answer. If it does, only the
 // CLIENTS table below needs a new version number / user agent.
 //

@@ -34,10 +34,8 @@ photos. Artist, album and song names are sent to those services. Every answer, a
 `backend/music_online.h`.
 
 ## Playback support
-On Android the songs play in libmpv (`MpvAudioController.kt`, separate from the video player), so every format the
-library lists plays: MP3, AAC / M4A, FLAC, Ogg, Opus, WAV, and also WMA, APE, WavPack, AIFF and ALAC. Everywhere else
-the song plays in the browser's audio player, so what it can decode decides what plays: MP3, AAC / M4A, FLAC, Ogg, Opus
-and WAV are fine; WMA, APE, WavPack, AIFF and ALAC files are listed but skipped with a message when played.
+Songs play in libmpv (`MpvAudioController.kt`, separate from the video player), so every format the library lists
+plays: MP3, AAC / M4A, FLAC, Ogg, Opus, WAV, and also WMA, APE, WavPack, AIFF and ALAC.
 Music keeps playing with the screen off or the app in the background. Starting a movie or episode pauses the music. Each song opens its own mpv instance, so there is a short gap between
 songs (gapless playback is not done yet).
 
@@ -50,7 +48,7 @@ leave a half-written cache. A damaged database is set aside as `music.db.corrupt
 Search (`/api/music/search`, `/api/music/songs?q=`) runs in memory over names that are folded once when the library is
 published: capitals and accents are ignored ("beyonce" finds Beyoncé) and every word may come from a different field
 ("drake hotline"). Measured with the database as the search engine instead, it was slower at 500 and at 50,000 songs,
-so the database only keeps the data. Front end: `www/music_player.js` (engine + bar) and `www/app_music.js` (screens).
+so the database only keeps the data. Front end: `flutter_ui/lib/src/music_controller.dart` (engine + queue), `music.dart` and `music_fullscreen.dart` (screens).
 Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_test song.mp3 song.flac ...`
 
 ## Known limits

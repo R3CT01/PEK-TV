@@ -1,4 +1,4 @@
-"""Streaming services the "Watch on ..." buttons know (generated from www/providers.js by tools/sync_providers.js; do not edit).
+"""Streaming services the "Watch on ..." buttons know (generated from tools/providers.json by tools/sync_providers.js; do not edit).
 
 Each row: (regex on the normalised service name, display name, Android packages, home page, search link with {q} or None).
 """

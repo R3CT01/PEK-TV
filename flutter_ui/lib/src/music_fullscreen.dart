@@ -15,7 +15,7 @@ import 'playlists.dart';
 import 'store.dart';
 import 'tokens.dart';
 
-/// The full-screen music player: a port of www/music_fullscreen.js.
+/// The full-screen music player.
 ///
 ///  * the song's cover fills the background (blurred while the lyrics are on),
 ///  * the big cover + title on the LEFT, time-synced lyrics (toggle) on the RIGHT,

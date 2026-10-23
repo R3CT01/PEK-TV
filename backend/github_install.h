@@ -3,7 +3,7 @@
 //
 //   POST /api/plugins/github-zip   owner=<user>  repo=<name>  url=<release or source zip link>
 //
-// The web side (www/github_install.js) asks api.github.com which release to use and then asks this
+// The app asks api.github.com which release to use and then asks this
 // route to fetch the zip, because release downloads are not reliably readable from a web view.
 // What comes back is only the zip's bytes: it then goes through exactly the same checks as a .zip
 // the person picked themselves (the server's safety checks, the permissions screen, a confirm).

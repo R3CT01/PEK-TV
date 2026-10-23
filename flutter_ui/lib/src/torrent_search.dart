@@ -61,7 +61,7 @@ class _Query {
   final int episode;
 }
 
-/// Port of www/search_engine.js, run in the Flutter UI. The sites are the ones you list (https address with {q}); their pages are
+/// Search over the sites you list. The sites are the ones you list (https address with {q}); their pages are
 /// fetched by the existing backend route /api/torrent/fetch, so the backend is unchanged. A Torznab provider (Jackett / Prowlarr)
 /// is asked directly. Results are filtered, scored and sorted best first.
 class TorrentSearch {

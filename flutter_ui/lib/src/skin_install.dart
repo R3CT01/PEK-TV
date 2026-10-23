@@ -47,7 +47,7 @@ class PreparedSkin {
       );
 }
 
-/// Skins from a .zip or from GitHub. Flutter twin of `www/skin_installer.js` (opening the zip) and `backend/skin_install.h`
+/// Skins from a .zip or from GitHub: opening the zip, with the same checks as `backend/skin_install.h`
 /// (what a skin may contain), with the same rules and the same messages:
 ///  - skin.json at the top of the zip or inside one folder, a zip is a plugin or a skin, never both
 ///  - data files only (json, md, txt, images, fonts), never code and never CSS (skin.css is refused); up to 60 files, 2 MB each, 6 MB in total
@@ -129,7 +129,7 @@ class SkinInstaller {
     return manifest ? '' : 'skin.json is missing';
   }
 
-  // ------------------------------------------------------------------ opening a zip (www/skin_installer.js prepare)
+  // ------------------------------------------------------------------ opening a zip
 
   static bool _junk(String path) => path.split('/').any((part) => part.startsWith('.') || part.toLowerCase() == '__macosx');
 

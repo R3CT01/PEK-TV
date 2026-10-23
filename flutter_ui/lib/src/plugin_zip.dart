@@ -8,7 +8,7 @@ import 'api.dart';
 import 'plugin_store.dart';
 
 /// A small .zip reader and the "unpack a plugin .zip" step of the plugin installer.
-/// Flutter twin of `www/plugin_zip.js` + `PekPluginInstaller.prepare()` in `www/plugin_installer.js`, with the same limits:
+/// Opens a plugin .zip in memory, with these limits:
 /// 2 MB per file, 8 MB in total, 400 files. It checks every file's CRC and stops inflating as soon as a file grows past its
 /// limit (so a "zip bomb" cannot use up memory). Not supported, and reported as an error: ZIP64, encrypted and split zips.
 class PluginZip {

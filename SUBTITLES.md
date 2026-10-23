@@ -14,9 +14,9 @@ Nobody needs an OpenSubtitles account: one shared account lives in the cloud wor
   serves it to all later users for free, and caps new downloads per day and per person.
 
 ## Where things are
-- cloud/worker.js      /v1/subs/search, /v1/subs/get (shared account, D1 cache, daily limits)  [pekmain only]
+- cloud/worker.js      /v1/subs/search, /v1/subs/get (shared account, D1 cache, daily limits)
 - backend/subtitles.h  local routes /api/subtitles/search, /fetch, /cache/<id>.srt (forwards to the worker)
-- www/subtitles.js     release-name parsing, client, SRT->VTT, the per-player controller
-- www/app_subtitles.js Settings > Subtitles
-- www/player.js        addSubtitle() on the backends, subtitle menu entry, on-screen message
+- flutter_ui/lib/src/subtitles.dart     release-name parsing, client, SRT handling, the per-player controller
+- flutter_ui/lib/src/settings_extra.dart Settings > Subtitles
+- flutter_ui/lib/src/player.dart         subtitle menu entry, on-screen message
 - Android: MpvController.addSubtitle + PekAndroid.mpvAddSubtitle (mpv sub-add)

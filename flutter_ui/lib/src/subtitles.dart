@@ -6,12 +6,12 @@ import 'api.dart';
 import 'mpv.dart';
 import 'store.dart';
 
-/// Automatic subtitles: a port of www/subtitles.js (PekSubs). Subtitles come from the app's own backend
+/// Automatic subtitles: Subtitles come from the app's own backend
 /// (/api/subtitles/search and /fetch), which asks one shared OpenSubtitles account kept in the cloud worker.
 /// Nobody needs an account. Settings (language, automatic on / off) live in [Store].
 ///
 /// Only things registered as a movie or a TV episode get a look-up: every search uses the shared quota, so
-/// plugin streams, live TV and bare files never touch the service.
+/// plugin streams and bare files never touch the service.
 class Subs {
   static const languages = <(String, String)>[
     ('en', 'English'), ('es', 'Spanish'), ('fr', 'French'), ('de', 'German'), ('it', 'Italian'),

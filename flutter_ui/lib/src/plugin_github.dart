@@ -9,7 +9,7 @@ import 'plugin_zip.dart';
 import 'store.dart';
 
 /// Install a plugin from GitHub by name (owner/repo), for plugins that are NOT in the PEK Store.
-/// Flutter twin of `PekGithub` in `www/github_install.js`, with the same rules:
+/// Install a plugin from GitHub, with these rules:
 ///  - PEK TV lists nothing. The person types the name; there is no catalog of repositories.
 ///  - The zip goes through exactly the same checks as one the person picked (the server's safety checks, the permissions
 ///    screen, a confirm). Nothing from GitHub gets extra trust and nothing installs or updates by itself.

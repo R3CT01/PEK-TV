@@ -36,7 +36,6 @@ Java_com_pektv_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) 
         if (access(pem.c_str(), R_OK) == 0) setenv("SSL_CERT_FILE", pem.c_str(), 1);
     }
 
-    std::string www     = root + "/www";
     std::string plugins = root + "/plugins";
     std::string skins   = root + "/skins";
 
@@ -49,8 +48,8 @@ Java_com_pektv_app_NativeBridge_startServer(JNIEnv* env, jclass, jstring jRoot) 
     g_scanner->setShowResolver(PekServer::resolveShowName);
     std::thread([]() { g_scanner->scan(); }).detach();
 
-    std::thread([www, plugins, skins]() {
-        PekServer::start(8080, www, plugins, skins,
+    std::thread([plugins, skins]() {
+        PekServer::start(8080, plugins, skins,
             []() { return std::vector<std::string>(); },   // Python plugin list: later step
             g_scanner);
     }).detach();

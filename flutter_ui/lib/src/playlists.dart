@@ -29,7 +29,7 @@ class Playlist {
   }
 }
 
-/// The user's playlists (www/music_player.js: createPlaylist / renamePlaylist / deletePlaylist / addToPlaylist /
+/// The user's playlists (create / rename / delete / add to playlist /
 /// removeFromPlaylist), kept on this device per profile. Listeners repaint when anything changes or the profile does.
 class Playlists extends ChangeNotifier {
   Playlists._() {

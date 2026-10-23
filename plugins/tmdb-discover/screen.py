@@ -1,4 +1,4 @@
-"""TMDb Discover for the Flutter UI (the Python twin of ui.js).
+"""TMDb Discover for the Flutter UI.
 
 Trending, top rated, popular and now playing rows for movies and TV, streaming-service chips, search, numbered
 pages for every list, a detail page (cast, more like this, where to watch, trailer), favorites and an

@@ -78,7 +78,7 @@ class FlutterHostActivity : FlutterActivity() {
         JSONObject().put("ok", false).put("error", "Python is not ready: ${t.message}").toString()
     }
 
-    // Streaming apps a plugin's "Watch on ..." button may open. Generated from www/providers.js by tools/sync_providers.js
+    // Streaming apps a plugin's "Watch on ..." button may open. Generated from tools/providers.json by tools/sync_providers.js
     // (the same list as MainActivity.streamingPackages and the manifest <queries>).
     private val streamingPackages = setOf(
         // PKGS-START

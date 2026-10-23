@@ -9,7 +9,7 @@ import 'skins.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
-/// The confirm screen for a skin from a .zip or GitHub (`_renderSkinInstallModal` in `www/app_skins.js`): what the skin is,
+/// The confirm screen for a skin from a .zip or GitHub : what the skin is,
 /// where it came from, a colour preview, then Install / Update. Nothing is stored until the person taps the button.
 ///
 /// [load] opens and checks the skin (a picked .zip: `SkinInstaller.prepare`; GitHub: `SkinInstaller.fromGithub`).

@@ -293,7 +293,7 @@ std::string PekServer::resolveShowName(const std::string& guess) {
     return name;
 }
 
-void PekServer::start(int port, const std::string& www_dir, const std::string& plugins_dir,
+void PekServer::start(int port, const std::string& plugins_dir,
                            const std::string& skins_dir,
                            std::function<std::vector<std::string>()> get_plugins,
                            MediaScanner* scanner) {
@@ -320,8 +320,8 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     svr.set_pre_routing_handler([remoteOpen, token](const httplib::Request& req, httplib::Response& res) {
         const bool fromLoopback = isLoopbackAddr(req.remote_addr);
 
-        // Plugins are Python only now: no JavaScript is served out of a plugin folder, so the classic UI can't load a
-        // plugin's ui.js (or any other .js / .mjs under /plugins/), whatever the page asks for.
+        // Plugins are Python only: no JavaScript is served out of a plugin folder (no .js / .mjs under /plugins/),
+        // whatever is asked for.
         if (req.path.rfind("/plugins/", 0) == 0) {
             std::string low = req.path;
             for (auto& c : low) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
@@ -383,18 +383,11 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
     peektrailer::registerTrailerRoutes(svr);   // /api/trailer: trailers as a plain video stream (trailer.h)
     registerTorrentRoutes(svr);             // /api/torrent/* (start, status, stream, stop)
     registerMusicRoutes(svr, scanner, std::filesystem::path(plugins_dir).parent_path().string());   // /api/music/* (music.h)
-    // 1a. Serve plugin folders (plugin.json, screen.py's data, images; never .js, see the pre-routing handler) at /plugins — registered
-    //     before the catch-all below so it's matched directly, without
-    //     needing to fail against www_dir first.
+    // 1. Serve plugin folders (plugin.json, screen.py's data, images; never .js, see the pre-routing handler) at /plugins.
+    //    The server is API only: the screens are drawn by the Flutter UI.
     svr.set_mount_point("/plugins", plugins_dir);
 
-    // 1b. Serve your JavaScript UI frontend files from the www folder
-    auto ret = svr.set_mount_point("/", www_dir);
-    if (!ret) {
-        std::cout << "[PEK Server Warning] Directory '" << www_dir << "' not found. Running API only." << std::endl;
-    }
-
-    // 2. Create the JSON API endpoint that feeds live data to your JS frontend framework
+    // 2. The JSON API endpoint that feeds live data to the Flutter UI
     svr.Get("/api/status", [get_plugins](const httplib::Request& req, httplib::Response& res) {
         std::vector<std::string> plugins = get_plugins();
         
@@ -446,15 +439,13 @@ void PekServer::start(int port, const std::string& www_dir, const std::string& p
         res.set_content(json_response, "application/json");
     });
 
-    // 3. UI plugin discovery: each subfolder of plugins_dir is one plugin
-    //    (ui.js for its frontend, optionally backend.py for its Python
+    // 3. Plugin discovery: each subfolder of plugins_dir is one plugin
+    //    (screen.py for its screen, optionally backend.py for its Python
     //    backend — the C++ core runs backend.py directly, see
     //    runFolderPlugins() in core.cpp). This is the same folder the
     //    legacy loose-file Python scrapers live in; loose .py files are
     //    ignored here, and subfolders are ignored by that scanner, so
     //    both can share it.
-    //    The frontend fetches this list, then loads each plugin's ui.js
-    //    (served via the /plugins mount above) to read its app_name.
     svr.Get("/api/plugins", [plugins_dir](const httplib::Request& req, httplib::Response& res) {
         std::string json_response = "{\"plugins\": [";
         bool first = true;

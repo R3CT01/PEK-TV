@@ -31,7 +31,7 @@ stops working nobody can sign in on a new device (devices that are already signe
 4. Visit the worker URL in a browser. It should say: `hesper-sync ok`
    (tables are created automatically on the first request).
 5. The app calls `https://pek-sync.aquariusibeats.workers.dev`. If your worker's URL is
-   different, change `API` at the top of `www/sync.js`.
+   different, change `api` in `flutter_ui/lib/src/cloud.dart`.
 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
    already limits sign-ups, sign-ins, reset requests and code guesses itself.
 

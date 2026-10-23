@@ -120,8 +120,8 @@ extra file, `--force` allows low-contrast text. A batch file is a list of
 
 Settings > Appearance has **Install skin from .zip** and **Install skin from GitHub**, the same flow as the web build:
 the same zip picker (this device, library folders and network folders), the same GitHub lookup (latest release `.zip`, else the
-source code), the same checks (`flutter_ui/lib/src/skin_install.dart`, a port of `backend/skin_install.h` and
-`www/skin_installer.js`), and the same confirm screen. A skin from GitHub is labelled "unverified". Installing the same
+source code), the same checks (`flutter_ui/lib/src/skin_install.dart`, mirroring `backend/skin_install.h`),
+and the same confirm screen. A skin from GitHub is labelled "unverified". Installing the same
 skin again updates it; hold it in the list to remove it.
 
 What differs: an installed skin gives the app its **colours and corner size** only (`bgImage` and the glass tokens are checked but

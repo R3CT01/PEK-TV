@@ -19,7 +19,7 @@ class SkipSpan {
   String get label => kind == 'recap' ? 'Skip Recap' : 'Skip Intro';
 }
 
-/// Skip Intro / Skip Recap, fully automatic (www/skip_segments.js). Nobody marks anything. The spans come from
+/// Skip Intro / Skip Recap, fully automatic. Nobody marks anything. The spans come from
 ///   1. chapters inside the file called "Intro", "Opening", "Recap", "Previously on ...", then
 ///   2. times from a community database, looked up for episodes of a show (/api/skip-segments, can be turned off).
 /// Auto-skip ([Store.skipAuto]) acts on either.

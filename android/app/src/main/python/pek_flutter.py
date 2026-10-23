@@ -1,7 +1,6 @@
 """pek_flutter: runs a plugin's Python screen (screen.py) for the Flutter UI.
 
-The web UI runs a plugin's ui.js in a sandboxed iframe and draws what it returns. The Flutter UI cannot run
-JavaScript, and Flutter cannot load new code at run time either, so a Flutter plugin screen is Python that returns
+Flutter cannot run JavaScript or load new code at run time, so a plugin screen is Python that returns
 a small JSON tree of widgets (see pek_ui.py). Flutter draws the tree natively and sends every tap back here:
 
     Flutter  --call({"op": ...})-->  pek_flutter  -->  plugins/<id>/screen.py  (sandboxed, same rules as backend.py)

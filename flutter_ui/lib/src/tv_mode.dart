@@ -8,7 +8,7 @@ import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
-/// Port of `www/tv_mode.js` (window.PekTV): the "10-foot" look.
+/// The "10-foot" look.
 ///
 /// - [mode]: 'auto' (on for a TV box, off on a phone), 'on' or 'off'. Settings > TV mode.
 /// - [safe]: percent of the screen kept clear at the edges (0, 2, 4 or 6) for TVs that crop the picture.

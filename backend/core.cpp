@@ -148,8 +148,8 @@ public:
     }
 
     // Runs plugins/<folder>/backend.py for every plugin folder that has
-    // one. ui.js (if present) is served straight to the browser by the
-    // C++ server and isn't touched here — this only handles the Python side.
+    // one. screen.py is run on demand by the UI and isn't touched here —
+    // this only handles the backend side.
     void runFolderPlugins(const std::string& path_str) {
         if (!fs::exists(path_str) || !fs::is_directory(path_str)) return;
 
@@ -183,7 +183,6 @@ std::string getExecutionDirectory(char* argv0) {
 }
 
 int main(int argc, char* argv[]) {
-    std::string www_dir = "/storage/emulated/0/Documents/media_core/hesper/www";
     std::string plugin_dir = "/storage/emulated/0/Documents/media_core/hesper/plugins";
     std::string skins_dir = "/storage/emulated/0/Documents/media_core/hesper/skins";
 
@@ -231,8 +230,8 @@ int main(int argc, char* argv[]) {
     scan_thread.detach();
 
     // Launch HTTP server with a lambda callback to dynamically serve scanned plugins to JS
-    std::thread server_thread([&pek, www_dir, plugin_dir, skins_dir, &scanner]() {
-        PekServer::start(8080, www_dir, plugin_dir, skins_dir, [&pek]() {
+    std::thread server_thread([&pek, plugin_dir, skins_dir, &scanner]() {
+        PekServer::start(8080, plugin_dir, skins_dir, [&pek]() {
             return pek.getPlugins();
         }, &scanner);
     });

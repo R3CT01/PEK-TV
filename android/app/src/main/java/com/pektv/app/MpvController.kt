@@ -155,7 +155,7 @@ class MpvController(
         m.setPropertyString("sid", if (id < 0) "no" else id.toString())
     }
 
-    // An extra subtitle file (SubRip at a URL the page got from the backend: www/subtitles.js). It is loaded and
+    // An extra subtitle file (SubRip at a URL the UI got from the backend). It is loaded and
     // switched on at once. Like picking a subtitle in the menu, it needs the normal renderer.
     fun addSubtitle(url: String, label: String) {
         val m = mpv ?: return
@@ -685,7 +685,7 @@ class MpvController(
             }
         }
         // Chapters (title + start second): the page turns "Intro" / "Opening" / "Recap" / "Previously on" ones into
-        // Skip Intro / Skip Recap buttons (www/skip_segments.js). Works the same for library files and torrent streams.
+        // Skip Intro / Skip Recap buttons. Works the same for library files and torrent streams.
         val chapters = JSONArray()
         if (m != null) {
             try {

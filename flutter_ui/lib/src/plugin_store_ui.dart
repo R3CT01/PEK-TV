@@ -13,7 +13,7 @@ import 'tokens.dart';
 import 'widgets.dart';
 
 /// The PEK Store in the Flutter UI: browse the Official and Community shelves and install a plugin.
-/// Same rules as the web UI (www/plugin_store.js): no web addresses to type, nothing installs by itself. The
+/// Rules: no web addresses to type, nothing installs by itself. The
 /// server's safety checks run first (a dry run), then the author's warning (if the plugin has one), then the
 /// permissions screen, then the person confirms. Uploading happens on the store's website, not in the app.
 Future<void> openPluginStore(BuildContext context) {

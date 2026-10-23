@@ -55,7 +55,7 @@ class _Packed {
   final int raw;
 }
 
-/// Port of www/plugin_backup.js, on the same cloud routes (cloud/worker.js: /v1/plugins/*), so a backup made by the web UI
+/// Plugin backup on the cloud routes (cloud/worker.js: /v1/plugins/*), so a backup made on another device
 /// can be restored here and the other way round (same bundle format and fingerprint).
 ///
 ///  - Only third-party plugins are backed up, and only their own files (never their data/ folder).

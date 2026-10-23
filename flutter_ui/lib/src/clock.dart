@@ -8,7 +8,7 @@ import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
-/// One time zone offered in Clock settings (CLOCK_ZONES in www/app_config.js). [std] is the winter offset from UTC in
+/// One time zone offered in Clock settings . [std] is the winter offset from UTC in
 /// minutes; [rule] says when daylight saving applies ('' = never).
 class ClockZone {
   const ClockZone(this.id, this.label, this.std, [this.rule = '']);

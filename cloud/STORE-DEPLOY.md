@@ -8,7 +8,7 @@ Cloudflare -> Storage & databases -> D1 -> **Create** -> name `pek-store`.
 ## 2. Worker
 1. Workers & Pages -> Create -> Hello World -> name `pek-store` -> Deploy.
    (Its address will be `https://pek-store.<your-subdomain>.workers.dev`. If it differs from the one in
-   `www/plugin_store.js` (`PEK_STORE_API`) and, if you host a separate store site, that site's own config, change both.)
+   `flutter_ui/lib/src/plugin_store.dart` (`base`) and, if you host a separate store site, that site's own config, change both.)
 2. Worker -> Settings -> Bindings -> Add -> D1 database -> variable name `DB` -> `pek-store`.
 3. Edit code -> delete everything -> paste all of `cloud/store-worker.js` -> Deploy.
 

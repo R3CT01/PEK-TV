@@ -12,7 +12,7 @@ public:
     // Declare start with the plugin data provider callback parameter,
     // plus the MediaScanner backing /api/movies, /api/shows, and
     // /api/movie-details.
-    static void start(int port, const std::string& www_dir, const std::string& plugins_dir,
+    static void start(int port, const std::string& plugins_dir,
                        const std::string& skins_dir,
                        std::function<std::vector<std::string>()> get_plugins,
                        MediaScanner* scanner);

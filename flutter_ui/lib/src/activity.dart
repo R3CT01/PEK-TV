@@ -6,7 +6,7 @@ import 'music_controller.dart';
 import 'store.dart';
 import 'tokens.dart';
 
-/// Port of www/activity.js: a small, quiet status line in the bottom right corner saying what PEK TV is doing in the background
+/// A small, quiet status line in the bottom right corner saying what PEK TV is doing in the background
 /// ("Scanning your media folders...", "Syncing watch history..."). It is never focusable, ignores taps, is hidden while a video
 /// plays or the keyboard is open, and sits above the phone's bottom bar and the mini player.
 ///
@@ -247,7 +247,7 @@ class _DotState extends State<_Dot> with SingleTickerProviderStateMixin {
   }
 }
 
-/// Port of www/busy.js: a ring over the screen when a request to the PEK TV server takes more than half a second (removing a
+/// A ring over the screen when a request to the PEK TV server takes more than half a second (removing a
 /// folder, browsing folders, loading a big library). Background chatter (progress polling, poster / detail lookups) is ignored.
 class Busy {
   static const _ignore = ['/api/scan-status', '/api/discover', '/api/status', '/api/plugins', '/api/skins', '/api/movie-details', '/api/show-details', '/api/episode-details'];

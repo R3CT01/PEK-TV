@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'cloud.dart';
 import 'store.dart';
 
-/// One person of the household. Same fields as www/profiles.js so the profile list syncs with the web UI's.
+/// One person of the household. These fields are what the cloud profile list stores.
 class Profile {
   Profile({required this.id, required this.name, required this.color, this.updated = 0, this.avatar = '', this.pin = ''});
   String id;

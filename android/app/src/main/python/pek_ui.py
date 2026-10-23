@@ -1,6 +1,5 @@
 """pek_ui: the UI toolkit for a plugin's Python screen (screen.py), drawn by the Flutter UI.
 
-This is the Python twin of the `ui` object and the `pek` global that a plugin's ui.js gets in the web UI.
 A plugin imports it like this:
 
     import pek_ui as ui
@@ -179,7 +178,7 @@ def _norm_service(name):
 
 
 def _provider_plan(name, title, kind, tmdb_id, region):
-    """What one press opens (the same rules as plan() in www/providers.js)."""
+    """What one press opens (see tools/providers.json)."""
     title = _s(title, 200)
     n = _norm_service(name)
     for pattern, _display, pkgs, home, search in pek_providers.TABLE:

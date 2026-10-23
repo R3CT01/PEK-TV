@@ -1,0 +1,203 @@
+{
+  "_note": "Streaming services the Watch on ... buttons know. match = regex on the normalised service name; pkgs = Android package names (first installed wins); search = link with {q} for the title, optional. After editing run: node tools/sync_providers.js",
+  "providers": [
+    {
+      "match": "^netflix\\b",
+      "name": "Netflix",
+      "pkgs": [
+        "com.netflix.mediaclient",
+        "com.netflix.ninja"
+      ],
+      "home": "https://www.netflix.com/",
+      "search": "https://www.netflix.com/search?q={q}"
+    },
+    {
+      "match": "^hulu\\b",
+      "name": "Hulu",
+      "pkgs": [
+        "com.hulu.plus",
+        "com.hulu.livingroomplus"
+      ],
+      "home": "https://www.hulu.com/",
+      "search": "https://www.hulu.com/search?q={q}"
+    },
+    {
+      "match": "^disney plus\\b",
+      "name": "Disney+",
+      "pkgs": [
+        "com.disney.disneyplus"
+      ],
+      "home": "https://www.disneyplus.com/"
+    },
+    {
+      "match": "^(hbo max|max)\\b",
+      "name": "Max",
+      "pkgs": [
+        "com.wbd.stream",
+        "com.hbo.hbonow"
+      ],
+      "home": "https://www.max.com/"
+    },
+    {
+      "match": "^(amazon prime video|prime video|amazon video)\\b",
+      "name": "Prime Video",
+      "pkgs": [
+        "com.amazon.avod.thirdpartyclient",
+        "com.amazon.amazonvideo.livingroom"
+      ],
+      "home": "https://www.primevideo.com/",
+      "search": "https://www.primevideo.com/search?phrase={q}"
+    },
+    {
+      "match": "^apple tv\\b",
+      "name": "Apple TV",
+      "pkgs": [
+        "com.apple.atve.androidtv.appletv"
+      ],
+      "home": "https://tv.apple.com/"
+    },
+    {
+      "match": "^paramount plus\\b",
+      "name": "Paramount+",
+      "pkgs": [
+        "com.cbs.app",
+        "com.cbs.ott"
+      ],
+      "home": "https://www.paramountplus.com/"
+    },
+    {
+      "match": "^peacock\\b",
+      "name": "Peacock",
+      "pkgs": [
+        "com.peacocktv.peacockandroid"
+      ],
+      "home": "https://www.peacocktv.com/"
+    },
+    {
+      "match": "^crunchyroll\\b",
+      "name": "Crunchyroll",
+      "pkgs": [
+        "com.crunchyroll.crunchyroid"
+      ],
+      "home": "https://www.crunchyroll.com/",
+      "search": "https://www.crunchyroll.com/search?q={q}"
+    },
+    {
+      "match": "^tubi\\b",
+      "name": "Tubi",
+      "pkgs": [
+        "com.tubitv"
+      ],
+      "home": "https://tubitv.com/",
+      "search": "https://tubitv.com/search/{q}"
+    },
+    {
+      "match": "^pluto tv\\b",
+      "name": "Pluto TV",
+      "pkgs": [
+        "tv.pluto.android"
+      ],
+      "home": "https://pluto.tv/"
+    },
+    {
+      "match": "^(youtube|youtube premium)$",
+      "name": "YouTube",
+      "pkgs": [
+        "com.google.android.youtube",
+        "com.google.android.youtube.tv"
+      ],
+      "home": "https://www.youtube.com/",
+      "search": "https://www.youtube.com/results?search_query={q}"
+    },
+    {
+      "match": "^google play (movies|tv)",
+      "name": "Google Play",
+      "pkgs": [
+        "com.google.android.videos"
+      ],
+      "home": "https://play.google.com/store/movies",
+      "search": "https://play.google.com/store/search?q={q}&c=movies"
+    },
+    {
+      "match": "^(vudu|fandango at home)\\b",
+      "name": "Fandango at Home",
+      "pkgs": [
+        "air.com.vudu.air.DownloaderTablet"
+      ],
+      "home": "https://athome.fandango.com/"
+    },
+    {
+      "match": "^starz\\b",
+      "name": "Starz",
+      "pkgs": [
+        "com.bydeluxe.d3.android.program.starz"
+      ],
+      "home": "https://www.starz.com/"
+    },
+    {
+      "match": "^showtime\\b",
+      "name": "Showtime",
+      "pkgs": [
+        "com.showtime.standalone"
+      ],
+      "home": "https://www.paramountplus.com/"
+    },
+    {
+      "match": "^(freevee|amazon freevee)\\b",
+      "name": "Freevee",
+      "pkgs": [
+        "com.amazon.imdb.tv.android.app"
+      ],
+      "home": "https://www.amazon.com/freevee"
+    },
+    {
+      "match": "^the roku channel\\b",
+      "name": "The Roku Channel",
+      "pkgs": [
+        "com.roku.web.trc"
+      ],
+      "home": "https://therokuchannel.roku.com/"
+    },
+    {
+      "match": "^plex\\b",
+      "name": "Plex",
+      "pkgs": [
+        "com.plexapp.android"
+      ],
+      "home": "https://watch.plex.tv/"
+    },
+    {
+      "match": "^criterion channel\\b",
+      "name": "Criterion Channel",
+      "pkgs": [
+        "com.criterionchannel"
+      ],
+      "home": "https://www.criterionchannel.com/",
+      "search": "https://www.criterionchannel.com/search?q={q}"
+    },
+    {
+      "match": "^mubi\\b",
+      "name": "MUBI",
+      "pkgs": [
+        "com.mubi"
+      ],
+      "home": "https://mubi.com/"
+    },
+    {
+      "match": "^kanopy\\b",
+      "name": "Kanopy",
+      "pkgs": [
+        "com.kanopy"
+      ],
+      "home": "https://www.kanopy.com/"
+    },
+    {
+      "match": "^hoopla\\b",
+      "name": "hoopla",
+      "pkgs": [
+        "com.hoopladigital.android"
+      ],
+      "home": "https://www.hoopladigital.com/"
+    }
+  ]
+}

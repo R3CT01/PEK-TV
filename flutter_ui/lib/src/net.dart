@@ -10,7 +10,7 @@ import 'store.dart';
 import 'tokens.dart';
 import 'weather.dart';
 
-/// Port of www/net.js: a small dot in the top right corner (green = online, red = offline) and the online / offline state.
+/// A small dot in the top right corner (green = online, red = offline) and the online / offline state.
 ///
 /// "Online" means the internet is really reachable, not just that Wi-Fi is connected: a tiny page is fetched every 30 seconds
 /// (every 8 seconds while offline, to notice the recovery quickly) and right away when the app comes back to the front.

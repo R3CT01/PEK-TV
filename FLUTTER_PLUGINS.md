@@ -1,6 +1,6 @@
 # Plugins in the Flutter UI (Python screens)
 
-The web UI runs a plugin's `ui.js` in a sandboxed iframe. The Flutter UI cannot run JavaScript, and Flutter cannot load new
+Plugins used to ship a `ui.js` that ran in a sandboxed web view. The Flutter UI cannot run JavaScript, and Flutter cannot load new
 code at run time, so a plugin that wants a screen in the Flutter UI ships a **Python screen**, `screen.py`, next to its
 `plugin.json` (and its optional `backend.py`). The screen *describes* a UI as data; Flutter draws it with the app's own widgets.
 
@@ -57,9 +57,9 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 
 `screen.py` is scanned with `backend.py`: same allowed imports (plus `pek_ui`), no `open/getattr/eval`, no `_attributes`, no `__`.
 
-### JS -> Python
+### Migrating from `ui.js` (JS -> Python)
 
-| Web sandbox (`ui.js`) | Python (`screen.py`) |
+| Old `ui.js` call | Python (`screen.py`) |
 |---|---|
 | `pek.render(ui => tree)` | `def render(): return ui.column(...)` |
 | `pek.requestRender()` after a fetch | `ui.background(work, done, fail)` (redraws by itself) |
@@ -91,7 +91,7 @@ title, save / remove a favorite (`favorites`), mark movies / episodes watched / 
 Anything else is dropped.
 
 **Streaming apps.** `provider_button` looks the service up in `python/pek_providers.py`, which is generated from
-`www/providers.js` by `node tools/sync_providers.js` (the same run also refreshes the Kotlin allow-lists and the manifest
+`tools/providers.json` by `node tools/sync_providers.js` (the same run also refreshes the Kotlin allow-lists and the manifest
 `<queries>`), so adding a service stays a one-place change. A known service opens its app on the title's page when the app
 supports the link, else the app, else its website; any other service opens the title's TMDb "where to watch" page.
 `FlutterHostActivity` only starts packages on its own allow-list.
@@ -115,8 +115,8 @@ History, and pressing and holding it marks / un-marks it (the app does this itse
 year the app looks for `(2010)` at the end of the title, then a year in the sub line, then (Settings > Plugin posters, on by default)
 matches by title alone. TMDb Discover passes both. Episode rows are not ticked yet.
 
-**Favorites.** Plugin favorites use the web UI's cloud format (`f|movie:603`, `from` = the plugin id), so they sync with the
-web UI and other devices; one that arrives for a title outside this library shows under Favorites > Saved from plugins.
+**Favorites.** Plugin favorites use the cloud format (`f|movie:603`, `from` = the plugin id), so they sync with
+your other devices; one that arrives for a title outside this library shows under Favorites > Saved from plugins.
 
 ### Limits
 Draw 6 s, tap handler 15 s, one `ui.background` job 25 s (the 10 s network limit per request still applies). A screen that
@@ -124,7 +124,7 @@ raises or runs past its limit shows an error card with **Try again**. `plugins/t
 A third-party plugin listing PEK's built-in TMDb proxy host is refused here too (only `tmdb-discover` may use it).
 
 ## TMDb Discover (ported, 1.6.0)
-`plugins/tmdb-discover/screen.py` has everything `ui.js` has:
+`plugins/tmdb-discover/screen.py` has:
 - Movies / TV rows (trending, top rated, popular, now playing / on the air), streaming-service chips, numbered pages with Next / Prev / +-10, search, actor pages.
 - Detail page: overview, genres, **inline trailer** (auto-play and sound settings), cast, more like this, where to watch / rent or buy as **buttons that open the service's app**, **Play with a plugin**, **Mark as watched**, favorites.
 - "In library" badges, refreshed from the library scanner on start and on **Refresh** (no restart needed).
@@ -134,12 +134,12 @@ A third-party plugin listing PEK's built-in TMDb proxy host is refused here too 
 today, so the section stays hidden until one is installed.
 
 ## The plugin store in the Flutter UI
-Plugins > **Browse the plugin store**. It is the Flutter twin of `www/plugin_store.js` + `www/plugin_installer.js` and talks to the
+Plugins > **Browse the plugin store**. It talks to the
 same two places:
 
 1. **The PEK Store worker** (`https://pek-store.aquariusibeats.workers.dev`, `plugin_store.dart`): `GET /v1/store?shelf=official|community&kind=plugin`
    lists a shelf; `GET /v1/store/chunk?id&fp&i` downloads the bundle in parts. The parts are joined, checked against the
-   item's 64-bit fingerprint (a port of `fingerprint()` in `plugin_store.js`, checked equal to the JS on test strings) and unpacked in memory.
+   item's 64-bit fingerprint (`fingerprint()` in `plugin_store.dart`) and unpacked in memory.
 2. **PEK TV's own server** (`POST /api/plugins/install`): first a **dry run** (the server's safety checks, and whether it
    replaces an installed plugin), then the real install after the person confirms. The multipart body is built by hand because the
    server pairs repeated `path` / `file` parts by position; it was tested against the real route from `backend/plugin_install.h`.
@@ -153,21 +153,21 @@ A plugin with only a `ui.js` is **no longer accepted** anywhere (store, .zip, Gi
 PEK TV once.
 
 Not in the Flutter store yet: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`)
-and the cloud plugin backup the web UI triggers after an install.
+and the cloud plugin backup that runs after an install.
 
 ## Install from a .zip file or from GitHub
-Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.dart`) are the Flutter twins of
-`www/app_plugins.js` (zip picker) and `www/github_install.js`. Both end on the same install screen as the store
+Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.dart`) are the zip picker and the GitHub
+install. Both end on the same install screen as the store
 (`PluginInstallPage`: server dry run -> the author's warning -> permissions -> Install), so nothing installs by itself.
 
 - **.zip**: PEK TV's own picker, on `POST /api/plugins/browse` + `/api/plugins/fetch` (works on TV boxes and network folders;
-  it starts at *This device* and your media sources). `plugin_zip.dart` unpacks it in memory with the web UI's limits
+  it starts at *This device* and your media sources). `plugin_zip.dart` unpacks it in memory with the same limits as the server
   (2 MB per file, 8 MB total, 400 files, CRC checked, inflate stops at the limit; no ZIP64 / encrypted / split zips). It needs no
   extra package (`dart:io` raw inflate). plugin.json at the top or inside one folder; a zip with `skin.json` is refused.
 - **GitHub**: type `owner/repo` or paste a link. `plugin_github.dart` asks `api.github.com` for the latest release (its .zip files
   and its source), or the default branch's source if there is no release; you pick one when there are several. The download goes
   through `POST /api/plugins/github-zip` (backend/github_install.h). A first-time warning is shown once; the switch is Settings >
-  *Plugins from GitHub* (same keys as the web UI, `PEK_ALLOW_GITHUB=0` still turns it off in the server). Source zips are
+  *Plugins from GitHub* (`PEK_ALLOW_GITHUB=0` still turns it off in the server). Source zips are
   installed under the repository name so an update replaces the same plugin.
 - The Plugins page labels where each plugin came from ("unverified - from GitHub owner/repo", "third party - from a .zip file").
 - Still web-UI only: the system file picker, finding network devices from inside the zip picker (add the device as a media
@@ -189,7 +189,7 @@ What it needed from the host, all in `pek_ui`:
 ## Files
 - `android/app/src/main/python/pek_ui.py` - what a screen imports (builders + host calls)
 - `android/app/src/main/python/pek_flutter.py` - sessions, guarded calls, background jobs, effects
-- `android/app/src/main/python/pek_providers.py` - streaming services (generated from `www/providers.js`; `tools/sync_providers.js` also feeds `FlutterHostActivity.kt`)
+- `android/app/src/main/python/pek_providers.py` - streaming services (generated from `tools/providers.json`; `tools/sync_providers.js` also feeds `FlutterHostActivity.kt`)
 - `android/app/src/main/python/hesper_guard.py` (+ `backend/` copy) - allows `import pek_ui`; `hesper_runner.py` remembers the plugins folder
 - `android/app/src/flutter/.../FlutterHostActivity.kt` - `pek/plugins` channel (`call`, `openUrl`)
 - `flutter_ui/lib/src/plugin_host.dart` - Dart client, host allow-list for pictures, TV Back hook
@@ -198,7 +198,7 @@ What it needed from the host, all in `pek_ui`:
 - `flutter_ui/lib/src/plugin_zip.dart` / `plugin_github.dart` / `plugin_install_ui.dart` - install from a .zip file / from GitHub: zip reader + picker client, GitHub client, screens and the Settings switch
 - `flutter_ui/lib/src/shell.dart`, `pages.dart`, `store.dart`, `api.dart`, `cloud.dart` - menu / More entries, Plugins > Open, plugin favorites and their cloud sync
 - `flutter_ui/pubspec.yaml` - adds `webview_flutter` / `webview_flutter_android` (trailer player); run `flutter pub get`
-- `backend/plugin_install.h` - a zip may contain `screen.py` instead of `ui.js`
+- `backend/plugin_install.h` - a zip needs a `screen.py`; any `.js` is refused
 - `plugins/tmdb-discover/{screen.py,plugin.json}` - the port (1.6.0)
 
 ## Plugin pictures, built-in plugins and updates (Fixes 4)

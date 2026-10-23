@@ -185,7 +185,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) { false }
     }
 
-    // The built-in files (www, plugins, skins, cacert.pem) only change when the app itself is installed or updated, so they are
+    // The built-in files (plugins, skins, cacert.pem) only change when the app itself is installed or updated, so they are
     // copied once per install instead of on every launch (that copy was most of the black start-up screen). A marker file next to
     // them remembers which install they came from. Any plugin the PEK Store installed lives in the same folder and is untouched.
     private fun installStamp(): String = try {
