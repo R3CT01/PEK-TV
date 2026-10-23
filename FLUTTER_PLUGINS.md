@@ -174,10 +174,10 @@ copy of the plugin's helper modules, so a shared `*_core.py` gets the right `pek
 sessions can write the same file, writes use a temp file per thread and a plugin that rotates tokens should re-read `auth.json` before refreshing
 (see `trakt_core.refresh`). Updating a plugin reloads its hooks without restarting the app.
 
-Reserved hosts: `hesper-tmdb...` is for `tmdb-discover` only and `pek-trakt...` for the plugin whose id is `trakt` only (`RESERVED_HOSTS` in
+Reserved hosts: `hesper-tmdb...` is for `tmdb-discover` only (`RESERVED_HOSTS` in
 `pek_flutter.py`); `trakt` is also owner-only in the PEK Store.
 
-The Trakt plugin (`plugin_packages/trakt/`, tests in `tools/test_trakt_plugin.py`, proxy in `cloud/trakt-worker.js`) is the reference user of all this.
+The Trakt plugin (`plugin_packages/trakt/`, tests in `tools/test_trakt_plugin.py`) is the reference user of all this.
 
 ## TMDb Discover (ported, 1.6.0)
 `plugins/tmdb-discover/screen.py` has:

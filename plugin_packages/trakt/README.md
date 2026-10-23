@@ -18,7 +18,7 @@ watches are); ratings, watchlist and collection.
 ## Setup
 
 1. Install the plugin (PEK Store, a .zip, or GitHub). The install screen says what it may do: it is told what you play (title, year,
-   season / episode and how far you got, never file names), and it may send data to `api.trakt.tv` and PEK's sign-in proxy.
+   season / episode and how far you got, never file names), and it may send data to `api.trakt.tv`.
 2. Open **Trakt** from the menu and press **Connect to Trakt**. PEK TV shows a code. Open trakt.tv/activate on any device, enter the
    code and approve. No password is typed into PEK TV.
 3. Choose what is shared with the three switches. Press **Import my Trakt history now** if you do not want to wait for the next start.
@@ -34,10 +34,10 @@ starts.
 - `screen.py`: sign-in (device flow), the three switches, the import button, "use my own Trakt app".
 - `trakt_core.py`: everything that talks to Trakt. The 3-minute check is one small request (`/sync/last_activities`); the history is only fetched when Trakt says something new was watched. Titles are matched once with Trakt's search (title + year) and the Trakt id is kept in
   `data/ids.json`.
-- Sign-in goes through PEK's proxy (`cloud/trakt-worker.js`, `cloud/TRAKT-DEPLOY.md`) which holds the app secret. "Use my own Trakt app"
-  skips the proxy.
+- Sign-in is Trakt's device flow with PKCE (a one-time `code_verifier` made on the device), straight to `api.trakt.tv`. Trakt apps no
+  longer have a client secret, so no proxy or server is needed. "Use my own Trakt app" swaps in your own client id.
 
-Files in `data/`: `auth.json` (tokens), `settings.json`, `client.json`, `ids.json`, `sync.json` (where the import stopped), `queue.json`.
+Files in `data/`: `auth.json` (tokens), `settings.json`, `pkce.json` (only while signing in), `ids.json`, `sync.json` (where the import stopped), `queue.json`.
 Removing the plugin removes them; **Disconnect** signs out and revokes the token.
 
 ## Testing

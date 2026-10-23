@@ -5,8 +5,11 @@ Run from the repository root:   python3 tools/test_trakt_plugin.py
 Nothing touches the network: hesper_guard's connection class is replaced by a fake Trakt, so the real policy code
 (host list, permissions, header rules, no redirects) still runs.
 """
+import base64
+import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -20,6 +23,7 @@ import pek_flutter as pf          # noqa: E402
 
 PLUGIN_SRC = os.path.join(ROOT, "plugin_packages", "trakt")
 failures = []
+CLIENT_ID = re.search(r'CLIENT_ID = "([^"]+)"', open(os.path.join(PLUGIN_SRC, "trakt_core.py")).read()).group(1)
 
 
 def check(name, cond, extra=""):
@@ -41,24 +45,29 @@ class Net:
 
     def route(self, method, host, path, query, headers, body):
         q = urllib.parse.parse_qs(query)
-        if host == "pek-trakt.aquariusibeats.workers.dev":
-            if path == "/client":
-                return 200, {"client_id": "CID"}
+        if host == "api.trakt.tv":
+            if headers.get("trakt-api-key") != CLIENT_ID:
+                return 403, None
             if path == "/oauth/device/code":
+                if body.get("client_id") != CLIENT_ID or "client_secret" in body or body.get("code_challenge_method") != "S256" or not body.get("code_challenge"):
+                    return 400, None
+                self.challenge = body["code_challenge"]
                 return 200, {"device_code": "DEV", "user_code": "ABCD1234", "verification_url": "https://trakt.tv/activate", "expires_in": 600, "interval": 3}
             if path == "/oauth/device/token":
                 self.polls += 1
+                v = body.get("code_verifier", "")
+                ok = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).decode().rstrip("=") == getattr(self, "challenge", None)
+                if body.get("code") != "DEV" or "client_secret" in body or not ok:
+                    return 400, None
                 if self.polls < 2:
                     return 400, None
                 return 200, {"access_token": "AT1", "refresh_token": "RT1", "expires_in": 86400, "created_at": int(time.time())}
             if path == "/oauth/token":
+                if "client_secret" in body or body.get("client_id") != CLIENT_ID:
+                    return 400, None
                 return 200, {"access_token": "AT2", "refresh_token": "RT2", "expires_in": 86400, "created_at": int(time.time())}
             if path == "/oauth/revoke":
                 return 200, {}
-            return 404, None
-        if host == "api.trakt.tv":
-            if headers.get("trakt-api-key") != "CID":
-                return 403, None
             authed = headers.get("Authorization", "").startswith("Bearer ")
             if path == "/search/movie":
                 return 200, [{"type": "movie", "movie": {"title": "Heat", "year": 1995, "ids": {"trakt": 7}}}]
@@ -178,7 +187,7 @@ try:
     except ValueError:
         check("request_json only allows GET and POST", True)
     NET.log.clear()
-    r = h_ok.request_json("POST", "https://api.trakt.tv/scrobble/start", body={"a": 1}, headers={"Authorization": "Bearer X", "Cookie": "no", "trakt-api-key": "CID"})
+    r = h_ok.request_json("POST", "https://api.trakt.tv/scrobble/start", body={"a": 1}, headers={"Authorization": "Bearer X", "Cookie": "no", "trakt-api-key": CLIENT_ID})
     sent = NET.log[-1][4]
     check("Authorization passes, Cookie is dropped", sent.get("Authorization") == "Bearer X" and "Cookie" not in sent, sent)
     check("request_json returns status and data", r["status"] == 401 or r["status"] == 201, r)
@@ -211,13 +220,6 @@ try:
     NET.log.clear()
     r = hook({"type": "play", "kind": "movie", "title": "Heat", "year": 1995}, pid="thief")
     check("a hook cannot reach a host it did not list", r["ok"] is False and not any(c[1] == "evil.example.com" for c in NET.log), r)
-
-    reserved = os.path.join(PLUGINS, "impostor")
-    os.makedirs(reserved)
-    json.dump({"permissions": {"network": [pf.TRAKT_PROXY_HOST], "send": True, "playback": True}, "flutter": {"screen": "screen.py", "hooks": "hooks.py"}}, open(os.path.join(reserved, "plugin.json"), "w"))
-    open(os.path.join(reserved, "screen.py"), "w").write("def render():\n    return None\n")
-    open(os.path.join(reserved, "hooks.py"), "w").write("def on_event(ev):\n    pass\n")
-    check("the Trakt proxy host is reserved for the trakt plugin", hook({"type": "play", "kind": "movie", "title": "Heat"}, pid="impostor")["ok"] is False)
 
     # -------------------------------------------------------------------------------------- sign in through the screen
     def flutter(req):
@@ -288,7 +290,7 @@ try:
     check("play -> scrobble/start with token, key and progress", r["ok"] and len(calls("/scrobble/start")) == 1, r)
     c = calls("/scrobble/start")[0]
     check("scrobble body has the Trakt id and progress", c[5] == {"movie": {"ids": {"trakt": 7}}, "progress": 10.0}, c[5])
-    check("scrobble sends the bearer token and api key", c[4].get("Authorization") == "Bearer AT1" and c[4].get("trakt-api-key") == "CID", c[4])
+    check("scrobble sends the bearer token and api key", c[4].get("Authorization") == "Bearer AT1" and c[4].get("trakt-api-key") == CLIENT_ID, c[4])
     hook(dict(movie, type="pause", position=1200))
     check("pause -> scrobble/pause", len(calls("/scrobble/pause")) == 1 and calls("/scrobble/pause")[0][5]["progress"] == 20.0)
     hook(dict(movie, type="stop", position=5700))

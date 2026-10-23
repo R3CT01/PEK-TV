@@ -165,8 +165,8 @@ def set_secret(text):
 
 
 def use_own_app():
-    if not (S["id"] and S["secret"]):
-        S["msg"] = "Enter both the client id and the client secret of your Trakt app."
+    if not S["id"]:
+        S["msg"] = "Enter the client id of your Trakt app."
         return
     t = trakt()
     t.set_setting("client_id", S["id"])
@@ -219,10 +219,10 @@ def render():
         kids.append(ui.text(S["msg"]))
     kids.append(ui.button("Use my own Trakt app" if not S["advanced"] else "Hide advanced", on=toggle_advanced))
     if S["advanced"]:
-        kids += [ui.text("Optional. Create an app at trakt.tv/oauth/applications (redirect uri urn:ietf:wg:oauth:2.0:oob) and enter its id and secret. "
-                         "They stay on this device."),
+        kids += [ui.text("Optional. Create an app at trakt.tv/oauth/applications (redirect uri urn:ietf:wg:oauth:2.0:oob) and enter its client id. "
+                         "A client secret is only needed for an older app that still has one. It stays on this device."),
                  ui.text_input("Client id", S["id"], on_change=set_id),
-                 ui.text_input("Client secret", S["secret"], on_change=set_secret, secret=True),
+                 ui.text_input("Client secret (optional)", S["secret"], on_change=set_secret, secret=True),
                  ui.button("Save and use my app", on=use_own_app),
                  ui.button("Go back to PEK TV's app", on=use_pek_app)]
     return ui.column(*kids)

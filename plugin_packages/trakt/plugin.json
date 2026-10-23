@@ -1,12 +1,11 @@
 {
   "name": "Trakt",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "PEK",
   "description": "Scrobbles what you watch to Trakt, sends your \"mark watched\" changes there, and brings your Trakt history into PEK TV.",
   "permissions": {
     "network": [
-      "api.trakt.tv",
-      "pek-trakt.aquariusibeats.workers.dev"
+      "api.trakt.tv"
     ],
     "storage": true,
     "watched": true,

@@ -2,19 +2,24 @@
 (scrobbling while you watch) both use it, each with its own pek_host.
 
 How it talks to Trakt:
-  * Sign-in is Trakt's "device" flow: Trakt gives a short code, the person types it at trakt.tv/activate, and this
-    plugin polls until Trakt says yes. The app's client secret is never in the plugin: PEK's sign-in proxy
-    (cloud/trakt-worker.js) adds it. A person who prefers their own Trakt app can enter its id and secret instead.
+  * Sign-in is Trakt's "device" flow with PKCE: Trakt gives a short code, the person types it at trakt.tv/activate, and this
+    plugin polls until Trakt says yes. Trakt apps no longer have a client secret; PKCE (a one-time code_verifier made on this
+    device) takes its place, so no proxy or server is needed. A person who prefers their own Trakt app can enter its id instead.
   * Everything else goes straight to api.trakt.tv with the person's token.
   * Titles are matched with Trakt's search (title + year) once and the Trakt id is remembered in ids.json.
 """
+import base64
 import datetime
+import hashlib
 import json
+import random
 import time
 from urllib.parse import quote
 
 API = "https://api.trakt.tv"
-PROXY = "https://pek-trakt.aquariusibeats.workers.dev"
+CLIENT_ID = "JFK-Zd7iVqbi2tSQhTm1Si4HCTtV-QSGjcnhbQtx_s8"   # PEK TV's Trakt app (a public id, not a secret)
+PKCE = "pkce.json"
+VERIFIER_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
 SETTINGS = "settings.json"
 AUTH = "auth.json"
 CLIENT = "client.json"
@@ -25,7 +30,7 @@ OOB = "urn:ietf:wg:oauth:2.0:oob"
 MAX_IDS = 3000
 MAX_QUEUE = 100
 PAGE = 500
-DEFAULTS = {"scrobble": True, "push": True, "pull": True, "client_id": "", "client_secret": ""}
+DEFAULTS = {"scrobble": True, "push": True, "pull": True, "client_id": "", "client_secret": ""}   # client_secret: only for an old app of your own that still has one
 NO_ANSWER = {"status": 0, "data": None, "page_count": 0, "retry_after": 0}
 
 
@@ -80,45 +85,44 @@ class Trakt:
 
     # ------------------------------------------------------------------------------------------ the app
     def custom(self):
-        return bool(self.settings["client_id"] and self.settings["client_secret"])
+        return bool(self.settings["client_id"])
 
     def client_id(self):
-        if self.custom():
-            return self.settings["client_id"]
-        cached = self.load(CLIENT, {})
-        if cached.get("client_id"):
-            return str(cached["client_id"])
-        r = self.h.request_json("GET", PROXY + "/client", timeout=8)
-        cid = r["data"].get("client_id") if r["status"] == 200 and isinstance(r["data"], dict) else ""
-        if not cid:
-            raise ConnectionError("Trakt sign-in is not available right now")
-        self.save(CLIENT, {"client_id": str(cid)})
-        return str(cid)
+        return self.settings["client_id"] if self.custom() else CLIENT_ID
 
     def oauth(self, path, body):
-        """A sign-in call. Through PEK's proxy the app id and secret are added there; with the person's own app they are added here."""
-        if self.custom():
-            b = dict(body)
-            b["client_id"] = self.settings["client_id"]
+        """A sign-in call, straight to Trakt. Only the app id goes along (PKCE needs no secret); an old own app that still
+        has a secret may add it in the settings."""
+        b = dict(body)
+        b["client_id"] = self.client_id()
+        if self.custom() and self.settings["client_secret"]:
             b["client_secret"] = self.settings["client_secret"]
-            return self.h.request_json("POST", API + path, body=b, headers={"trakt-api-version": "2", "trakt-api-key": self.settings["client_id"]})
-        return self.h.request_json("POST", PROXY + path, body=body)
+        return self.h.request_json("POST", API + path, body=b, headers={"trakt-api-version": "2", "trakt-api-key": self.client_id()})
 
     # ------------------------------------------------------------------------------------------ sign in
     def start_login(self):
         """Returns {user_code, verification_url, device_code, interval, expires_in} or raises."""
-        r = self.oauth("/oauth/device/code", {})
+        rng = random.SystemRandom()
+        verifier = "".join(rng.choice(VERIFIER_CHARS) for _ in range(96))
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest()).decode("ascii").rstrip("=")
+        r = self.oauth("/oauth/device/code", {"code_challenge": challenge, "code_challenge_method": "S256"})
         d = r["data"]
-        if r["status"] != 200 or not isinstance(d, dict) or not d.get("user_code"):
+        if r["status"] != 200 or not isinstance(d, dict) or not d.get("user_code") or not d.get("device_code"):
             raise ConnectionError("Trakt did not give a code (HTTP %d)" % r["status"])
+        self.save(PKCE, {"device_code": str(d["device_code"]), "verifier": verifier})   # the screen and the poll may be separate sessions
         return d
 
     def poll_login(self, device_code):
         """One check. 'ok' when approved (tokens saved), else pending / slow / expired / denied / invalid."""
-        r = self.oauth("/oauth/device/token", {"code": device_code})
+        saved = self.load(PKCE, {})
+        body = {"code": device_code}
+        if saved.get("device_code") == device_code and saved.get("verifier"):
+            body["code_verifier"] = saved["verifier"]
+        r = self.oauth("/oauth/device/token", body)
         st = r["status"]
         if st == 200 and isinstance(r["data"], dict) and r["data"].get("access_token"):
             self.store_tokens(r["data"])
+            self.save(PKCE, {})
             return "ok"
         return {400: "pending", 429: "slow", 410: "expired", 418: "denied", 404: "invalid", 409: "invalid"}.get(st, "error")
 
