@@ -260,7 +260,11 @@ class Store {
   /// "Mark as watched / unwatched" for many items in one write and one repaint (the web UI's `_setWatched` / `_setSeasonWatched`,
   /// and plugins). Marking watched adds an entry like finishing the item would (one already watched is left alone); marking
   /// unwatched leaves a `{deleted, updated}` marker so the removal syncs too. Returns true when something changed.
-  static Future<bool> setWatched(Iterable<Progress> items, bool on) async {
+  ///
+  /// [keepTime] (plugins only): the entry is dated with the item's own `updated` (when it was really watched, e.g. from Trakt)
+  /// instead of now, as long as that time is sane (2000 .. tomorrow). `updated` on the entry itself stays now, so the cloud
+  /// still sees the change as new.
+  static Future<bool> setWatched(Iterable<Progress> items, bool on, {List<Progress>? changedOut, bool keepTime = false}) async {
     final map = _map(_historyKey);
     final now = DateTime.now().millisecondsSinceEpoch;
     var changed = false;
@@ -271,12 +275,13 @@ class Store {
       final alive = old is Map && old['deleted'] == null;
       if (on) {
         if (alive) continue;
-        map[key] = HistoryEntry(key: key, kind: p.kind, title: p.kind == 'episode' ? p.showTitle : p.title, year: p.year, season: p.season, episode: p.episode, at: now, count: 1, updated: now).toJson();
+        map[key] = HistoryEntry(key: key, kind: p.kind, title: p.kind == 'episode' ? p.showTitle : p.title, year: p.year, season: p.season, episode: p.episode, at: keepTime ? watchTimeOr(p.updated, now) : now, count: 1, updated: now).toJson();
       } else {
         if (!alive) continue;
         map[key] = {'deleted': 1, 'updated': now};
       }
       changed = true;
+      changedOut?.add(p);
     }
     if (changed) {
       await _p.setString(_historyKey, jsonEncode(map));
@@ -298,6 +303,15 @@ class Store {
     if (kind == 'episode') return _norm(showTitle).isEmpty ? null : 'e|${_norm(showTitle)}|$season|$episode';
     return null;
   }
+
+  /// A watch time from a plugin: seconds since 1970 (as Python sends it) -> milliseconds, or null when missing or not believable.
+  static int? watchTimeFromSeconds(Object? seconds) {
+    final s = seconds is num ? seconds.toInt() : 0;
+    return s >= 946684800 && s * 1000 <= DateTime.now().millisecondsSinceEpoch + 86400000 ? s * 1000 : null;
+  }
+
+  /// [ms] when it is a believable watch time (2000 .. tomorrow), else [fallback].
+  static int watchTimeOr(int ms, int fallback) => ms >= 946684800000 && ms <= fallback + 86400000 ? ms : fallback;
 
   static String normalize(String s) => _norm(s);
 

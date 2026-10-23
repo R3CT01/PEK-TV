@@ -165,7 +165,7 @@ class PreparedPlugin {
   final String id, name, version, author, description, navTab;
   final PluginWarning? warning;
   final List<String> network;
-  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, watched, skins
+  final Set<String> perms; // storage, library, torrent, favorites, providers, plugins, watched, playback, send, skins
   final bool stream, hasBackend, hasFlutterScreen, hasWebScreen;
   final List<PluginFile> files;
 
@@ -187,7 +187,7 @@ class PreparedPlugin {
     }
   }
 
-  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'watched', 'skins'];
+  static const permissionNames = ['storage', 'library', 'torrent', 'favorites', 'providers', 'plugins', 'watched', 'playback', 'send', 'skins'];
   static final _host = RegExp(r'^(\*\.)?[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$');
   static final _ip = RegExp(r'^[\d.]+$');
 
@@ -273,6 +273,8 @@ class PreparedPlugin {
       if (perms.contains('torrent')) 'Can search for releases and start torrent streams through PEK TV (it never sees your provider key). Streams download and upload from your connection.',
       if (perms.contains('favorites')) 'Can add titles to your Favorites and remove them (it sees only which titles are favorites).',
       if (perms.contains('watched')) 'Can see which movies and episodes you have marked as watched and mark them watched or unwatched (it sees nothing else from your history).',
+      if (perms.contains('playback')) 'Is told which movie or episode you start, pause and stop watching, how far you got, and when you mark one watched or unwatched (title, year, season and episode only, never file names). It runs in the background, even when its screen is closed.',
+      if (perms.contains('send')) 'Can send information, including a sign-in token, to the sites listed above (not only read from them).',
       if (perms.contains('skins')) 'Can add, change and delete the skins you made, and switch the skin in use. Only PEK\u2019s official Skin maker may ask for this.',
       if (perms.contains('providers')) 'Can show \u201cWatch on Netflix / Hulu / \u2026\u201d buttons. PEK TV decides what they open: the service\u2019s app on Android, its website elsewhere.',
       if (perms.contains('plugins')) 'Can list your plugins that play titles and open one of them when you tap a button.',

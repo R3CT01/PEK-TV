@@ -85,6 +85,10 @@ class PluginHost {
 
   static Future<void> close(String id) => _call({'op': 'close', 'id': id});
 
+  /// Tells a plugin's hooks.py about an event (plugin_hooks.dart) and returns {ok, effects, error}. Needs the "playback"
+  /// permission and a "flutter": {"hooks": ...} entry; pek_flutter.py refuses anything else.
+  static Future<Map<String, dynamic>> hook(String id, Map<String, dynamic> event) => _call({'op': 'hook', 'id': id, 'event': event, 'ctx': const <String, dynamic>{}});
+
   /// A streaming app (the first installed of [packages], a comma list), on the title's page when it supports the link,
   /// else the app, else [url] in the browser. The activity only opens packages from its allow-list.
   static Future<bool> openApp(String packages, String url) async {

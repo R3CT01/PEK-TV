@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'cloud.dart';
+import 'library_match.dart';
+import 'plugin_hooks.dart';
 import 'store.dart';
 
 /// Marking movies / episodes watched or unwatched (the web UI's `_setWatched` / `_setSeasonWatched`).
@@ -12,9 +14,20 @@ class Watched {
   static Timer? _timer;
 
   /// Marks [items] watched ([on] true) or unwatched. Only movies and episodes count; others are ignored.
-  static Future<void> set(Iterable<Progress> items, bool on) async {
-    final changed = await Store.setWatched(items, on);
-    if (changed) _syncSoon();
+  /// Plugins with the "playback" permission are told which items really changed (one already watched is not a change),
+  /// except the plugin named in [source] (the one that asked for this change: a Trakt import must not go back to Trakt).
+  ///
+  /// A change a plugin asked for ([source] set) may carry the time it was really watched (Progress.updated, e.g. Trakt's own
+  /// date); Watch History then shows and sorts by that time. Anything else is dated now.
+  static Future<void> set(Iterable<Progress> items, bool on, {String? source}) async {
+    // A plugin names things its own way (Trakt: "The Office", the library: "The Office (US)"): its titles are lined up with
+    // the library's own first, only where exactly one library title fits (library_match.dart).
+    final Iterable<Progress> list = source != null ? await LibraryMatch.resolve(items.toList()) : items;
+    final changedItems = <Progress>[];
+    final changed = await Store.setWatched(list, on, changedOut: changedItems, keepTime: source != null);
+    if (!changed) return;
+    _syncSoon();
+    PluginHooks.watched(changedItems, on, except: source);
   }
 
   /// Schedules one light sync, however many marks happen in a row (a season is one call, tapping several episodes is one push).

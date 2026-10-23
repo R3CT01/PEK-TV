@@ -17,6 +17,7 @@ import 'mpv.dart';
 import 'music.dart';
 import 'pages.dart';
 import 'plugin_backup.dart';
+import 'plugin_hooks.dart';
 import 'plugin_host.dart' show PluginBack, PluginHost;
 import 'plugin_store_ui.dart' show PluginPicture;
 import 'plugin_ui.dart';
@@ -146,6 +147,7 @@ class _AppShellState extends State<AppShell> {
     super.initState();
     _loadPluginScreens();
     PluginUpdates.checkOnStartup(); // built-in plugins update from the PEK Store, GitHub ones are offered an update
+    Future<void>.delayed(const Duration(seconds: 6), PluginHooks.appStart); // plugins with hooks (Trakt import); once per run
     PluginHost.changed.addListener(_loadPluginScreens);
     PluginPins.changed.addListener(_pinsChanged);
     Store.profile.addListener(_pinsChanged);

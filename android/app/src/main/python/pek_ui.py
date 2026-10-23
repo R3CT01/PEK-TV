@@ -19,6 +19,7 @@ This module is host code (trusted). A plugin only gets the names below, and ever
 plugin (favorites, links) is checked against plugin.json here, not in the plugin.
 """
 import re
+import time
 import threading
 import urllib.parse
 
@@ -348,6 +349,15 @@ def _watched_key(kind, title, year=0, season=0, episode=0):
     raise ValueError("kind must be 'movie' or 'episode'")
 
 
+def _watch_time(at):
+    """When it was watched, in seconds since 1970, or 0 for \"now\". Anything before 2000 or more than a day ahead is ignored."""
+    try:
+        at = int(at or 0)
+    except (TypeError, ValueError):
+        return 0
+    return at if 946684800 <= at <= int(time.time()) + 86400 else 0
+
+
 def is_watched(kind, title, year=0, season=0, episode=0):
     """Is this movie / episode in PEK TV's Watch History? Needs "watched": true.
     Movie: is_watched("movie", title, year). Episode: is_watched("episode", show_title, season=1, episode=3)."""
@@ -377,20 +387,22 @@ def is_watched_many(items):
     return out
 
 
-def set_watched(kind, title, year=0, value=True, season=0, episode=0):
+def set_watched(kind, title, year=0, value=True, season=0, episode=0, at=0):
     """Mark a movie / episode watched / unwatched in PEK TV's Watch History (the history the person sees; it syncs to PEK
     Cloud). Needs "watched": true. For an episode, "title" is the show's title and season / episode are the numbers.
+    at: when it was really watched, seconds since 1970 (optional; Watch History shows and sorts by it, default is now).
     The screen's own is_watched() answers with the new value on the next call."""
     s = _sess()
     s.need("watched")
     _watched_key(kind, title, year, season, episode)       # validates
     s.effect("watched.set", kind=kind, title=_s(title, 200), year=int(year or 0), season=int(season or 0),
-             episode=int(episode or 0), value=bool(value))
+             episode=int(episode or 0), value=bool(value), at=_watch_time(at))
 
 
 def set_watched_many(items, value=True):
-    """set_watched() for a whole season or list in one go: items are {"kind", "title", "year", "season", "episode"} dicts
-    (max 300, anything invalid is skipped). Needs "watched": true."""
+    """set_watched() for a whole season or list in one go: items are {"kind", "title", "year", "season", "episode"} dicts,
+    each with an optional "at" (when it was watched, seconds since 1970). Max 300, anything invalid is skipped.
+    Needs "watched": true."""
     s = _sess()
     s.need("watched")
     clean = []
@@ -400,7 +412,7 @@ def set_watched_many(items, value=True):
         except (ValueError, AttributeError):
             continue
         clean.append({"kind": it.get("kind"), "title": _s(it.get("title"), 200), "year": int(it.get("year") or 0),
-                      "season": int(it.get("season") or 0), "episode": int(it.get("episode") or 0)})
+                      "season": int(it.get("season") or 0), "episode": int(it.get("episode") or 0), "at": _watch_time(it.get("at"))})
     if clean:
         s.effect("watched.set_many", items=clean, value=bool(value))
 

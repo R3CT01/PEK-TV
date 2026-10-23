@@ -253,7 +253,8 @@ class _PluginViewState extends State<PluginView> {
   Progress? _watchedItem(Map it) {
     final kind = '${it['kind']}';
     final title = '${it['title'] ?? ''}';
-    final now = DateTime.now().millisecondsSinceEpoch;
+    // "at": when it was really watched (seconds since 1970), if the plugin knows; otherwise now.
+    final now = Store.watchTimeFromSeconds(it['at']) ?? DateTime.now().millisecondsSinceEpoch;
     if (kind == 'movie') {
       final year = (it['year'] as num?)?.toInt() ?? 0;
       return Store.keyFor(kind: 'movie', title: title, year: year) == null
@@ -319,7 +320,7 @@ class _PluginViewState extends State<PluginView> {
           final p = _watchedItem(it);
           if (p != null) items.add(p);
         }
-        if (items.isNotEmpty) await Watched.set(items, on);
+        if (items.isNotEmpty) await Watched.set(items, on, source: widget.pluginId);
       } else if (op == 'favorite.add') {
         await Store.addPluginFavorite(
           plugin: widget.pluginId,

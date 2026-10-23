@@ -9,6 +9,7 @@ import 'api.dart';
 import 'cloud.dart';
 import 'mpv.dart';
 import 'music_controller.dart';
+import 'plugin_hooks.dart';
 import 'skip.dart';
 import 'store.dart';
 import 'subtitles.dart';
@@ -62,6 +63,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _nextDismissed = false;
   bool _nextEverShown = false;
   bool _leaving = false; // replaced by the next episode: the shared player must not be torn down
+  bool _hookStarted = false; // plugins with the "playback" permission were told playback began
+  bool _hookPaused = false;
   final ValueNotifier<bool> _nextVisible = ValueNotifier(false);
   final ValueNotifier<int?> _countdown = ValueNotifier(null);
   Timer? _countTimer;
@@ -77,6 +80,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
     _player.load(widget.url, startSec: widget.startSec, title: widget.title);
     _player.ended.addListener(_onEnded);
+    _player.playing.addListener(_onPlaying);
     _subs = SubsController(player: _player, meta: widget.resume, fileName: widget.title, toast: _toast);
     _player.subtitles.addListener(_subs.onTracks);
     _subs.onTracks(); // also once at the start, in case the file never reports a track list
@@ -92,12 +96,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     Activity.playerLeave();
-    if (!_leaving) _record(notify: true); // when the next episode took over, this one was recorded as finished already
+    if (!_leaving) {
+      _hook('stop');
+      _record(notify: true); // when the next episode took over, this one was recorded as finished already
+    }
     _save?.cancel();
     _hide?.cancel();
     _seekReset?.cancel();
     _countTimer?.cancel();
     _player.ended.removeListener(_onEnded);
+    _player.playing.removeListener(_onPlaying);
     _player.subtitles.removeListener(_subs.onTracks);
     _player.chapters.removeListener(_onChapters);
     _player.position.removeListener(_onPos);
@@ -118,6 +126,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _onChapters() => _skip.setChapters(_player.chapters.value, _player.duration.value);
 
   void _onPos() {
+    if (!_hookStarted && !_leaving && _player.position.value > 0 && _player.playing.value && !_player.buffering.value) {
+      _hookStarted = true;
+      _hook('play');
+    }
     _skip.tick(_player.position.value);
     final n = _next;
     if (n == null || _nextDismissed || _leaving) {
@@ -163,10 +175,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (r != null) {
       final dur = _player.duration.value > 0 ? _player.duration.value : r.duration;
       Store.saveProgress(r.at(dur, dur), notify: true); // finished
+      if (_hookStarted) PluginHooks.playback('stop', r, dur, dur);
+      _hookStarted = false;
     }
     Navigator.of(context).pushReplacement(MaterialPageRoute<void>(
       builder: (_) => PlayerScreen(url: Api.streamUrl(n.id), title: n.title, resume: n, nextFor: widget.nextFor),
     ));
+  }
+
+  /// Tells plugins that asked for the "playback" permission (Trakt scrobbling and the like): play once the video really
+  /// runs (the first position after buffering, so a file that never loads is never reported), then pause / resume, and
+  /// stop when the player closes. The player's `playing` starts as true, so "play" cannot come from that notifier.
+  void _onPlaying() {
+    if (_leaving || !_hookStarted) return;
+    if (!_player.playing.value) {
+      if (_player.ended.value || _hookPaused) return;
+      _hookPaused = true;
+      _hook('pause');
+    } else if (_hookPaused) {
+      _hookPaused = false;
+      _hook('resume');
+    }
+  }
+
+  void _hook(String type) {
+    final r = widget.resume;
+    if (r == null || (type == 'stop' && !_hookStarted)) return;
+    var pos = _player.position.value;
+    if (type == 'play' && pos < 1) pos = widget.startSec; // the player may not have reported where it resumed yet
+    PluginHooks.playback(type, r, pos, _player.duration.value > 0 ? _player.duration.value : r.duration);
   }
 
   /// _saveProgress() in app_watch.js: every ~10 s and when the player closes.

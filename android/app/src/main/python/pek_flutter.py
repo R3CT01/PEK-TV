@@ -33,12 +33,20 @@ WORK_LIMIT = 25.0                     # seconds one ui.background(work) may take
 RESERVED_HOST = "hesper-tmdb.aquariusibeats.workers.dev"
 OFFICIAL_PROXY_PLUGINS = {"tmdb-discover"}   # the only plugin that may use PEK's built-in TMDb access
 OFFICIAL_SKIN_PLUGINS = {"skin-maker"}       # the only plugin that may ask for the "skins" permission
+TRAKT_PROXY_HOST = "pek-trakt.aquariusibeats.workers.dev"   # PEK's Trakt sign-in proxy (cloud/trakt-worker.js): holds the app secret
+RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS, TRAKT_PROXY_HOST: {"trakt"}}   # host -> the only plugins that may list it
+HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
+HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched"}
+HOOK_EFFECTS = {"watched.set", "watched.set_many"}   # all a hook may ask Flutter to do
 ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "torrent.play", "toast", "exit",
                    "skin.save", "skin.use", "skin.delete", "clipboard.copy"}
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _SESSIONS = {}
 _SESSIONS_LOCK = threading.Lock()
+_HOOKS = {}                           # plugin id -> Session that runs hooks.py (separate from the screen's session)
+_HOOKS_LOCK = threading.Lock()
+_HOOK_FILE = re.compile(r"^[a-z0-9_]{1,40}\.py$")
 _IMPORT_LOCK = threading.Lock()       # pek_host / pek_ui are swapped into sys.modules while a screen is imported
 
 
@@ -94,6 +102,16 @@ def _guarded(sess, fn, limit):
 # One open screen
 # ---------------------------------------------------------------------------------------------------------
 
+def _forget_siblings(folder):
+    """Drops the plugin's own helper modules from sys.modules. The screen and the hooks of one plugin run in separate
+    sessions, each with its own pek_host, so they must not share an imported copy (and an update must not keep the old one)."""
+    prefix = folder.rstrip(os.sep) + os.sep
+    for name in list(sys.modules):
+        f = getattr(sys.modules.get(name), "__file__", None)
+        if isinstance(f, str) and f.startswith(prefix):
+            sys.modules.pop(name, None)
+
+
 class Session:
     def __init__(self, plugin_id, folder, manifest, sandboxed):
         self.id = plugin_id
@@ -117,6 +135,7 @@ class Session:
         self.scroll = 0
         self.effects = []
         self.error = ""
+        self.stamp = None             # hook sessions: when the plugin's files last changed (a newer one reloads)
 
     # -- what pek_ui calls ------------------------------------------------------------------------------
 
@@ -226,18 +245,18 @@ class Session:
         self.effects = []
         return out
 
-    def load(self):
-        """Imports screen.py under the guard and runs start()."""
-        path = os.path.join(self.folder, SCREEN_FILE + ".py")
+    def load(self, stem=SCREEN_FILE, run_start=True):
+        """Imports screen.py (or the hooks file) under the guard and runs start() for a screen."""
+        path = os.path.join(self.folder, stem + ".py")
         host = g.build_host_module(self.id, self.folder, self.manifest)
 
         def import_and_start():
-            spec = importlib.util.spec_from_file_location("pek_screen_" + re.sub(r"\W", "_", self.id), path)
+            spec = importlib.util.spec_from_file_location("pek_" + stem + "_" + re.sub(r"\W", "_", self.id), path)
             mod = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(mod)
             self.module = mod
             start = getattr(mod, "start", None)
-            if callable(start):
+            if run_start and callable(start):
                 start()
 
         with _IMPORT_LOCK:
@@ -246,9 +265,11 @@ class Session:
             sys.modules["hesper_host"] = host
             sys.modules["pek_ui"] = pek_ui
             sys.path.insert(0, self.folder)
+            _forget_siblings(self.folder)      # a helper module the plugin ships is imported fresh for this session
             try:
                 _, err = _guarded(self, import_and_start, EVENT_LIMIT)
             finally:
+                _forget_siblings(self.folder)
                 try:
                     sys.path.remove(self.folder)
                 except ValueError:
@@ -305,8 +326,9 @@ def _open(req):
         if err:
             return _fail("plugin.json: %s" % err)
         hosts = [str(h).lower() for h in (manifest.get("permissions", {}).get("network", []) or [])]
-        if RESERVED_HOST in hosts and pid not in OFFICIAL_PROXY_PLUGINS:
-            return _fail("%s is reserved for PEK's official plugins" % RESERVED_HOST)
+        for reserved, owners in RESERVED_HOSTS.items():
+            if reserved in hosts and pid not in owners:
+                return _fail("%s is reserved for PEK's official plugins" % reserved)
         if manifest.get("permissions", {}).get("skins") and pid not in OFFICIAL_SKIN_PLUGINS:
             return _fail("the 'skins' permission is reserved for PEK's official Skin maker")
         if not trusted:
@@ -410,7 +432,137 @@ def _close(req):
     return {"ok": True}
 
 
-_OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close}
+# ---------------------------------------------------------------------------------------------------------
+# Hooks: PEK TV tells a plugin what is being played (no screen needed)
+# ---------------------------------------------------------------------------------------------------------
+
+def _int(v, lo, hi):
+    try:
+        return max(lo, min(hi, int(float(v))))
+    except (TypeError, ValueError):
+        return lo
+
+
+def _float(v, lo, hi):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return lo
+    return lo if f != f else max(lo, min(hi, f))      # NaN -> lo
+
+
+def _clean_item(it):
+    """A movie or episode, with only the fields a plugin may know (never a file name, id or folder)."""
+    if not isinstance(it, dict) or it.get("kind") not in ("movie", "episode"):
+        return None
+    title = str(it.get("title") or "").strip()[:200]
+    if not title:
+        return None
+    return {"kind": it["kind"], "title": title, "year": _int(it.get("year"), 0, 3000),
+            "season": _int(it.get("season"), 0, 999), "episode": _int(it.get("episode"), 0, 9999)}
+
+
+def _clean_event(ev):
+    if not isinstance(ev, dict) or ev.get("type") not in HOOK_EVENTS:
+        return None
+    out = {"type": ev["type"]}
+    if ev["type"] in ("play", "pause", "resume", "stop"):
+        item = _clean_item(ev)
+        if item is None:
+            return None
+        out.update(item)
+        pos, dur = _float(ev.get("position"), 0, 1e7), _float(ev.get("duration"), 0, 1e7)
+        out["position"], out["duration"] = pos, dur
+        out["percent"] = round(min(100.0, pos * 100.0 / dur), 2) if dur > 0 else 0.0
+    elif ev["type"] == "watched":
+        items = [i for i in (_clean_item(x) for x in list(ev.get("items") or [])[:300]) if i]
+        if not items:
+            return None
+        out["items"], out["value"] = items, bool(ev.get("value"))
+    return out
+
+
+def _files_stamp(folder):
+    newest = 0.0
+    try:
+        for n in os.listdir(folder):
+            if n.endswith(".py") or n == "plugin.json":
+                newest = max(newest, os.path.getmtime(os.path.join(folder, n)))
+    except OSError:
+        pass
+    return newest
+
+
+def _hook_session(pid, req):
+    """The running hook session of a plugin (loading it, or loading it again after an update). (session, error)."""
+    base = _plugins_dir(req)
+    folder = os.path.join(base, pid) if base else ""
+    if not folder or not os.path.isdir(folder):
+        return None, "plugin %s is not installed" % pid
+    with _HOOKS_LOCK:
+        stamp = _files_stamp(folder)
+        sess = _HOOKS.get(pid)
+        if sess is not None and sess.stamp == stamp:
+            return sess, None
+        _HOOKS.pop(pid, None)
+        manifest, err = g.load_manifest(folder)
+        if err:
+            return None, "plugin.json: %s" % err
+        perms = manifest.get("permissions", {}) or {}
+        fl = manifest.get("flutter")
+        fname = fl.get("hooks") if isinstance(fl, dict) else None
+        if not perms.get("playback") or not isinstance(fname, str) or not _HOOK_FILE.match(fname):
+            return None, "this plugin does not ask for playback hooks"
+        if not os.path.isfile(os.path.join(folder, fname)):
+            return None, "%s is missing" % fname
+        hosts = [str(h).lower() for h in (perms.get("network", []) or [])]
+        for reserved, owners in RESERVED_HOSTS.items():
+            if reserved in hosts and pid not in owners:
+                return None, "%s is reserved for PEK's official plugins" % reserved
+        trusted = pid in g.trusted_names()
+        if not trusted:
+            problems = g.scan_plugin_folder(folder)
+            if problems:
+                log("REFUSED hooks of '%s': %s" % (pid, problems[0]))
+                return None, "the safety scan refused this plugin: " + problems[0]
+            g._install_hook()
+        sess = Session(pid, folder, manifest, sandboxed=not trusted)
+        sess.stamp = stamp
+        with sess.lock:
+            err = sess.load(fname[:-3], run_start=False)
+        if err:
+            return None, "could not start the hooks: %s" % err
+        _HOOKS[pid] = sess
+        return sess, None
+
+
+def _hook(req):
+    pid = str(req.get("id") or "")
+    if not _ID.match(pid):
+        return _fail("bad plugin id")
+    ev = _clean_event(req.get("event"))
+    if ev is None:
+        return _fail("bad event")
+    sess, err = _hook_session(pid, req)
+    if sess is None:
+        return _fail(err)
+    fn = getattr(sess.module, "on_event", None)
+    if not callable(fn):
+        return _fail("hooks file has no on_event(event)")
+    ctx = req.get("ctx") if isinstance(req.get("ctx"), dict) else {}
+    with sess.lock:
+        sess.ctx = ctx
+        sess.effects = []
+        _, err = _guarded(sess, lambda: fn(ev), HOOK_LIMIT)
+        effects = [e for e in sess.effects if e.get("op") in HOOK_EFFECTS]
+        sess.effects = []
+    if err:
+        log("'%s' on_event(%s) failed: %s" % (pid, ev["type"], err))
+        return {"ok": False, "error": str(err)[:300], "effects": effects}
+    return {"ok": True, "effects": effects}
+
+
+_OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close, "hook": _hook}
 
 
 def call(text):

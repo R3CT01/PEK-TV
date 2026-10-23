@@ -123,6 +123,62 @@ Draw 6 s, tap handler 15 s, one `ui.background` job 25 s (the 10 s network limit
 raises or runs past its limit shows an error card with **Try again**. `plugins/tmdb-discover/data/` style storage is unchanged.
 A third-party plugin listing PEK's built-in TMDb proxy host is refused here too (only `tmdb-discover` may use it).
 
+## Hooks: plugins that react to playback (`playback` and `send` permissions)
+
+A screen only runs while it is open. Some plugins have to act while the person watches (scrobbling to Trakt, Last.fm, a presence
+display), so a plugin can also have a **hooks file**:
+
+```json
+"permissions": { "network": ["api.example.com"], "storage": true, "send": true, "playback": true },
+"flutter": { "screen": "screen.py", "hooks": "hooks.py" }
+```
+
+```python
+import pek_host as h
+import pek_ui as ui
+
+def on_event(ev):        # called by PEK TV, no screen needed; max 25 s; one event at a time per plugin, in order
+    ...
+```
+
+`ev["type"]` is one of:
+
+| type | when | other fields |
+|---|---|---|
+| `app_start` | once per run, a few seconds after the shell opens | none |
+| `tick` | every 3 minutes while the app is open and nothing is playing, and when the app returns to the front (at most once a minute; never while another event for the plugin is still running) | none |
+| `play` | the video really runs (first position after buffering) | item + position |
+| `pause` / `resume` | the person paused / continued | item + position |
+| `stop` | the player closed, or the next episode took over | item + position |
+| `watched` | the person marked movies / episodes watched or unwatched | `items` (max 300 of `{kind, title, year, season, episode}`), `value` |
+
+An item is `kind` (`movie` or `episode`; torrents with no identity are not reported), `title` (for an episode: the **show's** title), `year`,
+`season`, `episode`, `position`, `duration` (seconds) and `percent` (0 to 100). `pek_flutter.py` builds the event itself and passes
+**only these fields**: never a file name, folder, library id or stream address.
+
+What a hook may do: everything a screen can that needs no screen, i.e. `h.request_json`, `h.read_json` / `h.write_json` (`storage`) and
+`ui.set_watched` / `ui.set_watched_many` (`watched`); both take an optional `at` (when it was really watched, seconds since 1970: Watch History shows and sorts by it; without it the time is now, and a time before 2000 or more than a day ahead is ignored). PEK TV also lines a plugin's titles up with the library's own before it stores them (`flutter_ui/lib/src/library_match.dart`): capitals, accents, punctuation, a leading "The" and a closing "(2005)" / "(US)" do not matter, a movie's year may be one off, and the library's title and year are used when exactly one fits. Anything that fits nothing, or fits more than one, is stored as the plugin sent it. The plugin is never shown the library. Other effects (links, favorites, toasts) are dropped. A change a hook makes to
+Watch History is **not** reported back to that same plugin, so an import cannot echo to the service it came from.
+
+**Permissions.**
+
+- `playback`: the plugin is told the events above. It needs `"flutter": {"hooks": "hooks.py"}` (and the other way round). The install screen
+  says it "runs in the background, even when its screen is closed".
+- `send`: `h.request_json(method, url, body=None, headers=None, timeout=10)` becomes available: HTTPS `GET` or `POST` with a JSON body to a host
+  in `permissions.network`, with an `Authorization` header allowed (`fetch_text` still drops it). Redirects are never followed, so a header can
+  only reach the host the plugin named; the same public-IP pinning, size caps (256 KB out, 2 MB back) and 10 s limit apply. It returns
+  `{"status", "data", "page_count", "retry_after"}` and does **not** raise on an HTTP error status, so a plugin can tell "pending" from "denied".
+
+A hooks file is scanned and sandboxed exactly like `screen.py`. The hook session is separate from the screen's session (each imports its own
+copy of the plugin's helper modules, so a shared `*_core.py` gets the right `pek_host`); both share the plugin's `data/` folder. Because two
+sessions can write the same file, writes use a temp file per thread and a plugin that rotates tokens should re-read `auth.json` before refreshing
+(see `trakt_core.refresh`). Updating a plugin reloads its hooks without restarting the app.
+
+Reserved hosts: `hesper-tmdb...` is for `tmdb-discover` only and `pek-trakt...` for the plugin whose id is `trakt` only (`RESERVED_HOSTS` in
+`pek_flutter.py`); `trakt` is also owner-only in the PEK Store.
+
+The Trakt plugin (`plugin_packages/trakt/`, tests in `tools/test_trakt_plugin.py`, proxy in `cloud/trakt-worker.js`) is the reference user of all this.
+
 ## TMDb Discover (ported, 1.6.0)
 `plugins/tmdb-discover/screen.py` has:
 - Movies / TV rows (trending, top rated, popular, now playing / on the air), streaming-service chips, numbered pages with Next / Prev / +-10, search, actor pages.

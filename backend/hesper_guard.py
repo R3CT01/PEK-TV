@@ -136,6 +136,14 @@ def load_manifest(folder):
         return None, "'permissions.library' must be true or false"
     if not isinstance(perms.get("torrent", False), bool):
         return None, "'permissions.torrent' must be true or false"
+    for flag in ("send", "playback"):
+        if not isinstance(perms.get(flag, False), bool):
+            return None, "'permissions.%s' must be true or false" % flag
+    fl = data.get("flutter")
+    if isinstance(fl, dict) and "hooks" in fl and not (isinstance(fl["hooks"], str) and re.fullmatch(r"[a-z0-9_]{1,40}\.py", fl["hooks"])):
+        return None, "'flutter.hooks' must be a file name such as \"hooks.py\""
+    if perms.get("playback") and not (isinstance(fl, dict) and "hooks" in fl):
+        return None, "the 'playback' permission needs \"flutter\": {\"hooks\": \"hooks.py\"}"
     return data, None
 
 
@@ -283,6 +291,7 @@ def build_host_module(plugin_id, folder, manifest):
     allowed_hosts = list(perms.get("network", []))
     storage_ok = bool(perms.get("storage", False))
     library_ok = bool(perms.get("library", False))
+    send_ok = bool(perms.get("send", False))
     data_dir = os.path.join(folder, "data")
     mod = types.ModuleType("pek_host")
 
@@ -343,7 +352,7 @@ def build_host_module(plugin_id, folder, manifest):
             raise ValueError("text must be a string under 1 MB")
         with _Privileged():
             os.makedirs(data_dir, exist_ok=True)
-            tmp = _data_path(name) + ".tmp"
+            tmp = "%s.%d.tmp" % (_data_path(name), threading.get_ident())     # one per thread: two writers must not share it
             with open(tmp, "w", encoding="utf-8") as f:
                 f.write(text)
             os.replace(tmp, _data_path(name))
@@ -435,10 +444,72 @@ def build_host_module(plugin_id, folder, manifest):
                     break
             return out
 
+    _SEND_BLOCKED = ("host", "cookie", "proxy-authorization", "content-length", "transfer-encoding", "connection", "upgrade")
+
+    def request_json(method, url, body=None, headers=None, timeout=10, max_bytes=2000000):
+        """HTTPS GET or POST of JSON to an allowlisted host. Needs "send": true in plugin.json.
+
+        Unlike fetch_text, a plugin may send an Authorization header here (that is what signing in to a service
+        needs) and gets the status back instead of an exception, so it can tell "pending" from "denied". Redirects
+        are never followed, so a header can only ever go to the host the plugin named. Returns
+        {"status": int, "data": parsed JSON or None, "page_count": int, "retry_after": int}."""
+        if not send_ok:
+            raise PermissionError("plugin.json does not request the 'send' permission")
+        method = str(method).upper()
+        if method not in ("GET", "POST"):
+            raise ValueError("method must be 'GET' or 'POST'")
+        payload = None
+        if body is not None:
+            payload = json.dumps(body).encode("utf-8")
+            if len(payload) > 262144:
+                raise ValueError("request body larger than 256 KB")
+        with _Privileged():
+            u = urllib.parse.urlsplit(url)
+            if u.scheme != "https":
+                raise PermissionError("only https:// URLs are allowed")
+            if not u.hostname or u.username or u.password:
+                raise PermissionError("invalid URL")
+            if not _host_allowed(u.hostname, allowed_hosts):
+                raise PermissionError("host %r is not in this plugin's network permissions" % u.hostname)
+            port = u.port or 443
+            ip = _resolve_public(u.hostname, port)
+            conn = _PinnedHTTPS(u.hostname, ip, port=port, timeout=min(float(timeout), 10.0),
+                                context=ssl.create_default_context())
+            try:
+                path = (u.path or "/") + ("?" + u.query if u.query else "")
+                hdrs = {"User-Agent": "PEK-Plugin/" + plugin_id, "Accept-Encoding": "identity", "Accept": "application/json"}
+                if payload is not None:
+                    hdrs["Content-Type"] = "application/json"
+                for k, v in (headers or {}).items():
+                    if str(k).lower() not in _SEND_BLOCKED:
+                        hdrs[str(k)] = str(v)
+                conn.request(method, path, body=payload, headers=hdrs)
+                resp = conn.getresponse()
+                raw = resp.read(max_bytes + 1)
+                if len(raw) > max_bytes:
+                    raise ValueError("response larger than %d bytes" % max_bytes)
+                text = raw.decode("utf-8", "replace")
+                data = None
+                if text.strip():
+                    try:
+                        data = json.loads(text)
+                    except ValueError:
+                        data = None
+
+                def _num(name):
+                    try:
+                        return max(0, int(resp.getheader(name) or 0))
+                    except ValueError:
+                        return 0
+                return {"status": resp.status, "data": data,
+                        "page_count": _num("X-Pagination-Page-Count"), "retry_after": _num("Retry-After")}
+            finally:
+                conn.close()
+
     def log(*parts):
         print("[plugin %s]" % plugin_id, *[str(p)[:500] for p in parts])
 
-    for fn in (fetch_text, fetch_json, write_text, read_text, write_json, read_json, library_titles, log):
+    for fn in (fetch_text, fetch_json, request_json, write_text, read_text, write_json, read_json, library_titles, log):
         setattr(mod, fn.__name__, fn)
     return mod
 
