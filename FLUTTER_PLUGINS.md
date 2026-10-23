@@ -96,7 +96,7 @@ Anything else is dropped.
 supports the link, else the app, else its website; any other service opens the title's TMDb "where to watch" page.
 `FlutterHostActivity` only starts packages on its own allow-list.
 
-**Trailers.** `ui.video` shows the trailer in an Android web view that can only load `www.youtube-nocookie.com` (any other
+**Trailers.** `ui.video` (needs `www.youtube-nocookie.com` under `permissions.network`) shows the trailer in an Android web view that can only load that host (any other
 address is refused). If `autoplay` is false the person presses **Play trailer**. On a TV the web view is skipped by the D-pad.
 
 **Play with a plugin.** A plugin that can play a title declares `"provides": {"stream": true}` plus a Flutter screen, and
@@ -145,15 +145,13 @@ same two places:
    server pairs repeated `path` / `file` parts by position; it was tested against the real route from `backend/plugin_install.h`.
 
 Screens (`plugin_store_ui.dart`): shelves -> list (with *installed* / *update available* marks) -> install page: download
-progress -> the author's own `warning` screen (if `plugin.json` has one) -> the permissions screen (the same sentences as the web
-UI) -> **Install / Update**. Nothing installs by itself, and uploading is still done on the store's website, not in the app.
+progress -> the author's own `warning` screen (if `plugin.json` has one) -> the permissions screen (plain-language sentences for each permission) -> **Install / Update**. Nothing installs by itself, and uploading is still done on the store's website, not in the app.
 After an install or a removal the menu entries and the Plugins page reload (`PluginHost.changed`), any open screen of that
 plugin restarts, and the Plugins page shows where each plugin came from ("PEK Store official" / "approved · community store").
-A plugin with only a `ui.js` is **no longer accepted** anywhere (store, .zip, GitHub), and neither is any other `.js` / `.mjs` file: a plugin is Python only and needs a `screen.py` and a `"flutter"` entry in `plugin.json`, checked in the app and again by `backend/plugin_install.h`. The server also refuses to serve any `.js` under `/plugins/`, so the classic UI can no longer load a plugin's `ui.js` (including ones installed earlier and the bundled Weather / TMDb Discover ones). One with a `backend.py` reminds the person to restart
+A plugin with only a `ui.js` is **no longer accepted** anywhere (store, .zip, GitHub), and neither is any other `.js` / `.mjs` file: a plugin is Python only and needs a `screen.py` and a `"flutter"` entry in `plugin.json`, checked in the app and again by `backend/plugin_install.h`. The server also refuses to serve any `.js` under `/plugins/`. One with a `backend.py` reminds the person to restart
 PEK TV once.
 
-Not in the Flutter store yet: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`)
-and the cloud plugin backup that runs after an install.
+Not in the Flutter plugin store: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`).
 
 ## Install from a .zip file or from GitHub
 Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.dart`) are the zip picker and the GitHub
@@ -170,8 +168,8 @@ install. Both end on the same install screen as the store
   *Plugins from GitHub* (`PEK_ALLOW_GITHUB=0` still turns it off in the server). Source zips are
   installed under the repository name so an update replaces the same plugin.
 - The Plugins page labels where each plugin came from ("unverified - from GitHub owner/repo", "third party - from a .zip file").
-- Still web-UI only: the system file picker, finding network devices from inside the zip picker (add the device as a media
-  source in Settings, then it shows up under the picker's start list), and installing a *skin* from a zip or GitHub.
+- Not in the zip picker: the system file picker, and finding network devices from inside it (add the device as a media
+  source in Settings, then it shows up under the picker's start list). Skins install from Settings > Appearance (see `SKINS.md`).
 
 ## Skin Maker (bundled, official)
 `plugins/skin-maker` replaces the Skin maker that used to be hard-coded in the app (`skin_maker.dart`, `skin_builder.dart`). It has a

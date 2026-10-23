@@ -13,15 +13,17 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with PEK TV runs *
     "storage": true,
     "library": true
   },
-  "ui": { "navTab": "Discover", "reloadOnInstall": true, "closeOnRemove": true }
+  "ui": { "navTab": "Discover" },
+  "flutter": { "screen": "screen.py" }
 }
 ```
 
-- `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains. Poster art and the YouTube player (`ui.video`) are only allowed from hosts listed here.
+- `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains. Poster art, provider logos and the YouTube trailer player (`ui.video`, host `www.youtube-nocookie.com`) are only allowed from hosts listed here.
 - `storage`: a small private key/value store, plus read access to `plugins/<id>/data/`.
 - `library`: lets the plugin's **Python backend** call `pek_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
 - No permission listed means no access.
-- `ui` (optional, only changes PEK TV's own screens): `navTab` adds a sidebar / More entry that opens the plugin; `reloadOnInstall` reloads the app right after installing; `closeOnRemove` makes PEK TV ask the user to close and reopen it after the plugin is removed (it cannot be dismissed until the app is really closed). The install and remove screens say so.
+- `flutter` (required): `{ "screen": "screen.py" }` names the Python screen PEK TV draws. See `FLUTTER_PLUGINS.md`.
+- `ui` (optional, only changes PEK TV's own screens): `navTab` (max 20 characters) adds a menu / More entry that opens the plugin.
 - `warning` (optional): a screen shown **before** the permissions screen when someone installs your plugin. Use it for disclaimers or advice you want every user to see. The user can cancel from it; "continue" moves on to the normal install screen. Plain text only (no HTML or links). Leave it out and no extra screen is shown.
 
   ```json
@@ -44,21 +46,21 @@ Must pass an automatic scan and then runs with a limited host API:
 - `h.library_titles()` (needs `"library": true`) returns `[{"title", "year", "kind": "movie" | "tv"}]` from the library scanner's last saved list, one entry per movie and per show. The list is only as fresh as the last scan, and backends run once at startup.
 - `run()` is called once, with a 10 second limit.
 
-Plugins that ship with PEK TV are **official** and are listed above a separator in the Plugins tab (third-party ones are listed below it). `weather` keeps full access; `tmdb-discover` is official but still runs sandboxed, and is the only kind of plugin allowed to use PEK TV's built-in TMDb access (a proxy that holds PEK TV's key, so users never enter one). Installing a .zip whose `plugin.json` lists that proxy host is refused. To trust a plugin you wrote yourself while developing:
+Plugins that ship with PEK TV are **official** and are listed above a separator on the Plugins page (third-party ones are listed below it). `weather` keeps full access; `skin-maker` is official and the only plugin that may use the `skins` permission; `tmdb-discover` is official but still runs sandboxed, and is the only kind of plugin allowed to use PEK TV's built-in TMDb access (a proxy that holds PEK TV's key, so users never enter one). Installing a .zip whose `plugin.json` lists that proxy host is refused. To trust a plugin you wrote yourself while developing:
 `PEK_TRUSTED_PLUGINS=my_plugin` (backend).
 
 ## Remote access
 
-PEK TV only answers the device it runs on. To open it to other devices on your network:
-`PEK_BIND=0.0.0.0 PEK_TOKEN=choose-a-secret`, then open `http://<device-ip>:8080/?token=choose-a-secret`.
+PEK TV's server only answers the device it runs on. To let other devices on your network reach its API:
+`PEK_BIND=0.0.0.0 PEK_TOKEN=choose-a-secret`. Other devices must send the token with every request. There is no web page to open: the server is API only and the screens are the Flutter app.
 
 ## Installing a plugin from a .zip
 
-In the app: **Settings -> Plugins -> Install plugin from .zip**, pick the file, check the permissions PEK TV
-shows, and confirm. To remove an installed plugin, hold its row in the Plugins tab. Plugins that ship
-with PEK TV (`weather` and `tmdb-discover`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
+In the app: **Plugins -> Install from .zip**, pick the file, check the permissions PEK TV
+shows, and confirm. To remove an installed plugin, hold its row on the Plugins page. Plugins that ship
+with PEK TV (`weather`, `tmdb-discover` and `skin-maker`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
 
-The zip must contain `plugin.json` (with a `"flutter": {"screen": "screen.py"}` entry) and `screen.py` (a plugin that only has a `ui.js` is no longer accepted), either at the top of the zip or inside one folder
+The zip must contain `plugin.json` (with a `"flutter": {"screen": "screen.py"}` entry) and `screen.py` (a plugin that only has a `ui.js`, or contains any `.js` / `.mjs` file, is refused), either at the top of the zip or inside one folder
 (the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:
 
 - allowed files: `.json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf`, and `.py` for the backend
@@ -76,7 +78,7 @@ Termux you can still drop a folder into `plugins/` yourself. A build that must n
 
 ## Backing plugins up to PEK Cloud
 
-When you are signed in (Settings -> Cloud Sync), plugins you installed from a .zip are backed up to your account
+When you are signed in (Settings > Account), plugins you installed from a .zip are backed up to your account
 automatically; switch it off with **Back up my plugins**. Built-in plugins are not backed up, and neither is a
 plugin's `data/` folder. On another device (or after reinstalling PEK TV) the same screen lists your backed-up
 plugins. **Restore** opens the usual install screen with the plugin's permissions, runs the same server checks and
@@ -89,10 +91,9 @@ removing a plugin on one device only stops it being offered on the others.
 "permissions": { "network": ["api.themoviedb.org"], "torrent": true }
 ```
 
-A plugin with `"torrent": true` may call, from its UI code:
+A plugin with `"torrent": true` may call, from its Python screen (`screen.py`):
 
-- `pek.torrent.info()` -> `{available}` (is the engine built in)
-- `pek.torrent.play({source, title, season, episode, kind, name, year, image})` -> resolves once the player is open.
+- `ui.play_torrent(source, label, season=0, episode=0, kind="movie", name="", year=0, image="")` starts the stream in PEK TV's player.
   Optional `kind` (`'movie'` or `'episode'`) plus `name` (the movie title, or the show name for an episode; episodes also need `season` and `episode`) and `year` (movies) make PEK TV keep the position under Resume Watching. Resuming starts the same release again at that spot. `image` is an optional https poster URL from a host in the plugin's `network` list. PEK TV itself records which plugin started the stream (the plugin cannot set or change this) and shows it on the Resume Watching card. A plugin that gives no `kind`/`name` is still remembered, under the `title` it passed.
   PEK TV shows its own buffering box (with Cancel) and opens the player when enough is downloaded.
 
@@ -103,7 +104,7 @@ Torrents and kept in PEK TV), the downloaded files, or any other PEK TV API. `so
 Playing a pasted magnet link is not built into the app: a normal plugin using this permission does that. No such plugin is included in this repository.
 
 PEK TV ships with no search provider. The engine (libtorrent) is optional at build time: without it,
-`search` still works and `play` fails with "not built in".
+playing a torrent fails with "not built in".
 
 
 ## Favorites, provider buttons and plugin launching
@@ -114,7 +115,7 @@ Android packages are listed in `tools/providers.json`; run `node tools/sync_prov
 
 ## Publishing your plugin on GitHub (for developers)
 
-Users can install a plugin straight from a public GitHub repository: **Settings -> Plugins -> Install from GitHub**,
+Users can install a plugin straight from a public GitHub repository: **Plugins -> Install from GitHub**,
 then type `owner/repo` (a pasted github.com link works too). PEK TV keeps no list of repositories, so there is
 nothing to submit anywhere. To make yours installable:
 
@@ -124,9 +125,9 @@ nothing to submit anywhere. To make yours installable:
    plugin files must be at the top of the repository.
 3. Keep your plugin's folder name or `plugin.json` name the same across versions, so an update replaces the old one.
 
-Plugins installed this way show as **unverified** in the Plugins tab and on the install screen, which names the
+Plugins installed this way show as **unverified** on the Plugins page and on the install screen, which names the
 repository, the version and its size, and says PEK TV did not review it. They get no extra trust: the same
 sandbox, safety scan and permissions screen apply. The developer of a plugin is responsible for it.
 
 A build that must not install from GitHub can start with `PEK_ALLOW_GITHUB=0`; people can also switch it off
-under Settings -> Plugins -> Allow installs from GitHub.
+under Settings > Plugins and skins from GitHub (Install from GitHub).

@@ -1,20 +1,20 @@
 # PEK TV skins
 
-A skin changes how PEK TV looks: colours, corner radius and, if you want, extra styling.
-A skin can't run code and can't reach the network.
+A skin changes how PEK TV looks: its colours and its corner size.
+A skin can't run code, can't contain CSS and can't reach the network.
 
 ## Installing and removing
 
-- **Install:** Settings → Skins → *Install skin from .zip*, then pick the .zip.
+- **Install:** Settings → Appearance → *Install skin from .zip*, then pick the .zip.
   PEK TV shows the skin's name, author, version and description before it installs anything.
-- **From GitHub:** Settings → Skins → *Install skin from GitHub*, then type `owner/repo` (a pasted github.com link
+- **From GitHub:** Settings → Appearance → *Install skin from GitHub*, then type `owner/repo` (a pasted github.com link
   works too). PEK TV uses the repository's latest release `.zip` (up to 8 MB), or its source code if it has no
   release, and then shows the same details and confirm screen as a .zip install. A skin that came from GitHub is
-  labelled "unverified" in the Skins list. The same *Allow installs from GitHub* switch (Settings) turns it off.
+  labelled "unverified" in the Skins list. The same *Install from GitHub* switch (Settings → Plugins and skins from GitHub) turns it off.
   The repository must hold a skin (`skin.json`), the same layout as the zip below.
-- **Use it:** tap the skin in the Skins list.
+- **Use it:** tap the skin in the Appearance list.
 - **Remove:** hold the skin's row (OK on a remote, or a long press on a phone), then confirm.
-  The skins that ship with PEK TV (PEK Ember, Green, Neon) can't be removed.
+  The skins that ship with PEK TV (PEK Ember, Cream, Night red, Green, Neon) can't be removed.
 - **A zip is a plugin or a skin, never both.** Installing a skin zip as a plugin, or a plugin
   zip as a skin, fails with a message that says which one it is.
 
@@ -49,17 +49,17 @@ a zip with the same id again updates the skin.
 
 | Field | Required | Shown in |
 |---|---|---|
-| `name` | yes | the Skins list and the install screen |
-| `author` | no | "by …" in the Skins list and the install screen |
-| `description` | no | the Skins list and the install screen |
-| `version` | no | the Skins list and the install screen |
-| `tokens` | no | colours and sizes, see the bundled `skins/neon/skin.json` for every token |
-| `tokens.bgImage` | no | a plain CSS gradient drawn behind the app, like the default Ember look. No `url()`. If a skin sets `bg` and no `bgImage`, its background is flat |
+| `name` | yes | the Appearance list and the install screen |
+| `author` | no | "by …" in the Appearance list and the install screen |
+| `description` | no | the Appearance list and the install screen |
+| `version` | no | the Appearance list and the install screen |
+| `tokens` | no | colours and the corner size (`radius`); see the bundled `skins/neon/skin.json` for every token. The app draws the colours and `radius`; other tokens are checked but not drawn |
+| `tokens.bgImage` | no | accepted and checked (a plain CSS gradient, no `url()`), but **not drawn** by the Flutter app, which has no background image |
 
 ## No CSS
 
 A skin is its colours and its corner size, nothing more. **A skin that contains a `skin.css` (any `.css` file) is refused**: by
-Install skin from .zip / GitHub in the app, by the server and the web build's installer, by `SkinBuilder` and by
+Install skin from .zip / GitHub in the app, by the server, by `SkinBuilder` and by
 `tools/make_skin.py`. The message is "skins can't contain CSS (skin.css): a skin is colours and a corner size only. Remove the .css
 file and try again."
 
@@ -80,10 +80,10 @@ the corner size, name it and save. A made skin appears in the Appearance list ne
 - **From one accent colour** makes a whole skin from one colour (dark or light) or one hue.
 - **Hold** any skin in the Appearance list to use it, edit it, start a new one from it, copy it as a `skin.json`, or delete it.
   Edit / "Make my own from this" open the plugin on that skin.
-- **Copy skin.json** gives the same file the web build installs from a .zip (put it in a folder and zip it).
-- **Paste skin.json** opens a skin made in the web build in the maker, ready to save. Only the name, description and
+- **Copy skin.json** gives a `skin.json` you can install from a .zip (put it in a folder and zip it).
+- **Paste skin.json** opens a `skin.json` made elsewhere in the maker, ready to save. Only the name, description and
   colours are used.
-- Like the web theme, a colour that would make the text hard to read on the background, the cards or the bars is refused
+- A colour that would make the text hard to read on the background, the cards or the bars is refused
   (in the plugin, and again by the app before it stores anything).
 
 It cannot be removed, and it updates from the PEK Store's Official shelf like Weather and TMDb Discover. The plugin only describes
@@ -92,16 +92,16 @@ See FLUTTER_PLUGINS.md ("Skin Maker").
 
 ## Making skins from code
 
-Two ways, all giving the same `skin.json` / .zip, so a skin made by any of them installs in the web build and in the Flutter app.
+Two ways, both giving the same `skin.json` / .zip, so a skin made either way installs in the app.
 
 **1. From the command line: `tools/make_skin.py`** (Python 3, no packages). It works out the colours you leave out, refuses
-text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` into a .zip. It does **not** accept a `skin.css` (PEK TV runs on Flutter, which draws a skin from its colours and corner size only): `--css` is gone, a `"css"` field in a batch file is an error, and `validate` refuses a zip that contains a `skin.css`.
+text that is hard to read, runs the same checks as `backend/skin_install.h`, and packs `my-skin/skin.json` into a .zip. It does **not** accept a `skin.css` (PEK TV draws a skin from its colours and corner size only): `--css` is gone, a `"css"` field in a batch file is an error, and `validate` refuses a zip that contains a `skin.css`.
 
 ```
 # four colours, the rest follows
 tools/make_skin.py new --name Sunset --bg '#1a0f14' --surface '#2a1820' --text '#fff1e8' --accent '#ffb347' --radius 14
 
-# one accent is enough (dark by default, --light for a light skin); a hue works too; --glow adds a background glow (web only)
+# one accent is enough (dark by default, --light for a light skin); a hue works too; --glow adds a bgImage glow that the app checks but does not draw
 tools/make_skin.py new --name Ocean --accent '#38bdf8'
 tools/make_skin.py new --name Moss --hue 140 --light
 
@@ -118,13 +118,12 @@ extra file, `--force` allows low-contrast text. A batch file is a list of
 
 ## Installing skins in the Flutter app
 
-Settings > Appearance has **Install skin from .zip** and **Install skin from GitHub**, the same flow as the web build:
-the same zip picker (this device, library folders and network folders), the same GitHub lookup (latest release `.zip`, else the
-source code), the same checks (`flutter_ui/lib/src/skin_install.dart`, mirroring `backend/skin_install.h`),
-and the same confirm screen. A skin from GitHub is labelled "unverified". Installing the same
+Settings > Appearance has **Install skin from .zip** and **Install skin from GitHub**. They use the zip picker plugins use (this
+device, library folders and network folders), the GitHub lookup (latest release `.zip`, else the source code), the checks in
+`flutter_ui/lib/src/skin_install.dart` (mirroring `backend/skin_install.h`) and a confirm screen. A skin from GitHub is labelled "unverified". Installing the same
 skin again updates it; hold it in the list to remove it.
 
-What differs: an installed skin gives the app its **colours and corner size** only (`bgImage` and the glass tokens are checked but
+Notes: an installed skin gives the app its **colours and corner size** only (`bgImage` and the glass tokens are checked but
 not drawn). A skin with no colours or radius in `skin.json` is refused there. The skin is kept on the device (not in the server's `skins/` folder).
 
 ## Skins in the cloud (per profile)
