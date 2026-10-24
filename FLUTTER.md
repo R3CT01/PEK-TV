@@ -29,7 +29,7 @@ Swipe navigation on phones and tablets: **Home, Movies, Shows, Music and More ar
 bottom bar). "More" is a page of its own with tiles for Resume Watching, Favorites, Duplicates, Unknown, Plugins and
 Settings; a tap opens that screen on top and Back returns. On a TV the sidebar lists everything and switches the content.
 
-- Dashboard: clock, Continue Watching, Recently Added, Favorites rows (Customize: add / remove / reorder)
+- Dashboard: clock, Continue Watching, Recently Added, Favorites rows (press and hold a widget: Move / Delete; Add widget button)
 - Movies, TV Shows: poster grids, Refresh (rescan), movie and show / season / episode pages, Favorite button
 - Player: libmpv engine, audio + subtitle pick, buffering, auto-hiding controls, records progress for Resume Watching
 - Resume Watching, Favorites (long-press a poster to remove)
@@ -73,7 +73,7 @@ Resume progress, favorites and the dashboard layout are stored on the device wit
 - **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance). Skins made or installed are kept per profile and saved to the cloud account with the rest of the profile's data (`k|<id>` items plus the `s|skin` setting, see SKINS.md), so a sign-in puts them back.
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
-- **Dashboard** (`dashboard.dart`, `store.dart`): a grid. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Customize (or press and hold a tile) to move, resize, remove, add widgets or reset. Saved per profile in the `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
+- **Dashboard** (`dashboard.dart`, `store.dart`): a grid. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Press and hold a widget (touch, held centre button, or the Menu key) for **Move** / **Delete** (and Make wide / small on tiles). Move: drag the widget up or down and let go on a square to place it (D-pad: Up / Down pick the square, centre places it); Back leaves move mode. The Add widget button adds widgets or resets. Saved per profile in the `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
 - **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. The weather tile shows a big temperature with "condition \u00b7 city" under it. Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
 
 - **Clock settings** (`clock.dart`): tap the Clock tile for 24-hour time, Show date and a time zone list (each zone shows the time it has now). 38 zones with a "day \u00b7 zone" line; kept on the device, not synced. Zones are computed from built-in daylight-saving rules (US/Canada, EU/UK, Sydney, Auckland, Cairo), so there is no extra package; the rules need a look only if a country changes its clocks.
@@ -140,7 +140,7 @@ switch, no "Open classic UI" buttons. If the server does not start, or the Flutt
 - Tests: `flutter test test/skin_install_test.dart test/skin_sync_test.dart`.
 
 ## Dashboard widgets (Add widget)
-Customize > Add widget lists every widget that is not on the dashboard yet, in groups. `flutter_ui/lib/src/dash_widgets.dart` holds the
+Add widget lists every widget that is not on the dashboard yet, in groups. `flutter_ui/lib/src/dash_widgets.dart` holds the
 newer ones; each loads its own data and keeps itself up to date:
 - Music: **Now Playing** (cover, title, artist, progress, shuffle / previous / play / next / repeat; tap = full-screen player),
   **Playlists** and **Albums** (rows of covers).

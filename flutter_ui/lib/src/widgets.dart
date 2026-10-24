@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart' show Details;
 import 'layouts.dart';
@@ -16,6 +17,7 @@ class PekFocusable extends StatefulWidget {
     required this.child,
     this.onTap,
     this.onLongPress,
+    this.holdSelect = false,
     this.autofocus = false,
     this.enabled = true,
     this.background,
@@ -31,6 +33,10 @@ class PekFocusable extends StatefulWidget {
   final Widget child;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
+
+  /// On a remote: holding the centre button (about half a second) runs [onLongPress] instead of [onTap]; a short press still
+  /// taps (on release). The Menu / X button runs [onLongPress] straight away.
+  final bool holdSelect;
   final bool autofocus;
   final bool enabled;
   final Color? background;
@@ -48,6 +54,42 @@ class PekFocusable extends StatefulWidget {
 
 class _PekFocusableState extends State<PekFocusable> {
   bool _focus = false;
+  Timer? _hold;
+  bool _heldFired = false;
+  late final FocusNode _node = FocusNode(debugLabel: 'PekFocusable', onKeyEvent: _holdKey);
+
+  @override
+  void dispose() {
+    _hold?.cancel();
+    _node.dispose();
+    super.dispose();
+  }
+
+  KeyEventResult _holdKey(FocusNode node, KeyEvent e) {
+    final long = widget.onLongPress;
+    if (!widget.holdSelect || long == null || !widget.enabled) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.contextMenu || k == LogicalKeyboardKey.gameButtonX) {
+      if (e is KeyDownEvent) long();
+      return KeyEventResult.handled;
+    }
+    if (!(k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.gameButtonA)) {
+      return KeyEventResult.ignored;
+    }
+    if (e is KeyDownEvent) {
+      _heldFired = false;
+      _hold?.cancel();
+      _hold = Timer(const Duration(milliseconds: 500), () {
+        _heldFired = true;
+        long();
+      });
+    } else if (e is KeyUpEvent) {
+      final waiting = _hold?.isActive ?? false;
+      _hold?.cancel();
+      if (waiting && !_heldFired) widget.onTap?.call();
+    }
+    return KeyEventResult.handled;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +116,7 @@ class _PekFocusableState extends State<PekFocusable> {
     return FocusableActionDetector(
       autofocus: widget.autofocus,
       enabled: widget.enabled,
+      focusNode: _node,
       onShowFocusHighlight: (v) => setState(() => _focus = v),
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
@@ -211,6 +254,7 @@ class DashTile extends StatelessWidget {
       autofocus: autofocus,
       onTap: onTap,
       onLongPress: onLongPress,
+      holdSelect: onLongPress != null,
       radius: t.radius,
       background: t.surface,
       minHeight: 7.5 * rem,
@@ -247,12 +291,13 @@ class DashTile extends StatelessWidget {
 /// `ui.posterCard`: shows a plain card until the poster is known (and if it fails to load), then the 2:3 poster with the
 /// title over a dark gradient at the bottom.
 class PosterCard extends StatefulWidget {
-  const PosterCard({super.key, required this.title, required this.subtitle, required this.poster, required this.onTap, this.onLongPress, this.autofocus = false, this.fallbackImage = '', this.progress});
+  const PosterCard({super.key, required this.title, required this.subtitle, required this.poster, required this.onTap, this.onLongPress, this.holdSelect = false, this.autofocus = false, this.fallbackImage = '', this.progress});
   final String title;
   final String subtitle;
   final Future<Details> poster;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+  final bool holdSelect; // a held centre button runs onLongPress (see PekFocusable)
   final bool autofocus;
 
   /// Used when the library has no artwork for this title (a stream started from a plugin): an https picture address.
@@ -293,6 +338,7 @@ class _PosterCardState extends State<PosterCard> {
           autofocus: widget.autofocus,
           onTap: widget.onTap,
           onLongPress: widget.onLongPress,
+          holdSelect: widget.holdSelect,
           focusScale: p.isTv ? 1.07 : 1.03,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
