@@ -6,8 +6,8 @@ screen comes up before the app. **Update now** downloads the apk and hands it to
 
 ## Publishing a release (what the app looks for)
 
-1. In `android/app/build.gradle` raise `pekBaseCode` by 1 (17 -> 18). Android refuses an install whose versionCode is not higher.
-2. Push a tag: `git tag v2.1.9 && git push origin v2.1.9`.
+1. In `android/app/build.gradle` raise `pekBaseCode` by 1 (18 -> 19). Android refuses an install whose versionCode is not higher.
+2. Push a tag: `git tag v2.2.0 && git push origin v2.2.0`.
 3. `build_android.yml` builds a signed release and publishes a GitHub release with
    `PEK-TV-<version>-release-arm64-v8a.apk` and `PEK-TV-<version>-release-armeabi-v7a.apk`.
    The tag (without the `v`) becomes the app's versionName and is what installed apps compare against.

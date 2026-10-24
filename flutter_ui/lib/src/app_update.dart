@@ -24,7 +24,7 @@ class AppRelease {
 
 /// Looks for a newer release of the app itself, downloads its apk and hands it to Android to install.
 ///
-///  * A release is a tag push (v2.1.9) built by .github/workflows/build_android.yml, which attaches
+///  * A release is a tag push (v2.2.0) built by .github/workflows/build_android.yml, which attaches
 ///    PEK-TV-<version>-release-<arm64-v8a|armeabi-v7a>.apk. Those are marked "pre-release", which GitHub's /releases/latest
 ///    skips, so the release LIST is read and the newest one with a matching apk wins.
 ///  * The CPU type comes from the installed versionCode (build.gradle: ...1 = 32-bit, ...2 = 64-bit), so an update never
