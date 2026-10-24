@@ -9,6 +9,7 @@ Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 """
 import json
 import re
+import time
 import unicodedata
 from urllib.parse import quote
 
@@ -163,7 +164,22 @@ def api(path, params=None):
     for k in sorted(p.keys()):
         q.append(quote(str(k), safe="") + "=" + quote(str(p[k]), safe=""))
     # Personal key: straight to TMDb. No key: PEK TV's built-in access (the proxy adds the key).
-    return h.fetch_json((API if S["key"] else PROXY) + path + "?" + "&".join(q), timeout=8)
+    url = (API if S["key"] else PROXY) + path + "?" + "&".join(q)
+    # A first try that fails is usually a hiccup (the phone just woke up, the proxy was cold, TMDb said 429 / 5xx), and
+    # a list that failed used to stay empty (no pictures) until it was refreshed by hand. Try again a couple of times
+    # inside this one background job, but never past the 25 second limit a job has.
+    t0 = time.monotonic()
+    wait = 1.0
+    while True:
+        try:
+            return h.fetch_json(url, timeout=8)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            final = re.search(r"HTTP (401|403|404)", msg) is not None      # a key / not-found answer will not change
+            if final or time.monotonic() - t0 > 11:
+                raise
+            time.sleep(wait)
+            wait = min(wait * 2, 3.0)
 
 
 def today():

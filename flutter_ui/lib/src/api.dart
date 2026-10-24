@@ -162,12 +162,29 @@ class Api {
   static void _forgetDetailSoon(String key, Duration after) {
     _noArt.add(key);
     Timer(after, () {
-      _details.remove(key);
-      _noArt.remove(key);
+      // Only forget it if nobody has asked again since (a poster that re-asked already replaced this entry).
+      if (_noArt.remove(key)) _details.remove(key);
     });
   }
 
-  static Future<Details> _cachedDetails(String key, Future<Details> Function() load) => _details.putIfAbsent(key, () async {
+  /// How to ask again for a lookup's title, kept per returned future so a poster that is already on screen can re-ask
+  /// ([retryDetails]) when its lookup failed or came back with no picture.
+  static final Expando<Future<Details> Function()> _reload = Expando();
+
+  /// A fresh lookup for the same title as [old] (which failed or had no poster). null = [old] is not a library lookup.
+  static Future<Details>? retryDetails(Future<Details> old) => _reload[old]?.call();
+
+  static Future<Details> _cachedDetails(String key, Future<Details> Function() load) {
+    final f = _details.putIfAbsent(key, () => _lookupDetails(key, load));
+    _reload[f] ??= () {
+      _details.remove(key);
+      _noArt.remove(key);
+      return _cachedDetails(key, load);
+    };
+    return f;
+  }
+
+  static Future<Details> _lookupDetails(String key, Future<Details> Function() load) async {
         final saved = await _savedDetail(key);
         if (saved != null) return saved; // looked up in an earlier run: no request, works offline
         Object? lastError;
@@ -188,7 +205,7 @@ class Api {
         }
         _forgetDetailSoon(key, const Duration(seconds: 20));
         throw lastError!;
-      });
+  }
 
   // ---- details kept on disk: synopsis + poster address per title. Only pictures from the internet are kept (a poster the
   // library itself has comes from the local server, which answers at once and may change when the files do).

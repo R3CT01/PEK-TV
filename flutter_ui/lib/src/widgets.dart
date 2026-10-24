@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'api.dart' show Details;
+import 'api.dart' show Api, Details;
 import 'layouts.dart';
 import 'tokens.dart';
 import 'art_cache.dart';
@@ -315,19 +315,76 @@ class _PosterCardState extends State<PosterCard> {
   int _failures = 0;
   Timer? _retry;
 
+  // The look-up (poster address + synopsis) can fail or come back with no picture while the server is busy, the TMDb proxy
+  // is slow or the internet is flaky. The card used to keep that answer until the screen was rebuilt (a manual Refresh);
+  // now it asks again by itself, after 5, 12, 25, 45, 60 and 60 seconds, and at once when the internet comes back.
+  static const _lookupWaits = [5, 12, 25, 45, 60, 60];
+  late Future<Details> _poster = widget.poster;
+  int _lookups = 0;
+  Timer? _lookupTimer;
+  bool _plain = false; // the title card is showing (no picture yet)
+
+  @override
+  void initState() {
+    super.initState();
+    ArtCache.retryNow.addListener(_retryNow);
+  }
+
+  @override
+  void didUpdateWidget(PosterCard old) {
+    super.didUpdateWidget(old);
+    if (old.poster != widget.poster) {
+      _lookupTimer?.cancel();
+      _poster = widget.poster;
+      _lookups = 0;
+    }
+  }
+
   @override
   void dispose() {
+    ArtCache.retryNow.removeListener(_retryNow);
     _retry?.cancel();
+    _lookupTimer?.cancel();
     super.dispose();
+  }
+
+  void _retryNow() {
+    if (!mounted || !_plain) return;
+    _retry?.cancel();
+    _lookupTimer?.cancel();
+    setState(() {
+      _failed = false;
+      _failures = 0;
+      _lookups = 0;
+      _poster = Api.retryDetails(_poster) ?? _poster;
+    });
+  }
+
+  void _scheduleLookup() {
+    if ((_lookupTimer?.isActive ?? false) || _lookups >= _lookupWaits.length) return;
+    _lookupTimer = Timer(Duration(seconds: _lookupWaits[_lookups]), () {
+      if (!mounted) return;
+      final next = Api.retryDetails(_poster);
+      if (next == null) {
+        _lookups = _lookupWaits.length; // not a library look-up (nothing to ask again)
+        return;
+      }
+      setState(() {
+        _lookups++;
+        _poster = next;
+      });
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<Details>(
-      future: widget.poster,
+      future: _poster,
       builder: (context, snap) {
         var url = snap.data?.poster ?? '';
         if (url.isEmpty && widget.fallbackImage.startsWith('https://')) url = widget.fallbackImage;
+        _plain = url.isEmpty || _failed;
+        if (url.isEmpty && snap.connectionState == ConnectionState.done) _scheduleLookup(); // failed, or no picture yet
         if (url.isEmpty || _failed) {
           return PekCard(title: widget.title, subtitle: widget.subtitle, onTap: widget.onTap, autofocus: widget.autofocus);
         }
@@ -360,9 +417,9 @@ class _PosterCardState extends State<PosterCard> {
                               setState(() => _failed = true);
                               // The picture would not load (after the image's own retries): show the title card, then
                               // try the picture again after 8, 16 and 24 s instead of staying blank until Refresh.
-                              if (++_failures <= 3) {
+                              if (++_failures <= 6) {
                                 _retry?.cancel();
-                                _retry = Timer(Duration(seconds: 8 * _failures), () {
+                                _retry = Timer(Duration(seconds: _failures < 5 ? 8 * _failures : 40), () {
                                   if (mounted) setState(() => _failed = false);
                                 });
                               }
@@ -394,14 +451,73 @@ class _PosterCardState extends State<PosterCard> {
 }
 
 /// Poster picture only (detail pages): same source as the grid, no card.
-class PosterImage extends StatelessWidget {
+class PosterImage extends StatefulWidget {
   const PosterImage({super.key, required this.poster, required this.title, this.width = 320});
   final Future<Details> poster;
   final String title;
   final int width;
 
   @override
+  State<PosterImage> createState() => _PosterImageState();
+}
+
+class _PosterImageState extends State<PosterImage> {
+  static const _lookupWaits = [5, 12, 25, 45, 60, 60];
+  late Future<Details> _poster = widget.poster;
+  int _lookups = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    ArtCache.retryNow.addListener(_retryNow);
+  }
+
+  @override
+  void didUpdateWidget(PosterImage old) {
+    super.didUpdateWidget(old);
+    if (old.poster != widget.poster) {
+      _timer?.cancel();
+      _poster = widget.poster;
+      _lookups = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    ArtCache.retryNow.removeListener(_retryNow);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _retryNow() {
+    if (!mounted) return;
+    _timer?.cancel();
+    _lookups = 0;
+    final next = Api.retryDetails(_poster);
+    if (next != null) setState(() => _poster = next);
+  }
+
+  void _scheduleLookup() {
+    if ((_timer?.isActive ?? false) || _lookups >= _lookupWaits.length) return;
+    _timer = Timer(Duration(seconds: _lookupWaits[_lookups]), () {
+      if (!mounted) return;
+      final next = Api.retryDetails(_poster);
+      if (next == null) {
+        _lookups = _lookupWaits.length;
+        return;
+      }
+      setState(() {
+        _lookups++;
+        _poster = next;
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final title = widget.title;
+    final width = widget.width;
     final t = context.pek.tokens;
     Widget placeholder() => Center(
           child: Padding(
@@ -410,10 +526,13 @@ class PosterImage extends StatelessWidget {
           ),
         );
     return FutureBuilder<Details>(
-      future: poster,
+      future: _poster,
       builder: (context, snap) {
         final url = snap.data?.poster ?? '';
-        if (url.isEmpty) return placeholder();
+        if (url.isEmpty) {
+          if (snap.connectionState == ConnectionState.done) _scheduleLookup();
+          return placeholder();
+        }
         return ArtImage(url, fit: BoxFit.cover, cacheWidth: width, errorBuilder: (_, __, ___) => placeholder());
       },
     );

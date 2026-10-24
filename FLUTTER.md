@@ -154,3 +154,13 @@ newer ones; each loads its own data and keeps itself up to date:
 To add one: write the widget in `dash_widgets.dart`, add its type to `Store.dashTypes` and `Store.dashGroups` (and `Store.dashIsTile` if it is a
 small tile), then add a `case` for it in `_DashboardPageState._widget` (`dashboard.dart`). The layout syncs to the profile like before
 (`s|dashboard`).
+
+## Pictures that heal themselves (no manual refresh)
+Posters used to stay blank until the screen was rebuilt by hand (Refresh). Causes and fixes:
+- `Api._cachedDetails` kept a failed or picture-less look-up for the card that asked for it; `PosterCard` / `PosterImage` (`widgets.dart`) now keep
+  their own copy of the look-up and re-ask through `Api.retryDetails` after 5, 12, 25, 45, 60 and 60 s (library posters, dashboard rows, detail pages).
+- `ArtCache` treated 403 / 429 as final ("not there"), so a rate-limited picture was never asked for again this run. Only 404 / 410 are final now.
+- `ArtImage` keeps asking after the quick tries (every 30 s, 10 more times) and swaps the picture in when it arrives; plugin posters
+  (`ui.poster_card`, `ui.episode_row`, provider logos, which now also use `ArtImage`) rely on this because their screens only redraw when the plugin does.
+- `Net._backOnline` calls `ArtCache.retryAll()`: every picture and poster that gave up tries again at once.
+- Plugins: `api()` in `tmdb-discover` (1.7.1) and `snake-skin` / Stream Media (3.4.1) retries a failed TMDb request inside its background job.

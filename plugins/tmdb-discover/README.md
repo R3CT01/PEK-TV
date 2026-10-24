@@ -67,3 +67,6 @@ Under the description, every service the title streams on in your region (and, s
 button with the service's logo. Press one to open that service: on Android its app (or its website if the app is not installed),
 elsewhere its website. A title that is on no service lists nothing. If the title is out and another installed plugin can play
 movies and shows, a **Play with ...** button opens that plugin on the title.
+
+## 1.7.1
+- Pictures no longer stay blank until you refresh: a TMDb request that fails (a cold proxy, a 429 / 5xx answer, a dropped connection) is tried again by itself for up to about 11 seconds before the row shows an error. Posters that could not load are asked for again by the app.

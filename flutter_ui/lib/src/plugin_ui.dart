@@ -651,7 +651,7 @@ class _PluginViewState extends State<PluginView> {
                 padding: EdgeInsets.only(right: 0.55 * rem),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(999),
-                  child: Image.network(logo, width: 2 * rem, height: 2 * rem, fit: BoxFit.cover, errorBuilder: (_, __, ___) => SizedBox(width: 2 * rem, height: 2 * rem)),
+                  child: ArtImage(logo, width: 2 * rem, height: 2 * rem, fit: BoxFit.cover, errorBuilder: (_, __, ___) => SizedBox(width: 2 * rem, height: 2 * rem)),
                 ),
               ),
             Flexible(child: Text('${n['s'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, fontWeight: FontWeight.w600, color: t.text))),

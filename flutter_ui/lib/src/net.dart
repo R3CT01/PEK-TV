@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'activity.dart';
 import 'api.dart';
+import 'art_cache.dart';
 import 'cloud.dart';
 import 'store.dart';
 import 'tokens.dart';
@@ -86,6 +87,7 @@ class Net {
   static void _backOnline() {
     if (Cloud.linked) unawaited(Cloud.sync()); // _autoSync
     Api.forgetFailedDetails(); // poster art that was skipped while offline
+    ArtCache.retryAll(); // pictures that gave up while the internet was gone try again now
     Store.notifyChanged(); // the screens showing posters ask again
     Weather.changes.value++; // the tile and the badge read the weather again
   }
