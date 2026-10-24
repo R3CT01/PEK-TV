@@ -2,7 +2,8 @@
 
 A media center with a sandboxed plugin system, network library support and a TV-first interface. It is in beta, so expect rough edges.
 
-Website: https://r3ct01.github.io/PEK-TV/ &nbsp;|&nbsp; Source docs: see `docs/`
+Website:
+https://pek-tv.web.app
 
 ## Screenshots
 
