@@ -17,6 +17,16 @@ class Store {
 
   static Future<void> init() async {
     _p = await SharedPreferences.getInstance();
+    musicModeN.value = _p.getBool('pek_music_mode') ?? false;
+  }
+
+  /// Music mode: the whole app shows only music (a Spotify-style shell, music-only settings). Device-wide, not per profile.
+  /// The notifier makes main.dart rebuild the shell the moment it is switched.
+  static final ValueNotifier<bool> musicModeN = ValueNotifier(false);
+  static bool get musicMode => musicModeN.value;
+  static Future<void> setMusicMode(bool on) async {
+    await _p.setBool('pek_music_mode', on);
+    musicModeN.value = on;
   }
 
   static void _bump() => changed.value++;

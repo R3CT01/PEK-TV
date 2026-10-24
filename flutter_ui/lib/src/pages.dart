@@ -9,6 +9,7 @@ import 'common.dart';
 import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
+import 'music_mode.dart';
 import 'plugin_backup.dart';
 import 'plugin_backup_ui.dart';
 import 'plugin_host.dart' show PluginHost;
@@ -331,14 +332,21 @@ class SettingsPage extends StatelessWidget {
           trailing: Icon(Icons.chevron_right, color: t.textMuted),
           onTap: () => _open(context, title, body),
         );
+    // Music mode: only the music-related settings are listed (no plugins, no video / subtitle / skip-intro options).
+    final music = Store.musicMode;
     return ListView(padding: padding, children: [
-      const Heading('Settings', weather: true),
-      row('Library', 'The folders PEK TV scans for movies, shows and music', Icons.folder_outlined, () => const _LibrarySettings()),
+      Heading('Settings', weather: !music),
+      row('Mode', music ? 'Music mode is on. Switch back to regular PEK TV here' : 'Turn on music mode: the app becomes a music player', Icons.music_note_outlined, () => const _SettingsList(children: [ModeSection()])),
+      row('Library', music ? 'The folders and network folders PEK TV scans for music' : 'The folders PEK TV scans for movies, shows and music', Icons.folder_outlined, () => _LibrarySettings(music: music)),
       row('Account', 'Sign in, profiles and sync', Icons.person_outline, () => const _SettingsList(children: [AccountSection()])),
       row('Appearance', 'Skins, layout and the activity display', Icons.palette_outlined, () => const _SettingsList(children: [AppearanceSection(), LayoutSection(), ActivitySection()])),
-      row('Playback', 'Subtitles, skip intro and online music', Icons.play_circle_outline, () => const _SettingsList(children: [SubtitleSection(), SkipSection(), MusicOnlineSection()])),
-      row('Plugins', 'Installing from GitHub and plugin posters', Icons.extension_outlined, () => const _SettingsList(children: [GithubInstallSection(), PluginPostersSection()])),
-      row('Advanced', 'TV mode and size, video and audio output, storage', Icons.tune, () => const _SettingsList(children: [TvModeSection(), VideoOutputSection(), AudioOutputSection(), StorageSection()])),
+      if (music)
+        row('Playback', 'Online art and lyrics', Icons.play_circle_outline, () => const _SettingsList(children: [MusicOnlineSection()]))
+      else
+        row('Playback', 'Subtitles, skip intro and online music', Icons.play_circle_outline, () => const _SettingsList(children: [SubtitleSection(), SkipSection(), MusicOnlineSection()])),
+      if (!music) row('Plugins', 'Installing from GitHub and plugin posters', Icons.extension_outlined, () => const _SettingsList(children: [GithubInstallSection(), PluginPostersSection()])),
+      row('Advanced', music ? 'TV mode and size, audio output, storage' : 'TV mode and size, video and audio output, storage', Icons.tune,
+          () => _SettingsList(children: [const TvModeSection(), if (!music) const VideoOutputSection(), const AudioOutputSection(), const StorageSection()])),
       row('App', 'Exit PEK TV', Icons.power_settings_new, () => const _ExitSettings()),
     ]);
   }
@@ -391,7 +399,8 @@ class _ExitSettings extends StatelessWidget {
 
 /// Settings > Library: the media sources.
 class _LibrarySettings extends StatefulWidget {
-  const _LibrarySettings();
+  const _LibrarySettings({this.music = false});
+  final bool music;
   @override
   State<_LibrarySettings> createState() => _LibrarySettingsState();
 }
@@ -427,7 +436,7 @@ class _LibrarySettingsState extends State<_LibrarySettings> {
     return _SettingsList(children: [
       Section(
         title: 'Media sources',
-        hint: 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',
+        hint: widget.music ? 'Folders PEK TV scans for music. Removing one only forgets it; no files are deleted.' : 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',
         children: [
           Async<List<String>>(
             future: _sources,

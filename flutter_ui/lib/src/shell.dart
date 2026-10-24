@@ -15,6 +15,7 @@ import 'layouts.dart';
 import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
+import 'music_mode.dart';
 import 'pages.dart';
 import 'plugin_backup.dart';
 import 'plugin_hooks.dart';
@@ -45,8 +46,12 @@ const _navItems = <(String, String)>[
 /// The pages you swipe between on a phone, in order. "More" is a page of its own (not a pop-up sheet): it holds every
 /// other screen as a tile, and a tap opens that screen on top.
 const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
-const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outlined, 'shows': Icons.tv_outlined, 'music': Icons.music_note_outlined, 'more': Icons.more_horiz};
-const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More'};
+
+/// Music mode (Settings > Mode): the same shell with four music pages instead.
+const _musicPages = ['mhome', 'msearch', 'mlibrary', 'msettings'];
+const _musicNav = <(String, String)>[('mhome', 'Home'), ('msearch', 'Search'), ('mlibrary', 'Your Library'), ('msettings', 'Settings')];
+const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outlined, 'shows': Icons.tv_outlined, 'music': Icons.music_note_outlined, 'more': Icons.more_horiz, 'mhome': Icons.home_outlined, 'msearch': Icons.search, 'mlibrary': Icons.library_music_outlined, 'msettings': Icons.settings_outlined};
+const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More', 'mhome': 'Home', 'msearch': 'Search', 'mlibrary': 'Your Library', 'msettings': 'Settings'};
 
 /// Everything that is not a swipe page.
 const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
@@ -65,7 +70,11 @@ class _AppShellState extends State<AppShell> {
   final PageController _pager = PageController();
   int _page = 0; // phone: index into _swipePages
   final ValueNotifier<int> _pageN = ValueNotifier(0); // only the tab bar listens, so a swipe does not rebuild every page
-  String _tab = 'dashboard'; // TV: sidebar selection
+  // Music mode is read once: switching it rebuilds the whole shell (main.dart keys it on the mode).
+  final bool _music = Store.musicMode;
+  String get _home => _music ? 'mhome' : 'dashboard';
+  List<String> get _pages => _music ? _musicPages : _swipePages;
+  late String _tab = _home; // TV: sidebar selection
   Timer? _syncTimer;
   Timer? _backupTimer;
 
@@ -91,6 +100,7 @@ class _AppShellState extends State<AppShell> {
 
   /// The menu with one entry per pinned plugin screen, just above Plugins (a plugin's own plugin.json ui.navTab names it).
   List<(String, String)> get _nav {
+    if (_music) return _musicNav;
     final i = _navItems.indexWhere((e) => e.$1 == 'plugins');
     return [
       ..._navItems.sublist(0, i),
@@ -145,9 +155,12 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _loadPluginScreens();
-    PluginUpdates.checkOnStartup(); // built-in plugins update from the PEK Store, GitHub ones are offered an update
-    Future<void>.delayed(const Duration(seconds: 6), PluginHooks.appStart); // plugins with hooks (Trakt import); once per run
+    if (!_music) {
+      // Music mode shows no plugin screens and starts no video plugin hooks (Trakt import and the like).
+      _loadPluginScreens();
+      PluginUpdates.checkOnStartup(); // built-in plugins update from the PEK Store, GitHub ones are offered an update
+      Future<void>.delayed(const Duration(seconds: 6), PluginHooks.appStart); // plugins with hooks (Trakt import); once per run
+    }
     PluginHost.changed.addListener(_loadPluginScreens);
     PluginPins.changed.addListener(_pinsChanged);
     Store.profile.addListener(_pinsChanged);
@@ -194,7 +207,7 @@ class _AppShellState extends State<AppShell> {
       setState(() => _tab = id);
       return;
     }
-    final i = _swipePages.indexOf(id);
+    final i = _pages.indexOf(id);
     if (i >= 0) {
       _goTo(i);
       return;
@@ -249,9 +262,9 @@ class _AppShellState extends State<AppShell> {
         if (didPop) return;
         if (PluginBack.handle()) return; // a plugin screen on the TV that is inside one of its own pages
         // Back: leave a secondary screen / any other page for the first page, then ask before exiting.
-        if (p.sidebar ? _tab != 'dashboard' : _page != 0) {
+        if (p.sidebar ? _tab != _home : _page != 0) {
           if (p.sidebar) {
-            setState(() => _tab = 'dashboard');
+            setState(() => _tab = _home);
           } else {
             _goTo(0);
           }
@@ -271,6 +284,14 @@ class _AppShellState extends State<AppShell> {
       return PluginView(key: ValueKey(id), pluginId: id.substring(7), padding: pad, embedded: context.pek.sidebar, onExit: () => setState(() => _tab = 'dashboard'));
     }
     switch (id) {
+      case 'mhome':
+        return MusicHomePage(padding: pad, onOpenLibrary: () => _open('mlibrary'));
+      case 'msearch':
+        return MusicPage(padding: pad, title: 'Search', view: MusicView.search);
+      case 'mlibrary':
+        return MusicPage(padding: pad, title: 'Your Library', view: MusicView.library);
+      case 'msettings':
+        return SettingsPage(padding: pad);
       case 'dashboard':
         return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'), onOpenMusic: () => _open('music'));
       case 'movies':
@@ -324,8 +345,8 @@ class _AppShellState extends State<AppShell> {
           builder: (context, page, _) => Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              for (var i = 0; i < _swipePages.length; i++)
-                Expanded(child: _BarItem(label: _swipeLabel[_swipePages[i]]!, icon: _swipeIcon[_swipePages[i]]!, active: i == page, onTap: () => _goTo(i))),
+              for (var i = 0; i < _pages.length; i++)
+                Expanded(child: _BarItem(label: _swipeLabel[_pages[i]]!, icon: _swipeIcon[_pages[i]]!, active: i == page, onTap: () => _goTo(i))),
             ],
           ),
         ),
@@ -342,7 +363,7 @@ class _AppShellState extends State<AppShell> {
               _page = i;
               _pageN.value = i;
             },
-            children: [for (final id in _swipePages) RepaintBoundary(child: _KeepAlive(child: _body(context, id)))],
+            children: [for (final id in _pages) RepaintBoundary(child: _KeepAlive(child: _body(context, id)))],
           ),
         ),
         const MiniPlayer(),
@@ -366,7 +387,7 @@ class _AppShellState extends State<AppShell> {
         padding: EdgeInsets.fromLTRB(rem + p.safeX, 0.75 * rem + p.safeY, rem + p.safeX, 0.75 * rem),
         decoration: BoxDecoration(color: t.bgElevated, border: Border(bottom: BorderSide(color: t.border))),
         child: Row(children: [
-          Padding(padding: EdgeInsets.only(right: 1.5 * rem), child: Text('PEK TV', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.accent))),
+          Padding(padding: EdgeInsets.only(right: 1.5 * rem), child: Text(_music ? 'PEK Music' : 'PEK TV', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.accent))),
           Expanded(
             child: SizedBox(
               height: 3 * rem,
@@ -397,7 +418,7 @@ class _AppShellState extends State<AppShell> {
         children: [
           Padding(
             padding: EdgeInsets.only(left: 0.5 * rem, bottom: 2 * rem),
-            child: Text('PEK TV', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.accent)),
+            child: Text(_music ? 'PEK Music' : 'PEK TV', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700, color: t.accent)),
           ),
           Expanded(
             child: ListView.separated(

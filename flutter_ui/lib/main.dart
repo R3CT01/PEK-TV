@@ -93,8 +93,8 @@ class _BootState extends State<_Boot> {
           }
           // With an account, "Who's watching?" comes first; the app below is rebuilt for each profile.
           return ListenableBuilder(
-            listenable: Listenable.merge([Profiles.changes, Cloud.changes]),
-            builder: (context, _) => Profiles.gateNeeded ? const ProfileGate() : AppShell(key: ValueKey('shell-${Profiles.currentId}')),
+            listenable: Listenable.merge([Profiles.changes, Cloud.changes, Store.musicModeN]),
+            builder: (context, _) => Profiles.gateNeeded ? const ProfileGate() : AppShell(key: ValueKey('shell-${Profiles.currentId}-${Store.musicMode}')),
           );
         }
         final rem = context.pek.rem;

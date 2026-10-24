@@ -7,6 +7,7 @@ import 'common.dart';
 import 'music_controller.dart';
 import 'music_fullscreen.dart';
 import 'playlist_ui.dart';
+import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
 
@@ -76,9 +77,14 @@ class _ArtState extends State<Art> {
 }
 
 /// The Music tab (app_music.js): Albums / Artists / Songs and a search box. Playback is in [MusicController].
+/// What a [MusicPage] shows: everything (the Music screen), or one half of it for music mode (Your Library / Search).
+enum MusicView { all, library, search }
+
 class MusicPage extends StatefulWidget {
-  const MusicPage({super.key, required this.padding});
+  const MusicPage({super.key, required this.padding, this.title = 'Music', this.view = MusicView.all});
   final EdgeInsets padding;
+  final String title;
+  final MusicView view;
   @override
   State<MusicPage> createState() => _MusicPageState();
 }
@@ -105,6 +111,7 @@ class _MusicPageState extends State<MusicPage> {
   @override
   void initState() {
     super.initState();
+    if (widget.view == MusicView.library) _tab = 3; // like Spotify, the library opens on the playlists
     _scanPoll = Timer.periodic(const Duration(seconds: 3), (_) => _checkStatus());
     _checkStatus();
   }
@@ -208,8 +215,8 @@ class _MusicPageState extends State<MusicPage> {
           padding: EdgeInsets.only(left: pad.left, right: pad.right, top: pad.top),
           sliver: SliverList(
             delegate: SliverChildListDelegate([
-              const Heading('Music', weather: true),
-              TextField(
+              Heading(widget.title, weather: !Store.musicMode),
+              if (widget.view != MusicView.library) TextField(
                 controller: _search,
                 onChanged: _onSearch,
                 decoration: InputDecoration(
@@ -218,8 +225,8 @@ class _MusicPageState extends State<MusicPage> {
                   contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
                 ),
               ),
-              SizedBox(height: rem),
-              if (_q.isEmpty) ...[
+              if (widget.view != MusicView.library) SizedBox(height: rem),
+              if (_q.isEmpty && widget.view != MusicView.search) ...[
                 PekTabs(
                   labels: tabs,
                   selected: _tab,
@@ -239,6 +246,8 @@ class _MusicPageState extends State<MusicPage> {
             padding: side,
             sliver: SliverToBoxAdapter(child: Async<MusicSearch>(future: _results!, builder: (c, r) => _searchResults(c, r))),
           )
+        else if (widget.view == MusicView.search)
+          SliverPadding(padding: side, sliver: const SliverToBoxAdapter(child: PekCard(title: 'Search your music', subtitle: 'Songs, albums and artists.')))
         else
           SliverPadding(padding: side, sliver: _librarySliver(context)),
         SliverToBoxAdapter(child: SizedBox(height: 4 * rem + pad.bottom)), // room for the mini player
@@ -272,7 +281,7 @@ class _MusicPageState extends State<MusicPage> {
           return SliverToBoxAdapter(
             child: PekCard(
               title: _scanning ? 'Scanning your music\u2026' : 'No music yet',
-              subtitle: _scanning ? 'Songs appear here as they are read.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.',
+              subtitle: _scanning ? 'Songs appear here as they are read.' : (Store.musicMode ? 'Add a folder with music in Settings \u2192 Library.' : 'Add a folder with music in More \u2192 Settings \u2192 Sources.'),
             ),
           );
         }
