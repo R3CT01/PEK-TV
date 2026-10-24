@@ -4,4 +4,12 @@
     <!-- PEK splash orange: the first instant of launch, before the video draws -->
     <color name="pek_splash_bg">#E04A00</color>
     <color name="ic_launcher_background">#0E0A06</color>
+    <!-- PEK Ember (the default skin, flutter_ui/lib/src/skins.dart): colours of the music home-screen widget -->
+    <color name="ember_bg_elevated">#1A0E08</color>
+    <color name="ember_surface">#24140C</color>
+    <color name="ember_border">#3D2314</color>
+    <color name="ember_accent">#FF8A3D</color>
+    <color name="ember_on_accent">#130A06</color>
+    <color name="ember_text">#FFF3EA</color>
+    <color name="ember_text_muted">#C9A590</color>
 </resources>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_music_description">Now playing, with previous, play / pause and next</string>
+    <string name="widget_music_idle_title">PEK TV</string>
+    <string name="widget_music_idle_text">Nothing playing. Tap to open.</string>
+    <string name="widget_prev">Previous</string>
+    <string name="widget_play">Play</string>
+    <string name="widget_pause">Pause</string>
+    <string name="widget_next">Next</string>
+</resources>

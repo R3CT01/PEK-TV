@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cover shown when a song has none (and when nothing is playing) -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/ember_surface" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item android:width="32dp" android:height="32dp" android:gravity="center" android:drawable="@drawable/ic_widget_note" />
+</layer-list>

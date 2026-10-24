@@ -143,6 +143,7 @@ class MusicService : Service() {
         try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (t: Throwable) { /* ignore */ }
         foreground = false
         if (instance === this) instance = null
+        MusicWidget.update(this)          // back to "Nothing playing"
         super.onDestroy()
     }
 
@@ -193,6 +194,8 @@ class MusicService : Service() {
         } catch (t: Throwable) {
             Log.w("PEK", "music service could not go foreground", t)
         }
+
+        MusicWidget.update(this)          // the home-screen widget shows the same song and buttons
 
         ui.removeCallbacks(releaseLocks)
         ui.removeCallbacks(idleStop)
