@@ -14,7 +14,7 @@ kotlin {
 
 // -PpekAbi=arm64-v8a | armeabi-v7a (set by the workflow, one build per CPU type)
 def pekAbi = project.findProperty('pekAbi')
-def pekBaseCode = 17
+def pekBaseCode = 18
 
 android {
     namespace 'com.pektv.app'
@@ -27,10 +27,10 @@ android {
         // updates from Aug 31, 2026.
         targetSdk 36
         // bump pekBaseCode by 1 for every release you publish. Each CPU build gets its own versionCode (an install must
-        // never replace a 64-bit build with a 32-bit one or the reverse): 17 -> 171 (32-bit) and 172 (64-bit).
+        // never replace a 64-bit build with a 32-bit one or the reverse): 18 -> 181 (32-bit) and 182 (64-bit).
         versionCode pekBaseCode * 10 + (pekAbi == 'arm64-v8a' ? 2 : (pekAbi == 'armeabi-v7a' ? 1 : 0))
-        // CI passes -PpekVersionName=<tag>; local builds use 2.1.8
-        versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '2.1.8')
+        // CI passes -PpekVersionName=<tag>; local builds use 2.1.9
+        versionName (project.hasProperty('pekVersionName') ? project.property('pekVersionName') : '2.1.9')
 
         // Chaquopy refuses to configure without ndk.abiFilters, and Gradle refuses abiFilters together with the
         // `splits { abi }` block, so there are no splits: the workflow builds once per CPU with -PpekAbi=<abi>
