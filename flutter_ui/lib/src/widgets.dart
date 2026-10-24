@@ -414,6 +414,7 @@ class _PosterCardState extends State<PosterCard> {
                         url,
                         fit: BoxFit.cover,
                         cacheWidth: 400, // decode small: weak TV boxes run out of memory on full-size posters
+                        placeholder: (_) => Center(child: Icon(Icons.image_outlined, color: t.textMuted, size: 2 * rem)),
                         errorBuilder: (_, __, ___) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (mounted && !_failed) {
@@ -536,7 +537,7 @@ class _PosterImageState extends State<PosterImage> {
           if (snap.connectionState == ConnectionState.done) _scheduleLookup();
           return placeholder();
         }
-        return ArtImage(url, fit: BoxFit.cover, cacheWidth: width, errorBuilder: (_, __, ___) => placeholder());
+        return ArtImage(url, fit: BoxFit.cover, cacheWidth: width, placeholder: (_) => placeholder(), errorBuilder: (_, __, ___) => placeholder());
       },
     );
   }

@@ -97,10 +97,11 @@ class ArtCache {
     return _inflight.putIfAbsent(url, () => _withRetry(url).whenComplete(() => _inflight.remove(url)));
   }
 
-  /// A try gives up after 4 seconds (the 6th try used to sit for 20 s and block the other pictures, actors included);
-  /// a failed picture is asked for again, up to 3 times. The pause between tries happens outside the queue, so a
+  /// A try gives up after 10, 12 and 15 seconds. 4 seconds was too short on a slow or VPN connection: the download was
+  /// thrown away when it was nearly done, kept running in the background, and slowed down every other picture on the
+  /// screen. A failed picture is asked for again, up to 3 times. The pause between tries happens outside the queue, so a
   /// failing picture never holds a place that another one could use.
-  static const _tryTimeouts = [Duration(seconds: 4), Duration(seconds: 4), Duration(seconds: 6)];
+  static const _tryTimeouts = [Duration(seconds: 10), Duration(seconds: 12), Duration(seconds: 15)];
   static final Set<String> _gone = HashSet(); // answers that will not change (404 ...): not asked again this run
 
   static Future<File?> _withRetry(String url) async {
@@ -248,7 +249,7 @@ class ArtCache {
 /// A picture from the network that is kept on the device: the first time it is downloaded, after that it comes from disk.
 /// Same look and options as `Image.network`; when the cache cannot be used it simply loads the picture from the network.
 class ArtImage extends StatefulWidget {
-  const ArtImage(this.url, {super.key, this.fit = BoxFit.cover, this.cacheWidth, this.width, this.height, this.errorBuilder});
+  const ArtImage(this.url, {super.key, this.fit = BoxFit.cover, this.cacheWidth, this.width, this.height, this.errorBuilder, this.placeholder});
   final String url;
   final BoxFit fit;
   final int? cacheWidth; // decode small: weak TV boxes run out of memory on full-size posters
@@ -256,12 +257,16 @@ class ArtImage extends StatefulWidget {
   final double? height;
   final ImageErrorWidgetBuilder? errorBuilder;
 
+  /// Shown while the picture is downloading and during the quick retries, so the tile is never an empty box.
+  /// null = nothing (the old look).
+  final WidgetBuilder? placeholder;
+
   @override
   State<ArtImage> createState() => _ArtImageState();
 }
 
 class _ArtImageState extends State<ArtImage> {
-  /// A picture that would not load is asked for again after 4, 6, 8 and 10 seconds; the error picture shows after those
+  /// A picture that would not load is asked for again after 2, 3, 4 and 5 seconds; the error picture shows after those
   /// quick tries, but the picture keeps being asked for every 30 seconds (10 more times) and replaces the error picture as
   /// soon as it arrives, so nothing stays blank until a manual refresh.
   static const _quickRetries = 4;
@@ -322,7 +327,7 @@ class _ArtImageState extends State<ArtImage> {
   /// Both the disk copy and the network picture failed: try the whole thing again shortly.
   void _scheduleRetry() {
     if (_retries >= _maxRetries || (_retryTimer?.isActive ?? false) || !ArtCache.retryable(widget.url)) return;
-    _retryTimer = Timer(Duration(seconds: _retries < _quickRetries ? 4 + 2 * _retries : 30), () {
+    _retryTimer = Timer(Duration(seconds: _retries < _quickRetries ? 2 + _retries : 30), () {
       if (!mounted) return;
       setState(() {
         _retries++;
@@ -336,7 +341,7 @@ class _ArtImageState extends State<ArtImage> {
   Widget _failed(BuildContext context, Object e, StackTrace? st) {
     if (_retries < _maxRetries && ArtCache.retryable(widget.url)) {
       _scheduleRetry();
-      if (_retries < _quickRetries) return const SizedBox.shrink();
+      if (_retries < _quickRetries) return widget.placeholder?.call(context) ?? const SizedBox.shrink();
     }
     _gaveUp = true;
     return widget.errorBuilder?.call(context, e, st) ?? const SizedBox.shrink();
@@ -382,7 +387,7 @@ class _ArtImageState extends State<ArtImage> {
         if (snap.connectionState != ConnectionState.done) {
           // A slow retry is running: keep the title / error picture on screen instead of flashing blank.
           if (_gaveUp && _retries >= _quickRetries) return widget.errorBuilder?.call(context, 'retrying', null) ?? const SizedBox.shrink();
-          return const SizedBox.shrink();
+          return widget.placeholder?.call(context) ?? const SizedBox.shrink();
         }
         final got = snap.data;
         return got != null ? _disk(got) : _network();

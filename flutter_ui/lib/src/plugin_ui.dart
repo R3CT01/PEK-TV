@@ -793,7 +793,7 @@ class _PluginEpisode extends StatelessWidget {
               width: (p.compact ? 9.5 : 13) * rem,
               child: AspectRatio(
                 aspectRatio: 16 / 9,
-                child: image.isEmpty ? blank() : ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (_, __, ___) => blank()),
+                child: image.isEmpty ? blank() : ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, placeholder: (_) => blank(), errorBuilder: (_, __, ___) => blank()),
               ),
             ),
           ),
@@ -851,7 +851,7 @@ class _PluginPoster extends StatelessWidget {
                   if (image.isEmpty)
                     plain()
                   else
-                    ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (_, __, ___) => plain()),
+                    ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, placeholder: (_) => plain(), errorBuilder: (_, __, ___) => plain()),
                   if (watched)
                     Positioned(
                       top: 6,

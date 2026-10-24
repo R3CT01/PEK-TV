@@ -155,9 +155,9 @@ class Api {
   static final Set<String> _noArt = {};
 
   /// A lookup that fails (the server is busy scanning, the TMDb proxy is slow or rate-limiting a screenful of requests) is
-  /// tried again after 2 s and 6 s, and one that still has nothing is forgotten after a short rest, so the next time the
+  /// tried again after 2 s, 6 s and 12 s, and one that still has nothing is forgotten after a short rest, so the next time the
   /// screen is built it asks again. Before, the first failure was kept until Refresh, which left posters blank.
-  static const _detailRetryWaits = [Duration(seconds: 2), Duration(seconds: 6)];
+  static const _detailRetryWaits = [Duration(seconds: 2), Duration(seconds: 6), Duration(seconds: 12)];
 
   static void _forgetDetailSoon(String key, Duration after) {
     _noArt.add(key);
