@@ -167,3 +167,15 @@ Posters used to stay blank until the screen was rebuilt by hand (Refresh). Cause
   (`ui.poster_card`, `ui.episode_row`, provider logos, which now also use `ArtImage`) rely on this because their screens only redraw when the plugin does.
 - `Net._backOnline` calls `ArtCache.retryAll()`: every picture and poster that gave up tries again at once.
 - Plugins: `api()` in `tmdb-discover` (1.7.1) and `snake-skin` / Stream Media (3.4.1) retries a failed TMDb request inside its background job.
+
+## Files that will not open
+`MpvController` tells Dart why a load ended: `ended` (it played) or `error` (it never loaded: damaged, 0 bytes, unsupported). The mpv event
+channel is now `{event: time|state|tracks|ended|error, data: {...}}`. `PekPlayer.failed` (`mpv.dart`) is the Dart side;
+`music_controller.dart` marks the song unplayable and skips it, `music.dart` (`TrackRow`) greys it out, and `player.dart` closes a video that
+will not open. Only when libmpv itself cannot start does the host still show "Player has crashed - please restart" (and send `ended`).
+Details and limits: `MUSIC.md` > "Files that cannot be played".
+
+## Music home-screen widget (Android)
+`android/app/src/main/java/com/pektv/app/MusicWidget.kt` plus the widget resources (layout, provider info, drawables, `ember_*` colours,
+strings) and a receiver in `AndroidManifest.xml`. It is native only: no Flutter screen and no channel. `MusicService` pushes `MusicState` to
+it whenever it redraws the notification. Details: `MUSIC.md` > "Home-screen widget".

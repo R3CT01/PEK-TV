@@ -39,6 +39,34 @@ plays: MP3, AAC / M4A, FLAC, Ogg, Opus, WAV, and also WMA, APE, WavPack, AIFF an
 Music keeps playing with the screen off or the app in the background. Starting a movie or episode pauses the music. Each song opens its own mpv instance, so there is a short gap between
 songs (gapless playback is not done yet).
 
+## Files that cannot be played
+Some files are listed by the scanner but cannot be opened: a 0-byte file, a damaged download, a format libmpv does not support.
+When the engine ends a song before it ever loaded, the player does **not** report a crash:
+- The host (`MpvController.fail(crashed = false)`) shows "This file can't be played (it may be damaged)" and sends an `error` event
+  to Dart. "Player has crashed - please restart" is now only shown when mpv itself cannot start, and that case still sends `ended`.
+- `PekPlayer.failed` (`mpv.dart`) turns true on `error` (and is cleared by `reset()` before each load).
+- `MusicController` (`_onFailed`) marks the song in `unplayable` (song ids, saved per profile under `pek_music_unplayable_v1`) and calls
+  `next(auto: true)`. Next, and the end of a song, skip marked songs, and **repeat never reloads a marked song**, so a bad file cannot loop.
+  At the end of the queue the player stops (with repeat on it wraps to the first song that is not marked); if nothing playable is left it stops.
+- Marked songs are greyed out in every song list (`TrackRow` in `music.dart`) with "Can't be played · the file may be damaged".
+  Tapping one (or choosing it from an album or playlist) still tries it, so a file that was repaired or replaced plays again;
+  once it opens and reports a length (`_onDuration`) the mark is removed.
+- The video player closes when a video will not open (`player.dart`, `_onFailed`), without the "Up next" countdown.
+The scanner itself does not check files yet, so a damaged file appears in the library until someone tries to play it.
+
+## Home-screen widget
+Phones and tablets can add a **PEK TV music** widget (long-press the home screen > Widgets). It is 4 x 2 cells and resizable, drawn in
+the PEK Ember colours (fixed colours: it does not follow the profile's skin): cover, title, artist, and previous / play-pause / next.
+- `android/.../MusicWidget.kt` (an `AppWidgetProvider`) only mirrors `MusicState`. `MusicService` calls `MusicWidget.update` every time it
+  redraws the notification, and once more when it stops. Nothing visible changed = nothing is sent.
+- The buttons send the same `ACTION_PLAY / PAUSE / NEXT / PREV` the notification buttons use. A tap on the card opens the app.
+- While the service is not running (nothing playing, or the app was closed) there is nothing to control and the service cannot be started
+  from a home-screen button on newer Android, so the widget shows "PEK TV / Nothing playing" with no buttons and a tap opens the app.
+- The cover is cut square, scaled to 192 px and rounded before it is sent (widget pictures go through a size-limited channel).
+- Files: `res/layout/widget_music.xml`, `res/xml/music_widget_info.xml` (and `res/xml-v31/` with grid-cell size and a live preview),
+  `res/drawable/widget_*.xml` and `ic_widget_*.xml`, the `ember_*` colours in `res/values/colors.xml`, `res/values/widget_strings.xml`,
+  and the `<receiver android:name=".MusicWidget">` in `AndroidManifest.xml`. Android TV has no home-screen widgets.
+
 ## Backend
 `backend/music.cpp` + `music_tags.cpp` (library, scanning, `/api/music/*`; see `music.h` for the routes), refreshed
 after every normal scan through `MediaScanner::setAfterScan` and once when the tab is first opened. The song list is kept in
@@ -54,7 +82,8 @@ Tests: `g++ -std=c++17 music_test.cpp music_tags.cpp -o music_test && ./music_te
 ## Known limits
 - Background play on Android uses a foreground service (`MusicService.kt`): a media notification with lock-screen
   controls, audio focus (pauses for calls, ducks for prompts) and pause when headphones are unplugged. The service
-  stops after 10 minutes without playing.
+  stops after 10 minutes without playing. The home-screen widget follows the same state (see above).
+- The list of files marked "Can't be played" is kept on the device, per profile, and is not synced to PEK Cloud.
 - Cover pictures are sent at their original size; very large covers on a big album grid cost memory on weak devices.
 - Scanning a large library on a network share the first time can take a while (results appear as they are read).
 

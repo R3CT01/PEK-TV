@@ -22,7 +22,7 @@ PEK TV running at 1920x1080.
 
 - **Your library, everywhere:** local folders and network shares (SMB, NFS, FTP, WebDAV, UPnP/DLNA). Reads Kodi-style NFO files and artwork first, and asks TMDb only for what is missing.
 - **A player that stays out of the way:** libmpv. Automatic subtitles, Skip Intro / Skip Recap, and an Up Next card.
-- **Music from your own folders:** albums, artists, songs, playlists and search over the same local and network folders. Tags and cover art are read from the files; shuffle, repeat, a queue and a player bar. Songs play in libmpv on Android. See `MUSIC.md`.
+- **Music from your own folders:** albums, artists, songs, playlists and search over the same local and network folders. Tags and cover art are read from the files; shuffle, repeat, a queue and a player bar. Songs play in libmpv on Android. Files that will not open (for example a 0-byte or damaged file) are marked "Can't be played" and skipped, and a home-screen widget shows the song that is playing (phones and tablets). See `MUSIC.md`.
 - **Built for the couch:** D-pad, remote and gamepad support, with a 10-foot look.
 - **A dashboard you design:** widgets you choose and order, saved per profile.
 - **Profiles and PEK Cloud:** profiles with their own history and favorites, plus optional cloud sync.
