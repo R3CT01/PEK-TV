@@ -474,12 +474,19 @@ class MpvController(
     }
 
     // mpv failed: close the player and tell the user. No second player to fall back to.
-    private fun fail() {
+    // [crashed] = mpv itself could not start. Otherwise mpv ran fine but this one file would not open (damaged or
+    // unsupported): say so, and report "error" (not "ended") so the queue can mark the file and move on.
+    private fun fail(crashed: Boolean = true) {
         stopEngine()
         surfaceView.visibility = View.GONE
         keepScreenOn(false)
-        Toast.makeText(activity, "Player has crashed - please restart", Toast.LENGTH_LONG).show()
-        emit("ended", JSONObject())          // closes the web player layer
+        if (crashed) {
+            Toast.makeText(activity, "Player has crashed - please restart", Toast.LENGTH_LONG).show()
+            emit("ended", JSONObject())          // closes the web player layer
+        } else {
+            Toast.makeText(activity, "This file can\u2019t be played (it may be damaged)", Toast.LENGTH_LONG).show()
+            emit("error", JSONObject())
+        }
     }
 
     // ---------------- surface ----------------
@@ -564,7 +571,7 @@ class MpvController(
                 MPVLib.MpvEvent.MPV_EVENT_END_FILE -> {
                     if (mpv == null) return@post                       // we stopped it ourselves
                     if (loaded) emit("ended", JSONObject())
-                    else fail()
+                    else fail(crashed = false)           // ended before it ever loaded: the file is bad
                 }
             }
         }

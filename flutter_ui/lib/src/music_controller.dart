@@ -21,6 +21,8 @@ class MusicController {
     WidgetsBinding.instance.addObserver(_Lifecycle(this));
     Store.profile.addListener(_onProfile);
     _p.playing.addListener(_onPlaying);
+    _p.failed.addListener(_onFailed);
+    _p.duration.addListener(_onDuration);
   }
   // ignore: unused_field
   late final MusicSession _session;
@@ -128,19 +130,71 @@ class MusicController {
 
   Future<void> next({bool auto = false}) async {
     if (_order.isEmpty) return;
-    if (auto && repeat.value) {
+    if (auto && repeat.value && !isUnplayable(_order[_index].id)) {
       await _load(_order[_index]);
       return;
     }
-    if (_index + 1 >= _order.length) {
+    // Next song that is not marked unplayable.
+    var i = _index + 1;
+    while (i < _order.length && isUnplayable(_order[i].id)) {
+      i++;
+    }
+    if (i >= _order.length) {
       if (auto && !repeat.value) {
         await stop();
         return;
       }
-      _index = -1;
+      i = 0; // wrap round to the first playable song
+      while (i < _order.length && isUnplayable(_order[i].id)) {
+        i++;
+      }
+      if (i >= _order.length) {
+        await stop(); // nothing in the queue can be played
+        return;
+      }
     }
-    _index++;
+    _index = i;
     await _load(_order[_index]);
+  }
+
+  // ---------------------------------------------------------------- files the player could not open
+
+  static const _kBad = 'pek_music_unplayable_v1';
+
+  /// Ids of songs libmpv could not open (damaged / unsupported). They are greyed out in the lists and skipped by Next
+  /// and by the end of a song. Tapping one still tries it again; if it opens, the mark is removed.
+  final ValueNotifier<Set<String>> unplayable = ValueNotifier(const <String>{});
+  bool isUnplayable(String id) => unplayable.value.contains(id);
+
+  void _loadUnplayable() {
+    try {
+      final o = jsonDecode(Store.strGet(_kBad) ?? '[]');
+      unplayable.value = o is List ? {for (final e in o) '$e'} : const <String>{};
+    } catch (e) {
+      debugPrint('music unplayable: $e');
+    }
+  }
+
+  void _setUnplayable(String id, bool bad) {
+    final s = Set<String>.of(unplayable.value);
+    if (bad ? !s.add(id) : !s.remove(id)) return;
+    unplayable.value = s;
+    unawaited(Store.strSet(_kBad, jsonEncode(s.toList())));
+  }
+
+  /// The engine reported that the current song would not open: mark it and go on (never reloads the same file, so
+  /// "repeat" cannot loop on it).
+  void _onFailed() {
+    final cur = current.value;
+    if (!_p.failed.value || cur == null) return;
+    _setUnplayable(cur.id, true);
+    unawaited(next(auto: true));
+  }
+
+  // A song that opens and reports a length is fine (it was repaired or replaced since).
+  void _onDuration() {
+    final cur = current.value;
+    if (cur != null && _p.duration.value > 0 && !_p.failed.value && isUnplayable(cur.id)) _setUnplayable(cur.id, false);
   }
 
   Future<void> prev() async {
@@ -240,6 +294,7 @@ class MusicController {
 
   /// Puts the last session's song back in the player, paused, for the active profile. Called once at start-up.
   void restore() {
+    _loadUnplayable();
     if (current.value != null) return; // something already plays
     try {
       final o = jsonDecode(Store.strGet(_kQueue) ?? '');
@@ -277,6 +332,7 @@ class MusicController {
 
   // Another profile became active: its own music comes back (the engine is stopped, the old profile's save stays as it is).
   void _onProfile() {
+    _loadUnplayable();
     final had = current.value != null;
     _saveEnabled = false;
     _posTimer?.cancel();

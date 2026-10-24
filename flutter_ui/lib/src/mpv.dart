@@ -40,6 +40,9 @@ class PekPlayer {
   final audio = ValueNotifier<List<TrackInfo>>(const []);
   final subtitles = ValueNotifier<List<TrackInfo>>(const []);
   final ended = ValueNotifier<bool>(false);
+
+  /// The file could not be opened (damaged or unsupported). Different from [ended]: nothing was played.
+  final failed = ValueNotifier<bool>(false);
   final chapters = ValueNotifier<List<Chapter>>(const []);
 
   void _onEvent(dynamic e) {
@@ -64,6 +67,11 @@ class PekPlayer {
         break;
       case 'ended':
         ended.value = true;
+        break;
+      case 'error':
+        buffering.value = false;
+        playing.value = false;
+        failed.value = true;
         break;
     }
   }
@@ -96,6 +104,7 @@ class PekPlayer {
     subtitles.value = const [];
     chapters.value = const [];
     ended.value = false;
+    failed.value = false;
   }
 
   // Host actions (MainActivity / FlutterHostActivity).

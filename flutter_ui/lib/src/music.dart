@@ -392,19 +392,28 @@ class TrackRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final rem = context.pek.rem;
-    return ValueListenableBuilder<Track?>(
-      valueListenable: _mc.current,
-      builder: (context, cur, _) {
-        final on = cur?.id == track.id;
-        return ListRow(
-          title: '${number != null ? '$number. ' : ''}${track.title}',
-          highlight: on,
-          subtitle: [track.artist, if (track.album.isNotEmpty && number == null) track.album].where((e) => e.isNotEmpty).join(' \u00b7 '),
-          onTap: onTap,
-          onLongPress: onLongPress ?? () => showTrackMenu(context, track),
-          trailing: Text(track.duration > 0 ? formatTime(track.duration) : '', style: TextStyle(fontSize: 0.85 * rem, color: context.pek.tokens.textMuted)),
-        );
-      },
+    return ValueListenableBuilder<Set<String>>(
+      valueListenable: _mc.unplayable,
+      builder: (context, bad, _) => ValueListenableBuilder<Track?>(
+        valueListenable: _mc.current,
+        builder: (context, cur, _) {
+          final on = cur?.id == track.id;
+          final broken = bad.contains(track.id);
+          return Opacity(
+            opacity: broken ? 0.5 : 1,
+            child: ListRow(
+              title: '${number != null ? '$number. ' : ''}${track.title}',
+              highlight: on,
+              subtitle: broken
+                  ? 'Can\u2019t be played \u00b7 the file may be damaged'
+                  : [track.artist, if (track.album.isNotEmpty && number == null) track.album].where((e) => e.isNotEmpty).join(' \u00b7 '),
+              onTap: onTap,
+              onLongPress: onLongPress ?? () => showTrackMenu(context, track),
+              trailing: Text(track.duration > 0 ? formatTime(track.duration) : '', style: TextStyle(fontSize: 0.85 * rem, color: context.pek.tokens.textMuted)),
+            ),
+          );
+        },
+      ),
     );
   }
 }

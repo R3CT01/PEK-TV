@@ -80,6 +80,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
     _player.load(widget.url, startSec: widget.startSec, title: widget.title);
     _player.ended.addListener(_onEnded);
+    _player.failed.addListener(_onFailed);
     _player.playing.addListener(_onPlaying);
     _subs = SubsController(player: _player, meta: widget.resume, fileName: widget.title, toast: _toast);
     _player.subtitles.addListener(_subs.onTracks);
@@ -105,6 +106,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _seekReset?.cancel();
     _countTimer?.cancel();
     _player.ended.removeListener(_onEnded);
+    _player.failed.removeListener(_onFailed);
     _player.playing.removeListener(_onPlaying);
     _player.subtitles.removeListener(_subs.onTracks);
     _player.chapters.removeListener(_onChapters);
@@ -249,6 +251,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
         ];
     }
+  }
+
+  // The file would not open (the host already showed a message): leave the player.
+  void _onFailed() {
+    if (!_player.failed.value || !mounted || _leaving) return;
+    Navigator.of(context).maybePop();
   }
 
   void _onEnded() {
