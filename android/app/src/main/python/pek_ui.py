@@ -215,6 +215,7 @@ def ctx():
     nothing. Prefer streamers() / is_watched(), which also check the plugin's permissions."""
     d = dict(_sess().ctx)
     d.pop("skins", None)          # only skins() hands these out, and it needs the official "skins" permission
+    d.pop("weather", None)        # only weather() hands this out, and it needs the official "weather" permission
     return d
 
 
@@ -522,6 +523,51 @@ def copy_skin_json(text):
     t = _s(text, 20000)
     if t:
         s.effect("clipboard.copy", text=t, note="skin.json copied.")
+
+
+# ---------------------------------------------------------------------------------------------------------
+# The app's city and unit (the official Weather plugin only: plugin.json "weather": true, refused for any other plugin)
+# ---------------------------------------------------------------------------------------------------------
+
+def weather():
+    """The city and unit the person chose in PEK TV (the dashboard's Weather widget and this plugin share them):
+    {"lat": 38.6, "lon": -90.2, "label": "St. Louis, Missouri", "unit": "F"}, with "lat", "lon" and "label" missing
+    (None / "") when no city is chosen yet. Needs "weather": true."""
+    s = _sess()
+    s.need("weather")
+    w = s.ctx.get("weather")
+    w = w if isinstance(w, dict) else {}
+    out = {"lat": None, "lon": None, "label": "", "unit": "C" if w.get("unit") == "C" else "F"}
+    try:
+        lat, lon = float(w.get("lat")), float(w.get("lon"))
+        if abs(lat) <= 90 and abs(lon) <= 180 and w.get("label"):
+            out.update(lat=lat, lon=lon, label=_s(w.get("label"), 120))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+def weather_set(lat, lon, label):
+    """Make this the city of the whole app (dashboard Weather widget, header badge). PEK TV checks the numbers again.
+    Needs "weather": true."""
+    s = _sess()
+    s.need("weather")
+    lat, lon = float(lat), float(lon)
+    if not (abs(lat) <= 90 and abs(lon) <= 180):
+        raise ValueError("bad coordinates")
+    label = _s(label, 120)
+    if not label:
+        raise ValueError("a city needs a name")
+    s.effect("weather.set", lat=lat, lon=lon, label=label)
+
+
+def weather_unit(unit):
+    """Switch the whole app to "C" or "F". Needs "weather": true."""
+    s = _sess()
+    s.need("weather")
+    if unit not in ("C", "F"):
+        raise ValueError("unit must be C or F")
+    s.effect("weather.set", unit=unit)
 
 
 def toast(message):

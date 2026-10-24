@@ -33,12 +33,13 @@ WORK_LIMIT = 25.0                     # seconds one ui.background(work) may take
 RESERVED_HOST = "hesper-tmdb.aquariusibeats.workers.dev"
 OFFICIAL_PROXY_PLUGINS = {"tmdb-discover"}   # the only plugin that may use PEK's built-in TMDb access
 OFFICIAL_SKIN_PLUGINS = {"skin-maker"}       # the only plugin that may ask for the "skins" permission
+OFFICIAL_WEATHER_PLUGINS = {"weather"}       # the only plugin that may ask for the "weather" permission (the app's city and unit)
 RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS}   # host -> the only plugins that may list it
 HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
 HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched"}
 HOOK_EFFECTS = {"watched.set", "watched.set_many"}   # all a hook may ask Flutter to do
 ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "torrent.play", "toast", "exit",
-                   "skin.save", "skin.use", "skin.delete", "clipboard.copy"}
+                   "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set"}
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _SESSIONS = {}
@@ -330,6 +331,8 @@ def _open(req):
                 return _fail("%s is reserved for PEK's official plugins" % reserved)
         if manifest.get("permissions", {}).get("skins") and pid not in OFFICIAL_SKIN_PLUGINS:
             return _fail("the 'skins' permission is reserved for PEK's official Skin maker")
+        if manifest.get("permissions", {}).get("weather") and pid not in OFFICIAL_WEATHER_PLUGINS:
+            return _fail("the 'weather' permission is reserved for PEK's official Weather plugin")
         if not trusted:
             problems = g.scan_plugin_folder(folder)
             if problems:

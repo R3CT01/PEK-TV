@@ -14,10 +14,9 @@ import 'plugin_host.dart' show PluginBack;
 import 'plugin_ui.dart';
 import 'store.dart';
 import 'tokens.dart';
-import 'weather.dart';
 import 'widgets.dart';
 
-/// The Dashboard tab (app_dashboard.js): a grid of widgets. Clock, Weather and plugin shortcuts are tiles (1 column, or 2 when
+/// The Dashboard tab (app_dashboard.js): a grid of widgets. Clock and plugin shortcuts are tiles (1 column, or 2 when
 /// set to Wide); Continue Watching, Recently Added and Favorites are full-width rows of posters.
 /// Press and hold a widget (touch, held centre button, or the Menu key) for Move / Delete. Move lifts the widget: drag it up
 /// or down and let go on a square to place it (D-pad: Up / Down to pick the square, centre button to place); Back leaves
@@ -435,7 +434,7 @@ class _DashboardPageState extends State<DashboardPage> {
       case 'clock':
         return (w: ClockTile(onLongPress: hold), span: span, full: false);
       case 'weather':
-        return (w: WeatherTile(onLongPress: hold), span: span, full: false);
+        return (w: WeatherCard(onLongPress: hold), span: 1, full: true);
       case 'plugin':
         final info = plugins.where((e) => e.folder == it.folder).firstOrNull;
         if (info == null) return null; // not installed: nothing to show (the edit view says so)
@@ -457,8 +456,6 @@ class _DashboardPageState extends State<DashboardPage> {
         );
       case 'nowplaying':
         return (w: NowPlayingCard(onLongPress: hold, onOpenMusic: widget.onOpenMusic), span: 1, full: true);
-      case 'forecast':
-        return (w: ForecastCard(onLongPress: hold), span: 1, full: true);
       case 'albums':
         return (w: AlbumsRow(onLongPress: hold, onOpenMusic: widget.onOpenMusic), span: 1, full: true);
       case 'playlists':

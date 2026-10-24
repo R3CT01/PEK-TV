@@ -73,7 +73,7 @@ Resume progress, favorites and the dashboard layout are stored on the device wit
 - **Skins** (`skins.dart`): PEK Ember (default), Cream, Night red, Green, Neon, per profile (Settings > Appearance). Skins made or installed are kept per profile and saved to the cloud account with the rest of the profile's data (`k|<id>` items plus the `s|skin` setting, see SKINS.md), so a sign-in puts them back.
 - HDR output and refresh-rate matching were already in Settings > Video output.
 
-- **Dashboard** (`dashboard.dart`, `store.dart`): a grid. Clock, Weather and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Continue Watching, Recently Added and Favorites are full-width poster rows. Press and hold a widget (touch, held centre button, or the Menu key) for **Move** / **Delete** (and Make wide / small on tiles). Move: drag the widget up or down and let go on a square to place it (D-pad: Up / Down pick the square, centre places it); Back leaves move mode. The Add widget button adds widgets or resets. Saved per profile in the `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
+- **Dashboard** (`dashboard.dart`, `store.dart`): a grid. Clock and plugin shortcuts are tiles (Small = 1 column, Wide = 2); Weather is a full-width card; Continue Watching, Recently Added and Favorites are full-width poster rows. Press and hold a widget (touch, held centre button, or the Menu key) for **Move** / **Delete** (and Make wide / small on tiles). Move: drag the widget up or down and let go on a square to place it (D-pad: Up / Down pick the square, centre places it); Back leaves move mode. The Add widget button adds widgets or resets. Saved per profile in the `{id, type, size, folder}` shape and synced as `s|dashboard`; the layout and poster size sync as `s|look`, the city and unit as `s|weather` (`cloud.dart`).
 - **Clock and Weather widgets** (`weather.dart`, `dashboard.dart`): both are dashboard widgets you can add, remove and reorder. The weather tile shows a big temperature with "condition \u00b7 city" under it. Weather uses Open-Meteo like plugins/weather (pick a city, Fahrenheit or Celsius, last reading shown offline).
 
 - **Clock settings** (`clock.dart`): tap the Clock tile for 24-hour time, Show date and a time zone list (each zone shows the time it has now). 38 zones with a "day \u00b7 zone" line; kept on the device, not synced. Zones are computed from built-in daylight-saving rules (US/Canada, EU/UK, Sydney, Auckland, Cairo), so there is no extra package; the rules need a look only if a country changes its clocks.
@@ -144,8 +144,10 @@ Add widget lists every widget that is not on the dashboard yet, in groups. `flut
 newer ones; each loads its own data and keeps itself up to date:
 - Music: **Now Playing** (cover, title, artist, progress, shuffle / previous / play / next / repeat; tap = full-screen player),
   **Playlists** and **Albums** (rows of covers).
-- Weather and time: Clock, Weather and **Forecast** (a horizontal, scrollable row: next 24 hours or next 7 days, toggled with Hourly / Daily;
-  Open-Meteo, same city and unit as Weather, cached for offline).
+- Weather and time: Clock and **Weather** (one full-width card: the temperature and conditions now, and under them a horizontal, scrollable
+  forecast, the next 24 hours or next 7 days, toggled with Hourly / Daily; tap a day for its details; Open-Meteo, cached for offline).
+  The old separate **Forecast** widget was merged into Weather: a saved layout that has `forecast` is read as `weather` (`Store.cleanDashboard`).
+  The Weather widget, the header badge and the Weather plugin share one city and unit, so a city is only typed once.
 - Movies and shows: Continue Watching, **Up Next** (the next unwatched episode of each show you are watching), Recently Added, **Recently Watched**, **TV Shows**, Favorites, **Library** (counts tile), **Surprise me** (random movie tile).
 - Plugins: **Pinned plugins** (a row of the icons pinned on the More page) and a shortcut tile for each installed plugin with a screen.
 

@@ -46,7 +46,7 @@ Must pass an automatic scan and then runs with a limited host API:
 - `h.library_titles()` (needs `"library": true`) returns `[{"title", "year", "kind": "movie" | "tv"}]` from the library scanner's last saved list, one entry per movie and per show. The list is only as fresh as the last scan, and backends run once at startup.
 - `run()` is called once, with a 10 second limit.
 
-Plugins that ship with PEK TV are **official** and are listed above a separator on the Plugins page (third-party ones are listed below it). `weather` keeps full access; `skin-maker` is official and the only plugin that may use the `skins` permission; `tmdb-discover` is official but still runs sandboxed, and is the only kind of plugin allowed to use PEK TV's built-in TMDb access (a proxy that holds PEK TV's key, so users never enter one). Installing a .zip whose `plugin.json` lists that proxy host is refused. To trust a plugin you wrote yourself while developing:
+Plugins that ship with PEK TV are **official** and are listed above a separator on the Plugins page (third-party ones are listed below it). `weather` keeps full access and is the only plugin that may use the `weather` permission (the app's city and unit); `skin-maker` is official and the only plugin that may use the `skins` permission; `tmdb-discover` is official but still runs sandboxed, and is the only kind of plugin allowed to use PEK TV's built-in TMDb access (a proxy that holds PEK TV's key, so users never enter one). Installing a .zip whose `plugin.json` lists that proxy host is refused. To trust a plugin you wrote yourself while developing:
 `PEK_TRUSTED_PLUGINS=my_plugin` (backend).
 
 ## Remote access

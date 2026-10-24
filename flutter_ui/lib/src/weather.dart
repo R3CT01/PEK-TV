@@ -153,6 +153,7 @@ class Weather {
     try {
       final r = await _c
           .get(Uri.parse('https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon'
+              '&current=temperature_2m,weather_code'
               '&hourly=temperature_2m,weather_code,precipitation_probability,is_day'
               '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,'
               'apparent_temperature_max,apparent_temperature_min,wind_speed_10m_max,wind_gusts_10m_max,'
@@ -299,70 +300,6 @@ class _WeatherBadgeState extends State<WeatherBadge> {
         ),
       ),
     );
-  }
-}
-
-/// The dashboard tile: the same card as the web UI's weather widget (big temperature, "condition \u00b7 city" under it).
-/// Tap = Weather settings (choose city / unit), like the web tile opening the Weather plugin; press and hold = [onLongPress]
-/// (customize the dashboard).
-class WeatherTile extends StatefulWidget {
-  const WeatherTile({super.key, this.onLongPress});
-  final VoidCallback? onLongPress;
-  @override
-  State<WeatherTile> createState() => _WeatherTileState();
-}
-
-class _WeatherTileState extends State<WeatherTile> {
-  String _title = '--\u00b0';
-  String _sub = '';
-  bool _noCity = false;
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    Weather.changes.addListener(_refresh);
-    _refresh();
-    _timer = Timer.periodic(const Duration(minutes: 30), (_) => _refresh());
-  }
-
-  @override
-  void dispose() {
-    Weather.changes.removeListener(_refresh);
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  String _line(String condition, String city) => [condition, city].where((e) => e.isNotEmpty).join(' \u00b7 ');
-
-  Future<void> _refresh() async {
-    final c = Weather.city;
-    if (c == null) {
-      if (mounted) setState(() => _noCity = true);
-      return;
-    }
-    final cached = Weather.last(c.label);
-    if (mounted) {
-      setState(() {
-        _noCity = false;
-        _title = cached != null ? Weather.format(cached.tempC) : '--\u00b0';
-        _sub = _line(cached?.condition ?? '', c.label);
-      });
-    }
-    final r = await Weather.fetch(c.lat, c.lon, c.label);
-    if (!mounted || r == null || Weather.city?.label != c.label) return;
-    setState(() {
-      _title = Weather.format(r.tempC);
-      _sub = _line(r.condition, c.label);
-    });
-  }
-
-  void _open() => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const WeatherSettingsScreen()));
-
-  @override
-  Widget build(BuildContext context) {
-    if (_noCity) return DashTile(heading: 'Weather', body: 'Tap to choose your city', onTap: _open, onLongPress: widget.onLongPress);
-    return DashTile(big: _title, sub: _sub, onTap: _open, onLongPress: widget.onLongPress);
   }
 }
 
@@ -524,8 +461,10 @@ class ForecastDay {
 
 /// The hourly and daily forecast for one city (Open-Meteo), as the dashboard's Forecast widget shows it.
 class WeatherForecast {
-  const WeatherForecast({required this.city, required this.utcOffset, required this.hours, required this.days});
+  const WeatherForecast({required this.city, required this.utcOffset, required this.hours, required this.days, this.curTempC, this.curCode});
   final String city;
+  final double? curTempC; // the reading right now (null in a cache from before the Weather and Forecast widgets were merged)
+  final int? curCode;
   final int utcOffset; // seconds: how far the city's clock is from UTC
   final List<ForecastHour> hours;
   final List<ForecastDay> days;
@@ -539,9 +478,12 @@ class WeatherForecast {
     List l(Map m, String k) => m[k] is List ? m[k] as List : const [];
     final ht = l(h, 'time');
     final dt = l(d, 'time');
+    final cur = j['current'] is Map ? j['current'] as Map : const {};
     return WeatherForecast(
       city: city,
       utcOffset: _i(j['utc_offset_seconds']),
+      curTempC: cur['temperature_2m'] is num ? (cur['temperature_2m'] as num).toDouble() : null,
+      curCode: cur['weather_code'] is num ? (cur['weather_code'] as num).round() : null,
       hours: [
         for (var i = 0; i < ht.length; i++)
           ForecastHour(
@@ -580,6 +522,8 @@ class WeatherForecast {
   factory WeatherForecast.fromJson(Map o) => WeatherForecast(
         city: '${o['city']}',
         utcOffset: _i(o['off']),
+        curTempC: o['cur'] is List && (o['cur'] as List).length >= 2 && (o['cur'] as List)[0] is num ? ((o['cur'] as List)[0] as num).toDouble() : null,
+        curCode: o['cur'] is List && (o['cur'] as List).length >= 2 && (o['cur'] as List)[1] is num ? ((o['cur'] as List)[1] as num).round() : null,
         hours: [
           for (final e in (o['h'] as List? ?? const []))
             if (e is List && e.length >= 5) ForecastHour(time: '${e[0]}', tempC: _d(e[1]), code: _i(e[2]), day: _i(e[3]) != 0, rain: _i(e[4])),
@@ -610,6 +554,7 @@ class WeatherForecast {
   Map<String, dynamic> toJson() => {
         'city': city,
         'off': utcOffset,
+        if (curTempC != null) 'cur': [curTempC, curCode ?? 0],
         'h': [for (final e in hours) [e.time, e.tempC, e.code, e.day ? 1 : 0, e.rain]],
         'd': [
           for (final e in days) [e.date, e.hiC, e.loC, e.code, e.rain, e.feelsHiC, e.feelsLoC, e.windKmh, e.gustKmh, e.windDir, e.precipMm, e.uv, e.sunrise, e.sunset],

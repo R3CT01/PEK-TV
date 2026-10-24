@@ -17,7 +17,7 @@ import 'store.dart';
 import 'torrent.dart';
 import 'tokens.dart';
 import 'watched.dart';
-import 'weather.dart' show WeatherBadge;
+import 'weather.dart' show Weather, WeatherBadge;
 import 'widgets.dart';
 import 'art_cache.dart';
 
@@ -361,6 +361,16 @@ class _PluginViewState extends State<PluginView> {
         // Skins are PEK's official Skin maker's job; Python already checked its permission, and this is a second lock.
         if (widget.pluginId != 'skin-maker') continue;
         await _skinEffect(op, raw);
+      } else if (op == 'weather.set') {
+        // The Weather plugin choosing the app's city / unit (pek_ui.weather_set / weather_unit); a second lock after Python's.
+        if (widget.pluginId != 'weather') continue;
+        final lat = (raw['lat'] as num?)?.toDouble(), lon = (raw['lon'] as num?)?.toDouble();
+        final label = '${raw['label'] ?? ''}'.trim();
+        if (lat != null && lon != null && lat.isFinite && lon.isFinite && lat.abs() <= 90 && lon.abs() <= 180 && label.isNotEmpty && label.length <= 120) {
+          await Weather.setCity(lat, lon, label);
+        }
+        final u = raw['unit'];
+        if (u == 'C' || u == 'F') await Weather.setUnit(u as String);
       } else if (op == 'toast') {
         _toast('${raw['text'] ?? ''}');
       } else if (op == 'exit') {

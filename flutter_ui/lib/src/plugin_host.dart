@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'api.dart';
 import 'skins.dart';
 import 'store.dart';
+import 'weather.dart' show Weather;
 
 /// The Dart end of the plugin bridge (see FLUTTER_PLUGINS.md).
 ///
@@ -41,6 +42,7 @@ class PluginHost {
   static Map<String, dynamic> context({required bool isTv}) {
     final loc = PlatformDispatcher.instance.locale;
     final cc = (loc.countryCode ?? '').toUpperCase();
+    final city = Weather.city;
     return {
       'lang': cc.isEmpty ? loc.languageCode : '${loc.languageCode}-$cc',
       'region': cc.isEmpty ? 'US' : cc,
@@ -48,6 +50,8 @@ class PluginHost {
       'favorites': Store.pluginFavoriteKeys(),
       'streamers': streamers ?? const <Map<String, String>>[],
       'watched': Store.history().take(4000).map((e) => e.key).toList(),
+      // The app's city and unit. Python only hands them out through pek_ui.weather(), which needs the official "weather" permission.
+      'weather': {if (city != null) ...{'lat': city.lat, 'lon': city.lon, 'label': city.label}, 'unit': Weather.unit},
       // The skins on this device. Python only hands them out through pek_ui.skins(), which needs the official "skins" permission.
       'skins': [
         for (final s in Skins.all)

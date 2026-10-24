@@ -1,13 +1,21 @@
 {
   "name": "Weather",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "PEK",
-  "description": "Current weather and a 5-day forecast for a city you pick. Celsius or Fahrenheit. No account or key needed.",
+  "description": "Current weather and a 7-day forecast. Uses the same city and unit as PEK TV's dashboard Weather widget, so you only choose your city once. No account or key needed.",
   "icon": "icon.png",
   "permissions": {
-    "network": ["api.open-meteo.com", "geocoding-api.open-meteo.com"],
-    "storage": true
+    "network": [
+      "api.open-meteo.com",
+      "geocoding-api.open-meteo.com"
+    ],
+    "storage": true,
+    "weather": true
   },
-  "ui": { "navTab": "Weather" },
-  "flutter": { "screen": "screen.py" }
+  "ui": {
+    "navTab": "Weather"
+  },
+  "flutter": {
+    "screen": "screen.py"
+  }
 }

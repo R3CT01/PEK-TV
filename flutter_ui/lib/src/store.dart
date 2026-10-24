@@ -437,14 +437,13 @@ class Store {
   static String get _dashKey3 => _sc('pek_dashboard_v3'); // JSON list of {id, type, size, folder?}: the same shape the web UI saves
   static const dashTypes = <String, (String, String)>{
     'clock': ('Clock', 'The time and date'),
-    'weather': ('Weather', 'Conditions for your city'),
+    'weather': ('Weather', 'Conditions and forecast for your city'),
     'continue': ('Continue Watching', 'Pick up where you left off'),
     'recent': ('Recently Added', 'Newest movies in your library'),
     'favorites': ('Favorites', 'Your saved movies and shows'),
     'plugin': ('Plugin', 'A shortcut to a plugin'),
     // Added with the Add widget list (dash_widgets.dart). The web UI does not know these and drops them if it saves the layout.
     'nowplaying': ('Now Playing', 'The song that is playing, with controls'),
-    'forecast': ('Forecast', 'Scroll through the next hours or days'),
     'albums': ('Albums', 'A row of albums from your music'),
     'playlists': ('Playlists', 'Your playlists in a row'),
     'shows': ('TV Shows', 'A row of shows from your library'),
@@ -459,13 +458,13 @@ class Store {
   /// What the Add widget list offers, in groups (the built-in widgets; plugin shortcuts are listed under them).
   static const dashGroups = <(String, List<String>)>[
     ('Music', ['nowplaying', 'playlists', 'albums']),
-    ('Weather and time', ['clock', 'weather', 'forecast']),
+    ('Weather and time', ['clock', 'weather']),
     ('Movies and shows', ['continue', 'upnext', 'recent', 'watched', 'shows', 'favorites', 'stats', 'surprise']),
     ('Plugins', ['pinned']),
   ];
 
-  /// Tiles (a small box, 1 or 2 columns wide) versus rows of posters (full width): `tile: true` in DASH_TYPES.
-  static bool dashIsTile(String type) => const {'clock', 'weather', 'plugin', 'stats', 'surprise'}.contains(type);
+  /// Tiles (a small box, 1 or 2 columns wide) versus full-width cards and rows of posters (Weather is a full-width card): `tile: true` in DASH_TYPES.
+  static bool dashIsTile(String type) => const {'clock', 'plugin', 'stats', 'surprise'}.contains(type);
 
   static List<DashItem> dashboardDefault() => [for (final t in dashDefault) DashItem(t, t)];
 
@@ -476,7 +475,8 @@ class Store {
     final out = <DashItem>[];
     for (final w in raw) {
       if (w is! Map) continue;
-      final type = w['type'];
+      var type = w['type'];
+      if (type == 'forecast') type = 'weather'; // the Forecast widget was merged into Weather: one city, one card
       if (type is! String || !dashTypes.containsKey(type) || out.length >= 40) continue;
       final folder = type == 'plugin' ? '${w['folder'] ?? ''}' : '';
       if (type == 'plugin' && !RegExp(r'^[A-Za-z0-9_-]{1,80}$').hasMatch(folder)) continue;

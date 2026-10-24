@@ -22,7 +22,7 @@ import 'widgets.dart';
 /// The extra Dashboard modules (Add widget > Music, Weather, Library, Plugins). Each one is a self-contained widget: it loads
 /// what it needs, keeps itself up to date and takes `onLongPress` so a press-and-hold still opens Customize.
 ///
-/// Full-width modules: [NowPlayingCard], [ForecastCard], [AlbumsRow], [PlaylistsRow], [PinnedPluginsRow].
+/// Full-width modules: [NowPlayingCard], [WeatherCard], [AlbumsRow], [PlaylistsRow], [PinnedPluginsRow].
 /// Tiles (1 or 2 columns): [LibraryStatsTile], [SurpriseTile].
 
 final _mc = MusicController.instance;
@@ -190,18 +190,19 @@ class NowPlayingCard extends StatelessWidget {
   }
 }
 
-// ====================================================================== Forecast
+// ====================================================================== Weather
 
-/// A scrollable forecast: the next 24 hours, or the next 7 days (the person's choice, remembered). Same city and unit as the
-/// Weather tile; tap a card = Weather settings.
-class ForecastCard extends StatefulWidget {
-  const ForecastCard({super.key, this.onLongPress});
+/// The Weather widget: the temperature and conditions now, and under them a scrollable forecast, the next 24 hours or the next
+/// 7 days (the person's choice, remembered). One city and unit for the widget, the header badge and the Weather plugin; tap the
+/// temperature = Weather settings, tap a day = its details.
+class WeatherCard extends StatefulWidget {
+  const WeatherCard({super.key, this.onLongPress});
   final VoidCallback? onLongPress;
   @override
-  State<ForecastCard> createState() => _ForecastCardState();
+  State<WeatherCard> createState() => _WeatherCardState();
 }
 
-class _ForecastCardState extends State<ForecastCard> {
+class _WeatherCardState extends State<WeatherCard> {
   static const _kMode = 'pek_forecast_daily';
   WeatherForecast? _f;
   bool _loading = false;
@@ -337,7 +338,7 @@ class _ForecastCardState extends State<ForecastCard> {
     final rem = p.rem;
     final city = Weather.city;
     if (city == null) {
-      return DashTile(heading: 'Forecast', body: 'Tap to choose your city', onTap: _open, onLongPress: widget.onLongPress);
+      return DashTile(heading: 'Weather', body: 'Tap to choose your city', onTap: _open, onLongPress: widget.onLongPress);
     }
     final daily = _daily;
     final h12 = Clock.hour12(context);
@@ -377,21 +378,38 @@ class _ForecastCardState extends State<ForecastCard> {
         ),
       );
     }
+    // The reading right now: the forecast's own, else the last one the badge / old cache saved.
+    final last = Weather.last(city.label);
+    final curT = f?.curTempC ?? last?.tempC;
+    final curCond = f?.curCode != null ? Weather.describe(f!.curCode!) : (last?.condition ?? '');
+    final sub = [curCond, city.label].where((e) => e.isNotEmpty).join(' \u00b7 ');
     return GestureDetector(
       onLongPress: widget.onLongPress,
       behavior: HitTestBehavior.translucent,
       child: Container(
-        padding: EdgeInsets.fromLTRB(1.1 * rem, 1 * rem, 1.1 * rem, 1 * rem),
+        padding: EdgeInsets.fromLTRB(1.1 * rem, 0.9 * rem, 1.1 * rem, 1 * rem),
         decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(t.radius)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Expanded(
-              child: Text('Forecast \u00b7 ${city.label}', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w700)),
+          PekFocusable(
+            onTap: _open,
+            onLongPress: widget.onLongPress,
+            holdSelect: widget.onLongPress != null,
+            radius: 14,
+            padding: EdgeInsets.symmetric(horizontal: 0.4 * rem, vertical: 0.3 * rem),
+            child: SizedBox(
+              width: double.infinity,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(curT == null ? '--\u00b0' : Weather.format(curT), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: (p.isTv ? 1.6 : 2.2) * rem, fontWeight: FontWeight.w700, height: 1.1)),
+                SizedBox(height: 0.3 * rem),
+                Opacity(opacity: 0.75, child: Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, color: t.text))),
+              ]),
             ),
-            SizedBox(width: 0.5 * rem),
-            PekButton(compact: true, primary: !daily, label: 'Hourly', onTap: () => _setDaily(false)),
+          ),
+          SizedBox(height: 0.7 * rem),
+          Row(children: [
+            PekButton(compact: true, shrink: true, primary: !daily, label: 'Hourly', onTap: () => _setDaily(false)),
             SizedBox(width: 0.4 * rem),
-            PekButton(compact: true, primary: daily, label: 'Daily', onTap: () => _setDaily(true)),
+            PekButton(compact: true, shrink: true, primary: daily, label: 'Daily', onTap: () => _setDaily(true)),
           ]),
           SizedBox(height: 0.8 * rem),
           body,

@@ -227,6 +227,15 @@ install. Both end on the same install screen as the store
 - Not in the zip picker: the system file picker, and finding network devices from inside it (add the device as a media
   source in Settings, then it shows up under the picker's start list). Skins install from Settings > Appearance (see `SKINS.md`).
 
+## Weather (bundled, official): one city for the whole app
+The Weather plugin no longer keeps a city of its own. PEK TV's city and unit (the dashboard's Weather widget, the header badge, `s|weather`
+in the cloud) are the plugin's too, so a city is typed once. What it needed from the host:
+- Permission **`weather`**, reserved: `pek_flutter.OFFICIAL_WEATHER_PLUGINS = {"weather"}`; any other plugin that asks for it is refused when it opens.
+- `ui.weather()` -> `{"lat", "lon", "label", "unit"}` (`lat` / `lon` are `None` and `label` is `""` until a city is chosen); `ui.weather_set(lat, lon, label)`
+  and `ui.weather_unit("C" | "F")`. The city is sent to Python only through `ui.weather()` (`ui.ctx()` drops it).
+- Effect `weather.set`: `plugin_ui.dart` only runs it for `weather`, and checks the numbers and the name again before `Weather.setCity / setUnit`.
+- An older PEK TV has none of this: the plugin catches the error and keeps its own city and unit in `data/settings.json`, as version 1.0 did.
+
 ## Skin Maker (bundled, official)
 `plugins/skin-maker` replaces the Skin maker that used to be hard-coded in the app (`skin_maker.dart`, `skin_builder.dart`). It has a
 `screen.py` and an icon like any plugin, and it is built in: no Remove button, and it updates from the PEK Store Official shelf.
