@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'common.dart';
@@ -218,7 +219,23 @@ class _StoreBrowserState extends State<StoreBrowser> {
   static final Map<StoreKind, List<StoreItem>> _cache = {};
 
   final TextEditingController _q = TextEditingController();
-  final FocusNode _qFocus = FocusNode(debugLabel: 'store search');
+  // A one-line text box keeps the arrow keys for its caret, so the D-pad could get in but never out (only Back left). Up and
+  // Down now move the focus on, like they do everywhere else.
+  late final FocusNode _qFocus = FocusNode(debugLabel: 'store search', onKeyEvent: _searchKey);
+
+  KeyEventResult _searchKey(FocusNode node, KeyEvent e) {
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final k = e.logicalKey;
+    if (k == LogicalKeyboardKey.arrowDown) {
+      node.focusInDirection(TraversalDirection.down);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowUp) {
+      node.focusInDirection(TraversalDirection.up);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   List<StoreItem>? _items;
   String _error = '';

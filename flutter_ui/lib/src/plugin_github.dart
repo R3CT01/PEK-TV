@@ -72,7 +72,27 @@ class PekGithub {
     final res = await _api('$base/releases/latest');
     final options = <GithubOption>[];
 
+    // /releases/latest never returns a pre-release, and PEK's own workflow publishes pre-releases: with only those it answers
+    // 404 and only the source code was offered. Fall back to the newest published release, pre-release or not.
+    Map<String, dynamic>? newest;
     if (res.statusCode == 404) {
+      final list = await _api('$base/releases?per_page=10');
+      if (list.statusCode == 200) {
+        try {
+          final j = jsonDecode(utf8.decode(list.bodyBytes));
+          if (j is List) {
+            for (final r in j) {
+              if (r is Map && r['draft'] != true) {
+                newest = Map<String, dynamic>.from(r);
+                break;
+              }
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (res.statusCode == 404 && newest == null) {
       // No release: say so clearly, or fall back to the repository's own source code.
       final rr = await _api(base);
       if (rr.statusCode == 404) throw StoreException('GitHub has no public repository called $name. Check the spelling.');
@@ -83,8 +103,8 @@ class PekGithub {
       }
       return GithubRelease(owner: owner, repo: repo, tag: '', options: options);
     }
-    if (res.statusCode != 200) throw StoreException('GitHub gave an unexpected answer (HTTP ${res.statusCode}).');
-    final rel = _json(res);
+    if (newest == null && res.statusCode != 200) throw StoreException('GitHub gave an unexpected answer (HTTP ${res.statusCode}).');
+    final rel = newest ?? _json(res);
     final tag = '${rel['tag_name'] ?? ''}';
     final prefix = 'https://github.com/$owner/$repo/releases/download/'.toLowerCase();
     for (final a in ((rel['assets'] as List?) ?? const [])) {

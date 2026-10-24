@@ -128,7 +128,7 @@ class PekRoot extends StatelessWidget {
   Widget _build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final isTv = TvMode.isOn(!isPhone);
-    final rem = isTv ? (size.width * 0.015625).clamp(16.0, 64.0).toDouble() : 16.0;
+    final rem = isTv ? (size.width * 0.015625 * TvMode.size / 100).clamp(11.0, 64.0).toDouble() : 16.0;
     return PekScope(
       tokens: tokens,
       isTv: isTv,

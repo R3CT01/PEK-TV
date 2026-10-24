@@ -22,6 +22,11 @@ class TvMode {
   static const modeKey = 'pek_tv_mode';
   static const safeKey = 'pek_tv_safe';
   static const safeChoices = <int>[0, 2, 4, 6];
+
+  /// Interface size on a TV, percent of the old size. 85 is the default: the old size (100) was a bit large.
+  static const sizeKey = 'pek_tv_size';
+  static const sizeChoices = <(int, String)>[(65, 'Smallest'), (75, 'Smaller'), (85, 'Small'), (100, 'Original')];
+  static const defaultSize = 85;
   static const modes = <(String, String, String)>[
     ('auto', 'Auto', 'On for TV boxes, off on phones'),
     ('on', 'On', 'Always use the TV look'),
@@ -39,6 +44,16 @@ class TvMode {
   static int get safe {
     final v = int.tryParse(Store.strGet(safeKey, scoped: false) ?? '');
     return v != null && safeChoices.contains(v) ? v : 2;
+  }
+
+  static int get size {
+    final v = int.tryParse(Store.strGet(sizeKey, scoped: false) ?? '');
+    return v != null && v >= 50 && v <= 130 ? v : defaultSize;
+  }
+
+  static Future<void> setSize(int pct) async {
+    await Store.strSet(sizeKey, '${pct.clamp(50, 130)}', scoped: false);
+    changes.value++;
   }
 
   /// [tvDevice] = the host says this is a TV box (not a phone or tablet).
@@ -76,6 +91,13 @@ class TvModeSection extends StatelessWidget {
               onTap: () => TvMode.setMode(m.$1),
               trailing: Icon(m.$1 == TvMode.mode ? Icons.check_circle : Icons.circle_outlined, color: m.$1 == TvMode.mode ? t.accent : t.textMuted),
             ),
+          SizedBox(height: 0.5 * p.rem),
+          Text('Interface size on the TV', style: TextStyle(color: t.textMuted)),
+          SizedBox(height: 0.4 * p.rem),
+          Wrap(spacing: 0.5 * p.rem, runSpacing: 0.5 * p.rem, children: [
+            for (final s in TvMode.sizeChoices)
+              PekButton(label: s.$2, primary: TvMode.size == s.$1, onTap: () => TvMode.setSize(s.$1)),
+          ]),
           SizedBox(height: 0.5 * p.rem),
           Text('Screen margins (raise if your TV cuts off the edges)', style: TextStyle(color: t.textMuted)),
           SizedBox(height: 0.4 * p.rem),

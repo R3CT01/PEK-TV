@@ -312,14 +312,91 @@ class _PluginsPageState extends State<PluginsPage> {
 
 // ====================================================================== Settings
 
-class SettingsPage extends StatefulWidget {
+/// Settings: a short list of categories. Each one opens on its own screen instead of everything sitting on one long page.
+class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key, required this.padding});
   final EdgeInsets padding;
+
+  void _open(BuildContext context, String title, Widget Function() body) {
+    Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => SubScreen(title: title, body: Builder(builder: (c) => body()))));
+  }
+
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) {
+    final t = context.pek.tokens;
+    Widget row(String title, String subtitle, IconData icon, Widget Function() body) => ListRow(
+          leading: Icon(icon, color: t.accent),
+          title: title,
+          subtitle: subtitle,
+          trailing: Icon(Icons.chevron_right, color: t.textMuted),
+          onTap: () => _open(context, title, body),
+        );
+    return ListView(padding: padding, children: [
+      const Heading('Settings', weather: true),
+      row('Library', 'The folders PEK TV scans for movies, shows and music', Icons.folder_outlined, () => const _LibrarySettings()),
+      row('Account', 'Sign in, profiles and sync', Icons.person_outline, () => const _SettingsList(children: [AccountSection()])),
+      row('Appearance', 'Skins, layout and the activity display', Icons.palette_outlined, () => const _SettingsList(children: [AppearanceSection(), LayoutSection(), ActivitySection()])),
+      row('Playback', 'Subtitles, skip intro and online music', Icons.play_circle_outline, () => const _SettingsList(children: [SubtitleSection(), SkipSection(), MusicOnlineSection()])),
+      row('Plugins', 'Installing from GitHub and plugin posters', Icons.extension_outlined, () => const _SettingsList(children: [GithubInstallSection(), PluginPostersSection()])),
+      row('Advanced', 'TV mode and size, video and audio output, storage', Icons.tune, () => const _SettingsList(children: [TvModeSection(), VideoOutputSection(), AudioOutputSection(), StorageSection()])),
+      row('App', 'Exit PEK TV', Icons.power_settings_new, () => const _ExitSettings()),
+    ]);
+  }
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+/// The body of one settings category: its sections one under the other, with the page padding.
+class _SettingsList extends StatelessWidget {
+  const _SettingsList({required this.children});
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(padding: context.pek.pagePad, children: [
+      for (var i = 0; i < children.length; i++) ...[
+        if (i > 0) const ThinDivider(),
+        children[i],
+      ],
+    ]);
+  }
+}
+
+class _ExitSettings extends StatelessWidget {
+  const _ExitSettings();
+
+  Future<void> _exit(BuildContext context) async {
+    final p = context.pek;
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierColor: p.tokens.overlay,
+      builder: (c) => AlertDialog(
+        backgroundColor: p.tokens.glassStrong,
+        title: const Text('Are you sure you want to exit?'),
+        content: const Text('PEK TV will stop running and its temporary cache will be cleared.'),
+        actions: [
+          TextButton(autofocus: true, onPressed: () => Navigator.pop(c, false), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes, exit')),
+        ],
+      ),
+    );
+    if (yes == true) await PekPlayer.exitApp();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsList(children: [
+      Section(title: 'Exit', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: () => _exit(context)))]),
+    ]);
+  }
+}
+
+/// Settings > Library: the media sources.
+class _LibrarySettings extends StatefulWidget {
+  const _LibrarySettings();
+  @override
+  State<_LibrarySettings> createState() => _LibrarySettingsState();
+}
+
+class _LibrarySettingsState extends State<_LibrarySettings> {
   late Future<List<String>> _sources = Api.sources();
 
   Future<void> _addFolder() async {
@@ -343,32 +420,12 @@ class _SettingsPageState extends State<SettingsPage> {
     if (mounted) setState(() => _sources = Api.sources());
   }
 
-  Future<void> _exit() async {
-    final p = context.pek;
-    final yes = await showDialog<bool>(
-      context: context,
-      barrierColor: p.tokens.overlay,
-      builder: (c) => AlertDialog(
-        backgroundColor: p.tokens.glassStrong,
-        title: const Text('Are you sure you want to exit?'),
-        content: const Text('PEK TV will stop running and its temporary cache will be cleared.'),
-        actions: [
-          TextButton(autofocus: true, onPressed: () => Navigator.pop(c, false), child: const Text('Close')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Yes, exit')),
-        ],
-      ),
-    );
-    if (yes == true) await PekPlayer.exitApp();
-  }
-
   @override
   Widget build(BuildContext context) {
-    final p = context.pek;
-    final t = p.tokens;
-    final rem = p.rem;
-    return ListView(padding: widget.padding, children: [
-      const Heading('Settings', weather: true),
-      SettingsGroup(title: 'Library', children: [Section(
+    final t = context.pek.tokens;
+    final rem = context.pek.rem;
+    return _SettingsList(children: [
+      Section(
         title: 'Media sources',
         hint: 'Folders PEK TV scans for movies, shows and music. Removing one only forgets it; no files are deleted.',
         children: [
@@ -385,20 +442,7 @@ class _SettingsPageState extends State<SettingsPage> {
             PekButton(label: 'Add network folder', onTap: _addNetFolder),
           ]),
         ],
-      )]),
-      const SettingsGroup(title: 'Account', children: [AccountSection()]),
-      const SettingsGroup(title: 'Appearance', children: [AppearanceSection(), LayoutSection(), ActivitySection()]),
-      const SettingsGroup(title: 'Playback', children: [SubtitleSection(), SkipSection(), MusicOnlineSection()]),
-      const SettingsGroup(title: 'Plugins', children: [GithubInstallSection(), PluginPostersSection()]),
-      SettingsGroup(title: 'Advanced', hint: 'Most people never need these.', children: [
-        const TvModeSection(),
-        const VideoOutputSection(),
-        const AudioOutputSection(),
-        const StorageSection(),
-      ]),
-      SettingsGroup(title: 'App', children: [
-        Section(title: 'Exit', children: [Align(alignment: Alignment.centerLeft, child: PekButton(label: 'Exit PEK TV', onTap: _exit))]),
-      ]),
+      ),
     ]);
   }
 }

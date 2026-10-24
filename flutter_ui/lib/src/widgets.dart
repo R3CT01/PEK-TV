@@ -96,11 +96,11 @@ class _PekFocusableState extends State<PekFocusable> {
     final p = context.pek;
     final t = p.tokens;
     final focused = _focus && widget.enabled;
-    final shadow = p.isTv
-        ? [BoxShadow(color: t.borderFocus, spreadRadius: 0.2 * p.rem)]
-        : [BoxShadow(color: t.accentGlow, blurRadius: 10)];
-    final box = AnimatedContainer(
-      duration: const Duration(milliseconds: 100),
+    // On a TV the focus ring is drawn ON TOP of the box (foregroundDecoration). A solid BoxShadow behind a see-through focus
+    // fill shines through it and turns the whole row deep orange. No fade either: the old item lets go at once, so two
+    // items are never lit together.
+    final ringColor = (widget.focusBackground != null ? t.text : t.borderFocus).withAlpha(210);
+    final box = Container(
       padding: widget.padding,
       alignment: widget.alignment,
       constraints: widget.minHeight == null ? null : BoxConstraints(minHeight: widget.minHeight!),
@@ -109,8 +109,11 @@ class _PekFocusableState extends State<PekFocusable> {
         color: focused ? (widget.focusBackground ?? t.surfaceFocused) : widget.background,
         borderRadius: BorderRadius.circular(widget.radius),
         border: widget.borderColor == null ? null : Border.all(color: focused ? t.borderFocus : widget.borderColor!),
-        boxShadow: focused ? shadow : null,
+        boxShadow: focused && !p.isTv ? [BoxShadow(color: t.accentGlow, blurRadius: 10)] : null,
       ),
+      foregroundDecoration: focused && p.isTv
+          ? BoxDecoration(borderRadius: BorderRadius.circular(widget.radius), border: Border.all(color: ringColor, width: 0.16 * p.rem))
+          : null,
       child: widget.child,
     );
     return FocusableActionDetector(

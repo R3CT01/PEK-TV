@@ -123,6 +123,9 @@ class ListRow extends StatelessWidget {
       padding: EdgeInsets.only(bottom: 0.1 * rem),
       child: PekFocusable(
         autofocus: autofocus,
+        // A row whose only controls are buttons in [trailing] (the Plugins list) must not take the focus itself: it would
+        // light up as a whole, do nothing on OK and hide the buttons from the D-pad.
+        enabled: onTap != null || onLongPress != null,
         radius: 14,
         minHeight: p.isTv ? 3 * rem : null,
         padding: EdgeInsets.symmetric(horizontal: 0.5 * rem, vertical: 0.7 * rem),
