@@ -15,6 +15,7 @@ import 'plugin_host.dart' show PluginHost;
 import 'plugin_install_ui.dart';
 import 'plugin_store.dart' show PluginInstaller;
 import 'plugin_store_ui.dart';
+import 'store_browser.dart' show openPluginStore;
 import 'plugin_pins.dart';
 import 'plugin_updates.dart';
 import 'plugin_ui.dart';

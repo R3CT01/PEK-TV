@@ -98,7 +98,10 @@ Plugins can ship a Python `screen.py` that the Flutter UI draws natively (see `F
 Plugins > Open, or its own entry in the menu / More page.
 
 ## Plugin store
-Plugins > Browse the plugin store: the PEK Official and Community shelves, install and update with the warning and permissions screens (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`).
+Plugins > Browse the plugin store, and Settings > Appearance > Browse the skin store: one full-page store for both (`store_browser.dart`; the same worker, `kind=plugin` or `kind=skin`).
+- A search box that suggests as you type (names first, then authors: tap a name to open it, tap an author to show only theirs), the Official / Community shelves, a sort (best match, newest, oldest, name A-Z, author A-Z) and an author filter. "Newest" uses the `updated` time the worker already sends for every item.
+- Cards show the picture (a skin shows its own colours, drawn small from the skin's file, downloaded once per session), version, author, size, when it was uploaded, and an Installed / Update / New badge.
+- Opening a card goes to the same install screens as before: the warning and permissions screens for a plugin (`plugin_store.dart`, `plugin_store_ui.dart`; details in `FLUTTER_PLUGINS.md`), the colour preview for a skin (`skin_install_ui.dart`). Nothing installs from the browsing screen. A skin installed this way is remembered as `{'type': 'store', 'shelf': ...}` and shown as "PEK Store" under its name.
 
 ## TV mode
 Settings > **TV mode** (`tv_mode.dart`): Auto (on for TV boxes, off on phones) / On / Off, and Screen margins (None, Small 2 %, Medium 4 %,

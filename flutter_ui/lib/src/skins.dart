@@ -26,6 +26,9 @@ class Skin {
   final int updated;
 
   bool get fromGithub => source?['type'] == 'github';
+
+  /// Installed from the PEK Store: {'type': 'store', 'shelf': 'official' | 'community'}.
+  bool get fromStore => source?['type'] == 'store';
   bool get installed => id.startsWith(Skins.installedPrefix);
 
   Skin copyWith({String? id, String? name, String? description, PekTokens? tokens, String? author, String? version, Map<String, dynamic>? source, int? updated}) =>
@@ -238,7 +241,8 @@ class Skins {
       'r': s.tokens.radius.round(),
       if (src != null)
         'src': {
-          'type': src['type'] == 'github' ? 'github' : 'zip',
+          'type': src['type'] == 'github' ? 'github' : (src['type'] == 'store' ? 'store' : 'zip'),
+          if (src['type'] == 'store') 'shelf': src['shelf'] == 'official' ? 'official' : 'community',
           if (src['type'] == 'github') ...{'owner': _clip(src['owner'], 60), 'repo': _clip(src['repo'], 80), 'tag': _clip(src['tag'], 60), 'kind': _clip(src['kind'], 10)},
         },
     };
@@ -263,7 +267,7 @@ class Skins {
     if (sr is Map) {
       source = sr['type'] == 'github'
           ? {'type': 'github', 'owner': _clip(sr['owner'], 60), 'repo': _clip(sr['repo'], 80), 'tag': _clip(sr['tag'], 60), 'kind': _clip(sr['kind'], 10)}
-          : {'type': 'zip'};
+          : (sr['type'] == 'store' ? {'type': 'store', 'shelf': sr['shelf'] == 'official' ? 'official' : 'community'} : {'type': 'zip'});
     }
     return Skin(id, name.isEmpty ? 'My skin' : name, _clip(d['desc'], 200), tokens,
         custom: true, author: _clip(d['author'], 80), version: _clip(d['ver'], 20), source: source, updated: updated);

@@ -11,6 +11,7 @@ import 'plugin_github.dart' show PekGithub;
 import 'plugin_install_ui.dart' show openGithubInstall, openZipInstall;
 import 'plugin_ui.dart' show openPluginScreen;
 import 'skins.dart';
+import 'store_browser.dart' show openSkinStore;
 import 'store.dart';
 import 'subtitles.dart';
 import 'tokens.dart';
@@ -446,6 +447,7 @@ class AppearanceSection extends StatelessWidget {
   String _subtitle(Skin s) {
     final text = s.custom ? (s.description.isEmpty ? (s.installed ? 'Installed' : 'Made by you') : s.description) : s.description;
     if (s.fromGithub) return '$text \u00b7 Unverified, from GitHub: ${s.source?['owner']}/${s.source?['repo']}';
+    if (s.fromStore) return '$text \u00b7 PEK Store${s.author.isNotEmpty ? ' \u00b7 by ${s.author}' : ''}';
     if (s.installed && s.author.isNotEmpty) return '$text \u00b7 by ${s.author}';
     return text;
   }
@@ -478,7 +480,8 @@ class AppearanceSection extends StatelessWidget {
             ),
           SizedBox(height: 0.75 * p.rem),
           Wrap(spacing: 0.75 * p.rem, runSpacing: 0.75 * p.rem, children: [
-            PekButton(label: 'Make a skin', primary: true, shrink: true, onTap: () => AppearanceSection.openSkinMaker(context)),
+            PekButton(label: 'Browse the skin store', primary: true, shrink: true, onTap: () => openSkinStore(context)),
+            PekButton(label: 'Make a skin', shrink: true, onTap: () => AppearanceSection.openSkinMaker(context)),
             PekButton(label: 'Paste skin.json', shrink: true, onTap: () => AppearanceSection.openSkinMaker(context, paste: true)),
             PekButton(label: 'Install skin from .zip', shrink: true, onTap: () => openZipInstall(context, skin: true)),
             PekButton(label: 'Install skin from GitHub', shrink: true, onTap: () => _github(context)),

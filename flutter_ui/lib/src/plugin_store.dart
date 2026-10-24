@@ -39,14 +39,25 @@ class PekStoreApi {
     return Map<String, dynamic>.from(data);
   }
 
-  /// shelf: 'official' or 'community'.
-  static Future<List<StoreItem>> list(String shelf) async {
-    final j = await _get('/v1/store?shelf=${Uri.encodeQueryComponent(shelf)}&kind=plugin');
-    return [for (final e in ((j['items'] as List?) ?? const [])) if (e is Map) StoreItem.fromJson(Map<String, dynamic>.from(e))];
+  /// shelf: 'official' or 'community'. [kind]: 'plugin' or 'skin' (the same worker keeps both).
+  static Future<List<StoreItem>> list(String shelf, {String kind = 'plugin'}) async {
+    final j = await _get('/v1/store?shelf=${Uri.encodeQueryComponent(shelf)}&kind=${Uri.encodeQueryComponent(kind)}');
+    return _items(j);
   }
 
-  /// Downloads an item and turns it into what the install screen needs. [onProgress] gets (chunk, of chunks).
-  static Future<PreparedPlugin> download(StoreItem item, {void Function(int, int)? onProgress, bool official = false}) async {
+  /// Both shelves in one request (what the full-page store shows). Every item says which shelf it is on.
+  static Future<List<StoreItem>> listAll({String kind = 'plugin'}) async {
+    final j = await _get('/v1/store?kind=${Uri.encodeQueryComponent(kind)}');
+    return _items(j);
+  }
+
+  static List<StoreItem> _items(Map<String, dynamic> j) => [
+        for (final e in ((j['items'] as List?) ?? const [])) if (e is Map) StoreItem.fromJson(Map<String, dynamic>.from(e)),
+      ];
+
+  /// Downloads an item's chunks, checks the fingerprint and unpacks the files (plugins and skins are packed the same way).
+  /// [onProgress] gets (chunk, of chunks). Nothing is installed.
+  static Future<List<PluginFile>> fetchFiles(StoreItem item, {void Function(int, int)? onProgress}) async {
     final parts = StringBuffer();
     for (var i = 0; i < item.chunks; i++) {
       onProgress?.call(i, item.chunks);
@@ -66,6 +77,12 @@ class PekStoreApi {
     } catch (_) {
       throw const StoreException('The download was damaged. Try again.');
     }
+    return files;
+  }
+
+  /// Downloads a plugin and turns it into what the install screen needs. [onProgress] gets (chunk, of chunks).
+  static Future<PreparedPlugin> download(StoreItem item, {void Function(int, int)? onProgress, bool official = false}) async {
+    final files = await fetchFiles(item, onProgress: onProgress);
     final prep = PreparedPlugin.fromFiles(item.id, files);
     // A built-in plugin's update from the Official shelf is the one case the server lets replace a built-in plugin.
     if (official && PluginInstaller.stockIds.contains(item.id)) prep.official = true;
@@ -95,8 +112,14 @@ class StoreException implements Exception {
 }
 
 class StoreItem {
-  const StoreItem({required this.id, required this.name, required this.version, required this.author, required this.description, required this.size, required this.fp, required this.chunks, this.icon = ''});
+  const StoreItem({required this.id, required this.name, required this.version, required this.author, required this.description, required this.size, required this.fp, required this.chunks, this.icon = '', this.shelf = '', this.updated = 0});
   final String id, name, version, author, description, fp;
+
+  /// 'official' or 'community' (which shelf of the store the item is on).
+  final String shelf;
+
+  /// When the item was uploaded or last updated (ms since epoch, set by the store), 0 = unknown.
+  final int updated;
 
   /// The plugin's picture as a small data: address (made by the store from plugin.json "icon"), '' = none.
   final String icon;
@@ -112,6 +135,8 @@ class StoreItem {
         fp: '${j['fp'] ?? ''}',
         chunks: (j['chunks'] as num?)?.toInt() ?? 0,
         icon: '${j['icon'] ?? ''}'.startsWith('data:image/') ? '${j['icon']}' : '',
+        shelf: j['shelf'] == 'official' ? 'official' : 'community',
+        updated: (j['updated'] as num?)?.toInt() ?? 0,
       );
 
   /// The picture's bytes, or null.
