@@ -1,5 +1,6 @@
 package com.pektv.app.flutter
 
+import android.app.Activity
 import android.app.UiModeManager
 import android.content.ActivityNotFoundException
 import android.content.Context
@@ -14,6 +15,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
+import android.provider.OpenableColumns
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
@@ -30,6 +32,7 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -54,8 +57,15 @@ import java.util.concurrent.Executors
  *   pek/plugins     (MethodChannel)  call(json) -> json: a plugin's Python screen (plugins/<id>/screen.py, run by
  *                                    python/pek_flutter.py through Chaquopy); openUrl(url): an https link in the
  *                                    YouTube app or the browser; openApp({packages, url}): a streaming app. See FLUTTER_PLUGINS.md.
+ *                                    pickFile(): Android's own file picker for a plugin / skin .zip (no storage permission needed);
+ *                                    answers {name, bytes}, null when cancelled, or the error "no_picker" on a TV with no picker.
  */
 class FlutterHostActivity : FlutterActivity() {
+
+    private companion object {
+        const val PICK_FILE = 4717              // request code of the .zip file picker
+        const val MAX_PICK_BYTES = 16 * 1024 * 1024 // a plugin is at most 8 MB, a skin 6 MB
+    }
 
     private var mpv: MpvController? = null
     private var events: EventChannel.EventSink? = null
@@ -66,6 +76,73 @@ class FlutterHostActivity : FlutterActivity() {
 
     // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
     private val pluginPool = Executors.newCachedThreadPool()
+
+    // Install from .zip: the system file picker (Storage Access Framework). The person picks the file and Android hands this
+    // app just that one file, so no storage permission is needed and "All files access" is not required to see .zip files.
+    private var pickResult: MethodChannel.Result? = null
+
+    private fun pickFile(result: MethodChannel.Result) {
+        if (pickResult != null) {
+            result.error("busy", "A file is already being chosen.", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            // Zips come with several types depending on the app that saved them; octet-stream is what many downloads get.
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/zip", "application/x-zip-compressed", "application/x-zip", "multipart/x-zip", "application/octet-stream"),
+            )
+        }
+        pickResult = result
+        try {
+            startActivityForResult(intent, PICK_FILE)
+        } catch (e: ActivityNotFoundException) {
+            pickResult = null
+            result.error("no_picker", "This device has no file picker.", null)
+        } catch (e: Exception) {
+            pickResult = null
+            result.error("pick_failed", e.message ?: "The file picker could not be opened.", null)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_FILE) {
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val result = pickResult ?: return
+        pickResult = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            result.success(null) // cancelled
+            return
+        }
+        pluginPool.execute {
+            try {
+                var name = "plugin.zip"
+                contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) c.getString(0)?.let { if (it.isNotBlank()) name = it }
+                }
+                val out = ByteArrayOutputStream()
+                val buf = ByteArray(64 * 1024)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        if (out.size() > MAX_PICK_BYTES) throw IllegalStateException("That file is too big to be a plugin or a skin.")
+                    }
+                } ?: throw IllegalStateException("The file could not be opened.")
+                val bytes = out.toByteArray()
+                runOnUiThread { result.success(mapOf("name" to name, "bytes" to bytes)) }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("read_failed", e.message ?: "The file could not be read.", null) }
+            }
+        }
+    }
 
     private fun pythonCall(json: String): String = try {
         // MainActivity starts Python on its own thread at boot; start it here too if that has not happened yet.
@@ -326,6 +403,7 @@ class FlutterHostActivity : FlutterActivity() {
                         runOnUiThread { result.success(answer) }
                     }
                 }
+                "pickFile" -> pickFile(result)
                 "openUrl" -> result.success(openUrl(call.arguments as? String ?: ""))
                 "openApp" -> result.success(openStreamingApp(call.argument<String>("packages") ?: "", call.argument<String>("url") ?: ""))
                 else -> result.notImplemented()

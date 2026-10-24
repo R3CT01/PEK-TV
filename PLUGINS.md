@@ -56,7 +56,7 @@ PEK TV's server only answers the device it runs on. To let other devices on your
 
 ## Installing a plugin from a .zip
 
-In the app: **Plugins -> Install from .zip**, pick the file, check the permissions PEK TV
+In the app: **Plugins -> Install from .zip -> Choose a file** (Android's own file picker, so no "All files access" permission is needed), pick the file, check the permissions PEK TV
 shows, and confirm. To remove an installed plugin, hold its row on the Plugins page. Plugins that ship
 with PEK TV (`weather`, `tmdb-discover` and `skin-maker`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
 

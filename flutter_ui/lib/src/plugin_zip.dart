@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io' show ZLibDecoder;
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show MethodChannel, MissingPluginException, PlatformException;
 import 'package:http/http.dart' as http;
 
 import 'api.dart';
@@ -212,6 +213,11 @@ class _CapSink extends ByteConversionSinkBase {
 }
 
 /// One row of the .zip picker: a folder, or a .zip file small enough to be a plugin.
+/// This device has no system file picker.
+class NoSystemPicker implements Exception {
+  const NoSystemPicker();
+}
+
 class ZipEntry {
   const ZipEntry({required this.name, required this.path, required this.dir, required this.size});
   final String name, path;
@@ -228,6 +234,27 @@ class ZipListing {
 /// Finds .zip files through PEK TV's own server, so it also works on TV boxes that have no system file picker, and on
 /// network folders (SMB, NFS, FTP, WebDAV): `POST /api/plugins/browse` lists, `POST /api/plugins/fetch` reads one file.
 class ZipPicker {
+  static const _channel = MethodChannel('pek/plugins');
+
+  /// Android's own file picker (no storage permission, so no "All files access" needed): the person picks a .zip anywhere
+  /// (Downloads, Drive, a USB stick) and the app gets just that file. Null when they cancel. Throws [NoSystemPicker] when
+  /// this device has none (some TV boxes), and the screen then offers the in-app browser instead.
+  static Future<({String name, Uint8List bytes})?> pickNative() async {
+    try {
+      final r = await _channel.invokeMethod<Map<Object?, Object?>>('pickFile');
+      if (r == null) return null;
+      final bytes = r['bytes'];
+      if (bytes is! Uint8List || bytes.isEmpty) throw const StoreException('the file could not be read');
+      final name = '${r['name'] ?? 'plugin.zip'}';
+      return (name: name, bytes: bytes);
+    } on MissingPluginException {
+      throw const NoSystemPicker();
+    } on PlatformException catch (e) {
+      if (e.code == 'no_picker') throw const NoSystemPicker();
+      throw StoreException(e.message ?? 'the file could not be read');
+    }
+  }
+
   /// [path] is '@local' (this device), a library folder, or a network address.
   static Future<ZipListing> browse(String path) async {
     http.Response r;

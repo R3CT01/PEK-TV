@@ -214,8 +214,11 @@ Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.
 install. Both end on the same install screen as the store
 (`PluginInstallPage`: server dry run -> the author's warning -> permissions -> Install), so nothing installs by itself.
 
-- **.zip**: PEK TV's own picker, on `POST /api/plugins/browse` + `/api/plugins/fetch` (works on TV boxes and network folders;
-  it starts at *This device* and your media sources). `plugin_zip.dart` unpacks it in memory with the same limits as the server
+- **.zip**: **Choose a file** opens Android's own file picker (`pek/plugins` `pickFile` -> `FlutterHostActivity`, the Storage Access
+  Framework: the app is handed just the chosen file, so **no storage permission and no "All files access"** is needed to see .zip
+  files). On a device with no system picker (some TV boxes) it says so, and **Browse this device** is PEK TV's own browser, on
+  `POST /api/plugins/browse` + `/api/plugins/fetch` (also used for network folders and your media sources; on Android 11+ it only
+  lists .zip files once All files access is allowed). `plugin_zip.dart` unpacks it in memory with the same limits as the server
   (2 MB per file, 8 MB total, 400 files, CRC checked, inflate stops at the limit; no ZIP64 / encrypted / split zips). It needs no
   extra package (`dart:io` raw inflate). plugin.json at the top or inside one folder; a zip with `skin.json` is refused.
 - **GitHub**: type `owner/repo` or paste a link. `plugin_github.dart` asks `api.github.com` for the latest release (its .zip files

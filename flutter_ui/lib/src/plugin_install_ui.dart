@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -90,6 +91,24 @@ class _ZipPickerState extends State<_ZipPicker> {
     if (mounted) setState(() => _loading = false);
   }
 
+  /// Android's own file picker: works without "All files access". On a device that has none, the in-app browser is used.
+  Future<void> _pick() async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _error = '';
+    });
+    try {
+      final f = await ZipPicker.pickNative();
+      if (f != null) await _open(f.name, f.bytes);
+    } on NoSystemPicker {
+      if (mounted) setState(() => _error = 'This device has no file picker. Use This device below to browse for the file.');
+    } on StoreException catch (err) {
+      if (mounted) setState(() => _error = err.message);
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
   Future<void> _choose(ZipEntry e) async {
     if (_loading) return;
     setState(() {
@@ -99,41 +118,46 @@ class _ZipPickerState extends State<_ZipPicker> {
     try {
       final bytes = await ZipPicker.fetch(e.path);
       if (!mounted) return;
-      setState(() => _loading = false);
-      if (widget.skin) {
-        await Navigator.push<void>(
-          context,
-          MaterialPageRoute<void>(
-            builder: (_) => SubScreen(
-              title: e.name,
-              body: Builder(builder: (c) => SkinInstallPage(load: () async => SkinInstaller.prepare(bytes, fileName: e.name), padding: c.pek.pagePad)),
-            ),
-          ),
-        );
-        if (mounted) setState(() => _loading = false);
-        return;
-      }
-      await Navigator.push<void>(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => SubScreen(
-            title: e.name,
-            body: Builder(
-              builder: (c) => PluginInstallPage(
-                title: e.name,
-                shelf: 'zip',
-                source: 'zip',
-                load: (_) async => PluginZip.prepare(bytes, fileName: e.name),
-                padding: c.pek.pagePad,
-              ),
-            ),
-          ),
-        ),
-      );
+      await _open(e.name, bytes);
     } on StoreException catch (err) {
       if (mounted) setState(() => _error = err.message);
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// The install screens for a .zip that was read (picked with the system picker or from the in-app browser).
+  Future<void> _open(String name, Uint8List bytes) async {
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (widget.skin) {
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SubScreen(
+            title: name,
+            body: Builder(builder: (c) => SkinInstallPage(load: () async => SkinInstaller.prepare(bytes, fileName: name), padding: c.pek.pagePad)),
+          ),
+        ),
+      );
+      return;
+    }
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => SubScreen(
+          title: name,
+          body: Builder(
+            builder: (c) => PluginInstallPage(
+              title: name,
+              shelf: 'zip',
+              source: 'zip',
+              load: (_) async => PluginZip.prepare(bytes, fileName: name),
+              padding: c.pek.pagePad,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -147,7 +171,8 @@ class _ZipPickerState extends State<_ZipPicker> {
         _muted(context, widget.skin
             ? 'Choose the skin\u2019s .zip file. You will see what it is before anything is installed.'
             : 'Choose the plugin\u2019s .zip file. You will see what it asks for before anything is installed.'),
-        ListRow(autofocus: true, title: 'This device', subtitle: 'Downloads and other folders on this device', onTap: () => _go('@local')),
+        ListRow(autofocus: true, title: 'Choose a file', subtitle: 'Pick the .zip with Android\u2019s file picker (Downloads, Drive, a USB stick). No extra permission needed.', onTap: _pick),
+        ListRow(title: 'Browse this device', subtitle: 'Folders on this device. Android only shows .zip files here after you allow All files access', onTap: () => _go('@local')),
         for (final s in _sources) ListRow(title: s, subtitle: 'Media source', onTap: () => _go(s)),
       ]);
     } else {
