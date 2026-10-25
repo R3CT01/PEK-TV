@@ -106,19 +106,22 @@ def list_row(title, sub="", on=None, autofocus=""):
             "on": _sess().register(on, 0)}
 
 
-def poster_card(title, sub="", poster="", on=None, badge="", autofocus="", year=0, kind="movie"):
+def poster_card(title, sub="", poster="", on=None, badge="", autofocus="", year=0, kind="movie", backdrop="", wide=False):
     """A poster tile. The picture only loads from a host listed under permissions.network in plugin.json.
 
     Watched marks need nothing from the plugin: PEK TV puts a tick on a movie poster that is in Watch History and lets the
     person press and hold it to mark / un-mark it. Pass year= (and kind="show" for TV so it is never ticked as a movie)
     for an exact match; without a year PEK TV looks for one in the title or the sub line, then (Settings > Plugin posters)
-    matches by title alone. No "watched" permission is needed, and the plugin is never told the answer."""
+    matches by title alone. No "watched" permission is needed, and the plugin is never told the answer.
+
+    wide=True with backdrop= (a 16:9 picture) makes the card landscape on a TV; on a phone it stays the portrait poster."""
     try:
         yr = int(year or 0)
     except (TypeError, ValueError):
         yr = 0
     return {"t": "poster", "s": _s(title, 200), "sub": _s(sub, 300), "img": _s(poster, 600),
             "badge": _s(badge, 40), "af": _s(autofocus, 100), "yr": yr if 1880 <= yr <= 2200 else 0,
+            "wimg": _s(backdrop, 600), "wide": bool(wide),
             "k": "movie" if kind == "movie" else "other", "on": _sess().register(on, 0)}
 
 

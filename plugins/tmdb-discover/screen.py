@@ -19,6 +19,7 @@ import pek_ui as ui
 API = "https://api.themoviedb.org/3"                           # only used with a personal key
 PROXY = "https://hesper-tmdb.aquariusibeats.workers.dev"       # PEK TV's built-in access (it adds the key)
 IMG = "https://image.tmdb.org/t/p/w342"
+IMG_WIDE = "https://image.tmdb.org/t/p/w780"          # backdrops (16:9) for landscape cards on a TV
 IMG_PERSON = "https://image.tmdb.org/t/p/w185"
 IMG_LOGO = "https://image.tmdb.org/t/p/w92"
 PER_ROW = 18
@@ -105,6 +106,7 @@ def map_item(r, kind):
         "id": r.get("id"), "type": t, "title": str(title), "alt": str(alt), "year": year_of(date),
         "poster": IMG + r["poster_path"] if r.get("poster_path") else "",
         "poster_path": r.get("poster_path") or "",
+        "backdrop": IMG_WIDE + r["backdrop_path"] if r.get("backdrop_path") else "",
         "overview": str(r.get("overview") or ""),
         "rating": float(vote) if isinstance(vote, (int, float)) else 0.0,
         "votes": r.get("vote_count") or 0,
@@ -574,6 +576,8 @@ def open_detail(item):
         if not item["poster_path"] and j.get("poster_path"):
             item["poster_path"] = j["poster_path"]
             item["poster"] = IMG + j["poster_path"]
+            if j.get("backdrop_path") and not item.get("backdrop"):
+                item["backdrop"] = IMG_WIDE + j["backdrop_path"]
         if not item["rating"]:
             item["rating"] = float(j.get("vote_average") or 0)
             item["votes"] = j.get("vote_count") or 0
@@ -608,7 +612,7 @@ def on_launch(intent):
     except (TypeError, ValueError):
         yr = 0
     open_detail({"id": tmdb_id, "type": kind, "title": str(intent.get("title") or "Loading\u2026"), "alt": "",
-                 "year": yr, "poster": "", "poster_path": "", "overview": "", "rating": 0.0, "votes": 0})
+                 "year": yr, "poster": "", "poster_path": "", "backdrop": "", "overview": "", "rating": 0.0, "votes": 0})
 
 
 # ---------------------------------------------------------------- favorites
@@ -764,7 +768,8 @@ def poster(item, focus_key=""):
     mine = owned(item)
     return ui.poster_card(item["title"], sub + " \u00b7 In your library" if mine else sub, item["poster"],
                           lambda: open_detail(item), badge="In library" if mine else "", autofocus=focus_key,
-                          year=item["year"] or 0, kind="show" if item["type"] == "tv" else "movie")
+                          year=item["year"] or 0, kind="show" if item["type"] == "tv" else "movie",
+                          backdrop=item.get("backdrop", ""), wide=True)
 
 
 def poster_row(items, focus_key=""):

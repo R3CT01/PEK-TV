@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -431,6 +431,10 @@ class _PluginViewState extends State<PluginView> {
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
+    // A trailer is the first thing in the scrolling page (full width; the top half of the screen on a TV), so it scrolls
+    // away with the page instead of staying pinned and squeezing the buttons under it. It is not restarted when the
+    // screen is redrawn (same key), and it stops once it has scrolled well out of view.
+    final video = (_error == null && _tree != null) ? _findVideo(_tree!) : null;
     final Widget body;
     if (_error != null) {
       body = ListView(padding: widget.padding, children: [
@@ -441,24 +445,37 @@ class _PluginViewState extends State<PluginView> {
     } else if (_tree == null) {
       body = Center(child: CircularProgressIndicator(color: t.accent));
     } else {
-      body = ListView(controller: _scroll, padding: widget.padding, children: [_node(_tree!)]);
+      body = LayoutBuilder(builder: (context, box) {
+        final heroH = video == null
+            ? 0.0
+            : (p.isTv ? box.maxHeight * 0.5 : math.min(box.maxWidth * 9 / 16, box.maxHeight * 0.5));
+        return ListView(controller: _scroll, padding: EdgeInsets.zero, addAutomaticKeepAlives: false, children: [
+          if (video != null)
+            SizedBox(
+              height: heroH,
+              child: Stack(fit: StackFit.expand, children: [
+                _PluginTrailer(key: ValueKey('trailer-${video['id']}'), id: '${video['id']}', autoplay: video['autoplay'] == true, muted: video['muted'] == true),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: 2.5 * p.rem,
+                  child: IgnorePointer(
+                    child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [t.bg.withAlpha(0), t.bg]))),
+                  ),
+                ),
+              ]),
+            ),
+          Padding(padding: widget.padding, child: _node(_tree!)),
+        ]);
+      });
     }
     final bar = (_busy || _pending > 0)
         ? LinearProgressIndicator(minHeight: 3, color: t.accent, backgroundColor: Colors.transparent)
         : const SizedBox(height: 3);
-    // A trailer stays pinned at the top (and is not restarted when the screen is redrawn), like ui.video in the web UI.
-    final video = (_error == null && _tree != null) ? _findVideo(_tree!) : null;
     final content = Column(children: [
       bar,
       if (widget.embedded) Padding(padding: EdgeInsets.fromLTRB(widget.padding.left, 0.5 * p.rem, widget.padding.right, 0), child: const Align(alignment: Alignment.centerRight, child: WeatherBadge())),
-      if (video != null)
-        Padding(
-          padding: EdgeInsets.fromLTRB(widget.padding.left, 0.5 * p.rem, widget.padding.right, 0.25 * p.rem),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: _PluginTrailer(key: ValueKey('trailer-${video['id']}'), id: '${video['id']}', autoplay: video['autoplay'] == true, muted: video['muted'] == true),
-          ),
-        ),
       Expanded(child: body),
     ]);
     if (widget.embedded) return content;
@@ -514,7 +531,7 @@ class _PluginViewState extends State<PluginView> {
       case 'grid':
         return _grid(n);
       case 'video':
-        return const SizedBox.shrink(); // pinned above the list by build()
+        return const SizedBox.shrink(); // drawn as the first item of the list by build()
       case 'text':
         return Text('${n['s'] ?? ''}', softWrap: true, style: TextStyle(fontSize: 0.92 * rem, height: 1.45, color: t.text.withAlpha(230)));
       case 'heading':
@@ -546,7 +563,11 @@ class _PluginViewState extends State<PluginView> {
       case 'listrow':
         return ListRow(title: '${n['s'] ?? ''}', subtitle: '${n['sub'] ?? ''}', autofocus: _af(n), onTap: on.isEmpty ? null : () => _send(on));
       case 'poster':
-        final img = '${n['img'] ?? ''}';
+        final img0 = '${n['img'] ?? ''}';
+        final wimg = '${n['wimg'] ?? ''}';
+        // On a TV a card that has a landscape picture (backdrop) is drawn 16:9; on a phone it stays a portrait poster.
+        final landscape = p.isTv && n['wide'] == true;
+        final img = landscape && wimg.isNotEmpty ? wimg : img0;
         final ptitle = '${n['s'] ?? ''}';
         final psub = '${n['sub'] ?? ''}';
         final isMovie = '${n['k'] ?? 'movie'}' == 'movie';
@@ -558,6 +579,7 @@ class _PluginViewState extends State<PluginView> {
             title: ptitle,
             sub: psub,
             image: img.isNotEmpty && PluginHosts.allows(_hosts, img) ? img : '',
+            landscape: landscape,
             badge: '${n['badge'] ?? ''}',
             watched: isMovie && _posterWatched(ptitle, pyear),
             autofocus: _af(n),
@@ -588,19 +610,19 @@ class _PluginViewState extends State<PluginView> {
         if (st == null) return const SizedBox.shrink();
         final submit = '${n['submit'] ?? ''}';
         if ('${n['s'] ?? ''}'.isEmpty) {
-          return _SearchBar(
+          return _DpadEscape(controller: st.controller, child: _SearchBar(
             controller: st.controller,
             hint: '${n['ph'] ?? ''}'.isEmpty ? 'Search' : '${n['ph']}',
             onSubmit: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
-          );
+          ));
         }
-        return PekField(
+        return _DpadEscape(controller: st.controller, child: PekField(
           label: '${n['s'] ?? ''}',
           controller: st.controller,
           hint: '${n['ph'] ?? ''}',
           obscure: n['secret'] == true,
           onSubmitted: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
-        );
+        ));
       case 'toggle':
         final checked = n['on_'] == true;
         return ToggleRow(title: '${n['s'] ?? ''}', on: checked, onTap: () => _send(on, value: !checked));
@@ -667,14 +689,18 @@ class _PluginViewState extends State<PluginView> {
     final rem = p.rem;
     final kids = _kids(n);
     final gap = (p.compact ? 0.6 : 0.9) * rem;
-    final minW = ((n['min'] as num?) ?? 150).toDouble() * rem / 16;
     if (kids.isEmpty) return const SizedBox.shrink();
+    // A grid of landscape cards (TV) is wider per tile and its pictures are 16:9.
+    final wide = p.isTv && kids.first['t'] == 'poster' && kids.first['wide'] == true;
+    // Landscape cards on a TV are a medium size: 8.5 rem wide (about 6 per row on a 1080p screen). A lone card (the
+    // featured one) keeps the size the plugin asked for.
+    final minW = wide && kids.length > 1 ? 8.5 * rem : ((n['min'] as num?) ?? 150).toDouble() * rem / 16;
     if (n['scroll'] == true) {
       // Row height = poster (2:3) + caption (title + sub line, scaled with the system text size) + list padding + slack,
       // so the card never overflows by a fraction of a pixel (the yellow/black "BOTTOM OVERFLOWED" stripes).
       final textScale = MediaQuery.textScalerOf(context).scale(1.0);
       return SizedBox(
-        height: minW * 1.5 + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
+        height: minW / (wide ? 16 / 9 : 2 / 3) + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: EdgeInsets.symmetric(vertical: 0.4 * rem, horizontal: 0.3 * rem),
@@ -685,7 +711,8 @@ class _PluginViewState extends State<PluginView> {
       );
     }
     return LayoutBuilder(builder: (context, box) {
-      final cols = math.max(1, ((box.maxWidth + gap) / (minW + gap)).floor());
+      var cols = math.max(1, ((box.maxWidth + gap) / (minW + gap)).floor());
+      if (wide) cols = cols.clamp(5, 7); // 5 to 7 landscape cards per row
       final w = (box.maxWidth - gap * (cols - 1)) / cols;
       return Wrap(spacing: gap, runSpacing: gap, children: [for (final k in kids) SizedBox(width: w, child: _node(k))]);
     });
@@ -730,14 +757,40 @@ class _PluginTrailerState extends State<_PluginTrailer> {
     // "Error 153 / Video player configuration error" is YouTube refusing an embed that has no referrer. A page loaded from
     // a bare URL sends none, so the player sits in an iframe of a page whose base address is YouTube's own host (the only
     // one the navigation filter above allows) and says where it is embedded from.
+    //
+    // The trailer plays like a native video: no YouTube controls, title bar, logo, play button or pause / end screens.
+    //  - controls=0 / disablekb / fs=0 / iv_load_policy=3 / cc_load_policy=0 switch the player's own UI off.
+    //  - The iframe is scaled up 20 % and centred ("cover"), so whatever chrome is left (title strip, logo) falls outside
+    //    the clipped area, and it takes no touches (pointer-events:none).
+    //  - It stays invisible until the player reports "playing" (so the big play button and thumbnail never show), hides
+    //    again if it pauses or ends, and loops.
     const origin = 'https://www.youtube-nocookie.com';
     final id = Uri.encodeComponent(widget.id);
-    final q = 'autoplay=${play ? 1 : 0}&mute=${widget.muted ? 1 : 0}&playsinline=1&rel=0&modestbranding=1&origin=${Uri.encodeComponent(origin)}';
+    final q = 'autoplay=${play ? 1 : 0}&mute=${widget.muted ? 1 : 0}&controls=0&disablekb=1&fs=0&iv_load_policy=3&cc_load_policy=0'
+        '&playsinline=1&rel=0&modestbranding=1&loop=1&playlist=$id&enablejsapi=1&origin=${Uri.encodeComponent(origin)}';
+    const css = 'html,body{margin:0;height:100%;background:#000;overflow:hidden}'
+        'iframe{position:absolute;left:50%;top:50%;border:0;pointer-events:none;opacity:0;transition:opacity .4s;'
+        'width:calc(max(100vw,177.78vh)*1.2);height:calc(max(56.25vw,100vh)*1.2);transform:translate(-50%,-50%)}'
+        'iframe.on{opacity:1}';
+    const js = "var f=document.getElementById('f'),got=false;"
+        "function post(o){try{f.contentWindow.postMessage(JSON.stringify(o),'*')}catch(e){}}"
+        "function listen(){post({event:'listening',id:1,channel:'widget'});"
+        "post({event:'command',func:'addEventListener',args:['onStateChange'],id:1,channel:'widget'})}"
+        "f.addEventListener('load',function(){var n=0;(function t(){if(got||n++>40)return;listen();setTimeout(t,500)})()});"
+        "window.addEventListener('message',function(e){var d;"
+        "try{d=typeof e.data==='string'?JSON.parse(e.data):e.data}catch(x){return}"
+        "if(!d)return;got=true;var s=d.event==='onStateChange'?d.info:(d.info&&d.info.playerState);"
+        "if(s===undefined||s===null)return;"
+        "if(s===1)f.className='on';"
+        "else if(s===2||s===5||s===-1)f.className='';"
+        "else if(s===0){f.className='';post({event:'command',func:'seekTo',args:[0,true]});"
+        "post({event:'command',func:'playVideo',args:[]})}});"
+        "setTimeout(function(){if(!got)f.className='on'},9000);";
     final html = '<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta name="referrer" content="strict-origin-when-cross-origin">'
-        '<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{position:absolute;inset:0;width:100%;height:100%;border:0}</style></head>'
-        '<body><iframe src="$origin/embed/$id?$q" title="Trailer" referrerpolicy="strict-origin-when-cross-origin" '
-        'allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe></body></html>';
+        '<style>$css</style></head>'
+        '<body><iframe id="f" src="$origin/embed/$id?$q" title="Trailer" referrerpolicy="strict-origin-when-cross-origin" '
+        'allow="autoplay; encrypted-media; picture-in-picture" tabindex="-1"></iframe><script>$js</script></body></html>';
     unawaited(c.loadHtmlString(html, baseUrl: '$origin/'));
     _controller = c;
   }
@@ -746,19 +799,12 @@ class _PluginTrailerState extends State<_PluginTrailer> {
   Widget build(BuildContext context) {
     final p = context.pek;
     final c = _controller;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 720),
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(14),
-          child: ColoredBox(
-            color: Colors.black,
-            child: c == null
-                ? Center(child: PekButton(shrink: true, label: 'Play trailer', primary: true, onTap: () => setState(() => _start(play: true))))
-                : ExcludeFocus(excluding: p.tvDevice, child: WebViewWidget(controller: c)),
-          ),
-        ),
+    return ClipRect(
+      child: ColoredBox(
+        color: Colors.black,
+        child: c == null
+            ? Center(child: PekButton(shrink: true, label: 'Play trailer', primary: true, onTap: () => setState(() => _start(play: true))))
+            : ExcludeFocus(excluding: p.tvDevice, child: WebViewWidget(controller: c)),
       ),
     );
   }
@@ -800,9 +846,9 @@ class _PluginEpisode extends StatelessWidget {
           SizedBox(width: 0.8 * rem),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, fontWeight: FontWeight.w600, height: 1.25, color: t.text)),
+              Text(title, maxLines: p.compact ? null : 2, overflow: p.compact ? TextOverflow.visible : TextOverflow.ellipsis, style: TextStyle(fontSize: 0.95 * rem, fontWeight: FontWeight.w600, height: 1.25, color: t.text)),
               if (meta.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.15 * rem), child: Text(meta, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.8 * rem, color: t.textMuted))),
-              if (text.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.3 * rem), child: Text(text, maxLines: p.compact ? 2 : 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.82 * rem, height: 1.35, color: t.textMuted))),
+              if (text.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.3 * rem), child: Text(text, maxLines: p.compact ? null : 3, overflow: p.compact ? TextOverflow.visible : TextOverflow.ellipsis, style: TextStyle(fontSize: 0.82 * rem, height: 1.35, color: t.textMuted))),
             ]),
           ),
         ]),
@@ -815,10 +861,11 @@ class _PluginEpisode extends StatelessWidget {
 /// loads from a host the plugin listed under permissions.network; without one (or when it fails) the tile shows the
 /// title on a plain surface.
 class _PluginPoster extends StatelessWidget {
-  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap, this.watched = false, this.onLongPress});
+  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap, this.watched = false, this.landscape = false, this.onLongPress});
   final String title, sub, image, badge;
   final bool autofocus;
   final bool watched; // in Watch History: a tick in the corner
+  final bool landscape; // TV: 16:9 backdrop card instead of a 2:3 poster
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -842,7 +889,7 @@ class _PluginPoster extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: 2 / 3,
+            aspectRatio: landscape ? 16 / 9 : 2 / 3,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(p.compact ? 12 : 14),
               child: ColoredBox(
@@ -851,7 +898,7 @@ class _PluginPoster extends StatelessWidget {
                   if (image.isEmpty)
                     plain()
                   else
-                    ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, placeholder: (_) => plain(), errorBuilder: (_, __, ___) => plain()),
+                    ArtImage(image, fit: BoxFit.cover, cacheWidth: landscape ? 640 : 400, placeholder: (_) => plain(), errorBuilder: (_, __, ___) => plain()),
                   if (watched)
                     Positioned(
                       top: 6,
@@ -1072,5 +1119,44 @@ class _PluginSliderState extends State<_PluginSlider> {
       ),
       SizedBox(width: 3.5 * p.rem, child: Text('${_v.round()}${widget.unit}', style: TextStyle(color: t.textMuted))),
     ]);
+  }
+}
+
+
+/// A text box takes the arrow keys for its caret, so on a remote the focus got stuck in it. Up and Down always leave the
+/// box; Left leaves it when the caret is at the start (or the box is empty) and Right when it is at the end. The move is a
+/// normal focus move, so it lands on whatever is next to the box.
+class _DpadEscape extends StatelessWidget {
+  const _DpadEscape({required this.controller, required this.child});
+  final TextEditingController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, KeyEvent e) {
+        if (e is KeyUpEvent) return KeyEventResult.ignored;
+        final k = e.logicalKey;
+        final sel = controller.selection;
+        final atStart = !sel.isValid || (sel.isCollapsed && sel.baseOffset <= 0);
+        final atEnd = !sel.isValid || (sel.isCollapsed && sel.baseOffset >= controller.text.length);
+        TraversalDirection? d;
+        if (k == LogicalKeyboardKey.arrowDown) {
+          d = TraversalDirection.down;
+        } else if (k == LogicalKeyboardKey.arrowUp) {
+          d = TraversalDirection.up;
+        } else if (k == LogicalKeyboardKey.arrowLeft && atStart) {
+          d = TraversalDirection.left;
+        } else if (k == LogicalKeyboardKey.arrowRight && atEnd) {
+          d = TraversalDirection.right;
+        }
+        if (d == null) return KeyEventResult.ignored;
+        if (e is KeyDownEvent) FocusManager.instance.primaryFocus?.focusInDirection(d);
+        return KeyEventResult.handled;
+      },
+      child: child,
+    );
   }
 }

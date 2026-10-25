@@ -70,3 +70,8 @@ movies and shows, a **Play with ...** button opens that plugin on the title.
 
 ## 1.7.1
 - Pictures no longer stay blank until you refresh: a TMDb request that fails (a cold proxy, a 429 / 5xx answer, a dropped connection) is tried again by itself for up to about 11 seconds before the row shows an error. Posters that could not load are asked for again by the app.
+
+## 1.7.2
+- Trailer is full width and covers the top half of the screen on a TV, plays with no YouTube controls, play button or icons, and scrolls away with the page instead of staying pinned over the buttons.
+- Remote: the D-pad no longer gets stuck in search boxes.
+- Movie and show cards are landscape on a TV and portrait on a phone.
