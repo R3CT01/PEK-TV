@@ -104,8 +104,11 @@ class SubScreen extends StatelessWidget {
 
 /// `ui.listRow(title, subtitle, onTap)`.
 class ListRow extends StatelessWidget {
-  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.onLongPress, this.trailing, this.leading, this.autofocus = false, this.highlight = false});
+  const ListRow({super.key, required this.title, this.subtitle = '', this.onTap, this.onLongPress, this.trailing, this.leading, this.autofocus = false, this.highlight = false, this.trailingBelow = false});
   final VoidCallback? onLongPress;
+  /// Put [trailing] on its own line under the text instead of beside it. For rows with several buttons on a phone,
+  /// where a side-by-side layout leaves the text a sliver and the buttons overflow.
+  final bool trailingBelow;
   final bool highlight;
   final String title;
   final String subtitle;
@@ -113,6 +116,11 @@ class ListRow extends StatelessWidget {
   final Widget? trailing;
   final Widget? leading; // a picture at the left
   final bool autofocus;
+
+  Widget _text(dynamic t, double rem) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, fontSize: rem, color: highlight ? t.accent : null)),
+        if (subtitle.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.15 * rem), child: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.82 * rem))),
+      ]);
 
   @override
   Widget build(BuildContext context) {
@@ -131,16 +139,20 @@ class ListRow extends StatelessWidget {
         padding: EdgeInsets.symmetric(horizontal: 0.5 * rem, vertical: 0.7 * rem),
         onTap: onTap,
         onLongPress: onLongPress,
-        child: Row(children: [
-          if (leading != null) ...[leading!, SizedBox(width: 0.8 * rem)],
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: highlight ? FontWeight.w700 : FontWeight.w500, fontSize: rem, color: highlight ? t.accent : null)),
-              if (subtitle.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.15 * rem), child: Text(subtitle, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontSize: 0.82 * rem))),
-            ]),
-          ),
-          if (trailing != null) ...[SizedBox(width: rem), trailing!],
-        ]),
+        child: trailingBelow && trailing != null
+            ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  if (leading != null) ...[leading!, SizedBox(width: 0.8 * rem)],
+                  Expanded(child: _text(t, rem)),
+                ]),
+                SizedBox(height: 0.6 * rem),
+                Align(alignment: Alignment.centerLeft, child: trailing!),
+              ])
+            : Row(children: [
+                if (leading != null) ...[leading!, SizedBox(width: 0.8 * rem)],
+                Expanded(child: _text(t, rem)),
+                if (trailing != null) ...[SizedBox(width: rem), trailing!],
+              ]),
       ),
     );
   }

@@ -486,6 +486,8 @@ class FlutterHostActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        splash?.dismissNow()   // the splash is its own window; close it with the activity
+        splash = null
         pluginPool.shutdown()
         AppUpdater.onStatus = null
         updateChannel = null

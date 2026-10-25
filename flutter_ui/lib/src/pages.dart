@@ -290,16 +290,14 @@ class _PluginsPageState extends State<PluginsPage> {
                   if (PluginUpdates.github.value.containsKey(pl.folder)) 'update available: ${PluginUpdates.github.value[pl.folder]!.release.tag}',
                   pl.description,
                 ].where((s) => s.isNotEmpty).join(' \u00b7 '),
-                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                trailingBelow: context.pek.compact,
+                trailing: Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, crossAxisAlignment: WrapCrossAlignment.center, children: [
                   if (pl.flutterScreen) ...[
                     PekButton(compact: true, primary: true, label: 'Open', onTap: () => openPluginScreen(context, pluginId: pl.folder, title: pl.navTab.isEmpty ? pl.name : pl.navTab)),
-                    SizedBox(width: 0.5 * rem),
                     PekButton(compact: true, label: PluginPins.isPinned(pl.folder) ? 'Unpin' : 'Pin', onTap: () => _togglePin(pl)),
-                    SizedBox(width: 0.5 * rem),
                   ],
                   if (PluginUpdates.github.value.containsKey(pl.folder)) ...[
                     PekButton(compact: true, primary: true, label: 'Update', onTap: () => PluginUpdates.openGithubUpdate(context, PluginUpdates.github.value[pl.folder]!)),
-                    SizedBox(width: 0.5 * rem),
                   ],
                   if (!(pl.builtin || PluginInstaller.stockIds.contains(pl.folder))) PekButton(compact: true, label: 'Remove', onTap: () => _remove(pl)),
                 ]),

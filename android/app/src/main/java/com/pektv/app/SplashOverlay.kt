@@ -1,6 +1,11 @@
 package com.pektv.app
 
 import android.app.Activity
+import android.app.Dialog
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.os.Build
+import android.view.WindowManager
 import android.content.res.Configuration
 import android.media.MediaPlayer
 import android.net.Uri
@@ -28,6 +33,12 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
     private val root = FrameLayout(activity)
     private val video = VideoView(activity)
 
+    // The splash lives in its own window (a Dialog), not inside the activity's view tree. Flutter's SurfaceView is set to
+    // draw on top of everything in the activity window (transparent background mode), so a video added as a normal view,
+    // even with setZOrderMediaOverlay, ends up BEHIND Flutter's first frame and is never seen. A separate window always
+    // sits above all of the activity's surfaces.
+    private var dialog: Dialog? = null
+
     private var videoDone = false
     private var flutterReady = false
     private var serverReady = false
@@ -42,10 +53,28 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
         // Not skippable: touches and keys (including Back) are swallowed while the splash is up.
         root.setOnKeyListener { _, _, _ -> true }
 
-        video.setZOrderMediaOverlay(true)   // above Flutter's own surface
         root.addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
-        activity.addContentView(root, FrameLayout.LayoutParams(-1, -1))
+
+        val d = Dialog(activity, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        d.setCancelable(false)
+        d.setOnKeyListener { _, _, _ -> true }   // not skippable: keys (including Back) are swallowed
+        d.setContentView(root, FrameLayout.LayoutParams(-1, -1))
+        d.window?.let { w ->
+            w.setBackgroundDrawable(ColorDrawable(activity.getColor(R.color.pek_splash_bg)))
+            w.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+            w.setWindowAnimations(0)
+            w.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+            if (Build.VERSION.SDK_INT >= 28) {
+                w.attributes = w.attributes.also { it.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
+            }
+            @Suppress("DEPRECATION")
+            w.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+        }
+        dialog = d
+        try { d.show() } catch (e: Throwable) { dialog = null }
         root.requestFocus()
 
         video.setOnPreparedListener { mp: MediaPlayer ->
@@ -72,6 +101,15 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
     }
 
     /** Called from FlutterActivity.onFlutterUiDisplayed(). A short pause lets Flutter swap its loading screen for the app. */
+    /** Drops the splash window right away (the activity is going away, so the window must not leak). */
+    fun dismissNow() {
+        removed = true
+        giveUp?.let { handler.removeCallbacks(it) }
+        try { video.stopPlayback() } catch (_: Throwable) {}
+        try { dialog?.dismiss() } catch (_: Throwable) {}
+        dialog = null
+    }
+
     fun flutterShown() {
         handler.postDelayed({ flutterReady = true; maybeRemove() }, 500)
     }
@@ -104,7 +142,8 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
         removed = true
         giveUp?.let { handler.removeCallbacks(it) }
         root.animate().alpha(0f).setDuration(250).withEndAction {
-            (root.parent as? android.view.ViewGroup)?.removeView(root)
+            try { dialog?.dismiss() } catch (_: Throwable) {}
+            dialog = null
             onGone()
         }.start()
     }
