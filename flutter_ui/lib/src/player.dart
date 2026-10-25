@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'activity.dart';
 import 'api.dart';
 import 'cloud.dart';
+import 'live_tv.dart';
 import 'mpv.dart';
 import 'music_controller.dart';
 import 'plugin_hooks.dart';
@@ -23,7 +24,7 @@ import 'torrent.dart';
 /// Remote / D-pad:  Select = play / pause   Left / Right = -10 s / +10 s   Up = show controls
 ///                  Down = audio and subtitles   Back = close
 class PlayerScreen extends StatefulWidget {
-  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume, this.nextFor, this.torrentHash, this.onClose});
+  const PlayerScreen({super.key, required this.url, required this.title, this.startSec = 0, this.resume, this.nextFor, this.torrentHash, this.onClose, this.live});
   final String url;
   final String title;
   final double startSec;
@@ -39,6 +40,10 @@ class PlayerScreen extends StatefulWidget {
 
   /// Called when the player closes for good (a torrent is stopped and its temporary data deleted).
   final VoidCallback? onClose;
+
+  /// A live channel started by a plugin with the "live" permission (pek_ui.live_play). Live has no seek bar and no end; when the
+  /// plugin ships a live file the player also gets the channel switcher and the TV guide (the tab on the right edge).
+  final LiveSource? live;
 
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
@@ -65,6 +70,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _leaving = false; // replaced by the next episode: the shared player must not be torn down
   bool _hookStarted = false; // plugins with the "playback" permission were told playback began
   bool _hookPaused = false;
+
+  // Live TV (widget.live): the plugin's channels and guide, the channel playing, and the guide itself.
+  LiveTv? _tv;
+  String _liveId = '';
+  late String _title = widget.title;
+  bool _guideOpen = false;
+  Rect? _rect;
+  bool get _live => widget.live != null;
   final ValueNotifier<bool> _nextVisible = ValueNotifier(false);
   final ValueNotifier<int?> _countdown = ValueNotifier(null);
   Timer? _countTimer;
@@ -79,6 +92,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player.reset();
     _save = Timer.periodic(const Duration(seconds: 10), (_) => _record());
     _player.load(widget.url, startSec: widget.startSec, title: widget.title);
+    final live = widget.live;
+    if (live != null) {
+      _liveId = live.channelId;
+      _tv = LiveTv(live.pluginId)
+        ..addListener(_onTv)
+        ..start();
+    }
     _player.ended.addListener(_onEnded);
     _player.failed.addListener(_onFailed);
     _player.playing.addListener(_onPlaying);
@@ -118,6 +138,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _nextVisible.dispose();
     _countdown.dispose();
     _toastTimer?.cancel();
+    _tv?.removeListener(_onTv);
+    _tv?.dispose();
     if (!_leaving) {
       unawaited(_player.destroy());
       _player.reset();
@@ -258,11 +280,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // The file would not open (the host already showed a message): leave the player.
   void _onFailed() {
     if (!_player.failed.value || !mounted || _leaving) return;
+    if (_live) {
+      _toast('This channel is not working right now.'); // a dead stream must not close the player: the person is flicking through channels
+      return;
+    }
     Navigator.of(context).maybePop();
   }
 
   void _onEnded() {
     if (!_player.ended.value || !mounted || _leaving) return;
+    if (_live) return; // a live stream that stops is not "the end of the film"
     if (_next != null && !_nextDismissed && _nextEverShown) {
       _startCountdown();
     } else {
@@ -301,6 +328,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (_guideOpen) return KeyEventResult.ignored; // the guide has its own keys
     final k = e.logicalKey;
     final isOk = k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.gameButtonA;
     final isArrow = k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown;
@@ -319,6 +347,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (e is KeyDownEvent) _player.togglePause();
       _poke();
       return KeyEventResult.handled;
+    }
+    if (_live) {
+      // Live has nothing to seek: Right opens the guide, the channel keys switch channel.
+      if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.mediaFastForward) {
+        if (e is KeyDownEvent) _openGuide();
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind) {
+        _poke();
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.channelUp || k == LogicalKeyboardKey.mediaTrackNext || k == LogicalKeyboardKey.channelDown || k == LogicalKeyboardKey.mediaTrackPrevious) {
+        if (e is KeyDownEvent) _step(k == LogicalKeyboardKey.channelUp || k == LogicalKeyboardKey.mediaTrackNext ? 1 : -1);
+        return KeyEventResult.handled;
+      }
     }
     if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind || k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.mediaFastForward) {
       final back = k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind;
@@ -344,6 +387,89 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
+  }
+
+  // ------------------------------------------------------------------------------------------------ live TV
+
+  void _onTv() {
+    if (mounted) setState(() {}); // the guide tab appears once the plugin has answered `list`
+  }
+
+  /// The guide: the picture shrinks into the top left corner and keeps playing, the channels go down beside and below it.
+  void _openGuide() {
+    final tv = _tv;
+    if (tv == null || !tv.available || _guideOpen) return;
+    _hide?.cancel();
+    setState(() {
+      _guideOpen = true;
+      _controls = false;
+    });
+    _applyRect(force: true);
+  }
+
+  void _closeGuide() {
+    if (!_guideOpen) return;
+    setState(() => _guideOpen = false);
+    _rect = null;
+    unawaited(_player.fullscreen().catchError((_) {}));
+    _rootNode.requestFocus();
+    _poke();
+  }
+
+  void _applyRect({bool force = false}) {
+    final r = liveVideoRect(MediaQuery.sizeOf(context));
+    if (!force && _rect == r) return;
+    _rect = r;
+    unawaited(_player.setMiniRect(r).catchError((_) {}));
+  }
+
+  /// OK on a channel in the guide: the playing one closes the guide (full screen), another one is tuned in.
+  void _pick(String id) {
+    if (id == _liveId) {
+      _closeGuide();
+    } else {
+      unawaited(_switchTo(id));
+    }
+  }
+
+  void _step(int by) {
+    final id = _tv?.neighbour(_liveId, by);
+    if (id != null) unawaited(_switchTo(id));
+  }
+
+  Future<void> _switchTo(String id) async {
+    final tv = _tv;
+    if (tv == null || id == _liveId) return;
+    final r = await tv.url(id);
+    if (!mounted) return;
+    if (r == null) {
+      _toast('That channel could not be opened.');
+      return;
+    }
+    setState(() {
+      _liveId = id;
+      _title = r.title.isEmpty ? tv.nameOf(id) : r.title;
+    });
+    _player.reset();
+    await _player.load(r.url, title: _title);
+    if (_guideOpen && mounted) _applyRect(force: true); // load() always starts full screen
+    unawaited(_banner(id));
+  }
+
+  /// "Name / Now: ... / Next: ..." for a moment after a channel change.
+  Future<void> _banner(String id) async {
+    final tv = _tv;
+    if (tv == null) return;
+    tv.wantNow([id]);
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (!mounted || id != _liveId) return;
+    final n = liveNowSec(), info = tv.now[id];
+    final lines = [
+      tv.nameOf(id),
+      if (info?.cur != null) 'Now: ${info!.cur!.title} (${liveSpan(info.cur!.end - n)} left)',
+      if (info?.next != null) 'Next: ${info!.next!.title}  ${liveClock(info.next!.start)}',
+    ];
+    _toast(lines.join('\n'));
   }
 
   Future<void> _tracks() async {
@@ -408,6 +534,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_guideOpen) {
+      // a turned screen changes the corner the picture shrinks into
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _guideOpen) _applyRect();
+      });
+    }
+    return PopScope(
+      canPop: !_guideOpen, // Back closes the guide first, then the player
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _guideOpen) _closeGuide();
+      },
+      child: _screen(),
+    );
+  }
+
+  Widget _screen() {
     return Scaffold(
       backgroundColor: Colors.transparent, // the video surface is behind Flutter
       body: Focus(
@@ -455,6 +597,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ),
               Positioned(right: 16, top: 0, bottom: 0, child: Center(child: _nextCard())),
+              if (_live && !_guideOpen && (_tv?.available ?? false))
+                Positioned(
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(
+                    child: AnimatedOpacity(
+                      opacity: _controls ? 1 : 0,
+                      duration: const Duration(milliseconds: 120),
+                      child: IgnorePointer(ignoring: !_controls, child: LiveGuideTab(onTap: _openGuide)),
+                    ),
+                  ),
+                ),
+              if (_guideOpen && _tv != null) Positioned.fill(child: LiveGuide(tv: _tv!, currentId: _liveId, onPick: _pick, onClose: _closeGuide)),
               if (_toastText != null)
                 Positioned(
                   left: 24,
@@ -471,11 +627,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ExcludeFocus(
-                excluding: !_controls,
+                excluding: !_controls || _guideOpen,
                 child: IgnorePointer(
-                ignoring: !_controls,
+                ignoring: !_controls || _guideOpen,
                 child: AnimatedOpacity(
-                  opacity: _controls ? 1 : 0,
+                  opacity: _controls && !_guideOpen ? 1 : 0,
                   duration: const Duration(milliseconds: 120),
                   child: RepaintBoundary(child: Theme(data: ThemeData.dark(useMaterial3: true), child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: _overlay()))),
                 ),
@@ -581,7 +737,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             children: [
               _glassBtn(Icons.arrow_back, () => Navigator.of(context).maybePop()),
               const SizedBox(width: 12),
-              Expanded(child: Text(widget.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w600, letterSpacing: 0.2, color: _fg))),
+              Expanded(child: Text(_title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17.5, fontWeight: FontWeight.w600, letterSpacing: 0.2, color: _fg))),
             ],
           ),
         ),
@@ -594,14 +750,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: 30, child: ExcludeFocus(child: RepaintBoundary(child: _seekBar()))),
+              if (_live) const SizedBox(height: 8) else SizedBox(height: 30, child: ExcludeFocus(child: RepaintBoundary(child: _seekBar()))),
               const SizedBox(height: 4),
               Row(
                 children: [
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerLeft,
-                      child: ValueListenableBuilder<double>(
+                      child: _live
+                          ? Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.circle, size: 10, color: Color(0xFFE5484D)),
+                              const SizedBox(width: 8),
+                              Text('LIVE', style: timeStyle.copyWith(letterSpacing: 1.6)),
+                            ])
+                          : ValueListenableBuilder<double>(
                         valueListenable: _player.position,
                         builder: (_, pos, __) => ValueListenableBuilder<double>(
                           valueListenable: _player.duration,
@@ -614,18 +776,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   ),
-                  _glassBtn(Icons.replay_10, () { _seekBy(-10); _poke(); }),
+                  _live ? _glassBtn(Icons.skip_previous, () { _step(-1); _poke(); }) : _glassBtn(Icons.replay_10, () { _seekBy(-10); _poke(); }),
                   const SizedBox(width: 16),
                   ValueListenableBuilder<bool>(
                     valueListenable: _player.playing,
                     builder: (_, p, __) => _glassBtn(p ? Icons.pause : Icons.play_arrow, () { _player.togglePause(); _poke(); }, size: 56, icon_: 30, node: _playNode),
                   ),
                   const SizedBox(width: 16),
-                  _glassBtn(Icons.forward_10, () { _seekBy(10); _poke(); }),
+                  _live ? _glassBtn(Icons.skip_next, () { _step(1); _poke(); }) : _glassBtn(Icons.forward_10, () { _seekBy(10); _poke(); }),
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerRight,
-                      child: _glassBtn(Icons.subtitles_outlined, _tracks),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        if (_live && (_tv?.available ?? false)) ...[
+                          _glassBtn(Icons.view_list, _openGuide),
+                          const SizedBox(width: 12),
+                        ],
+                        _glassBtn(Icons.subtitles_outlined, _tracks),
+                      ]),
                     ),
                   ),
                 ],

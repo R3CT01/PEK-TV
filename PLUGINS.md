@@ -20,6 +20,7 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with PEK TV runs *
 
 - `network`: https host names only (no IP addresses, no `localhost`). `*.x.com` matches subdomains. Poster art, provider logos and the YouTube trailer player (`ui.video`, host `www.youtube-nocookie.com`) are only allowed from hosts listed here.
 - `storage`: a small private key/value store, plus read access to `plugins/<id>/data/`.
+- `live`: lets the plugin play live TV streams in PEK TV's player (`ui.live_play`) and add a channel guide to it (`"flutter": {"live": "live.py"}`). `epg`: lets it read TV guide (XMLTV) files from its `network` hosts (`pek_host.fetch_epg`). See `FLUTTER_PLUGINS.md`, "Live TV".
 - `library`: lets the plugin's **Python backend** call `pek_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
 - No permission listed means no access.
 - `flutter` (required): `{ "screen": "screen.py" }` names the Python screen PEK TV draws. See `FLUTTER_PLUGINS.md`.

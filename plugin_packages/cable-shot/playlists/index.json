@@ -1,0 +1,41 @@
+{
+ "v": 2,
+ "playlists": [
+  {
+   "id": "us",
+   "name": "us",
+   "count": 1481,
+   "parts": [
+    "us.1.json"
+   ],
+   "source": "https://iptv-org.github.io/iptv/countries/us.m3u",
+   "added": "2026-10-12"
+  },
+  {
+   "id": "news",
+   "name": "news",
+   "count": 1012,
+   "parts": [
+    "news.1.json"
+   ],
+   "source": "https://iptv-org.github.io/iptv/categories/news.m3u",
+   "added": "2026-10-12"
+  }
+ ],
+ "epg": {
+  "urls": [
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-1.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-2.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-3.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-4.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-5.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-6.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-7.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-8.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-9.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-10.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-11.xml",
+   "https://raw.githubusercontent.com/R3CT01/cable-guide/main/guide/guide-12.xml"
+  ]
+ }
+}

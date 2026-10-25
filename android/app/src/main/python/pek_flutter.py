@@ -37,9 +37,11 @@ OFFICIAL_WEATHER_PLUGINS = {"weather"}       # the only plugin that may ask for 
 RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS}   # host -> the only plugins that may list it
 HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
 HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited", "profile_removed"}
+LIVE_LIMIT = 12.0                     # seconds one live query (the player asking for the channel list, now / next, the guide) may take
+LIVE_OPS = {"list", "now", "guide", "url"}
 HOOK_EFFECTS = {"watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many"}   # all a hook may ask Flutter to do
 ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many", "torrent.play", "toast", "exit",
-                   "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set"}
+                   "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set", "live.play"}
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 _SESSIONS = {}
@@ -47,6 +49,8 @@ _SESSIONS_LOCK = threading.Lock()
 _HOOKS = {}                           # plugin id -> Session that runs hooks.py (separate from the screen's session)
 _HOOKS_LOCK = threading.Lock()
 _HOOK_FILE = re.compile(r"^[a-z0-9_]{1,40}\.py$")
+_LIVE = {}                            # plugin id -> Session that answers the player's live TV questions (flutter.live, e.g. live.py)
+_LIVE_LOCK = threading.Lock()
 _IMPORT_LOCK = threading.Lock()       # pek_host / pek_ui are swapped into sys.modules while a screen is imported
 
 
@@ -521,26 +525,27 @@ def _files_stamp(folder):
     return newest
 
 
-def _hook_session(pid, req):
-    """The running hook session of a plugin (loading it, or loading it again after an update). (session, error)."""
+def _file_session(store, lock, pid, req, perm, key, what):
+    """The running session of a plugin's hooks file (key "hooks") or live file (key "live"): loaded on first use, and again
+    after the plugin was updated. (session, error). Both kinds live in their own session, apart from the screen's."""
     base = _plugins_dir(req)
     folder = os.path.join(base, pid) if base else ""
     if not folder or not os.path.isdir(folder):
         return None, "plugin %s is not installed" % pid
-    with _HOOKS_LOCK:
+    with lock:
         stamp = _files_stamp(folder)
-        sess = _HOOKS.get(pid)
+        sess = store.get(pid)
         if sess is not None and sess.stamp == stamp:
             return sess, None
-        _HOOKS.pop(pid, None)
+        store.pop(pid, None)
         manifest, err = g.load_manifest(folder)
         if err:
             return None, "plugin.json: %s" % err
         perms = manifest.get("permissions", {}) or {}
         fl = manifest.get("flutter")
-        fname = fl.get("hooks") if isinstance(fl, dict) else None
-        if not perms.get("playback") or not isinstance(fname, str) or not _HOOK_FILE.match(fname):
-            return None, "this plugin does not ask for playback hooks"
+        fname = fl.get(key) if isinstance(fl, dict) else None
+        if not perms.get(perm) or not isinstance(fname, str) or not _HOOK_FILE.match(fname):
+            return None, "this plugin does not ask for %s" % what
         if not os.path.isfile(os.path.join(folder, fname)):
             return None, "%s is missing" % fname
         hosts = [str(h).lower() for h in (perms.get("network", []) or [])]
@@ -551,7 +556,7 @@ def _hook_session(pid, req):
         if not trusted:
             problems = g.scan_plugin_folder(folder)
             if problems:
-                log("REFUSED hooks of '%s': %s" % (pid, problems[0]))
+                log("REFUSED %s of '%s': %s" % (key, pid, problems[0]))
                 return None, "the safety scan refused this plugin: " + problems[0]
             g._install_hook()
         sess = Session(pid, folder, manifest, sandboxed=not trusted)
@@ -559,9 +564,14 @@ def _hook_session(pid, req):
         with sess.lock:
             err = sess.load(fname[:-3], run_start=False)
         if err:
-            return None, "could not start the hooks: %s" % err
-        _HOOKS[pid] = sess
+            return None, "could not start the %s: %s" % (key, err)
+        store[pid] = sess
         return sess, None
+
+
+def _hook_session(pid, req):
+    """The running hook session of a plugin (loading it, or loading it again after an update). (session, error)."""
+    return _file_session(_HOOKS, _HOOKS_LOCK, pid, req, "playback", "hooks", "playback hooks")
 
 
 def _hook(req):
@@ -590,7 +600,63 @@ def _hook(req):
     return {"ok": True, "effects": effects}
 
 
-_OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close, "hook": _hook}
+# ---------------------------------------------------------------------------------------------------------
+# Live TV: the player asks the plugin about its channels (the "live" permission + "flutter": {"live": "live.py"})
+# ---------------------------------------------------------------------------------------------------------
+
+def _clean_query(q):
+    """What the player may ask: an op from LIVE_OPS and a few plain fields. Nothing else reaches the plugin."""
+    if not isinstance(q, dict) or q.get("op") not in LIVE_OPS:
+        return None
+    out = {"op": q["op"]}
+    if q["op"] in ("now", "guide"):
+        ids = q.get("ids")
+        out["ids"] = [str(i)[:60] for i in (ids if isinstance(ids, list) else [])[:200]]
+    if q["op"] == "guide":
+        out["from"] = _int(q.get("from"), 0, 4102444800)
+        out["to"] = _int(q.get("to"), 0, 4102444800)
+    if q["op"] == "url":
+        out["id"] = str(q.get("id") or "")[:60]
+    return out
+
+
+def _live(req):
+    pid = str(req.get("id") or "")
+    if not _ID.match(pid):
+        return _fail("bad plugin id")
+    query = _clean_query(req.get("query"))
+    if query is None:
+        return _fail("bad live query")
+    sess, err = _file_session(_LIVE, _LIVE_LOCK, pid, req, "live", "live", "live TV")
+    if sess is None:
+        return _fail(err)
+    fn = getattr(sess.module, "on_query", None)
+    if not callable(fn):
+        return _fail("the live file has no on_query(query)")
+    ctx = req.get("ctx") if isinstance(req.get("ctx"), dict) else {}
+    with sess.lock:
+        sess.ctx = ctx
+        sess.effects = []
+        value, err = _guarded(sess, lambda: fn(query), LIVE_LIMIT)
+        sess.effects = []                 # a live query can only answer; it cannot ask the app to do anything
+    if err:
+        log("'%s' on_query(%s) failed: %s" % (pid, query["op"], err))
+        return _fail(str(err)[:300])
+    if query["op"] == "url":              # the address goes to PEK's player, so it gets the same checks as ui.live_play()
+        try:
+            value = {"url": pek_ui._live_url(value.get("url")), "title": str(value.get("title") or "")[:120]}
+        except (ValueError, AttributeError) as e:
+            return _fail("that channel's address was refused: %s" % e)
+    try:
+        text = json.dumps(value)
+    except (TypeError, ValueError):
+        return _fail("on_query() must return plain data (lists, dicts, text, numbers)")
+    if len(text) > 1500000:
+        return _fail("the answer is too big (over 1.5 MB)")
+    return {"ok": True, "data": value}
+
+
+_OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close, "hook": _hook, "live": _live}
 
 
 def call(text):

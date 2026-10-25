@@ -49,6 +49,8 @@ class PluginHost {
       'lang': cc.isEmpty ? loc.languageCode : '${loc.languageCode}-$cc',
       'region': cc.isEmpty ? 'US' : cc,
       'tv': isTv,
+      // How far the device clock is ahead of UTC right now, in seconds: pek_ui.tz_offset() hands it out, for showing local times.
+      'tz': DateTime.now().timeZoneOffset.inSeconds,
       // The open profile's id (never its name): pek_ui.profile() hands it out, so a plugin can keep one account or setting per profile.
       'profile': Store.profileId,
       'favorites': Store.pluginFavoriteKeys(),
@@ -102,6 +104,10 @@ class PluginHost {
   /// belongs to (the one open when it happened), which the hook reads with pek_ui.profile().
   static Future<Map<String, dynamic>> hook(String id, Map<String, dynamic> event, {String profile = ''}) =>
       _call({'op': 'hook', 'id': id, 'event': event, 'ctx': <String, dynamic>{'profile': profile}});
+
+  /// Asks a plugin's live file (`flutter.live`, needs the "live" permission) one of the four live TV questions the player has:
+  /// list, now, guide, url (live_tv.dart). Returns {ok, data} or {ok: false, error}. pek_flutter.py cleans the question.
+  static Future<Map<String, dynamic>> live(String id, Map<String, dynamic> query) => _call({'op': 'live', 'id': id, 'query': query, 'ctx': <String, dynamic>{'tz': DateTime.now().timeZoneOffset.inSeconds}});
 
   /// A streaming app (the first installed of [packages], a comma list), on the title's page when it supports the link,
   /// else the app, else [url] in the browser. The activity only opens packages from its allow-list.

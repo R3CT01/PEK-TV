@@ -192,6 +192,60 @@ Reserved hosts: `hesper-tmdb...` is for `tmdb-discover` only (`RESERVED_HOSTS` i
 
 The Trakt plugin (`plugin_packages/trakt/`, tests in `tools/test_trakt_plugin.py`) is the reference user of all this.
 
+## Live TV: channels, the TV guide and the guide reader (`live` and `epg` permissions)
+
+A plugin that is a TV directory (Cable Shot is the reference, `plugin_packages/cable-shot/`) needs three things a normal screen has no
+way to do, so the sandbox has them:
+
+```json
+"permissions": { "network": ["raw.githubusercontent.com"], "storage": true, "live": true, "epg": true },
+"flutter": { "screen": "screen.py", "live": "live.py" }
+```
+
+**1. Play a channel in PEK's own player (`live`).** `ui.live_play(url, title, channel)` from a tap handler. The address must be `http://`
+or `https://` with a real host: no sign-in in the address, nothing on this device or the home network (`localhost`, `.local`, a private
+IP number), at most 2000 characters. Python checks it (`pek_ui._live_url`), `plugin_ui.dart` checks the scheme again. `channel` is the
+plugin's own id for the channel. The player is PEK's: the plugin never touches the stream. A live channel has no seek bar and no end; a
+stream that fails shows a message instead of closing the player.
+
+**2. The guide in the player (`flutter.live`).** When the plugin ships a live file, the player asks it four questions and draws the answers
+itself (`flutter_ui/lib/src/live_tv.dart`). `live.py` defines `on_query(query)`:
+
+| `query["op"]` | extra fields | answer |
+|---|---|---|
+| `list` | | `{"guide": bool, "refreshing": bool, "channels": [[id, name, group, has_guide], ...]}` |
+| `now` | `ids` (up to 200) | `{id: [[start, stop, title] or 0, [start, stop, title] or 0]}`: on now, next |
+| `guide` | `ids`, `from`, `to` (seconds since 1970) | `{id: [[start, stop, title, desc], ...]}` (up to 60 each) |
+| `url` | `id` | `{"url": ..., "title": ...}`; the address goes through the same checks as `live_play` |
+
+Any other op, or extra fields, never reach the plugin (`pek_flutter._clean_query`). A query may take 12 s and answer at most 1.5 MB. Like a
+hooks file it has its **own session** (separate from the screen's), is scanned like `screen.py`, reloads when the plugin is updated, and
+can only answer: effects it asks for are dropped. It may call `ui.background(work, done, fail)` to read something in the background
+(Cable Shot reads its guide that way) and keep module state between queries. The screen and the live file share the plugin's `data/` folder.
+
+What the person sees: while a channel plays, a little **GUIDE** tab sits on the right edge of the picture (press Right on the remote, or
+tap it, or use the list button in the controls). It shrinks the picture into the top left corner (`setMiniRect`, the same call the old
+mini player used) and opens the guide: details and description of the highlighted channel beside the picture, the channels going down
+below it with what is on (progress bar, minutes left) and what follows. Up / Down move, Channel Up / Down jump 8, OK tunes a channel
+(OK on the one playing returns to full screen), Left / Back close the guide. With the guide closed, Channel Up / Down (or the
+previous / next buttons) switch channel and show a short now / next banner.
+
+**3. Read a TV guide file (`epg`).** `h.fetch_epg(url, want_ids=None, want_names=None, back_hours=3, ahead_hours=36)` downloads ONE XMLTV file
+(xml or xml.gz, up to 12 MB, 40 MB unpacked) from a host in `permissions.network` and returns only what the plugin asked for:
+`{"programmes": {channel id: [[start, stop, title, desc], ...]}, "names": {channel id: [h.epg_norm names]}, "channels", "kept", "bytes"}`.
+`want_ids` are the plugin's guide ids (matched case-insensitively), `want_names` are `h.epg_norm(name)` of its channels: a channel whose id
+is not wanted is still kept when one of its display names matches. Titles are cut to 120 characters, descriptions to 240, 80 programmes
+per channel. The reader is host code (`pek_epg.py`): it cuts the text with regular expressions and decodes only the standard entities and
+numeric references, so a file cannot expand entities or pull anything in. One file per call, so each is its own `ui.background` job.
+Use `h.write_json` (1 MB per file) to keep the result in `data/`.
+
+**Also new for plugins**: `h.read_bundled_text(name)` / `h.read_bundled_json(name)` read a `.json` or `.txt` that shipped inside the plugin
+(at the top or one folder down, e.g. `playlists/us.1.json`; 2 MB; never `data/`; no permission needed, it is the plugin's own file), and
+`ui.tz_offset()` is how far the device clock is ahead of UTC, in seconds, for showing local times (a phone's Python can think it is UTC).
+
+Install screen: `live` -> "Can play live TV streams in PEK TV's player, from web addresses it chooses ... the servers that send a stream
+can see your internet address"; `epg` -> "Can download TV guide files (XMLTV) from the sites listed above". Tests: `tools/test_cable_shot.py`.
+
 ## TMDb Discover (ported, 1.6.0)
 `plugins/tmdb-discover/screen.py` has:
 - Movies / TV rows (trending, top rated, popular, now playing / on the air), streaming-service chips, numbered pages with Next / Prev / +-10, search, actor pages.
@@ -268,6 +322,8 @@ What it needed from the host, all in `pek_ui`:
 ## Files
 - `android/app/src/main/python/pek_ui.py` - what a screen imports (builders + host calls)
 - `android/app/src/main/python/pek_flutter.py` - sessions, guarded calls, background jobs, effects
+- `android/app/src/main/python/pek_epg.py` - the XMLTV reader behind `fetch_epg` (host code)
+- `flutter_ui/lib/src/live_tv.dart` - live TV in the player: the plugin client, the guide panel, the guide tab
 - `android/app/src/main/python/pek_providers.py` - streaming services (generated from `tools/providers.json`; `tools/sync_providers.js` also feeds `FlutterHostActivity.kt`)
 - `android/app/src/main/python/hesper_guard.py` (+ `backend/` copy) - allows `import pek_ui`; `hesper_runner.py` remembers the plugins folder
 - `android/app/src/flutter/.../FlutterHostActivity.kt` - `pek/plugins` channel (`call`, `openUrl`)

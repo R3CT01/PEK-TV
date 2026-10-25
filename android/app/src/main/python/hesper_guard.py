@@ -41,6 +41,8 @@ import types
 import urllib.parse
 import importlib.util
 
+import pek_epg
+
 # Plugins that ship with PEK and keep full access (as they always had).
 BUNDLED_TRUSTED = {"weather", "sample_scraper"}
 
@@ -134,7 +136,7 @@ def load_manifest(folder):
             pass
     if not isinstance(perms.get("library", False), bool):
         return None, "'permissions.library' must be true or false"
-    for flag in ("send", "playback"):
+    for flag in ("send", "playback", "live", "epg"):
         if not isinstance(perms.get(flag, False), bool):
             return None, "'permissions.%s' must be true or false" % flag
     fl = data.get("flutter")
@@ -142,6 +144,10 @@ def load_manifest(folder):
         return None, "'flutter.hooks' must be a file name such as \"hooks.py\""
     if perms.get("playback") and not (isinstance(fl, dict) and "hooks" in fl):
         return None, "the 'playback' permission needs \"flutter\": {\"hooks\": \"hooks.py\"}"
+    if isinstance(fl, dict) and "live" in fl and not (isinstance(fl["live"], str) and re.fullmatch(r"[a-z0-9_]{1,40}\.py", fl["live"])):
+        return None, "'flutter.live' must be a file name such as \"live.py\""
+    if isinstance(fl, dict) and "live" in fl and not perms.get("live"):
+        return None, "'flutter.live' needs the 'live' permission"
     return data, None
 
 
@@ -290,6 +296,7 @@ def build_host_module(plugin_id, folder, manifest):
     storage_ok = bool(perms.get("storage", False))
     library_ok = bool(perms.get("library", False))
     send_ok = bool(perms.get("send", False))
+    epg_ok = bool(perms.get("epg", False))
     data_dir = os.path.join(folder, "data")
     mod = types.ModuleType("pek_host")
 
@@ -302,8 +309,8 @@ def build_host_module(plugin_id, folder, manifest):
             raise ValueError("file name must be letters, digits, '.', '_' or '-' (no folders)")
         return os.path.join(data_dir, name)
 
-    def fetch_text(url, headers=None, timeout=5, max_bytes=1000000):
-        """HTTPS GET of an allowlisted host. Returns the body as text."""
+    def _get_bytes(url, headers=None, timeout=5, max_bytes=1000000):
+        """HTTPS GET of an allowlisted host (public addresses only, redirects re-checked). Returns the body as bytes."""
         with _Privileged():
             hops = 0
             while True:
@@ -337,9 +344,13 @@ def build_host_module(plugin_id, folder, manifest):
                     body = resp.read(max_bytes + 1)
                     if len(body) > max_bytes:
                         raise ValueError("response larger than %d bytes" % max_bytes)
-                    return body.decode("utf-8", "replace")
+                    return body
                 finally:
                     conn.close()
+
+    def fetch_text(url, headers=None, timeout=5, max_bytes=1000000):
+        """HTTPS GET of an allowlisted host. Returns the body as text."""
+        return _get_bytes(url, headers, timeout, max_bytes).decode("utf-8", "replace")
 
     def fetch_json(url, **kw):
         return json.loads(fetch_text(url, **kw))
@@ -504,10 +515,73 @@ def build_host_module(plugin_id, folder, manifest):
             finally:
                 conn.close()
 
+    # ---- the plugin's own shipped files (read only) -------------------------------------------------------------
+    _BUNDLED_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(/[A-Za-z0-9][A-Za-z0-9._-]{0,63})?$")
+    _BUNDLED_MAX = 2000000          # the installer's own per-file limit
+
+    def read_bundled_text(name):
+        """Text of a .json / .txt file that SHIPPED inside the plugin (at the top, or one folder down such as
+        "playlists/us.1.json"). Read only, no permission needed: it is the plugin's own code and data, not the user's. The
+        data/ folder is not reachable this way (that is what the 'storage' permission is for)."""
+        if (not isinstance(name, str) or not _BUNDLED_RE.match(name) or not name.lower().endswith((".json", ".txt"))
+                or name.split("/")[0].lower() == "data"):
+            raise ValueError("a shipped file is a .json or .txt name such as 'index.json' or 'playlists/us.1.json'")
+        with _Privileged():
+            root = os.path.realpath(folder)
+            path = os.path.realpath(os.path.join(root, name))
+            if not path.startswith(root + os.sep) or not os.path.isfile(path):
+                raise FileNotFoundError("%s is not part of this plugin" % name)
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read(_BUNDLED_MAX + 1)
+        if len(text) > _BUNDLED_MAX:
+            raise ValueError("%s is larger than 2 MB" % name)
+        return text
+
+    def read_bundled_json(name):
+        return json.loads(read_bundled_text(name))
+
+    # ---- TV guide (the 'epg' permission) --------------------------------------------------------------------------
+    def epg_norm(name):
+        """A channel name the way the guide reader compares names ("CNN HD" and "cnn" are the same)."""
+        return pek_epg.norm_name(name)
+
+    def _name_list(v, what):
+        if v is None:
+            return None
+        if not isinstance(v, (list, tuple, set, frozenset)) or len(v) > 30000 or not all(isinstance(x, str) and len(x) < 200 for x in v):
+            raise ValueError("%s must be a list of up to 30000 short strings" % what)
+        return list(v)
+
+    def fetch_epg(url, want_ids=None, want_names=None, back_hours=3, ahead_hours=36, timeout=10):
+        """Downloads ONE XMLTV guide file (xml, or xml.gz) from a host in permissions.network and returns what is on in the
+        window [now - back_hours, now + ahead_hours]. Needs "epg": true.
+
+        want_ids   channel ids the plugin has (matched case-insensitively against the file's <channel id>), None = all
+        want_names names the plugin has, as epg_norm(name): a channel is also kept when one of its display names matches
+        Returns {"programmes": {channel id: [[start, stop, title, desc], ...]}, "names": {channel id: [epg_norm names]},
+                 "channels": n in the file, "kept": programmes kept, "bytes": size of the download}.
+        Up to 12 MB per file (40 MB once unpacked), 80 programmes per channel; titles 120 and descriptions 240 characters."""
+        if not epg_ok:
+            raise PermissionError("plugin.json does not request the 'epg' permission")
+        ids = _name_list(want_ids, "want_ids")
+        names = _name_list(want_names, "want_names")
+        try:
+            back = max(0.0, min(24.0, float(back_hours)))
+            ahead = max(1.0, min(72.0, float(ahead_hours)))
+        except (TypeError, ValueError):
+            raise ValueError("back_hours and ahead_hours must be numbers")
+        raw = _get_bytes(url, {"Accept": "application/xml, text/xml, */*"}, timeout, pek_epg.MAX_RAW_BYTES)
+        with _Privileged():
+            text = pek_epg.unpack(raw)
+            out = pek_epg.parse(text, int(time.time()), int(back * 3600), int(ahead * 3600), ids, names)
+        out["bytes"] = len(raw)
+        return out
+
     def log(*parts):
         print("[plugin %s]" % plugin_id, *[str(p)[:500] for p in parts])
 
-    for fn in (fetch_text, fetch_json, request_json, write_text, read_text, write_json, read_json, library_titles, log):
+    for fn in (fetch_text, fetch_json, request_json, write_text, read_text, write_json, read_json, library_titles, log,
+               read_bundled_text, read_bundled_json, epg_norm, fetch_epg):
         setattr(mod, fn.__name__, fn)
     return mod
 

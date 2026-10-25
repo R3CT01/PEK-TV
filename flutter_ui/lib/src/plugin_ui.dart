@@ -9,6 +9,8 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'activity.dart';
 import 'common.dart';
 import 'fields.dart';
+import 'live_tv.dart';
+import 'player.dart';
 import 'plugin_host.dart';
 import 'skin_widgets.dart';
 import 'skins.dart';
@@ -350,6 +352,16 @@ class _PluginViewState extends State<PluginView> {
           episode: episode,
         );
         unawaited(playTorrent(context, track: tt.track(src, origin: widget.pluginId, image: _artwork('${raw['image'] ?? ''}'))));
+      } else if (op == 'live.play') {
+        // A plugin with the "live" permission started a channel (pek_ui.live_play): PEK's own player takes over. When the plugin
+        // also ships a live file, the player offers the channel switcher and the TV guide, asking the plugin for the answers.
+        // Python checked the address; this is a second lock (http or https, nothing else).
+        final url = '${raw['url'] ?? ''}';
+        final u = Uri.tryParse(url);
+        if (!mounted || u == null || !(u.scheme == 'https' || u.scheme == 'http') || u.host.isEmpty) continue;
+        unawaited(Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => PlayerScreen(url: url, title: '${raw['title'] ?? ''}', live: LiveSource(widget.pluginId, '${raw['channel'] ?? ''}')),
+        )));
       } else if (op == 'clipboard.copy') {
         // Text the plugin asked to copy (the Skin maker's skin.json). Short text only; the person is told it was copied.
         final text = '${raw['text'] ?? ''}';

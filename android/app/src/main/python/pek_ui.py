@@ -18,6 +18,7 @@ which is the Python version of "start a fetch, then call pek.requestRender() whe
 This module is host code (trusted). A plugin only gets the names below, and every name that reaches outside the
 plugin (favorites, links) is checked against plugin.json here, not in the plugin.
 """
+import ipaddress
 import re
 import time
 import threading
@@ -222,6 +223,19 @@ def ctx():
     return d
 
 
+def tz_offset(at=None):
+    """Seconds the device's clock is ahead of UTC right now (PEK TV tells the screen; an older PEK TV does not, and the
+    answer then comes from this process's own time zone, which can be UTC on a phone). Use it to show local times:
+    datetime.datetime.fromtimestamp(t + ui.tz_offset(), datetime.timezone.utc)."""
+    v = _sess().ctx.get("tz")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and -14 * 3600 <= v <= 14 * 3600:
+        return int(v)
+    try:
+        return int(time.localtime(at if at is not None else time.time()).tm_gmtoff or 0)
+    except (OverflowError, OSError, ValueError):
+        return 0
+
+
 def profile():
     """The id of the PEK TV profile that is open ("p1" for the first one; letters, digits, "_" and "-", at most 24 characters), for a
     plugin that keeps something per profile (its own account, its own settings). Never the profile's name or picture. A hook is told the
@@ -341,6 +355,52 @@ def play_torrent(source, label, season=0, episode=0, kind="movie", name="", year
         raise ValueError("kind must be movie or episode")
     s.effect("torrent.play", source=src, title=_s(label, 200), season=int(season or 0), episode=int(episode or 0),
              kind=kind, name=_s(name, 200), year=int(year or 0), image=_s(image, 200))
+
+
+# ---------------------------------------------------------------------------------------------------------
+# Live TV (the "live" permission): play a channel in PEK's own player, with its channel switcher and TV guide
+# ---------------------------------------------------------------------------------------------------------
+
+_LIVE_BAD_SUFFIXES = (".local", ".localhost", ".internal", ".lan", ".home", ".corp", ".intranet")
+_CONTROL = re.compile(r"[\x00-\x20\x7f]")
+
+
+def _live_url(url):
+    """The stream address, checked: http or https, a real host, no sign-in in the address, nothing on this device or the
+    home network (an address typed as an IP number must be a public one). Raises ValueError otherwise."""
+    u = _s(url, 4000).strip()
+    if not u or len(u) > 2000 or _CONTROL.search(u):
+        raise ValueError("a stream address is up to 2000 characters with no spaces")
+    p = urllib.parse.urlsplit(u)
+    if p.scheme not in ("http", "https"):
+        raise ValueError("a live stream must be an http:// or https:// address")
+    host = (p.hostname or "").lower().rstrip(".")
+    if not host or p.username or p.password:
+        raise ValueError("a stream address needs a host name and no user name or password")
+    if host == "localhost" or host.endswith(_LIVE_BAD_SUFFIXES) or "." not in host and ":" not in host:
+        raise ValueError("streams on this device or the home network are not allowed")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None and not ip.is_global:
+        raise ValueError("streams on this device or the home network are not allowed")
+    try:
+        p.port                       # raises ValueError for a port that is not a number
+    except ValueError:
+        raise ValueError("the stream address has a bad port")
+    return u
+
+
+def live_play(url, title="", channel=""):
+    """Start a live channel in PEK TV's own player. Needs "live": true. url is an http(s) stream (HLS .m3u8 and the like);
+    title is shown in the player; channel is YOUR id for the channel (up to 60 characters): when the plugin ships a
+    flutter.live file, the player uses it to open the guide, switch channels and show what is on (see FLUTTER_PLUGINS.md).
+    The player is PEK's, so the plugin never touches the stream: it only names the address."""
+    s = _sess()
+    s.need("live")
+    u = _live_url(url)
+    s.effect("live.play", url=u, title=_s(title, 120), channel=_s(channel, 60))
 
 
 _WATCHED_MAX = 300      # items per is_watched_many() / set_watched_many() call (the web pek.watched.check limit)

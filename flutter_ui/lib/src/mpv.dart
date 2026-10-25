@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'dart:ui' show Rect;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -91,6 +93,11 @@ class PekPlayer {
   /// An extra subtitle file at [url] (loaded and switched on at once).
   Future<void> addSubtitle(String url, String label) => _method.invokeMethod('addSubtitle', {'url': url, 'label': label});
   Future<void> destroy() => _method.invokeMethod('destroy');
+
+  /// Shrinks the picture into a rectangle (logical pixels from the top left of the screen): the live TV guide uses it to
+  /// keep the channel playing in the top left corner. [fullscreen] puts it back. A new [load] always starts full screen.
+  Future<void> setMiniRect(Rect r) => _method.invokeMethod('setMiniRect', {'left': r.left, 'top': r.top, 'width': r.width, 'height': r.height});
+  Future<void> fullscreen() => _method.invokeMethod('fullscreen');
 
   Future<void> togglePause() => playing.value ? pause() : play();
 
