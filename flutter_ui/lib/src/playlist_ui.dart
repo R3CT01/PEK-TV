@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'api.dart';
 import 'common.dart';
@@ -15,6 +19,7 @@ String _songs(int n) => '$n ${n == 1 ? 'song' : 'songs'}';
 
 /// The picture shown for a playlist ('' = the note icon).
 String playlistArt(Playlist p) {
+  if (p.image.isNotEmpty && File(p.image).existsSync()) return p.image;
   final t = p.cover;
   return t == null ? '' : Api.trackArt(t);
 }
@@ -159,6 +164,21 @@ Future<void> renamePlaylist(BuildContext context, Playlist p) async {
   if (name != null && name.isNotEmpty) _pl.rename(p.id, name);
 }
 
+/// Lets the person pick a picture from their gallery; it is copied into the app's own folder and becomes the playlist's cover.
+Future<void> pickPlaylistImage(BuildContext context, Playlist p) async {
+  try {
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 800, maxHeight: 800, imageQuality: 85);
+    if (x == null) return;
+    final dir = Directory('${(await getApplicationSupportDirectory()).path}/playlist_art');
+    await dir.create(recursive: true);
+    final dest = '${dir.path}/${p.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await File(x.path).copy(dest);
+    _pl.setImage(p.id, dest);
+  } catch (_) {
+    if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not use that picture.')));
+  }
+}
+
 Future<bool> deletePlaylist(BuildContext context, Playlist p) async {
   final ok = await _confirm(context, 'Delete playlist?', '\u201c${p.name}\u201d will be deleted. Your songs are not touched.', 'Delete');
   if (ok) _pl.delete(p.id);
@@ -172,6 +192,8 @@ Future<void> showPlaylistMenu(BuildContext context, Playlist p) {
     if (p.tracks.isNotEmpty) SheetAction('Shuffle', Icons.shuffle, () => _mc.playAll(p.tracks, shuffle: true)),
     if (p.tracks.isNotEmpty) SheetAction('Add to queue', Icons.queue_music, () => _mc.enqueue(p.tracks)),
     SheetAction('Rename', Icons.edit_outlined, () => renamePlaylist(context, p)),
+    SheetAction('Change picture', Icons.image_outlined, () => pickPlaylistImage(context, p)),
+    if (p.image.isNotEmpty) SheetAction('Remove picture', Icons.hide_image_outlined, () => _pl.setImage(p.id, '')),
     SheetAction('Delete', Icons.delete_outline, () => deletePlaylist(context, p)),
   ]);
 }
@@ -248,7 +270,7 @@ class PlaylistScreen extends StatelessWidget {
     final header = Padding(
       padding: EdgeInsets.only(bottom: rem),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Art(url: playlistArt(pl), size: (p.narrow ? 8 : 12) * rem, radius: 12),
+        GestureDetector(onTap: () => pickPlaylistImage(context, pl), child: Art(url: playlistArt(pl), size: (p.narrow ? 8 : 12) * rem, radius: 12)),
         SizedBox(width: rem),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -260,6 +282,8 @@ class PlaylistScreen extends StatelessWidget {
               PekButton(compact: true, label: 'Shuffle', onTap: tracks.isEmpty ? null : () => _mc.playAll(tracks, shuffle: true)),
               PekButton(compact: true, label: 'Add to queue', onTap: tracks.isEmpty ? null : () => _mc.enqueue(tracks)),
               PekButton(compact: true, label: 'Rename', onTap: () => renamePlaylist(context, pl)),
+              PekButton(compact: true, label: pl.image.isEmpty ? 'Add picture' : 'Change picture', onTap: () => pickPlaylistImage(context, pl)),
+              if (pl.image.isNotEmpty) PekButton(compact: true, label: 'Remove picture', onTap: () => _pl.setImage(pl.id, '')),
               PekButton(
                 compact: true,
                 label: 'Delete',

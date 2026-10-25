@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -7,16 +8,20 @@ import 'api.dart';
 import 'store.dart';
 
 class Playlist {
-  Playlist({required this.id, required this.name, List<Track>? tracks}) : tracks = tracks ?? [];
+  Playlist({required this.id, required this.name, List<Track>? tracks, this.image = ''}) : tracks = tracks ?? [];
   final String id;
   String name;
+
+  /// Path of a picture the user chose for this playlist ('' = none: the first song's cover is used).
+  String image;
   final List<Track> tracks;
 
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'tracks': [for (final t in tracks) t.toJson()]};
+  Map<String, dynamic> toJson() => {'id': id, 'name': name, if (image.isNotEmpty) 'image': image, 'tracks': [for (final t in tracks) t.toJson()]};
 
   factory Playlist.fromJson(Map<String, dynamic> j) => Playlist(
         id: '${j['id']}',
         name: '${j['name'] ?? 'Playlist'}',
+        image: '${j['image'] ?? ''}',
         tracks: [for (final t in (j['tracks'] as List?) ?? const []) if (t is Map && t['id'] != null) Track.fromJson(Map<String, dynamic>.from(t))],
       );
 
@@ -85,7 +90,25 @@ class Playlists extends ChangeNotifier {
     _save();
   }
 
+  /// Sets (or, with '', clears) the playlist's own picture. The old picture file is deleted.
+  void setImage(String id, String path) {
+    final p = byId(id);
+    if (p == null) return;
+    _dropFile(p.image, except: path);
+    p.image = path;
+    _save();
+  }
+
+  static void _dropFile(String path, {String except = ''}) {
+    if (path.isEmpty || path == except) return;
+    try {
+      File(path).deleteSync();
+    } catch (_) {}
+  }
+
   void delete(String id) {
+    final gone = byId(id);
+    if (gone != null) _dropFile(gone.image);
     _lists.removeWhere((p) => p.id == id);
     _save();
   }

@@ -15,6 +15,8 @@ dependencies:
   share_plus: ^10.1.4               # sharing the history / ratings export file
   webview_flutter: ^4.10.0          # plugin trailers (YouTube, locked to youtube-nocookie.com)
   webview_flutter_android: ^4.3.0
+  image_picker: ^1.1.2              # choosing a playlist picture from the gallery
+  path_provider: ^2.1.4             # where the chosen playlist pictures are kept
 
 dev_dependencies:
   flutter_test:

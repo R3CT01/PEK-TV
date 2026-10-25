@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -61,7 +62,9 @@ class _ArtState extends State<Art> {
     Widget fallback() => ColoredBox(color: t.surfaceFocused, child: Center(child: Icon(Icons.music_note, color: t.textMuted)));
     final img = widget.url.isEmpty
         ? fallback()
-        : Image.network(
+        : widget.url.startsWith('/')
+            ? Image.file(File(widget.url), key: ValueKey(widget.url), fit: BoxFit.cover, cacheWidth: 400, gaplessPlayback: true, errorBuilder: (_, __, ___) => fallback())
+            : Image.network(
             widget.url,
             key: ValueKey('${widget.url}#$_tries'),
             fit: BoxFit.cover,
@@ -537,7 +540,7 @@ class ArtistScreen extends StatelessWidget {
 }
 
 /// A slim bar above the bottom tabs while something plays (like Spotify's): the song, previous / play-pause / next and a thin
-/// progress line. Tapping the bar does nothing; the full-screen player only opens from the expand button.
+/// progress line. Tapping the bar (or swiping it up) opens the full-screen player, as does the expand button.
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 
@@ -555,7 +558,15 @@ class MiniPlayer extends StatelessWidget {
           decoration: BoxDecoration(color: t.surface, borderRadius: BorderRadius.circular(18)),
           clipBehavior: Clip.antiAlias,
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            Padding(
+            InkWell(
+              onTap: () => openNowPlaying(context),
+              onLongPress: null,
+              child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragEnd: (d) {
+                if ((d.primaryVelocity ?? 0) < -200) openNowPlaying(context);
+              },
+              child: Padding(
               padding: EdgeInsets.symmetric(horizontal: 0.6 * rem, vertical: 0.4 * rem),
               child: Row(children: [
                 Art(url: Api.trackArt(cur), size: 2.5 * rem, radius: 10),
@@ -574,7 +585,7 @@ class MiniPlayer extends StatelessWidget {
                 IconButton(tooltip: 'Next', visualDensity: VisualDensity.compact, onPressed: () => _mc.next(), icon: const Icon(Icons.skip_next)),
                 IconButton(tooltip: 'Full screen', visualDensity: VisualDensity.compact, onPressed: () => openNowPlaying(context), icon: const Icon(Icons.open_in_full, size: 20)),
               ]),
-            ),
+            ))),
             ValueListenableBuilder<double>(
               valueListenable: _mc.position,
               builder: (_, pos, __) => ValueListenableBuilder<double>(
