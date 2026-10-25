@@ -270,6 +270,14 @@ class _MusicPageState extends State<MusicPage> {
                 ),
                 SizedBox(height: rem),
               ],
+              if (widget.view != MusicView.search)
+                Padding(
+                  padding: EdgeInsets.only(bottom: 0.5 * rem),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: PekButton(compact: true, label: _scanning ? 'Scanning\u2026' : 'Rescan library', onTap: _scanning ? null : _rescanLibrary),
+                  ),
+                ),
               if (_scanning) ScanLine(label: _scanned > 0 ? 'Reading your music\u2026 $_scanned songs so far' : 'Reading your music\u2026'),
             ]),
           ),
@@ -286,6 +294,19 @@ class _MusicPageState extends State<MusicPage> {
         SliverToBoxAdapter(child: SizedBox(height: 4 * rem + pad.bottom)), // room for the mini player
       ],
     );
+  }
+
+  /// The Rescan button: walks every source folder again (nothing scans by itself at start-up). The status poll shows progress.
+  Future<void> _rescanLibrary() async {
+    setState(() => _scanning = true);
+    try {
+      final wait = await Api.rescan();
+      if (wait != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Please wait $wait s before scanning again.')));
+      }
+    } catch (_) {}
+    Api.forgetLibrary();
+    _checkStatus();
   }
 
   /// The Albums / Artists / Songs body as a sliver, once the library answered.

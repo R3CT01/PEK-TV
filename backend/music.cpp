@@ -527,7 +527,9 @@ public:
             if (onScanDone) { try { onScanDone(); } catch (...) { } }
         }).detach();
     }
-    void scanOnceIfNeeded() { if (!everStarted_.load()) scanAsync(); }
+    // Used to start a scan on the first request after boot. Now the saved library is shown as it is; a scan starts only
+    // after a source is added or Rescan is tapped (scanAsync via MediaScanner's after-scan hook).
+    void scanOnceIfNeeded() {}
 
     // ---- cover pictures
     bool cover(const Track& t, bool embeddedFirst, std::string& bytes, std::string& mime);
@@ -1295,7 +1297,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
     // After every scan, keep the pictures and lyrics for the (new) songs too, while Online art & lyrics is on.
     lib->onScanDone = [lib, offline]() { if (musiconline::store().on.load()) offline->start(lib); };
 
-    // Every normal scan (startup, rescan, a new source) refreshes the music too, on its own thread.
+    // Every scan (a rescan, a new source) refreshes the music too, on its own thread.
     scanner->setAfterScan([lib]() { lib->scanAsync(); });
 
     svr.Get("/api/music/status", [lib](const httplib::Request&, httplib::Response& res) {

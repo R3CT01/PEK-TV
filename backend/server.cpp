@@ -1360,12 +1360,12 @@ void PekServer::start(int port, const std::string& plugins_dir,
                 return;
             }
             vfs::persistCredentials(u.scheme, u.host);
-            std::thread([scanner]() { scanner->scan(); }).detach();
+            std::thread([scanner]() { scanner->scan(true); }).detach();   // only the new folder
             res.set_content("{\"status\": \"ok\"}", "application/json");
             return;
         }
         if (scanner->addMediaDir(path)) {
-            std::thread([scanner]() { scanner->scan(); }).detach();
+            std::thread([scanner]() { scanner->scan(true); }).detach();   // only the new folder
             res.set_content("{\"status\": \"ok\"}", "application/json");
         } else {
             res.status = 400;

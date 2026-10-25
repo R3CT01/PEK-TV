@@ -74,7 +74,9 @@ public:
     // video files (by size+mtime), classifies each via container
     // tags, and persists the result. Safe to call repeatedly —
     // unchanged files are skipped without re-invoking ffprobe.
-    void scan();
+    // scan(true) is the light version used after adding a source: only the source folders that have no files in the
+    // library yet are walked; every other folder keeps what it had. scan() (the Rescan button) walks everything.
+    void scan(bool onlyNewSources = false);
 
     // True while any scan() is running or waiting for its turn (startup, /api/rescan, adding a source).
     bool isScanning() const { return active_scans_.load() > 0; }

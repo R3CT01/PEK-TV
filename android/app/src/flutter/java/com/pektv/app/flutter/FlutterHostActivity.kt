@@ -24,6 +24,8 @@ import com.pektv.app.MediaPermissions
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pektv.app.MpvController
+import com.pektv.app.Boot
+import com.pektv.app.SplashOverlay
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
 import io.flutter.embedding.android.RenderMode
@@ -259,10 +261,23 @@ class FlutterHostActivity : FlutterActivity() {
     override fun onFlutterUiDisplayed() {
         super.onFlutterUiDisplayed()
         window.setBackgroundDrawable(ColorDrawable(Color.BLACK))
+        splash?.flutterShown()
     }
 
+    // The splash video, drawn over this screen while the app loads underneath it (SplashOverlay.kt).
+    private var splash: SplashOverlay? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Start loading first (files, C++ server, Python plugins, Flutter's own initialisation); it all runs while the splash plays.
+        Boot.ensureStarted(applicationContext)
         super.onCreate(savedInstanceState)
+        // Only on a fresh start; coming back to the running app (widget, notification) shows no splash.
+        if (savedInstanceState == null && isTaskRoot) {
+            splash = SplashOverlay(this) {
+                splash = null
+                MediaPermissions.askOnce(this)   // the system prompt appears once the splash is gone, not over it
+            }.also { it.show() }
+        }
 
         val surface = SurfaceView(this)
         surface.visibility = View.GONE
@@ -280,7 +295,8 @@ class FlutterHostActivity : FlutterActivity() {
         }
         hideSystemBars()
         // MainActivity's own prompt never runs when it hands over to this screen, so ask here: video + audio, once.
-        MediaPermissions.askOnce(this)
+        // With the splash showing it is asked when the splash goes away; otherwise now.
+        if (splash == null) MediaPermissions.askOnce(this)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

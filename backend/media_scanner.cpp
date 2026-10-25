@@ -952,7 +952,7 @@ bool MediaScanner::scanRemoteDir(vfs::Share& share, const vfs::Url& base, const 
     return true;
 }
 
-void MediaScanner::scan() {
+void MediaScanner::scan(bool onlyNewSources) {
     struct ActiveGuard { std::atomic<int>& n; explicit ActiveGuard(std::atomic<int>& a) : n(a) { ++n; } ~ActiveGuard() { --n; } } activeGuard(active_scans_);
     std::lock_guard<std::mutex> scan_lock(scan_mutex_);
     {
@@ -973,6 +973,20 @@ void MediaScanner::scan() {
 
     std::vector<MediaEntry> fresh;
     for (const auto& dir : dirs_snapshot) {
+        bool known = false;
+        if (onlyNewSources) {            // light scan: a folder that already has files in the library is left alone
+            std::string pre = dir;
+            while (!pre.empty() && pre.back() == '/') pre.pop_back();
+            pre += "/";
+            for (const auto& kv : previous) if (kv.first.compare(0, pre.size(), pre) == 0) { known = true; break; }
+        }
+        if (known) {
+            std::string pre = dir;
+            while (!pre.empty() && pre.back() == '/') pre.pop_back();
+            pre += "/";
+            for (const auto& kv : previous) if (kv.first.compare(0, pre.size(), pre) == 0) fresh.push_back(kv.second);
+            continue;
+        }
         if (!vfs::isRemote(dir)) { scanDirectory(dir, fresh); continue; }
         if (scanRemote(dir, fresh)) continue;
         // The network source is unreachable (NAS off, Wi-Fi down...). Keep what we

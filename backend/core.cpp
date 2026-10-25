@@ -226,8 +226,8 @@ int main(int argc, char* argv[]) {
     // Confirms show names guessed from filenames against TMDb (needs the
     // TMDB_API_KEY env var; without it the parsed name is used as-is).
     scanner.setShowResolver(PekServer::resolveShowName);
-    std::thread scan_thread([&scanner]() { scanner.scan(); });
-    scan_thread.detach();
+    // No scan at startup: the library, shows and music are read from the saved database, so the app opens fast.
+    // A scan runs only after a new source folder is added (just that folder) or when Rescan is tapped (everything).
 
     // Launch HTTP server with a lambda callback to dynamically serve scanned plugins to JS
     std::thread server_thread([&pek, plugin_dir, skins_dir, &scanner]() {

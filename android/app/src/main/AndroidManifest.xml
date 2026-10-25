@@ -84,19 +84,6 @@
              Remove this line to try Impeller again once video is confirmed to show through. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
 
-        <!-- Launcher entry: plays the splash video while the app loads in the background (Boot), then opens MainActivity. -->
-        <activity
-            android:name=".SplashActivity"
-            android:exported="true"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
-            android:theme="@style/Theme.PEK.Launch">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
-            </intent-filter>
-        </activity>
-
         <!-- Hand-over: waits for Boot (files, server, Python plugins), then opens the Flutter UI. -->
         <activity
             android:name=".MainActivity"
@@ -104,15 +91,22 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
             android:theme="@style/Theme.PEK.Launch" />
 
-        <!-- The app's one UI: Flutter (flutter_ui/). MainActivity opens it once the server is up. -->
+        <!-- The app's one UI: Flutter (flutter_ui/). It is the launcher and also opens from MainActivity (widget / notification taps). -->
         <activity
             android:name=".flutter.FlutterHostActivity"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.PEK.Launch" />
+            android:theme="@style/Theme.PEK.Launch">
+            <!-- Launcher entry. The splash video (SplashOverlay.kt) plays on top of this screen while the app loads underneath. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
 
         <!-- PackageInstaller reports the outcome of an in-app update here (AppUpdater.kt). -->
         <receiver
