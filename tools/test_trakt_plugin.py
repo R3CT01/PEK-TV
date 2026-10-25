@@ -629,6 +629,66 @@ try:
     check("a refresh by one session is reused by the other (one /oauth/token call)", ta == "AT2" and tb == "AT2" and len(calls("/oauth/token")) == 1, [c[2] for c in NET.log])
     sys.path.pop(0)
 
+    # -------------------------------------------------------------------------------------- one Trakt account per profile
+    fresh = time.time() + 86400
+    def put(name, obj):
+        json.dump(obj, open(os.path.join(DATA, name), "w"))
+    def get(name, default=None):
+        try:
+            return json.load(open(os.path.join(DATA, name)))
+        except (OSError, ValueError):
+            return default
+    put("settings.json", {})
+    put("auth.json", {"access_token": "AT-P1", "refresh_token": "RT-P1", "expires_at": fresh})
+    put("queue.json", [])
+    play = dict(movie, type="play", position=600)
+    NET.log.clear()
+    r = hook(play, ctx={"profile": "p2"})
+    check("a profile that never connected Trakt scrobbles nothing, even while p1 is connected", r["ok"] and not calls("/scrobble"), [c[2] for c in NET.log])
+    put("p2.auth.json", {"access_token": "AT-P2", "refresh_token": "RT-P2", "expires_at": fresh})
+    NET.log.clear()
+    hook(play, ctx={"profile": "p2"})
+    c = calls("/scrobble/start")
+    check("profile p2 scrobbles with its own token", len(c) == 1 and c[0][4].get("Authorization") == "Bearer AT-P2", [x[4] for x in c])
+    NET.log.clear()
+    hook(play, ctx={"profile": "p1"})
+    c = calls("/scrobble/start")
+    check("profile p1 keeps using its own token (the account linked before profiles existed)", len(c) == 1 and c[0][4].get("Authorization") == "Bearer AT-P1", [x[4] for x in c])
+    NET.log.clear()
+    hook(play)
+    c = calls("/scrobble/start")
+    check("a PEK TV that tells no profile means p1", len(c) == 1 and c[0][4].get("Authorization") == "Bearer AT-P1", [x[4] for x in c])
+    NET.fail_scrobble_stop = True
+    hook(dict(movie, type="stop", position=5700), ctx={"profile": "p2"})
+    NET.fail_scrobble_stop = False
+    check("a watch p2 could not send is queued for p2 only", len(get("p2.queue.json", [])) == 1 and get("queue.json") == [], (get("p2.queue.json"), get("queue.json")))
+    put("settings.json", {"scrobble": False})
+    NET.log.clear()
+    hook(play, ctx={"profile": "p2"})
+    check("switches are per profile (p1 turned scrobbling off, p2 still scrobbles)", len(calls("/scrobble/start")) == 1)
+    put("settings.json", {})
+    NET.log.clear()
+    hook(play, ctx={"profile": "../evil/x"})
+    check("a profile id cannot be used to reach other files", not calls("/scrobble") and not os.path.exists(os.path.join(TMP, "evil")) and not os.path.exists(os.path.join(DATA, "..", "evil.auth.json")))
+    r = flutter({"op": "open", "id": "trakt", "fresh": True, "ctx": {"profile": "p1"}})
+    check("the screen of p1 shows p1's account", bool(find(r.get("tree"), "Disconnect")), texts(r.get("tree")))
+    r = flutter({"op": "open", "id": "trakt", "ctx": {"profile": "p3"}})
+    check("the same screen, opened for a profile with no account, offers Connect", bool(find(r.get("tree"), "Connect to Trakt")) and not find(r.get("tree"), "Disconnect"), texts(r.get("tree")))
+    r = flutter({"op": "open", "id": "trakt", "ctx": {"profile": "p2"}})
+    check("and for p2 it shows p2's account again", bool(find(r.get("tree"), "Disconnect")), texts(r.get("tree")))
+    flutter({"op": "close", "id": "trakt"})
+    NET.log.clear()
+    r = hook({"type": "profile_removed"}, ctx={"profile": "p2"})
+    rv = calls("/oauth/revoke")
+    check("deleting a profile revokes its Trakt token", r["ok"] and len(rv) == 1 and rv[0][5].get("token") == "AT-P2", [(c[2], c[5]) for c in NET.log])
+    check("and empties its files", not get("p2.auth.json", {}).get("access_token") and get("p2.queue.json", {}) == {})
+    check("another profile's account is untouched", get("auth.json", {}).get("access_token") == "AT-P1")
+    NET.log.clear()
+    hook({"type": "profile_removed"}, ctx={"profile": "p9"})
+    check("deleting a profile that never connected Trakt calls nothing", not calls("/oauth"))
+    check("pek_ui.profile() hands out only the id", pf.pek_ui.profile.__doc__ is not None and tc.clean_profile("p1") == "p1" and tc.clean_profile("") == "p1" and tc.clean_profile("a/b.c d") == "abcd" and len(tc.clean_profile("x" * 99)) == 24)
+    put("auth.json", {"access_token": "AT-P1", "refresh_token": "RT-P1", "expires_at": fresh})
+
     # -------------------------------------------------------------------------------------- an update reloads the hooks
     json.dump({"scrobble": True, "push": True, "pull": True}, open(os.path.join(DATA, "settings.json"), "w"))
     hp = os.path.join(PLUGINS, "trakt", "hooks.py")

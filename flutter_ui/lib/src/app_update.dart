@@ -71,6 +71,17 @@ class AppUpdate {
     return 0;
   }
 
+  /// The version name of the running app ("2.2.0"), or null when the platform does not say.
+  static Future<String?> installedVersion() async {
+    try {
+      final info = await _channel.invokeMapMethod<String, dynamic>('info');
+      final name = '${info?['versionName'] ?? ''}';
+      return name.isEmpty ? null : name;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The newest release that is newer than the running app, or null (up to date, offline, a debug build, anything unexpected).
   static Future<AppRelease?> check() async {
     try {

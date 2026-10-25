@@ -1,6 +1,7 @@
 """Trakt for PEK TV: sign in, choose what is shared, import your Trakt history.
 
 The scrobbling itself (what you watch, while you watch it) is hooks.py; this screen is only for setting up.
+Every PEK TV profile has its own Trakt account: this screen always shows and changes the account of the profile that is open.
 """
 import time
 
@@ -8,20 +9,35 @@ import pek_host as h
 import pek_ui as ui
 import trakt_core as tc
 
-S = {"linked": False, "user": "", "login": None, "msg": "", "busy": "", "set": {}, "advanced": False, "id": "", "secret": ""}
+S = {"pid": "", "linked": False, "user": "", "login": None, "msg": "", "busy": "", "set": {}, "advanced": False, "id": "", "secret": ""}
 
 
 def trakt():
-    return tc.Trakt(h)
+    """The Trakt account of the profile this screen is showing. Called on the screen's own thread, before any background job starts,
+    so a job keeps the account it began with even if another profile is opened meanwhile."""
+    return tc.Trakt(h, S["pid"])
+
+
+def mine(fn):
+    """Wraps a callback of a background job: if another profile was opened since the job began, its answer is dropped."""
+    pid = S["pid"]
+
+    def guarded(*args):
+        if S["pid"] == pid:
+            return fn(*args)
+    return guarded
 
 
 def start():
+    """Runs when the screen opens, and again from render() when another profile was opened since (the screen is kept between visits)."""
+    S["pid"] = tc.profile_of(ui)
+    S["login"], S["user"], S["msg"], S["busy"], S["advanced"] = None, "", "", "", False
     t = trakt()
     S["linked"] = t.linked()
     S["set"] = {k: t.on(k) for k in ("scrobble", "push", "pull", "ratings", "favorites", "removals")}
     S["id"], S["secret"] = t.settings["client_id"], t.settings["client_secret"]
     if S["linked"]:
-        ui.background(lambda: trakt().username(), got_user, quiet)
+        ui.background(lambda: t.username(), mine(got_user), quiet)
 
 
 def quiet(message):
@@ -35,7 +51,8 @@ def got_user(name):
 # ------------------------------------------------------------------------------------------------ sign in
 def connect():
     S["msg"], S["busy"] = "", "login"
-    ui.background(lambda: trakt().start_login(), got_code, login_failed)
+    t = trakt()
+    ui.background(lambda: t.start_login(), mine(got_code), mine(login_failed))
 
 
 def got_code(d):
@@ -51,14 +68,15 @@ def got_code(d):
 
 def poll():
     lg = S["login"]
-    ui.background(lambda: wait_and_check(lg), polled, login_failed)
+    t = trakt()
+    ui.background(lambda: wait_and_check(t, lg), mine(polled), mine(login_failed))
 
 
-def wait_and_check(lg):
+def wait_and_check(t, lg):
     time.sleep(lg["interval"])
     if S["login"] is not lg:
         return "cancelled"
-    return trakt().poll_login(lg["device"])
+    return t.poll_login(lg["device"])
 
 
 def polled(res):
@@ -68,7 +86,8 @@ def polled(res):
     if res == "ok":
         S["login"], S["linked"], S["msg"] = None, True, "Connected to Trakt."
         S["busy"] = "sync" if S["set"].get("pull") else ""
-        ui.background(first_run, first_done, sync_failed)
+        t = trakt()
+        ui.background(lambda: first_run(t), mine(first_done), mine(sync_failed))
     elif res == "pending":
         if time.time() > lg["until"]:
             S["login"], S["msg"] = None, "The code expired. Tap Connect to get a new one."
@@ -83,9 +102,8 @@ def polled(res):
                     "denied": "Trakt said no. Nothing was connected."}.get(res, "Could not sign in. Please try again.")
 
 
-def first_run():
+def first_run(t):
     """Right after signing in: the user name, then (if switched on) the first import. One job, so they never write the same file at once."""
-    t = trakt()
     name = t.username()
     if S["set"].get("pull"):
         return name, tuple(t.pull(time.time() + 18)) + ([],)      # (items, finished, error) + nothing removed yet
@@ -112,7 +130,8 @@ def cancel():
 
 def disconnect():
     S["busy"] = "out"
-    ui.background(lambda: trakt().revoke(), signed_out, signed_out)
+    t = trakt()
+    ui.background(lambda: t.revoke(), mine(signed_out), mine(signed_out))
 
 
 def signed_out(unused=None):
@@ -122,11 +141,11 @@ def signed_out(unused=None):
 # ------------------------------------------------------------------------------------------------ history
 def sync():
     S["busy"], S["msg"] = "sync", ""
-    ui.background(sync_work, sync_done, sync_failed)
-
-
-def sync_work():
     t = trakt()
+    ui.background(lambda: sync_work(t), mine(sync_done), mine(sync_failed))
+
+
+def sync_work(t):
     items, finished, error = t.pull(time.time() + 14)
     t.flush_queue(time.time() + 4)
     gone = []
@@ -159,15 +178,15 @@ def sync_failed(message):
 def send_ratings():
     """Uploads every rating this profile has in PEK TV (the hooks only send new ones), and brings Trakt's in."""
     S["busy"], S["msg"] = "ratings", ""
-    mine = ui.ratings()
-    ui.background(lambda: ratings_work(mine), ratings_done, sync_failed)
-
-
-def ratings_work(mine):
+    have = ui.ratings()
     t = trakt()
+    ui.background(lambda: ratings_work(t, have), mine(ratings_done), mine(sync_failed))
+
+
+def ratings_work(t, have):
     sent, missed = 0, 0
-    for i in range(0, len(mine), 100):
-        a, b = t.push_ratings(mine[i:i + 100], time.time() + 8)
+    for i in range(0, len(have), 100):
+        a, b = t.push_ratings(have[i:i + 100], time.time() + 8)
         sent, missed = sent + a, missed + b
     items, finished, error = t.pull_ratings(time.time() + 12)
     return sent, missed, items, error
@@ -185,15 +204,15 @@ def ratings_done(res):
 def send_favorites():
     """Uploads every favorite movie / show this profile has in PEK TV (the hooks only send new ones), and brings Trakt's in."""
     S["busy"], S["msg"] = "favs", ""
-    mine = ui.favorites()
-    ui.background(lambda: favorites_work(mine), favorites_done, sync_failed)
-
-
-def favorites_work(mine):
+    have = ui.favorites()
     t = trakt()
+    ui.background(lambda: favorites_work(t, have), mine(favorites_done), mine(sync_failed))
+
+
+def favorites_work(t, have):
     sent, missed = 0, 0
-    for i in range(0, len(mine), 100):
-        a, b = t.push_favorites(mine[i:i + 100], True, time.time() + 8)
+    for i in range(0, len(have), 100):
+        a, b = t.push_favorites(have[i:i + 100], True, time.time() + 8)
         sent, missed = sent + a, missed + b
     items, removed, finished, error = t.pull_favorites(time.time() + 12, removals=t.on("removals"))
     return sent, missed, items, removed, error
@@ -250,6 +269,8 @@ def toggle_advanced():
 
 # ------------------------------------------------------------------------------------------------ drawing
 def render():
+    if S["pid"] != tc.profile_of(ui):         # another profile was opened since this screen was last shown: it has its own account
+        start()
     kids = [ui.heading("Trakt")]
     lg = S["login"]
     if lg:
@@ -258,7 +279,7 @@ def render():
                  ui.spinner("Waiting for you to approve it on Trakt..."),
                  ui.button("Cancel", on=cancel)]
     elif S["linked"]:
-        kids += [ui.text("Connected" + (" as " + S["user"] if S["user"] else "") + "."),
+        kids += [ui.text("Connected" + (" as " + S["user"] if S["user"] else "") + ". This Trakt account belongs to the profile that is open; every profile can connect its own."),
                  ui.toggle("Send what I watch to Trakt (scrobble)", S["set"].get("scrobble", True), lambda v: flip("scrobble", v)),
                  ui.toggle("Send my 'mark watched' changes to Trakt", S["set"].get("push", True), lambda v: flip("push", v)),
                  ui.toggle("Import my Trakt history when PEK TV starts", S["set"].get("pull", True), lambda v: flip("pull", v)),
@@ -280,6 +301,7 @@ def render():
                      ui.button("Disconnect", on=disconnect)]
     else:
         kids.append(ui.text("Connect your Trakt account to scrobble what you watch in PEK TV and to see your Trakt history here. "
+                            "It is kept for the profile that is open now; every profile can connect its own account. "
                             "PEK TV shows you a code; you approve it on trakt.tv. Your password is never typed into PEK TV."))
         if S["busy"] == "login":
             kids.append(ui.spinner("Asking Trakt for a code..."))

@@ -79,6 +79,7 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 | ratings (`watched`) | `ui.ratings()` -> `[{kind, title, year, season, episode, rating 1-10, at}]` (the open profile's ratings; `kind` is `movie`, `episode` or `show`, and an episode's or show's `title` is the show's title); `ui.set_ratings_many(items)` with items `{kind (movie by default), title, year, season, episode, rating, at}` (rating 0 removes it, `at` = seconds since 1970, max 300). A hook with the `playback` permission also gets a `rated` event: `{type: "rated", items: [{kind, title, year, season, episode, rating}]}` (0 = removed). Ratings are per profile and sync to PEK Cloud; a rating a plugin sets is not sent back to that plugin. |
 | favorites (`watched`) | `ui.favorites()` -> `[{kind ("movie" or "show"), title, year, tmdb}]` (the open profile's favorite movies and shows, library and plugin favorites together; `tmdb` is 0 when unknown); `ui.set_favorites_many(items, value=True)` adds (False removes) favorites: items `{kind, title, year, tmdb, at}`. A title the library has becomes a library favorite; one it does not have is kept as a plugin favorite through `tmdb`. With value False, `at` is "the time I last looked" (seconds since 1970) and a favorite changed here after it is kept. A hook with `playback` gets `{type: "favorited", value: bool, items: [{kind, title, year, tmdb}]}`. A change a plugin makes is not sent back to that plugin. |
 | removals (`watched`) | `ui.set_watched_many(items, False)`: with value False an item's `at` is "the time I last looked"; a title finished in PEK TV after that time stays watched. |
+| profile (`storage`) | `ui.profile()` -> the open profile's id (string), for plugins that keep one account or setting per profile; see "Profiles" under Hooks |
 | `pek.fetchJSON(url)` (`network`) | `h.fetch_json(url)` (inside `ui.background`) |
 | `pek.storage.*`, `pek.readJSON` | `h.write_json / h.read_json` (`storage`, in `data/`) |
 | `navigator.language` | `ui.ctx()["lang"]`, `["region"]`, `["tv"]`, `["favorites"]` |
@@ -148,12 +149,13 @@ def on_event(ev):        # called by PEK TV, no screen needed; max 25 s; one eve
 
 | type | when | other fields |
 |---|---|---|
-| `app_start` | once per run, a few seconds after the shell opens | none |
+| `app_start` | once per run, a few seconds after the shell opens, and again each time another profile is opened | none |
 | `tick` | every 3 minutes while the app is open and nothing is playing, and when the app returns to the front (at most once a minute; never while another event for the plugin is still running) | none |
 | `play` | the video really runs (first position after buffering) | item + position |
 | `pause` / `resume` | the person paused / continued | item + position |
 | `stop` | the player closed, or the next episode took over | item + position |
 | `watched` | the person marked movies / episodes watched or unwatched | `items` (max 300 of `{kind, title, year, season, episode}`), `value` |
+| `profile_removed` | a profile was deleted (here or on another device), or the profiles were replaced by another account's | none (`ui.profile()` is the removed profile's id) |
 
 An item is `kind` (`movie` or `episode`; torrents with no identity are not reported), `title` (for an episode: the **show's** title), `year`,
 `season`, `episode`, `position`, `duration` (seconds) and `percent` (0 to 100). `pek_flutter.py` builds the event itself and passes
@@ -171,6 +173,14 @@ Watch History is **not** reported back to that same plugin, so an import cannot 
   in `permissions.network`, with an `Authorization` header allowed (`fetch_text` still drops it). Redirects are never followed, so a header can
   only reach the host the plugin named; the same public-IP pinning, size caps (256 KB out, 2 MB back) and 10 s limit apply. It returns
   `{"status", "data", "page_count", "retry_after"}` and does **not** raise on an HTTP error status, so a plugin can tell "pending" from "denied".
+
+**Profiles.** Every event belongs to the profile that was open when it happened, and `ui.profile()` (`storage`) tells the plugin which: the
+profile's id (`p1` for the first one; letters, digits, `_` and `-`, at most 24 characters), never its name. A plugin that keeps something per
+profile (Trakt keeps one account per profile) puts the id in its file names. A screen gets the same call for the profile that is open. Marks,
+ratings and favorites a hook brings in are applied to the profile the event belonged to: if another profile was opened while the hook ran,
+they wait until that profile is open again (kept while the app runs, at most 20 batches). On `profile_removed` the plugin should let go of
+what it kept for that profile (Trakt revokes the account and empties its files). A PEK TV older than this has no `ui.profile()`: a plugin that
+wants to run there catches the error and treats everything as one profile.
 
 A hooks file is scanned and sandboxed exactly like `screen.py`. The hook session is separate from the screen's session (each imports its own
 copy of the plugin's helper modules, so a shared `*_core.py` gets the right `pek_host`); both share the plugin's `data/` folder. Because two

@@ -15,6 +15,7 @@ import 'src/shell.dart';
 import 'src/store.dart';
 import 'src/theme.dart';
 import 'src/tokens.dart';
+import 'src/whats_new.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -69,10 +70,16 @@ class _BootState extends State<_Boot> {
   AppRelease? _update;
   bool _later = false;
 
+  // What changed in this version (whats_new.dart): shown once, on the first start after an update.
+  List<ReleaseNotes> _notes = const [];
+  bool _notesSeen = false;
+
   Future<bool> _start() async {
     final check = AppUpdate.check(); // gives up after a few seconds; any problem = no update screen
+    final notes = WhatsNew.pending(); // local, instant; any problem = no screen
     final ok = await Api.waitForServer();
     _update = await check;
+    _notes = await notes;
     return ok;
   }
 
@@ -91,6 +98,15 @@ class _BootState extends State<_Boot> {
         if (snap.data == true) {
           if (_update != null && !_later) {
             return AppUpdateScreen(release: _update!, onLater: () => setState(() => _later = true));
+          }
+          if (_notes.isNotEmpty && !_notesSeen) {
+            return WhatsNewScreen(
+              notes: _notes,
+              onDone: () {
+                WhatsNew.markSeen();
+                setState(() => _notesSeen = true);
+              },
+            );
           }
           // With an account, "Who's watching?" comes first; the app below is rebuilt for each profile.
           return ListenableBuilder(

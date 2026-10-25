@@ -6,6 +6,7 @@ import 'api.dart';
 import 'plugin_host.dart';
 import 'library_match.dart';
 import 'plugin_favorites.dart';
+import 'profiles.dart';
 import 'ratings.dart';
 import 'store.dart';
 import 'watched.dart';
@@ -22,6 +23,11 @@ import 'watched.dart';
 ///   watched         the person marked movies / episodes watched or unwatched
 ///   rated           the person rated a movie, episode or show (1 to 10) or removed the rating (0)
 ///   favorited       the person added movies / shows to the favorites, or removed them
+///   profile_removed a profile was deleted (or replaced by another account's): a plugin that keeps something per profile lets go of it
+///
+/// Every event is told which profile it belongs to (the one open when it happened; pek_ui.profile() in the plugin), so a plugin can
+/// keep one account per profile (Trakt does). Whatever a hook asks PEK TV to change (marks, ratings, favorites) is applied to that
+/// same profile: if another profile has been opened by the time the hook answers, the changes wait until that profile is open again.
 ///
 /// Events for one plugin run one after the other, in the order they happened. A plugin that is slow, broken or missing
 /// never holds up the player: every call is fire-and-forget. All Python checking (the permission, the field filter that
@@ -33,6 +39,8 @@ class PluginHooks {
   static Future<List<String>>? _loading;
   static final Map<String, Future<void>> _chain = {};
   static final Map<String, int> _pending = {}; // plugin id -> events queued or running (a tick never queues behind another)
+  static final Map<String, List<(String, List)>> _deferred = {}; // profile id -> (plugin id, effects) that came back after another profile was opened
+  static String _lastProfile = '';
 
   static const _tickEvery = Duration(minutes: 3);
   static DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
@@ -58,7 +66,8 @@ class PluginHooks {
     }
   }
 
-  static void _send(Map<String, dynamic> event, {String? except, bool idleOnly = false}) {
+  static void _send(Map<String, dynamic> event, {String? except, bool idleOnly = false, String? profile}) {
+    final owner = profile ?? Store.profileId; // read now: the event belongs to the profile that is open as it happens
     unawaited(() async {
       final ids = await _plugins();
       for (final id in ids) {
@@ -66,21 +75,56 @@ class PluginHooks {
         if (idleOnly && (_pending[id] ?? 0) > 0) continue;
         _pending[id] = (_pending[id] ?? 0) + 1;
         final prev = _chain[id] ?? Future<void>.value();
-        _chain[id] = prev.then((_) => _run(id, event)).whenComplete(() {
+        _chain[id] = prev.then((_) => _run(id, event, owner)).whenComplete(() {
           _pending[id] = (_pending[id] ?? 1) - 1;
         });
       }
     }());
   }
 
-  static Future<void> _run(String id, Map<String, dynamic> event) async {
+  static Future<void> _run(String id, Map<String, dynamic> event, String profile) async {
     try {
-      final r = await PluginHost.hook(id, event);
+      final r = await PluginHost.hook(id, event, profile: profile);
       final fx = r['effects'];
-      if (fx is List) await _apply(id, fx);
+      if (fx is! List || fx.isEmpty) return;
+      if (Store.profileId == profile) {
+        await _apply(id, fx);
+      } else {
+        // Another profile was opened while the plugin worked: marks, ratings and favorites belong to the profile the event was for,
+        // so they wait until that profile is open again (a few at most; only kept while the app runs).
+        final waiting = _deferred.putIfAbsent(profile, () => []);
+        if (waiting.length < 20) waiting.add((id, fx));
+      }
     } catch (_) {
       // a hook never breaks playback
     }
+  }
+
+  /// Another profile was opened: apply what hooks brought in for it while it was closed, and let the plugins bring in what is new
+  /// for it (an `app_start` for that profile: Trakt imports into the profile that just opened, not the one that opened first).
+  static void _profileChanged() {
+    final now = Store.profileId;
+    if (now == _lastProfile) return;
+    _lastProfile = now;
+    final waiting = _deferred.remove(now);
+    if (waiting != null) {
+      unawaited(() async {
+        for (var i = 0; i < waiting.length; i++) {
+          if (Store.profileId != now) {
+            _deferred.putIfAbsent(now, () => []).addAll(waiting.sublist(i)); // opened another one again: keep the rest for later
+            return;
+          }
+          await _apply(waiting[i].$1, waiting[i].$2);
+        }
+      }());
+    }
+    _send({'type': 'app_start'}, profile: now);
+  }
+
+  /// A profile was deleted: tell the plugins, as that profile, so they can let go of what they kept for it.
+  static void profileRemoved(String id) {
+    _deferred.remove(id);
+    _send({'type': 'profile_removed'}, profile: id);
   }
 
   /// The only things a hook can ask for: marking movies / episodes watched (Python already checked the permission).
@@ -148,12 +192,15 @@ class PluginHooks {
 
   // ------------------------------------------------------------------------------------------ what PEK TV reports
 
-  /// Once per run (the first profile that opens): lets a plugin bring in what happened elsewhere. From then on the plugin
+  /// Once per run (for the profile that is open): lets a plugin bring in what happened elsewhere. From then on the plugin
   /// also gets a `tick` every few minutes (and when the app returns to the front) so a watch marked elsewhere shows up
-  /// while PEK TV is open.
+  /// while PEK TV is open. Every profile opened later gets its own `app_start`, so each profile's account is brought up to date.
   static void appStart() {
     if (_started) return;
     _started = true;
+    _lastProfile = Store.profileId;
+    Store.profile.addListener(_profileChanged);
+    Profiles.onRemoved = profileRemoved;
     _send({'type': 'app_start'});
     _lastTick = DateTime.now();
     Timer.periodic(_tickEvery, (_) => _tick(const Duration(minutes: 1)));

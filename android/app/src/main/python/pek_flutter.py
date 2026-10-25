@@ -36,7 +36,7 @@ OFFICIAL_SKIN_PLUGINS = {"skin-maker"}       # the only plugin that may ask for 
 OFFICIAL_WEATHER_PLUGINS = {"weather"}       # the only plugin that may ask for the "weather" permission (the app's city and unit)
 RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS}   # host -> the only plugins that may list it
 HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
-HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited"}
+HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited", "profile_removed"}
 HOOK_EFFECTS = {"watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many"}   # all a hook may ask Flutter to do
 ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many", "torrent.play", "toast", "exit",
                    "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set"}

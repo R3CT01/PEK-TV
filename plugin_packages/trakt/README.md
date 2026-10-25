@@ -3,6 +3,9 @@
 Scrobbles what you watch in PEK TV to [Trakt](https://trakt.tv), sends your "mark watched" changes there, and brings your Trakt
 history into PEK TV. Made for people who already use Trakt with Kodi (the same account, the same history).
 
+**One Trakt account per PEK TV profile.** Each profile connects its own account, with its own switches, so what one person watches
+never lands in another person's Trakt, and a Trakt import goes into the profile it belongs to.
+
 ## What it does
 
 | | |
@@ -25,21 +28,27 @@ Not done (yet): your existing PEK TV history is not uploaded to Trakt (only new 
    code and approve. No password is typed into PEK TV.
 3. Choose what is shared with the six switches. Press **Import my Trakt history now** if you do not want to wait for the next start.
 
-The account belongs to this device (plugin storage), not to a PEK TV profile. The import goes into the profile that is open when PEK TV
-starts.
+The account belongs to the PEK TV profile that is open when you connect it. Open another profile and the plugin shows that profile's own
+state (connected as someone else, or not connected yet). Each profile's scrobbles, marks, ratings, favorites and imports use only that
+profile's account. When PEK TV starts, and whenever you switch profile, the open profile's Trakt history is imported.
+
+Coming from an earlier version (one account for the whole device): that account stays on the first profile (`p1`, the main profile).
+Other profiles start not connected. Deleting a profile in PEK TV signs its Trakt account out (the token is revoked at Trakt) and
+empties its files. Needs a PEK TV that tells plugins the open profile (`ui.profile()`); on an older PEK TV the plugin behaves as before,
+with one account.
 
 ## How it is built
 
 - `plugin.json`: permissions `send` (Authorization header + POST, to the listed hosts only), `playback` (the hook below), `watched`,
-  `storage`; `flutter.hooks` names `hooks.py`.
-- `hooks.py`: `on_event(event)`, called by PEK TV without a screen: `app_start`, `tick`, `play`, `resume`, `pause`, `stop`, `watched`, `rated`, `favorited`.
+  `storage`; `flutter.hooks` names `hooks.py`. Both ask PEK TV which profile is open (`ui.profile()`) and use that profile's account.
+- `hooks.py`: `on_event(event)`, called by PEK TV without a screen: `app_start`, `tick`, `play`, `resume`, `pause`, `stop`, `watched`, `rated`, `favorited`, `profile_removed`.
 - `screen.py`: sign-in (device flow), the switches, the import / ratings / favorites buttons, "use my own Trakt app".
 - `trakt_core.py`: everything that talks to Trakt. The 3-minute check is one small request (`/sync/last_activities`); the history is only fetched when Trakt says something new was watched. Titles are matched once with Trakt's search (title + year) and the Trakt id is kept in
   `data/ids.json`.
 - Sign-in is Trakt's device flow with PKCE (a one-time `code_verifier` made on the device), straight to `api.trakt.tv`. Trakt apps no
   longer have a client secret, so no proxy or server is needed. "Use my own Trakt app" swaps in your own client id.
 
-Files in `data/`: `auth.json` (tokens), `settings.json`, `pkce.json` (only while signing in), `ids.json`, `sync.json` (where the import stopped), `queue.json`, `rqueue.json` / `fqueue.json` (ratings / favorites that still have to be sent), `rsynced.json` / `wsynced.json` / `fsynced.json` (what Trakt held the last time it was looked at, used to notice removals).
+Files in `data/`: `auth.json` (tokens), `settings.json`, `pkce.json` (only while signing in), `sync.json` (where the import stopped), `queue.json`, `rqueue.json` / `fqueue.json` (ratings / favorites that still have to be sent), `rsynced.json` / `wsynced.json` / `fsynced.json` (what Trakt held the last time it was looked at, used to notice removals). All of these are per profile: the first profile (`p1`) uses these names, every other profile has its id in front (`p2abc.auth.json`). `ids.json` (which Trakt id a title has) is the only shared file; it holds no account data.
 Removing the plugin removes them; **Disconnect** signs out and revokes the token.
 
 ## Testing

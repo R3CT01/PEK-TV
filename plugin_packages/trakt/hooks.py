@@ -12,6 +12,10 @@
   favorited      the person added movies / shows to the favorites, or removed them -> POST /sync/favorites[/remove]
                  (Trakt favorites come in at app_start and, when Trakt reports a favorites time, at tick: ui.set_favorites_many)
 
+Every event belongs to the profile that was open when it happened, and every profile has its own Trakt account: PEK TV tells the hook
+which profile that is (ui.profile()) and the plugin looks only at that profile's account and files.
+  profile_removed  the profile was deleted in PEK TV (the event carries that profile's id): its Trakt account is signed out here
+
 Removals made on Trakt (a watch, a rating, a favorite) come back too: after Trakt says a list changed, the list is read again and
 compared with what it held last time (see trakt_core.snapshot_diff). The "removals" switch turns that off.
 
@@ -48,10 +52,13 @@ def apply_favorites(items, removed):
 
 
 def on_event(ev):
-    t = tc.Trakt(h)
+    t = tc.Trakt(h, tc.profile_of(ui))     # the account of the profile this event belongs to
+    kind = ev.get("type")
+    if kind == "profile_removed":
+        t.erase()
+        return
     if not t.linked():
         return
-    kind = ev.get("type")
     now = time.time()
     if kind == "app_start":
         # one hook may run 25 seconds: every step gets a time to start by, and a step cut short carries on at the next tick

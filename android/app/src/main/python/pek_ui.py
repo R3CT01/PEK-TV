@@ -222,6 +222,17 @@ def ctx():
     return d
 
 
+def profile():
+    """The id of the PEK TV profile that is open ("p1" for the first one; letters, digits, "_" and "-", at most 24 characters), for a
+    plugin that keeps something per profile (its own account, its own settings). Never the profile's name or picture. A hook is told the
+    profile that was open when the event happened, not the one open when the hook runs. Needs "storage": true, because keeping
+    something per profile is all it is for."""
+    s = _sess()
+    s.need("storage")
+    p = "".join(c for c in str(s.ctx.get("profile") or "") if (c.isascii() and c.isalnum()) or c in "_-")[:24]
+    return p or "p1"
+
+
 def background(work, done, fail=None):
     """Runs work() on another thread (so it may wait for the network), then done(result) back on the screen's
     own thread, and the screen is drawn again. fail(message) runs if work() raised. This is the Python version

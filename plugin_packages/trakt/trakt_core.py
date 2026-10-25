@@ -7,6 +7,9 @@ How it talks to Trakt:
     device) takes its place, so no proxy or server is needed. A person who prefers their own Trakt app can enter its id instead.
   * Everything else goes straight to api.trakt.tv with the person's token.
   * Titles are matched with Trakt's search (title + year) once and the Trakt id is remembered in ids.json.
+  * Every PEK TV profile has its own Trakt account: the token, the settings, the import position, the retry queues and the
+    "what Trakt held last time" snapshots all live in files named after the profile (see Trakt.fname). Only ids.json, the
+    title -> Trakt id cache, is shared, because it holds no account data.
 """
 import base64
 import datetime
@@ -28,6 +31,9 @@ STATE = "sync.json"
 QUEUE = "queue.json"
 RQUEUE = "rqueue.json"
 FQUEUE = "fqueue.json"
+SHARED = (IDS,)                      # the same for every profile: a title has one Trakt id whoever is watching
+PER_PROFILE = (SETTINGS, AUTH, PKCE, STATE, QUEUE, RQUEUE, FQUEUE, "rsynced.json", "wsynced.json", "fsynced.json")
+FIRST = "p1"                         # PEK TV's first profile; its files keep their old names, so an account linked before profiles existed stays on it
 SNAP_MAX = 4000                      # most titles a "what Trakt held last time" snapshot keeps
 OOB = "urn:ietf:wg:oauth:2.0:oob"
 MAX_IDS = 3000
@@ -55,9 +61,25 @@ def norm(s):
     return " ".join(str(s or "").lower().split())
 
 
+def clean_profile(p):
+    """A profile id made safe for a file name: letters, digits, '_' and '-', at most 24 characters. Nothing usable -> FIRST."""
+    out = "".join(c for c in str(p or "") if (c.isascii() and c.isalnum()) or c in "_-")[:24]
+    return out or FIRST
+
+
+def profile_of(ui):
+    """The id of the profile that is open in PEK TV. A PEK TV that does not tell plugins its profile (older than profiles for
+    plugins) gives FIRST, which is how the plugin worked before: one account."""
+    try:
+        return clean_profile(ui.profile())
+    except Exception:
+        return FIRST
+
+
 class Trakt:
-    def __init__(self, host):
+    def __init__(self, host, profile=FIRST):
         self.h = host
+        self.profile = clean_profile(profile)
         stored = self.load(SETTINGS, {})
         self.settings = dict(DEFAULTS)
         for k in DEFAULTS:
@@ -67,15 +89,19 @@ class Trakt:
         self.acts = None                     # Trakt's last_activities answer of this event (see activity())
 
     # ------------------------------------------------------------------------------------------ storage
+    def fname(self, name):
+        """The file a piece of data lives in for this profile: profile p1 keeps the plain name, every other profile gets its id in front."""
+        return name if name in SHARED or self.profile == FIRST else "%s.%s" % (self.profile, name)
+
     def load(self, name, default):
         try:
-            v = self.h.read_json(name)
+            v = self.h.read_json(self.fname(name))
         except Exception:
             return default
         return v if isinstance(v, type(default)) else default
 
     def save(self, name, obj):
-        self.h.write_json(name, obj)
+        self.h.write_json(self.fname(name), obj)
 
     def set_setting(self, key, value):
         if key in DEFAULTS:
@@ -151,6 +177,14 @@ class Trakt:
             except Exception:
                 pass
         self.forget()
+
+    def erase(self):
+        """This profile was removed from PEK TV: its Trakt account is signed out (the token is revoked at Trakt) and its files are emptied."""
+        if self.linked():
+            self.revoke()
+        for n in PER_PROFILE:
+            self.save(n, {})
+        self.auth = {}
 
     def refresh(self):
         """Trades the refresh token for a new access token. False when it could not (signed out if Trakt refused it).

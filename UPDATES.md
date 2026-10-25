@@ -26,3 +26,24 @@ Rules the app follows:
 Android never lets a normal app update itself with no prompt at all. The person turns on "Install unknown apps" for PEK TV once
 (the screen sends them there), and Android shows its own confirmation. On Android 12+ Android may skip that confirmation for
 updates of an app it already installed this way.
+
+## "What's new" screen (after an update)
+
+After the app was updated, the first start shows a **What's new in PEK TV x.y.z** screen once, then the app. It is separate from the
+"A new version is available" screen above (that one comes first, before the update is installed).
+
+Every release, **before you push the tag**:
+
+1. Add a `ReleaseNotes('x.y.z', 'Short title', ['line', 'line', ...])` at the TOP of `releases` in
+   `flutter_ui/lib/src/whats_new.dart`. `x.y.z` must be the tag you push, without the `v`.
+2. Raise `version:` in `flutter_ui/pubspec.yaml` and `pekBaseCode` in `android/app/build.gradle` (see "Publishing a release").
+
+How it behaves:
+
+- The last version the person saw is remembered on the device (not per profile). The notes are shown when the running version has
+  an entry newer than that. Someone who skips versions sees every entry in between, newest first.
+- The first time (nothing remembered yet) only the newest entry is shown, not the whole history. A brand-new install sees it too.
+- A release with no entry shows nothing.
+- `-debug` / `-dev.N` builds use the notes of their base version, so you can check the text on a dev build.
+- The version is remembered when **Continue** is pressed, so closing the app on the screen shows it again at the next start.
+- On a TV, OK presses Continue and up / down scroll a long list.

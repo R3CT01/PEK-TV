@@ -63,6 +63,10 @@ class Profiles {
   /// A profile was picked in this run of the app (the picker is shown once per run).
   static bool pickedThisSession = false;
 
+  /// Called with a profile's id when that profile is deleted (here or on another device) or replaced by another account's profiles,
+  /// so plugins that keep something per profile (Trakt's account) can let go of it. PluginHooks sets it.
+  static void Function(String id)? onRemoved;
+
   // ---------------------------------------------------------------- loading / saving
 
   static Profile _first() => Profile(id: 'p1', name: 'Profile 1', color: colors[0]);
@@ -251,6 +255,7 @@ class Profiles {
   static Future<bool> remove(String id) async {
     if (_list.length < 2) return false;
     await Store.removeProfileData(id, keepFavorites: false);
+    onRemoved?.call(id);
     _list.removeWhere((p) => p.id == id);
     _tombs[id] = DateTime.now().millisecondsSinceEpoch; // so the removal reaches the cloud and the other devices
     if (_active == id) {
@@ -301,6 +306,7 @@ class Profiles {
         if (local != null && local.updated <= ru && id != _active && _list.length > 1) {
           _list.removeWhere((p) => p.id == id);
           Store.removeProfileData(id, keepFavorites: false);
+          onRemoved?.call(id);
           changed = true;
         }
         continue;
@@ -350,10 +356,14 @@ class Profiles {
     }
     final remote = await Cloud.peekProfiles() ?? <Map<String, dynamic>>[];
     final live = remote.where((r) => r['id'] is String && !(r['deleted'] == true || (r['deleted'] is num && r['deleted'] != 0)) && _cleanName('${r['name'] ?? ''}').isNotEmpty).take(max).toList();
+    final oldIds = {...ids, 'p1'};
     for (final id in ids.toList()) {
       await Store.removeProfileData(id, keepFavorites: true);
     }
     await Store.removeProfileData('p1', keepFavorites: true);
+    for (final id in oldIds) {
+      onRemoved?.call(id); // another person's account: nothing of the old profiles' plugin accounts may carry over
+    }
     if (live.isNotEmpty) {
       _list = [
         for (final r in live)
