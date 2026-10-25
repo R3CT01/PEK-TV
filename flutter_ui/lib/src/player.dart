@@ -96,6 +96,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _rootNode.dispose();
+    _playNode.dispose();
     Activity.playerLeave();
     if (!_leaving) {
       _hook('stop');
@@ -272,7 +274,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!_controls) setState(() => _controls = true);
     _hide?.cancel();
     _hide = Timer(const Duration(seconds: 4), () {
-      if (mounted && _player.playing.value) setState(() => _controls = false);
+      if (mounted && _player.playing.value) {
+        setState(() => _controls = false);
+        // the buttons are out of the focus order while hidden: hand the remote back to the video
+        if (ModalRoute.of(context)?.isCurrent ?? false) _rootNode.requestFocus();
+      }
     });
   }
 
@@ -287,10 +293,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _player.seek(t);
   }
 
+  // The root listens for the remote when no button has the focus; _playNode is the play / pause button, where Down from the
+  // video lands. Left / Right / Up / Down then move between the buttons and OK presses the one that is lit.
+  final FocusNode _rootNode = FocusNode(debugLabel: 'player');
+  final FocusNode _playNode = FocusNode(debugLabel: 'player play');
+  DateTime _lastSeekKey = DateTime.fromMillisecondsSinceEpoch(0);
+
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
-    if (k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.gameButtonA || k == LogicalKeyboardKey.mediaPlayPause) {
+    final isOk = k == LogicalKeyboardKey.select || k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter || k == LogicalKeyboardKey.gameButtonA;
+    final isArrow = k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown;
+    // A button (back, rewind, play, forward, subtitles, Skip, Up next) has the focus: the arrows move between buttons by the
+    // normal focus rules and OK presses the lit one. Keep the controls on screen while the person is using them.
+    if (FocusManager.instance.primaryFocus != node && (isOk || isArrow)) {
+      _poke();
+      return KeyEventResult.ignored;
+    }
+    if (isOk || k == LogicalKeyboardKey.mediaPlayPause) {
       if (e is KeyDownEvent && context.pek.tvDevice && _skip.cur != null && k != LogicalKeyboardKey.mediaPlayPause) {
         _skip.skip(); // on a TV the button is already "highlighted": OK skips
         _poke();
@@ -300,13 +320,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _poke();
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind) {
-      _seekBy(-10);
-      _poke();
-      return KeyEventResult.handled;
-    }
-    if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.mediaFastForward) {
-      _seekBy(10);
+    if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind || k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.mediaFastForward) {
+      final back = k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.mediaRewind;
+      if (e is KeyRepeatEvent) {
+        // A held key repeats about 30 times a second: skip 10 s about 5 times a second, not 300 s a second.
+        final now = DateTime.now();
+        if (now.difference(_lastSeekKey) < const Duration(milliseconds: 200)) return KeyEventResult.handled;
+        _lastSeekKey = now;
+      }
+      _seekBy(back ? -10 : 10);
       _poke();
       return KeyEventResult.handled;
     }
@@ -314,8 +336,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _poke();
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.arrowDown && e is KeyDownEvent) {
-      _tracks();
+    if (k == LogicalKeyboardKey.arrowDown) {
+      // First press shows the controls; with them showing, Down moves onto the buttons (it no longer opens the subtitle menu).
+      final wasShown = _controls;
+      _poke();
+      if (wasShown && e is KeyDownEvent) _playNode.requestFocus();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -386,6 +411,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent, // the video surface is behind Flutter
       body: Focus(
+        focusNode: _rootNode,
         autofocus: true,
         onKeyEvent: _onKey,
         child: GestureDetector(
@@ -444,14 +470,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
-              IgnorePointer(
+              ExcludeFocus(
+                excluding: !_controls,
+                child: IgnorePointer(
                 ignoring: !_controls,
                 child: AnimatedOpacity(
                   opacity: _controls ? 1 : 0,
                   duration: const Duration(milliseconds: 120),
                   child: RepaintBoundary(child: Theme(data: ThemeData.dark(useMaterial3: true), child: DefaultTextStyle.merge(style: const TextStyle(color: Colors.white), child: _overlay()))),
                 ),
-              ),
+              )),
             ],
           ),
         ),
@@ -499,18 +527,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   static const _fg = Color(0xFFF6F2EC);
   static const _hi = Color(0xFFF3EEE7);
 
-  Widget _glassBtn(IconData icon, VoidCallback onTap, {double size = 44, double icon_ = 22}) {
-    return Material(
-      color: _glass,
-      shape: const CircleBorder(),
-      elevation: 0,
-      shadowColor: Colors.transparent,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: SizedBox(width: size, height: size, child: Icon(icon, size: icon_, color: _fg)),
-      ),
-    );
+  Widget _glassBtn(IconData icon, VoidCallback onTap, {double size = 44, double icon_ = 22, FocusNode? node}) {
+    return _GlassButton(icon: icon, onTap: onTap, size: size, iconSize: icon_, focusNode: node);
   }
 
   Widget _seekBar() {
@@ -576,7 +594,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SizedBox(height: 30, child: RepaintBoundary(child: _seekBar())),
+              SizedBox(height: 30, child: ExcludeFocus(child: RepaintBoundary(child: _seekBar()))),
               const SizedBox(height: 4),
               Row(
                 children: [
@@ -600,7 +618,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   const SizedBox(width: 16),
                   ValueListenableBuilder<bool>(
                     valueListenable: _player.playing,
-                    builder: (_, p, __) => _glassBtn(p ? Icons.pause : Icons.play_arrow, () { _player.togglePause(); _poke(); }, size: 56, icon_: 30),
+                    builder: (_, p, __) => _glassBtn(p ? Icons.pause : Icons.play_arrow, () { _player.togglePause(); _poke(); }, size: 56, icon_: 30, node: _playNode),
                   ),
                   const SizedBox(width: 16),
                   _glassBtn(Icons.forward_10, () { _seekBy(10); _poke(); }),
@@ -616,6 +634,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+
+/// A round player button that lights up when the remote is on it: it grows, turns light with a dark icon and gets a white ring,
+/// so it is clear which button OK will press.
+class _GlassButton extends StatefulWidget {
+  const _GlassButton({required this.icon, required this.onTap, required this.size, required this.iconSize, this.focusNode});
+  final IconData icon;
+  final VoidCallback onTap;
+  final double size, iconSize;
+  final FocusNode? focusNode;
+
+  @override
+  State<_GlassButton> createState() => _GlassButtonState();
+}
+
+class _GlassButtonState extends State<_GlassButton> {
+  bool _f = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _f ? 1.18 : 1.0,
+      duration: const Duration(milliseconds: 120),
+      child: Material(
+        color: _f ? const Color(0xFFF6F2EC) : const Color(0xB31C1815),
+        shape: CircleBorder(side: _f ? const BorderSide(color: Colors.white, width: 3) : BorderSide.none),
+        elevation: 0,
+        shadowColor: Colors.transparent,
+        child: InkWell(
+          focusNode: widget.focusNode,
+          customBorder: const CircleBorder(),
+          focusColor: Colors.transparent,
+          onFocusChange: (v) => setState(() => _f = v),
+          onTap: widget.onTap,
+          child: SizedBox(width: widget.size, height: widget.size, child: Icon(widget.icon, size: widget.iconSize, color: _f ? const Color(0xFF1C1815) : const Color(0xFFF6F2EC))),
+        ),
+      ),
     );
   }
 }

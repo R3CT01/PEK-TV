@@ -256,6 +256,8 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
+  DateTime _lastStep = DateTime.fromMillisecondsSinceEpoch(0);
+
   /// D-pad in move mode: Up / Down pick the square, the centre button places the widget there.
   KeyEventResult _moveKey(FocusNode node, KeyEvent e) {
     final k = e.logicalKey;
@@ -264,6 +266,12 @@ class _DashboardPageState extends State<DashboardPage> {
     if (from < 0) return KeyEventResult.ignored;
     final down = e is KeyDownEvent || e is KeyRepeatEvent;
     if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      // A held button repeats about 30 times a second: one square at a time, about 6 a second, not a blur.
+      if (e is KeyRepeatEvent) {
+        final now = DateTime.now();
+        if (now.difference(_lastStep) < const Duration(milliseconds: 170)) return KeyEventResult.handled;
+        _lastStep = now;
+      }
       if (down) {
         final to = ((_hover < 0 ? from : _hover) + (k == LogicalKeyboardKey.arrowUp ? -1 : 1)).clamp(0, items.length - 1);
         setState(() => _hover = to);
@@ -519,7 +527,7 @@ class _DashboardPageState extends State<DashboardPage> {
       case 'continue':
         final items = Store.resumeItems().take(12).toList();
         if (items.isEmpty) return null;
-        return _row(context, 'Continue Watching', widget.onOpenResume, [
+        return _row(context, 'Continue Watching', widget.onOpenResume, scale: 1.3, [
           for (final r in items)
             PosterCard(onLongPress: hold, holdSelect: true, 
               title: r.title,
@@ -528,7 +536,7 @@ class _DashboardPageState extends State<DashboardPage> {
               poster: r.isTorrent ? Future.value(const Details(overview: '', poster: '')) : (r.kind == 'movie' ? Api.movieDetails(r.id) : Api.showDetails(r.showTitle)),
               fallbackImage: r.image,
               progress: r.duration > 0 ? r.position / r.duration : null,
-              onTap: () => playMedia(context, r, startSec: r.position),
+              onTap: () => playResumeOrStart(context, r),
             ),
         ]);
       case 'recent':
@@ -588,10 +596,10 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   /// One widget: a heading (tap = see all) and a horizontal row of posters.
-  _Node _row(BuildContext context, String title, VoidCallback? more, List<Widget> cells) {
+  _Node _row(BuildContext context, String title, VoidCallback? more, List<Widget> cells, {double scale = 1.0}) {
     final p = context.pek;
     final rem = p.rem;
-    final w = p.compact ? 110.0 : (p.isTv ? 8 * rem : 150.0);
+    final w = (p.compact ? 110.0 : (p.isTv ? 8 * rem : 150.0)) * scale;
     // Room under the poster for the title and the subtitle line (about 2.6 rem), growing with the phone's text size.
     final textRoom = (0.4 + 2.7 * MediaQuery.textScalerOf(context).scale(1.0)) * rem;
     return (

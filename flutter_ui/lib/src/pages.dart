@@ -45,10 +45,10 @@ class ResumePage extends StatelessWidget {
           if (items.isEmpty) const PekCard(title: 'Nothing to resume', subtitle: 'Anything you stop partway through shows up here.'),
           for (final it in items)
             ListRow(
-              leading: it.image.startsWith('https://') ? _ResumeThumb(url: it.image) : null,
+              leading: _ResumeThumb(item: it),
               title: it.title,
               subtitle: it.duration > 0 ? '${formatTime(it.position)} of ${formatTime(it.duration)}' : 'Stopped at ${formatTime(it.position)}',
-              onTap: () => playMedia(context, it, startSec: it.position),
+              onTap: () => playResumeOrStart(context, it),
               trailing: IconButton(tooltip: 'Remove', onPressed: () => Store.removeProgress(it.id), icon: Icon(Icons.close, color: p.tokens.textMuted)),
             ),
           const PluginFavoritesSection(),
@@ -516,21 +516,36 @@ class _FolderPickerState extends State<FolderPicker> {
 }
 
 
-/// The small picture at the left of a Resume Watching row (a stream started from a plugin brings its own artwork).
+/// The poster at the left of a Resume Watching row: large (about 6.5 rem wide), with a thin progress bar along the bottom.
+/// A library title uses its library artwork; a stream started from a plugin brings its own picture.
 class _ResumeThumb extends StatelessWidget {
-  const _ResumeThumb({required this.url});
-  final String url;
+  const _ResumeThumb({required this.item});
+  final Progress item;
 
   @override
   Widget build(BuildContext context) {
     final p = context.pek;
-    final w = 3.2 * p.rem;
+    final t = p.tokens;
+    final w = (p.compact ? 5.5 : 7.5) * p.rem;
+    final frac = item.duration > 0 ? (item.position / item.duration).clamp(0.0, 1.0) : 0.0;
+    final Widget art;
+    if (item.image.startsWith('https://')) {
+      art = ArtImage(item.image, fit: BoxFit.cover, cacheWidth: 400, errorBuilder: (_, __, ___) => ColoredBox(color: t.surface));
+    } else if (item.isTorrent) {
+      art = ColoredBox(color: t.surface);
+    } else {
+      art = PosterImage(poster: item.kind == 'movie' ? Api.movieDetails(item.id) : Api.showDetails(item.showTitle), title: item.title, width: 400);
+    }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(10),
       child: SizedBox(
         width: w,
         height: w * 1.5,
-        child: ArtImage(url, fit: BoxFit.cover, cacheWidth: 200, errorBuilder: (_, __, ___) => ColoredBox(color: p.tokens.surface)),
+        child: Stack(fit: StackFit.expand, children: [
+          ColoredBox(color: t.surface, child: art),
+          if (frac > 0)
+            Positioned(left: 0, right: 0, bottom: 0, child: LinearProgressIndicator(value: frac, minHeight: 4, color: t.accent, backgroundColor: Colors.black54)),
+        ]),
       ),
     );
   }

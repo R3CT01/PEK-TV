@@ -35,6 +35,28 @@ Future<void> playMedia(BuildContext context, Progress item, {double startSec = 0
   );
 }
 
+/// Pressing something you stopped partway: ask whether to carry on from where you were or start from the beginning.
+/// (Under 15 seconds in there is nothing worth resuming, so it just plays.)
+Future<void> playResumeOrStart(BuildContext context, Progress item) async {
+  if (item.position < 15) {
+    await playMedia(context, item);
+    return;
+  }
+  final from = await showDialog<double>(
+    context: context,
+    builder: (c) => AlertDialog(
+      title: Text(item.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+      content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        PekButton(label: 'Resume from ${_fmt(item.position)}', primary: true, autofocus: true, onTap: () => Navigator.pop(c, item.position)),
+        const SizedBox(height: 8),
+        PekButton(label: 'Start over', onTap: () => Navigator.pop(c, 0.0)),
+      ]),
+    ),
+  );
+  if (from == null || !context.mounted) return;
+  await playMedia(context, item, startSec: from);
+}
+
 /// The episode after [currentId] in [show]: the rest of the season, then the next season. Specials never come "next".
 Progress? nextEpisodeItem(Show show, String currentId) {
   final flat = <Episode>[
