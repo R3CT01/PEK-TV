@@ -13,7 +13,7 @@ import android.content.res.Configuration
 import android.widget.FrameLayout
 import android.widget.VideoView
 
-// Plays the splash video once, then opens MainActivity. Portrait screens (phones) get the
+// The launcher activity. Plays the splash video once while Boot loads the app in the background, then opens MainActivity. Portrait screens (phones) get the
 // 9:16 cut (pek_splash_portrait) cropped to fill the whole screen; landscape screens
 // (TVs, tablets) get the 16:9 cut (pek_splash).
 // Tap, any key or the remote's OK/Back skips it. If the video can't play for any
@@ -25,9 +25,10 @@ class SplashActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Boot.ensureStarted(applicationContext)   // files, server, plugins and Flutter's own loading run while the video plays
 
         val root = FrameLayout(this)
-        root.setBackgroundColor(resources.getColor(R.color.pek_cream, theme))
+        root.setBackgroundColor(resources.getColor(R.color.pek_splash_bg, theme))
         video = VideoView(this)
         root.addView(video, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         setContentView(root)

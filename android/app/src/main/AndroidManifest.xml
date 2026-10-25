@@ -84,9 +84,9 @@
              Remove this line to try Impeller again once video is confirmed to show through. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
 
-        <!-- Launcher entry. It only gets the app ready (files, server, Python plugins) and opens the Flutter UI. -->
+        <!-- Launcher entry: plays the splash video while the app loads in the background (Boot), then opens MainActivity. -->
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
             android:theme="@style/Theme.PEK.Launch">
@@ -96,6 +96,13 @@
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Hand-over: waits for Boot (files, server, Python plugins), then opens the Flutter UI. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="false"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation"
+            android:theme="@style/Theme.PEK.Launch" />
 
         <!-- The app's one UI: Flutter (flutter_ui/). MainActivity opens it once the server is up. -->
         <activity
