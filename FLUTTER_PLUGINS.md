@@ -194,7 +194,7 @@ The Trakt plugin (`plugin_packages/trakt/`, tests in `tools/test_trakt_plugin.py
 
 ## Live TV: channels, the TV guide and the guide reader (`live` and `epg` permissions)
 
-A plugin that is a TV directory (Cable Shot is the reference, `plugin_packages/cable-shot/`) needs three things a normal screen has no
+A plugin that is a TV directory (`plugin_packages/m3u8/` is the reference) needs three things a normal screen has no
 way to do, so the sandbox has them:
 
 ```json
@@ -221,7 +221,7 @@ itself (`flutter_ui/lib/src/live_tv.dart`). `live.py` defines `on_query(query)`:
 Any other op, or extra fields, never reach the plugin (`pek_flutter._clean_query`). A query may take 12 s and answer at most 1.5 MB. Like a
 hooks file it has its **own session** (separate from the screen's), is scanned like `screen.py`, reloads when the plugin is updated, and
 can only answer: effects it asks for are dropped. It may call `ui.background(work, done, fail)` to read something in the background
-(Cable Shot reads its guide that way) and keep module state between queries. The screen and the live file share the plugin's `data/` folder.
+(M3U8 reads its guide that way) and keep module state between queries. The screen and the live file share the plugin's `data/` folder.
 
 What the person sees: while a channel plays, a little **GUIDE** tab sits on the right edge of the picture (press Right on the remote, or
 tap it, or use the list button in the controls). It shrinks the picture into the top left corner (`setMiniRect`, the same call the old
@@ -244,7 +244,26 @@ Use `h.write_json` (1 MB per file) to keep the result in `data/`.
 `ui.tz_offset()` is how far the device clock is ahead of UTC, in seconds, for showing local times (a phone's Python can think it is UTC).
 
 Install screen: `live` -> "Can play live TV streams in PEK TV's player, from web addresses it chooses ... the servers that send a stream
-can see your internet address"; `epg` -> "Can download TV guide files (XMLTV) from the sites listed above". Tests: `tools/test_cable_shot.py`.
+can see your internet address"; `epg` -> "Can download TV guide files (XMLTV) from the sites listed above".
+
+## M3U8 (official, 1.0.0)
+`plugin_packages/m3u8/` (zipped as `plugin_packages/m3u8.zip`) takes `.m3u` / `.m3u8` playlists and turns them into a TV directory. It is an official plugin
+that is not bundled in the app: the owner publishes it on the PEK Store's Official shelf (`m3u8` is in the store worker's owner-only list, so nobody else can use the id)
+and people install it from there. It runs sandboxed; the `live` and `epg` permissions above are open to any plugin.
+
+- **Adding a playlist**: the M3U8 tab, **Playlists -> Add a playlist**. The person types an `https://` address; the plugin downloads it
+  (`h.fetch_text`, up to 8 MB, in a `ui.background` job), reads it (`parse_m3u` in `m3u_core.py`: `#EXTINF` attributes `tvg-id`, `tvg-logo`,
+  `group-title`, a name that may hold commas, `#EXTGRP`, Kodi style `address|header` suffixes, only http(s) streams, the same stream kept once,
+  the playlist's own `url-tvg` / `x-tvg-url` guide addresses) and stores the channels in `data/pl-<id>-<n>.json`, cut below 1 MB. An address that
+  turns out to be one HLS stream (a master or media playlist) becomes a one-channel playlist. A playlist can be updated from its address or
+  removed (two taps; its files are emptied because a plugin cannot delete files).
+- **Where addresses may point**: playlists and guide files load only from hosts in `permissions.network` (GitHub: `raw.githubusercontent.com`,
+  `gist.githubusercontent.com`, `*.github.io`); the plugin checks the address first and says so. There is no file picker in the sandbox.
+- **The guide**: the default list in `defaults.json` (`pattern` with `{n}` and a `count`, or `urls`), the `url-tvg` of each playlist and the addresses added
+  under Settings -> Guide addresses, all read with `h.fetch_epg` and stored as in the Live TV section. The built-in list can be switched off.
+- **Screen and player share `data/`**: `lists.json` has a `rev` that changes whenever a playlist or guide address is added or removed, and both sessions
+  reload the channels when it changes, so a playlist added on the screen is in the player's channel switcher without restarting.
+- Tests: `python3 tools/test_m3u8_plugin.py` (the guide reader, the playlist reader, the screens, the live provider and the sandbox limits).
 
 ## TMDb Discover (ported, 1.6.0)
 `plugins/tmdb-discover/screen.py` has:
@@ -340,7 +359,7 @@ What it needed from the host, all in `pek_ui`:
 - **Picture**: `plugin.json` `"icon": "icon.png"` (png / jpg / webp in the plugin folder, 256x256 recommended, under 60 KB). The Plugins page shows it
   (served from `/plugins/<id>/<icon>`), the store worker copies it into the listing as a small data: address (`icon` column, added by itself
   on the first request after you paste `cloud/store-worker.js`) so the store list and the install screen show it without downloading the plugin.
-- **Built-in plugins** (`weather`, `tmdb-discover`, `PluginInstaller.stockIds` / `isReservedId`) cannot be removed: no Remove button, and the
+- **Built-in plugins** (`weather`, `tmdb-discover`, `skin-maker`, `PluginInstaller.stockIds` / `isReservedId`) cannot be removed: no Remove button, and the
   server refuses (`/api/plugins` now reports `builtin`).
 - **Updates** (`plugin_updates.dart`, checked 6 s after start and whenever the Plugins page opens):
   built-in plugins update by themselves from the PEK Store Official shelf (an `official=1` install, the only way the server lets a built-in

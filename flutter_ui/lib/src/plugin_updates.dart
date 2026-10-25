@@ -14,7 +14,7 @@ import 'widgets.dart';
 /// Keeps installed plugins up to date. Checked once when the app starts (a few seconds in, so the start is not slowed down) and
 /// again when the Plugins page asks.
 ///
-///  * Built-in plugins (Weather, TMDb Discover) come from the PEK Store's Official shelf. A newer version there is installed by
+///  * Built-in plugins (Weather, TMDb Discover, Skin maker) come from the PEK Store's Official shelf. A newer version there is installed by
 ///    itself: it is PEK's own plugin, published by the owner.
 ///  * A plugin installed from GitHub is looked up on GitHub again (its latest release). A newer one is only OFFERED on the Plugins
 ///    page: it is third-party code from an unverified developer, so the person sees the permissions screen again and taps Update.

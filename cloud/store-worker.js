@@ -16,7 +16,7 @@ const PLUGIN_CHUNK = 400000;               // chars per chunk (the app and the s
 const MAX_PLUGIN_CHUNKS = 40;
 const BUILTIN_PLUGINS = ['weather', 'sample_scraper', 'sample_counter', 'tmdb-discover'];
 // Bundled with the app, but the OWNER may publish them on the Official shelf (so the app can update them). Nobody else may use these ids.
-const OWNER_ONLY_PLUGINS = ['skin-maker', 'trakt'];
+const OWNER_ONLY_PLUGINS = ['skin-maker', 'trakt', 'm3u8'];
 const BUILTIN_SKINS = ['default', 'green', 'neon'];
 const MAX_SKIN_RAW = 6 * 1024 * 1024;
 

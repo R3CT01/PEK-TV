@@ -41,7 +41,7 @@ _TIME = re.compile(r"^\s*(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})?\s*([+-]\d{4
 
 def norm_name(s):
     """A channel name reduced to letters and digits, a trailing quality tag (HD, SD, FHD, UHD, 4K, HEVC) removed:
-    "CNN HD" and "cnn" are the same channel. The same rule the old Cable Shot used (normName)."""
+    "CNN HD" and "cnn" are the same channel."""
     n = _NON_WORD.sub("", str(s if s is not None else "").lower())
     t = _QUALITY.sub("", n)
     return t or n

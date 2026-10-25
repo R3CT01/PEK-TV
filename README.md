@@ -36,7 +36,7 @@ See `PLUGINS.md`, `SKINS.md`, `SUBTITLES.md`, `LOCAL_METADATA.md` and `MUSIC.md`
 - `flutter_ui/`: the app's screens (Flutter). The only UI.
 - `backend/`: the C++ server (library scanner, network sources, music, torrent streaming, subtitles).
 - `android/`: the Android app (start-up, libmpv player, Python plugin host) and the GitHub Actions build.
-- `plugins/`, `plugin_packages/`, `skins/`: built-in plugins and skins.
+- `plugins/`, `plugin_packages/`, `skins/`: built-in plugins and skins (Weather, TMDb Discover, Skin maker); `plugin_packages/` holds the plugins published on the PEK Store (M3U8, Trakt).
 - `cloud/`: the Cloudflare workers (accounts and sync, plugin store).
 - `assets/`: branding artwork: launcher icon, TV banner, splash videos (`assets/android/res`) and README screenshots.
 - `tools/`: helper scripts (`make_skin.py`, `sync_providers.js` with `providers.json`).
