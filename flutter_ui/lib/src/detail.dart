@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'art_cache.dart';
 import 'player.dart';
+import 'ratings.dart';
 import 'store.dart';
 import 'tokens.dart';
 import 'weather.dart' show weatherActions;
@@ -129,6 +130,8 @@ class MovieScreen extends StatelessWidget {
               PekButton(label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.movie(movie.id, movie.title, movie.year))),
               PekButton(label: seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', onTap: () => Watched.set([movieItem(movie)], !seen)),
             ]),
+            SizedBox(height: 1.25 * rem),
+            RatingPanel(title: movie.title, year: movie.year),
           ],
         );
       },
@@ -200,6 +203,8 @@ class _ShowScreenState extends State<ShowScreen> {
                     onTap: () => Watched.set([for (final e in episodes) episodeItem(show, e)], !seasonSeen),
                   ),
               ]),
+              SizedBox(height: 0.75 * rem),
+              RatingPanel(title: show.title, kind: 'show'),
               SizedBox(height: 0.75 * rem),
               SizedBox(
                 height: 2.75 * rem,
@@ -369,6 +374,8 @@ class EpisodeScreen extends StatelessWidget {
                 PekButton(label: 'Play', primary: true, autofocus: true, onTap: () => play(0)),
               PekButton(label: seen ? '\u2713 Watched \u00b7 mark as unwatched' : 'Mark as watched', onTap: () => Watched.set([item], !seen)),
             ]),
+            SizedBox(height: 1.25 * rem),
+            RatingPanel(title: show.title, kind: 'episode', season: e.season, episode: e.episode),
           ],
         );
       },

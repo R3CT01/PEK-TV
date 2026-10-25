@@ -38,6 +38,18 @@ class Net:
         self.log = []                 # (method, host, path, query, headers, body)
         self.polls = 0
         self.fail_scrobble_stop = False
+        self.fail_ratings = False
+        self.show_ratings = []
+        self.watched_movies = []
+        self.watched_shows = []
+        self.favs = []
+        self.fav_status = 200
+        self.fav_acts = None          # None = Trakt reports no favorites time
+        self.show_rated_at = ""
+        self.episode_rated_at = ""
+        self.episode_ratings = []
+        self.rated_at = "2026-10-18T10:00:00.000Z"
+        self.ratings = [{"rated_at": "2026-10-18T10:00:00.000Z", "rating": 9, "movie": {"title": "Heat", "year": 1995}}]
         self.activity = {"movies": "2026-10-20T10:00:00.000Z", "episodes": "2026-10-21T10:00:00.000Z"}
         self.movie_pages = [[{"watched_at": "2026-10-20T10:00:00.000Z", "movie": {"title": "Heat", "year": 1995}},
                              {"watched_at": "2026-10-19T10:00:00.000Z", "movie": {"title": "Alien", "year": 1979}}]]
@@ -76,13 +88,33 @@ class Net:
             if not authed:
                 return 401, None
             if path == "/sync/last_activities":
-                return 200, {"all": self.activity["episodes"], "movies": {"watched_at": self.activity["movies"]}, "episodes": {"watched_at": self.activity["episodes"]}}
+                d = {"all": self.activity["episodes"], "movies": {"watched_at": self.activity["movies"], "rated_at": self.rated_at},
+                     "episodes": {"watched_at": self.activity["episodes"], "rated_at": self.episode_rated_at}, "shows": {"rated_at": self.show_rated_at}}
+                if self.fav_acts is not None:
+                    d["movies"]["favorited_at"] = d["shows"]["favorited_at"] = self.fav_acts
+                return 200, d
             if path == "/users/settings":
                 return 200, {"user": {"username": "pek-fan"}}
             if path.startswith("/scrobble/"):
                 if self.fail_scrobble_stop and path.endswith("stop"):
                     return 500, None
                 return 201, {"id": 1}
+            if path in ("/sync/ratings", "/sync/ratings/remove"):
+                return (500, None) if self.fail_ratings else (201, {"added": {}})
+            if path == "/sync/ratings/movies":
+                return 200, self.ratings
+            if path == "/sync/watched/movies":
+                return 200, self.watched_movies
+            if path == "/sync/watched/shows":
+                return 200, self.watched_shows
+            if path == "/sync/favorites":
+                return (self.fav_status, self.favs) if self.fav_status != 200 or method == "GET" else (201, {"added": {}})
+            if path == "/sync/favorites/remove":
+                return 200, {"deleted": {}}
+            if path == "/sync/ratings/shows":
+                return 200, self.show_ratings
+            if path == "/sync/ratings/episodes":
+                return 200, self.episode_ratings
             if path in ("/sync/history", "/sync/history/remove"):
                 return 201, {"added": {}}
             if path in ("/sync/history/movies", "/sync/history/episodes"):
@@ -316,10 +348,10 @@ try:
 
     # -------------------------------------------------------------------------------------- import
     effects = r["effects"]
-    items = [i for e in effects for i in e["items"]]
+    items = [i for e in effects if e["op"].startswith("watched") for i in e["items"]]
     titles = {(i["kind"], i["title"]) for i in items}
     check("app_start imports Trakt history as watched.set_many", {("movie", "Heat"), ("movie", "Alien"), ("episode", "Severance")} <= titles, items)
-    check("import effects are limited to watched", all(e["op"] in ("watched.set", "watched.set_many") for e in effects))
+    check("import effects are limited to watched and ratings", all(e["op"] in ("watched.set", "watched.set_many", "ratings.set_many") for e in effects))
     NET.log.clear()
     r = hook({"type": "app_start"})
     st = [c for c in calls("/sync/history/") if "start_at" in c[3]]
@@ -330,7 +362,7 @@ try:
     want = {("movie", "Heat"): calendar.timegm((2026, 10, 20, 10, 0, 0)), ("movie", "Alien"): calendar.timegm((2026, 10, 19, 10, 0, 0)),
             ("episode", "Severance"): calendar.timegm((2026, 10, 21, 10, 0, 0))}
     r = hook({"type": "app_start"})
-    got = {(i["kind"], i["title"]): i.get("at") for e in r["effects"] for i in e["items"]}
+    got = {(i["kind"], i["title"]): i.get("at") for e in r["effects"] if e["op"].startswith("watched") for i in e["items"]}
     check("imported items carry the day they were watched on Trakt", got == want, got)
 
     # the newest watch of an item wins
@@ -338,7 +370,7 @@ try:
     NET.movie_pages = [[{"watched_at": "2026-10-22T09:00:00.000Z", "movie": {"title": "Heat", "year": 1995}},
                         {"watched_at": "2026-01-02T09:00:00.000Z", "movie": {"title": "Heat", "year": 1995}}]]
     r = hook({"type": "app_start"})
-    heat = [i for e in r["effects"] for i in e["items"] if i["title"] == "Heat"]
+    heat = [i for e in r["effects"] if e["op"].startswith("watched") for i in e["items"] if i["title"] == "Heat"]
     check("a rewatched movie is dated by its newest watch", len(heat) == 1 and heat[0]["at"] == calendar.timegm((2026, 10, 22, 9, 0, 0)), heat)
     NET.movie_pages = keep_movies
 
@@ -361,7 +393,7 @@ try:
     NET.movie_pages = [[]]
     NET.log.clear()
     r = hook({"type": "tick"})
-    items = [i for e in r["effects"] for i in e["items"]]
+    items = [i for e in r["effects"] if e["op"].startswith("watched") for i in e["items"]]
     check("tick with something new fetches the history since last time", any("start_at" in c[3] for c in calls("/sync/history/")), [c[3] for c in calls("/sync/history/")])
     check("a watch made elsewhere reaches PEK TV with its date", items == [{"kind": "episode", "title": "Severance", "year": 0, "season": 1, "episode": 6, "at": calendar.timegm((2026, 10, 23, 12, 0, 0))}], items)
     NET.log.clear()
@@ -373,6 +405,8 @@ try:
     saved_settings = open(st_file).read() if os.path.exists(st_file) else None      # no file = the defaults
     cfg = json.loads(saved_settings) if saved_settings else {}
     cfg["pull"] = False
+    cfg["ratings"] = False
+    cfg["favorites"] = False
     open(st_file, "w").write(json.dumps(cfg))
     NET.log.clear()
     r = hook({"type": "tick"})
@@ -381,6 +415,178 @@ try:
         os.remove(st_file)
     else:
         open(st_file, "w").write(saved_settings)
+
+    # -------------------------------------------------------------------------------------- ratings
+    NET.log.clear()
+    r = hook({"type": "rated", "items": [{"kind": "movie", "title": "Heat", "year": 1995, "rating": 8}]})
+    sent = calls("/sync/ratings")
+    body = sent[0][5] if sent else {}
+    check("rating a movie -> one /sync/ratings call", r["ok"] and len(sent) == 1 and sent[0][2] == "/sync/ratings", [c[2] for c in NET.log])
+    check("the rating is the 1-10 value with a rated_at", body.get("movies", [{}])[0].get("rating") == 8 and body["movies"][0].get("rated_at", "").endswith("Z") and body["movies"][0]["ids"] == {"trakt": 7}, body)
+    NET.log.clear()
+    hook({"type": "rated", "items": [{"kind": "movie", "title": "Heat", "year": 1995, "rating": 0}]})
+    check("removing a rating -> /sync/ratings/remove", [c[2] for c in calls("/sync/ratings")] == ["/sync/ratings/remove"] and "rating" not in calls("/sync/ratings/remove")[0][5]["movies"][0], [c[2] for c in NET.log])
+
+    NET.log.clear()
+    r = hook({"type": "tick"})
+    check("tick with no new rating costs one request", [c[2] for c in NET.log] == ["/sync/last_activities"] and not r["effects"], [c[2] for c in NET.log])
+    NET.rated_at = "2026-10-24T09:00:00.000Z"
+    NET.ratings = [{"rated_at": "2026-10-24T09:00:00.000Z", "rating": 7, "movie": {"title": "Alien", "year": 1979}}]
+    NET.log.clear()
+    r = hook({"type": "tick"})
+    rated_fx = [e for e in r["effects"] if e["op"] == "ratings.set_many"]
+    check("a rating made on Trakt reaches PEK TV with its date",
+          len(rated_fx) == 1 and rated_fx[0]["items"] == [{"kind": "movie", "title": "Alien", "year": 1979, "season": 0, "episode": 0, "rating": 7, "at": calendar.timegm((2026, 10, 24, 9, 0, 0))}], r["effects"])
+    NET.log.clear()
+    hook({"type": "tick"})
+    check("the next tick is quiet about ratings", [c[2] for c in NET.log] == ["/sync/last_activities"])
+
+    NET.fail_ratings = True
+    NET.log.clear()
+    hook({"type": "rated", "items": [{"kind": "movie", "title": "Heat", "year": 1995, "rating": 6}]})
+    queued = json.load(open(os.path.join(DATA, "rqueue.json"))) if os.path.exists(os.path.join(DATA, "rqueue.json")) else {}
+    check("a rating that could not be sent is kept", len(queued) == 1 and list(queued.values())[0]["rating"] == 6, queued)
+    NET.fail_ratings = False
+    NET.log.clear()
+    hook({"type": "app_start"})
+    resent = calls("/sync/ratings")
+    check("and sent at the next start", len(resent) >= 1 and resent[0][5]["movies"][0]["rating"] == 6 and not json.load(open(os.path.join(DATA, "rqueue.json"))), [c[2] for c in NET.log])
+
+    cfg2 = json.loads(open(st_file).read()) if os.path.exists(st_file) else {}
+    cfg2["ratings"] = False
+    open(st_file, "w").write(json.dumps(cfg2))
+    NET.log.clear()
+    hook({"type": "rated", "items": [{"kind": "movie", "title": "Heat", "year": 1995, "rating": 5}]})
+    check("the ratings switch turns rating sync off", not NET.log, [c[2] for c in NET.log])
+    cfg2["ratings"] = True
+    open(st_file, "w").write(json.dumps(cfg2))
+    r = hook({"type": "rated", "items": [{"kind": "season", "title": "Severance", "season": 1, "rating": 5}]})
+    check("only movies, episodes and shows can be rated", not r["ok"] and not calls("/sync/ratings"), r)
+
+    # episodes and whole shows
+    NET.log.clear()
+    hook({"type": "rated", "items": [{"kind": "episode", "title": "Severance", "season": 1, "episode": 2, "rating": 9},
+                                     {"kind": "episode", "title": "Severance", "season": 1, "episode": 3, "rating": 7},
+                                     {"kind": "show", "title": "Severance", "rating": 10}]})
+    body = calls("/sync/ratings")[0][5] if calls("/sync/ratings") else {}
+    shows = body.get("shows", [])
+    ep_entry = [s for s in shows if "seasons" in s]
+    show_entry = [s for s in shows if "rating" in s]
+    check("episode ratings go up grouped show > season > episode",
+          len(ep_entry) == 1 and ep_entry[0]["seasons"][0]["number"] == 1 and [(e["number"], e["rating"]) for e in ep_entry[0]["seasons"][0]["episodes"]] == [(2, 9), (3, 7)], body)
+    check("a show rating is its own entry with the show's rating", len(show_entry) == 1 and show_entry[0]["rating"] == 10 and show_entry[0]["rated_at"].endswith("Z"), body)
+    NET.log.clear()
+    hook({"type": "rated", "items": [{"kind": "episode", "title": "Severance", "season": 1, "episode": 2, "rating": 0}]})
+    rb = calls("/sync/ratings/remove")[0][5] if calls("/sync/ratings/remove") else {}
+    check("removing an episode rating -> /sync/ratings/remove with no rating", rb.get("shows", [{}])[0].get("seasons", [{}])[0].get("episodes") == [{"number": 2}], rb)
+
+    NET.show_ratings = [{"rated_at": "2026-10-24T10:00:00.000Z", "rating": 8, "show": {"title": "Andor", "year": 2022}}]
+    NET.episode_ratings = [{"rated_at": "2026-10-24T11:00:00.000Z", "rating": 6, "show": {"title": "Andor", "year": 2022}, "episode": {"season": 1, "number": 4}}]
+    NET.rated_at = "2026-10-24T12:00:00.000Z"
+    NET.show_rated_at, NET.episode_rated_at = "2026-10-24T10:00:00.000Z", "2026-10-24T11:00:00.000Z"
+    r = hook({"type": "tick"})
+    fx = [i for e in r["effects"] if e["op"] == "ratings.set_many" for i in e["items"]]
+    check("Trakt show and episode ratings come into PEK TV",
+          {(i["kind"], i["title"], i.get("season"), i.get("episode"), i["rating"]) for i in fx} >= {("show", "Andor", 0, 0, 8), ("episode", "Andor", 1, 4, 6)}, fx)
+    NET.log.clear()
+    hook({"type": "tick"})
+    check("and the next tick is quiet again", [c[2] for c in NET.log] == ["/sync/last_activities"], [c[2] for c in NET.log])
+
+    # -------------------------------------------------------------------------------------- removals made on Trakt
+    def fx(r, op):
+        return [e for e in r["effects"] if e["op"] == op]
+
+    # a rating removed on Trakt comes back as rating 0 (Alien was imported above, so it is in the snapshot)
+    NET.ratings, NET.rated_at = [], "2026-10-25T09:00:00.000Z"
+    r = hook({"type": "tick"})
+    gone = [i for e in fx(r, "ratings.set_many") for i in e["items"] if i["rating"] == 0]
+    check("a rating removed on Trakt is removed in PEK TV, with the time we last looked",
+          any(i["title"] == "Alien" and i["kind"] == "movie" and i["at"] > 0 for i in gone), r["effects"])
+    NET.log.clear()
+    r = hook({"type": "tick"})
+    check("and only once", not [i for e in fx(r, "ratings.set_many") for i in e["items"]] and [c[2] for c in NET.log] == ["/sync/last_activities"], [c[2] for c in NET.log])
+
+    # a big part of the list vanishing at once is held back once: it may be a bad answer, not a clean-out
+    NET.show_ratings = [{"rated_at": "2026-10-25T10:00:00.000Z", "rating": 7, "show": {"title": "Show %d" % i, "year": 2000}} for i in range(40)]
+    NET.show_rated_at = "2026-10-25T10:00:00.000Z"
+    hook({"type": "tick"})
+    NET.show_ratings, NET.show_rated_at = [], "2026-10-25T11:00:00.000Z"
+    r = hook({"type": "tick"})
+    check("a list that suddenly empties is held back the first time", not [i for e in fx(r, "ratings.set_many") for i in e["items"] if i["rating"] == 0], r["effects"])
+    r = hook({"type": "tick"})
+    zero = [i for e in fx(r, "ratings.set_many") for i in e["items"] if i["rating"] == 0]
+    check("and removed when Trakt says the same again", len([i for i in zero if i["title"].startswith("Show ")]) == 40, len(zero))
+    NET.log.clear()
+    hook({"type": "tick"})
+    check("then the check is quiet again", [c[2] for c in NET.log] == ["/sync/last_activities"], [c[2] for c in NET.log])
+
+    # a watch removed on Trakt
+    NET.watched_movies = [{"plays": 1, "movie": {"title": "Heat", "year": 1995}}, {"plays": 2, "movie": {"title": "Alien", "year": 1979}}]
+    NET.watched_shows = [{"plays": 3, "show": {"title": "Severance"}, "seasons": [{"number": 1, "episodes": [{"number": 1, "plays": 1}, {"number": 2, "plays": 1}]}]}]
+    NET.activity = {"movies": "2026-10-26T10:00:00.000Z", "episodes": "2026-10-26T10:00:00.000Z"}
+    hook({"type": "tick"})
+    NET.watched_movies = [{"plays": 1, "movie": {"title": "Heat", "year": 1995}}]
+    NET.watched_shows = [{"plays": 3, "show": {"title": "Severance"}, "seasons": [{"number": 1, "episodes": [{"number": 1, "plays": 1}]}]}]
+    NET.activity = {"movies": "2026-10-26T11:00:00.000Z", "episodes": "2026-10-26T11:00:00.000Z"}
+    r = hook({"type": "tick"})
+    removed = [i for e in fx(r, "watched.set_many") if e["value"] is False for i in e["items"]]
+    check("a watch removed on Trakt is unmarked in PEK TV (movie and episode)",
+          {(i["kind"], i["title"], i["season"], i["episode"]) for i in removed} == {("movie", "Alien", 0, 0), ("episode", "Severance", 1, 2)} and all(i["at"] > 0 for i in removed), r["effects"])
+    NET.log.clear()
+    r = hook({"type": "tick"})
+    check("history removals cost nothing when nothing changed", [c[2] for c in NET.log] == ["/sync/last_activities"], [c[2] for c in NET.log])
+    NET.watched_movies = []
+    NET.activity = {"movies": "2026-10-26T12:00:00.000Z", "episodes": "2026-10-26T11:00:00.000Z"}
+    cfg3 = json.loads(open(st_file).read())
+    cfg3["removals"] = False
+    open(st_file, "w").write(json.dumps(cfg3))
+    r = hook({"type": "tick"})
+    check("the removals switch keeps Trakt removals out of PEK TV", not [e for e in fx(r, "watched.set_many") if e["value"] is False], r["effects"])
+    cfg3["removals"] = True
+    open(st_file, "w").write(json.dumps(cfg3))
+
+    # -------------------------------------------------------------------------------------- favorites
+    NET.log.clear()
+    r = hook({"type": "favorited", "value": True, "items": [{"kind": "movie", "title": "Heat", "year": 1995, "tmdb": 949}, {"kind": "show", "title": "Severance", "year": 0, "tmdb": 0}]})
+    sent = calls("/sync/favorites")
+    body = sent[0][5] if sent else {}
+    check("favoriting goes up with the TMDb id when PEK knows it, and a Trakt id otherwise",
+          r["ok"] and sent and sent[0][2] == "/sync/favorites" and body.get("movies") == [{"ids": {"tmdb": 949}}] and list(body["shows"][0]["ids"]) == ["trakt"], body)
+    NET.log.clear()
+    hook({"type": "favorited", "value": False, "items": [{"kind": "movie", "title": "Heat", "year": 1995, "tmdb": 949}]})
+    check("removing a favorite -> /sync/favorites/remove", [c[2] for c in calls("/sync/favorites")] == ["/sync/favorites/remove"], [c[2] for c in NET.log])
+    r = hook({"type": "favorited", "value": True, "items": [{"kind": "episode", "title": "x"}]})
+    check("only movies and shows can be favorites", not r["ok"], r)
+
+    NET.fav_status = 500
+    NET.log.clear()
+    hook({"type": "favorited", "value": True, "items": [{"kind": "movie", "title": "Heat", "year": 1995, "tmdb": 949}]})
+    fq = json.load(open(os.path.join(DATA, "fqueue.json"))) if os.path.exists(os.path.join(DATA, "fqueue.json")) else {}
+    check("a favorite that could not be sent is kept", len(fq) == 1 and list(fq.values())[0]["value"] is True, fq)
+    NET.fav_status = 200
+    NET.log.clear()
+    hook({"type": "app_start"})
+    check("and sent at the next start", any(c[2] == "/sync/favorites" and c[0] == "POST" for c in NET.log) and not json.load(open(os.path.join(DATA, "fqueue.json"))), [c[2] for c in NET.log])
+
+    NET.favs = [{"type": "movie", "movie": {"title": "Alien", "year": 1979, "ids": {"tmdb": 348}}}, {"type": "show", "show": {"title": "Andor", "ids": {"tmdb": 83867}}}]
+    NET.log.clear()
+    r = hook({"type": "tick"})
+    check("without a favorites time from Trakt, a tick does not read the list", not [c for c in NET.log if c[2] == "/sync/favorites"], [c[2] for c in NET.log])
+    NET.fav_acts = "2026-10-27T10:00:00.000Z"
+    r = hook({"type": "tick"})
+    added = [i for e in fx(r, "favorites.set_many") if e["value"] is True for i in e["items"]]
+    check("Trakt favorites come into PEK TV with their TMDb ids",
+          {(i["kind"], i["title"], i["tmdb"]) for i in added} == {("movie", "Alien", 348), ("show", "Andor", 83867)}, r["effects"])
+    NET.log.clear()
+    hook({"type": "tick"})
+    check("the next tick is quiet about favorites", [c[2] for c in NET.log] == ["/sync/last_activities"], [c[2] for c in NET.log])
+    NET.favs = [{"type": "show", "show": {"title": "Andor", "ids": {"tmdb": 83867}}}]
+    NET.fav_acts = "2026-10-27T11:00:00.000Z"
+    r = hook({"type": "tick"})
+    gone = [i for e in fx(r, "favorites.set_many") if e["value"] is False for i in e["items"]]
+    check("a favorite removed on Trakt is removed in PEK TV", [(i["kind"], i["title"]) for i in gone] == [("movie", "Alien")] and gone[0]["at"] > 0, r["effects"])
+    NET.fav_acts = None
+    NET.favs = []
 
     # Trakt without last_activities (or an error) still works: the history is asked for
     NET.log.clear()
@@ -404,12 +610,12 @@ try:
 
     # -------------------------------------------------------------------------------------- settings
     s = json.load(open(os.path.join(DATA, "settings.json"))) if os.path.exists(os.path.join(DATA, "settings.json")) else {}
-    json.dump({"scrobble": False, "push": False, "pull": False}, open(os.path.join(DATA, "settings.json"), "w"))
+    json.dump({"scrobble": False, "push": False, "pull": False, "ratings": False, "favorites": False}, open(os.path.join(DATA, "settings.json"), "w"))
     NET.log.clear()
     hook(dict(movie, type="play", position=0))
     hook({"type": "watched", "items": items, "value": True})
     r = hook({"type": "app_start"})
-    check("switches turn scrobbling, marks and import off", not calls("/scrobble") and not calls("/sync/history") and r["effects"] == [], [c[2] for c in NET.log])
+    check("switches turn scrobbling, marks, import and ratings off", not calls("/scrobble") and not calls("/sync/history") and r["effects"] == [], [c[2] for c in NET.log])
 
     # -------------------------------------------------------------------------------------- two sessions, one refresh token
     sys.path.insert(0, os.path.join(PLUGINS, "trakt"))

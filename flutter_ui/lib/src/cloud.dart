@@ -11,6 +11,7 @@ import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
 import 'layouts.dart' show Layouts;
+import 'ratings.dart' show RatingEntry;
 import 'skins.dart' show Skins;
 import 'weather.dart' show Weather;
 
@@ -317,7 +318,7 @@ class Cloud {
   static bool hasLocalChanges() {
     if (!linked) return false;
     final a = _collectPush();
-    return a.history.length + a.progress.length + a.favorites.length + a.settings.length + a.skins.length > 0 || _hasUnresolvedFavorites;
+    return a.history.length + a.progress.length + a.favorites.length + a.settings.length + a.skins.length + a.ratings.length > 0 || _hasUnresolvedFavorites;
   }
 
   /// [light] skips the profile round trip (a stop-of-playback sync only needs to push what changed).
@@ -352,13 +353,13 @@ class Cloud {
       }
       await _resolveFavorites();
       final all = _collectPush();
-      final pushed = all.history.length + all.progress.length + all.favorites.length + all.settings.length + all.skins.length;
+      final pushed = all.history.length + all.progress.length + all.favorites.length + all.settings.length + all.skins.length + all.ratings.length;
       var anyChange = false;
       CloudResult? fail;
       for (var n = 1; n <= _maxRounds; n++) {
         final chunk = all.take(_chunk);
         final cursor = int.tryParse(Store.strGet('pek_sync_cursor') ?? '') ?? 0;
-        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites, 'settings': chunk.settings, 'skins': chunk.skins}, withToken: true);
+        final r = await _request('POST', '/v1/sync', body: {'profile': pid, 'since': cursor, 'history': chunk.history, 'progress': chunk.progress, 'favorites': chunk.favorites, 'settings': chunk.settings, 'skins': chunk.skins, 'ratings': chunk.ratings}, withToken: true);
         if (r.status == 404 && r.body['error'] == 'unknown_profile') {
           fail = const CloudResult(ok: false, error: 'unknown_profile');
           break;
@@ -372,7 +373,7 @@ class Cloud {
           fail = const CloudResult(ok: false, error: 'cloud_outdated');
           break;
         }
-        _markPushed(chunk, settingsStored: r.body['settings'] is List, skinsStored: r.body['skins'] is List); // an older cloud ignores settings and skins: keep them for later
+        _markPushed(chunk, settingsStored: r.body['settings'] is List, skinsStored: r.body['skins'] is List, ratingsStored: r.body['ratings'] is List); // an older cloud ignores settings, skins and ratings: keep them for later
         if (await _applyRemote(r.body)) anyChange = true;
         await Store.strSet('pek_sync_cursor', '${r.body['cursor'] ?? cursor}');
         final more = r.body['more'] == true || all.isNotEmpty;
@@ -636,7 +637,27 @@ class Cloud {
       final key = 'k|$id';
       if (Skins.validId(id) && u > 0 && _int(sk[key]) != u) skins.add({'key': key, 'data': <String, dynamic>{}, 'updated': u, 'deleted': 1});
     });
-    return _All(history, progress, favorites, settings, skins);
+    // ratings (movies, 1..10; a removal goes up as a deleted marker)
+    final ratings = <Map<String, dynamic>>[];
+    final sr = seen['r'] is Map ? Map<String, dynamic>.from(seen['r'] as Map) : <String, dynamic>{};
+    Store.ratingsRaw().forEach((k, v) {
+      if (v is! Map) return;
+      final updated = _int(v['updated'] ?? v['at']);
+      if (updated <= 0 || _int(sr[k]) == updated) return;
+      if (v['deleted'] != null) {
+        ratings.add({'key': 'r|$k', 'data': <String, dynamic>{}, 'updated': updated, 'deleted': 1});
+      } else {
+        final r = _int(v['rating']);
+        if (r < 1 || r > 10 || !RegExp(r'^[mes]\|').hasMatch(k)) return;
+        ratings.add({
+          'key': 'r|$k',
+          'data': {'title': '${v['title'] ?? ''}', 'year': _int(v['year']), 'season': _int(v['season']), 'episode': _int(v['episode']), 'rating': r, 'at': _int(v['at'])},
+          'updated': updated,
+          'deleted': 0,
+        });
+      }
+    });
+    return _All(history, progress, favorites, settings, skins, ratings);
   }
 
   static const _skinBudget = 1900; // the cloud keeps 2000 characters per item
@@ -723,7 +744,7 @@ class Cloud {
     return meta;
   }
 
-  static void _markPushed(_Chunk chunk, {bool settingsStored = false, bool skinsStored = false}) {
+  static void _markPushed(_Chunk chunk, {bool settingsStored = false, bool skinsStored = false, bool ratingsStored = false}) {
     final seen = _seen();
     final sh = seen['h'] as Map<String, dynamic>;
     final sp = seen['p'] as Map<String, dynamic>;
@@ -738,6 +759,13 @@ class Cloud {
       sf['${it['key']}'] = it['updated'];
     }
     seen['f'] = sf;
+    if (ratingsStored) {
+      final sr = seen['r'] is Map ? Map<String, dynamic>.from(seen['r'] as Map) : <String, dynamic>{};
+      for (final it in chunk.ratings) {
+        sr['${it['key']}'.substring(2)] = it['updated'];
+      }
+      seen['r'] = sr;
+    }
     if (skinsStored) {
       final sk = seen['k'] is Map ? Map<String, dynamic>.from(seen['k'] as Map) : <String, dynamic>{};
       for (final it in chunk.skins) {
@@ -1060,6 +1088,40 @@ class Cloud {
     if (tombChanged) await Store.writeFavTombs(tombs);
     await Store.setJsonMap('pek_sync_pendingf', newPendingF);
 
+    // ratings: last writer wins per movie, by the rating's own "updated" time
+    final remoteR = resp['ratings'];
+    if (remoteR is List) {
+      final rmap = Store.ratingsRaw();
+      final sr = seen['r'] is Map ? Map<String, dynamic>.from(seen['r'] as Map) : <String, dynamic>{};
+      var ratingsChanged = false;
+      for (final r in listOf(remoteR)) {
+        final rkey = '${r['key']}';
+        if (!RegExp(r'^r\|[mes]\|').hasMatch(rkey)) continue;
+        final key = rkey.substring(2);
+        final ru = _int(r['updated']);
+        final localR = rmap[key];
+        final lu = localR is Map ? _int(localR['updated'] ?? localR['at']) : 0;
+        if (localR != null && lu > ru) continue; // ours is newer; it gets pushed
+        if (localR == null || lu < ru) {
+          if (_truthy(r['deleted'])) {
+            rmap[key] = {'deleted': 1, 'updated': ru};
+          } else {
+            final d = r['data'] is Map ? Map<String, dynamic>.from(r['data'] as Map) : <String, dynamic>{};
+            final stars = _int(d['rating']);
+            if (stars < 1 || stars > 10) continue;
+            rmap[key] = {'key': key, 'kind': RatingEntry.kindOfKey(key), 'title': '${d['title'] ?? ''}', 'year': _int(d['year']), 'season': _int(d['season']), 'episode': _int(d['episode']), 'rating': stars, 'at': _int(d['at']) > 0 ? _int(d['at']) : ru, 'updated': ru};
+          }
+          ratingsChanged = true;
+        }
+        sr[key] = ru;
+      }
+      seen['r'] = sr;
+      if (ratingsChanged) {
+        await Store.writeRatingsRaw(rmap);
+        changed = true;
+      }
+    }
+
     // skins: this profile's skins from the cloud (before the settings, so the chosen skin can be one of them)
     final remoteK = resp['skins'];
     if (remoteK is List) {
@@ -1117,23 +1179,25 @@ class _P {
 }
 
 class _Chunk {
-  _Chunk(this.history, this.progress, this.favorites, this.settings, this.skins);
+  _Chunk(this.history, this.progress, this.favorites, this.settings, this.skins, this.ratings);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
   final List<Map<String, dynamic>> settings;
   final List<Map<String, dynamic>> skins;
+  final List<Map<String, dynamic>> ratings;
 }
 
 class _All {
-  _All(this.history, this.progress, this.favorites, this.settings, this.skins);
+  _All(this.history, this.progress, this.favorites, this.settings, this.skins, this.ratings);
   final List<Map<String, dynamic>> history;
   final List<Map<String, dynamic>> progress;
   final List<Map<String, dynamic>> favorites;
   final List<Map<String, dynamic>> settings;
   final List<Map<String, dynamic>> skins;
+  final List<Map<String, dynamic>> ratings;
 
-  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty || settings.isNotEmpty || skins.isNotEmpty;
+  bool get isNotEmpty => history.isNotEmpty || progress.isNotEmpty || favorites.isNotEmpty || settings.isNotEmpty || skins.isNotEmpty || ratings.isNotEmpty;
 
   /// Up to [max] items (history first), removed from this list.
   _Chunk take(int max) {
@@ -1147,6 +1211,8 @@ class _All {
     settings.removeRange(0, s.length);
     final k = skins.take(max - h.length - p.length - f.length - s.length).toList();
     skins.removeRange(0, k.length);
-    return _Chunk(h, p, f, s, k);
+    final r = ratings.take(max - h.length - p.length - f.length - s.length - k.length).toList();
+    ratings.removeRange(0, r.length);
+    return _Chunk(h, p, f, s, k, r);
   }
 }

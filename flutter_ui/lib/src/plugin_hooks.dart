@@ -4,6 +4,9 @@ import 'package:flutter/widgets.dart';
 
 import 'api.dart';
 import 'plugin_host.dart';
+import 'library_match.dart';
+import 'plugin_favorites.dart';
+import 'ratings.dart';
 import 'store.dart';
 import 'watched.dart';
 
@@ -17,6 +20,8 @@ import 'watched.dart';
 ///   pause           playback paused
 ///   stop            the player closed, or the next episode took over
 ///   watched         the person marked movies / episodes watched or unwatched
+///   rated           the person rated a movie, episode or show (1 to 10) or removed the rating (0)
+///   favorited       the person added movies / shows to the favorites, or removed them
 ///
 /// Events for one plugin run one after the other, in the order they happened. A plugin that is slow, broken or missing
 /// never holds up the player: every call is fire-and-forget. All Python checking (the permission, the field filter that
@@ -83,6 +88,20 @@ class PluginHooks {
     for (final e in fx) {
       if (e is! Map) continue;
       final op = e['op'];
+      if (op == 'ratings.set_many') {
+        // Ratings a plugin brought in (Trakt): {title, year, rating 0..10, at}. The plugin is not told about its own change.
+        final raw = e['items'] is List ? e['items'] as List : const [];
+        final items = <Map>[for (final it in raw.take(300)) if (it is Map) it];
+        if (items.isNotEmpty) await Ratings.setFromPlugin(items, id);
+        continue;
+      }
+      if (op == 'favorites.set_many') {
+        // Favorites a plugin added or removed (Trakt): {kind, title, year, tmdb, at}. The plugin is not told about its own change.
+        final raw = e['items'] is List ? e['items'] as List : const [];
+        final items = <Map>[for (final it in raw.take(300)) if (it is Map) it];
+        if (items.isNotEmpty) await PluginFavorites.setFromPlugin(items, e['value'] == true, id);
+        continue;
+      }
       if (op != 'watched.set' && op != 'watched.set_many') continue;
       final list = op == 'watched.set_many' ? (e['items'] is List ? e['items'] as List : const []) : [e];
       final items = <Progress>[];
@@ -92,6 +111,18 @@ class PluginHooks {
         if (p != null) items.add(p);
       }
       // source: the plugin that asked, so it is not told about its own change (a Trakt import must not go back to Trakt).
+      if (items.isNotEmpty && e['value'] != true) {
+        // A removal carries "the time the plugin last looked" as its "at": a title finished here after that time stays watched.
+        final lined = await LibraryMatch.resolve(items);
+        final hist = {for (final h in Store.history()) h.key: h.at};
+        final kept = <Progress>[
+          for (final p in lined)
+            if ((hist[Store.keyFor(kind: p.kind, title: p.title, showTitle: p.showTitle, year: p.year, season: p.season, episode: p.episode)] ?? 0) <= p.updated) p,
+        ];
+        items
+          ..clear()
+          ..addAll(kept);
+      }
       if (items.isNotEmpty) await Watched.set(items, e['value'] == true, source: id);
     }
   }
@@ -169,6 +200,26 @@ class PluginHooks {
     ];
     for (var i = 0; i < list.length; i += 300) {
       _send({'type': 'watched', 'items': list.sublist(i, i + 300 > list.length ? list.length : i + 300), 'value': on}, except: except);
+    }
+  }
+
+  /// Movies, episodes and shows the person just rated ([rating] 1..10, 0 = the rating was removed). [except] is the plugin that made
+  /// the change itself.
+  static void rated(List<RatedItem> items, {String? except}) {
+    final list = [
+      for (final r in items) {'kind': r.kind, 'title': r.title, 'year': r.year, 'season': r.season, 'episode': r.episode, 'rating': r.rating},
+    ];
+    for (var i = 0; i < list.length; i += 300) {
+      _send({'type': 'rated', 'items': list.sublist(i, i + 300 > list.length ? list.length : i + 300)}, except: except);
+    }
+  }
+
+  /// Movies and shows the person just added to ([value] true) or removed from (false) the favorites. [except] is the plugin that made
+  /// the change itself.
+  static void favorited(List<({String kind, String title, int year, int tmdb})> items, bool value, {String? except}) {
+    final list = [for (final f in items) {'kind': f.kind, 'title': f.title, 'year': f.year, 'tmdb': f.tmdb}];
+    for (var i = 0; i < list.length; i += 300) {
+      _send({'type': 'favorited', 'value': value, 'items': list.sublist(i, i + 300 > list.length ? list.length : i + 300)}, except: except);
     }
   }
 }

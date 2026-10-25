@@ -36,9 +36,9 @@ OFFICIAL_SKIN_PLUGINS = {"skin-maker"}       # the only plugin that may ask for 
 OFFICIAL_WEATHER_PLUGINS = {"weather"}       # the only plugin that may ask for the "weather" permission (the app's city and unit)
 RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS}   # host -> the only plugins that may list it
 HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
-HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched"}
-HOOK_EFFECTS = {"watched.set", "watched.set_many"}   # all a hook may ask Flutter to do
-ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "torrent.play", "toast", "exit",
+HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited"}
+HOOK_EFFECTS = {"watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many"}   # all a hook may ask Flutter to do
+ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many", "torrent.play", "toast", "exit",
                    "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set"}
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
@@ -478,6 +478,32 @@ def _clean_event(ev):
         out["percent"] = round(min(100.0, pos * 100.0 / dur), 2) if dur > 0 else 0.0
     elif ev["type"] == "watched":
         items = [i for i in (_clean_item(x) for x in list(ev.get("items") or [])[:300]) if i]
+        if not items:
+            return None
+        out["items"], out["value"] = items, bool(ev.get("value"))
+    elif ev["type"] == "rated":
+        items = []
+        for x in list(ev.get("items") or [])[:300]:
+            if not isinstance(x, dict) or x.get("kind") not in ("movie", "episode", "show"):
+                continue
+            title = str(x.get("title") or "").strip()[:200]
+            if not title:
+                continue
+            items.append({"kind": x["kind"], "title": title, "year": _int(x.get("year"), 0, 3000),
+                          "season": _int(x.get("season"), 0, 10000), "episode": _int(x.get("episode"), 0, 100000),
+                          "rating": _int(x.get("rating"), 0, 10)})          # 0 = the rating was removed
+        if not items:
+            return None
+        out["items"] = items
+    elif ev["type"] == "favorited":
+        items = []
+        for x in list(ev.get("items") or [])[:300]:
+            if not isinstance(x, dict) or x.get("kind") not in ("movie", "show"):
+                continue
+            title = str(x.get("title") or "").strip()[:200]
+            if not title:
+                continue
+            items.append({"kind": x["kind"], "title": title, "year": _int(x.get("year"), 0, 3000), "tmdb": _int(x.get("tmdb"), 0, 10 ** 9)})
         if not items:
             return None
         out["items"], out["value"] = items, bool(ev.get("value"))

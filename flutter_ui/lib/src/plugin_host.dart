@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/services.dart';
 
 import 'api.dart';
+import 'plugin_favorites.dart';
+import 'ratings.dart';
 import 'skins.dart';
 import 'store.dart';
 import 'weather.dart' show Weather;
@@ -50,6 +52,10 @@ class PluginHost {
       'favorites': Store.pluginFavoriteKeys(),
       'streamers': streamers ?? const <Map<String, String>>[],
       'watched': Store.history().take(4000).map((e) => e.key).toList(),
+      // The profile's favorite movies and shows (library and plugin favorites, each title once); pek_ui.favorites() hands them out.
+      'favorites': PluginFavorites.snapshot(),
+      // The profile's movie ratings. Python only hands them out through pek_ui.ratings(), which needs the "watched" permission.
+      'ratings': [for (final r in Ratings.all().take(4000)) {'kind': r.kind, 'title': r.title, 'year': r.year, 'season': r.season, 'episode': r.episode, 'rating': r.rating, 'at': r.at ~/ 1000}],
       // The app's city and unit. Python only hands them out through pek_ui.weather(), which needs the official "weather" permission.
       'weather': {if (city != null) ...{'lat': city.lat, 'lon': city.lon, 'label': city.label}, 'unit': Weather.unit},
       // The skins on this device. Python only hands them out through pek_ui.skins(), which needs the official "skins" permission.

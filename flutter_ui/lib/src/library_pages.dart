@@ -6,6 +6,8 @@ import 'api.dart';
 import 'common.dart';
 import 'detail.dart';
 import 'fields.dart';
+import 'ratings.dart';
+import 'ratings_export.dart';
 import 'store.dart';
 import 'tokens.dart';
 import 'watched.dart';
@@ -443,15 +445,28 @@ class HistoryPage extends StatelessWidget {
           if (items.isEmpty)
             const PekCard(title: 'Nothing watched yet', subtitle: 'Movies and episodes show up here once you finish them.')
           else ...[
-            Padding(padding: EdgeInsets.only(bottom: rem), child: Align(alignment: Alignment.centerLeft, child: PekButton(compact: true, label: 'Clear history', onTap: () => _clear(context)))),
+            Padding(
+              padding: EdgeInsets.only(bottom: rem),
+              child: Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
+                PekButton(compact: true, label: 'Clear history', onTap: () => _clear(context)),
+                PekButton(compact: true, label: 'Export history & ratings', onTap: () => showExportSheet(context)),
+              ]),
+            ),
             for (final e in items)
               ListRow(
                 title: e.label,
-                subtitle: '${_when(e.at)}${e.count > 1 ? ' \u00b7 watched ${e.count} times' : ''}',
-                trailing: IconButton(tooltip: 'Remove', icon: const Icon(Icons.close), onPressed: () async {
-                  await Store.removeHistory(e.key);
-                  Watched.syncSoon();
-                }),
+                subtitle: '${_when(e.at)}${e.count > 1 ? ' \u00b7 watched ${e.count} times' : ''}${Ratings.ofTarget(targetOfHistory(e)) > 0 ? ' \u00b7 \u2605 ${Ratings.ofTarget(targetOfHistory(e))}/${Ratings.max}' : ''}',
+                trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                  IconButton(
+                    tooltip: 'Rate',
+                    icon: Icon(Ratings.ofTarget(targetOfHistory(e)) > 0 ? Icons.star_rounded : Icons.star_outline_rounded),
+                    onPressed: () => showRateDialog(context, title: e.title, year: e.year, kind: e.kind, season: e.season, episode: e.episode),
+                  ),
+                  IconButton(tooltip: 'Remove', icon: const Icon(Icons.close), onPressed: () async {
+                    await Store.removeHistory(e.key);
+                    Watched.syncSoon();
+                  }),
+                ]),
               ),
           ],
         ]);

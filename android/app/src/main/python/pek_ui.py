@@ -406,7 +406,8 @@ def set_watched(kind, title, year=0, value=True, season=0, episode=0, at=0):
 def set_watched_many(items, value=True):
     """set_watched() for a whole season or list in one go: items are {"kind", "title", "year", "season", "episode"} dicts,
     each with an optional "at" (when it was watched, seconds since 1970). Max 300, anything invalid is skipped.
-    Needs "watched": true."""
+    With value=False, "at" means something else: "the time I last looked". An item that was watched here AFTER that time is kept,
+    so a removal that happened elsewhere never undoes a watch made since. Needs "watched": true."""
     s = _sess()
     s.need("watched")
     clean = []
@@ -419,6 +420,93 @@ def set_watched_many(items, value=True):
                       "season": int(it.get("season") or 0), "episode": int(it.get("episode") or 0), "at": _watch_time(it.get("at"))})
     if clean:
         s.effect("watched.set_many", items=clean, value=bool(value))
+
+
+def ratings():
+    """The active profile's ratings, newest first: [{"kind" ("movie" | "episode" | "show"), "title" (for an episode and a show: the show's
+    title), "year", "season", "episode", "rating" (1 to 10), "at" (seconds since 1970)}]. Needs "watched": true. Same 1 to 10 scale
+    Trakt uses."""
+    s = _sess()
+    s.need("watched")
+    out = []
+    for r in list(s.ctx.get("ratings") or [])[:4000]:
+        try:
+            kind = str(r.get("kind") or "movie")
+            if kind not in ("movie", "episode", "show"):
+                continue
+            out.append({"kind": kind, "title": str(r["title"]), "year": int(r.get("year") or 0), "season": int(r.get("season") or 0),
+                        "episode": int(r.get("episode") or 0), "rating": int(r["rating"]), "at": int(r.get("at") or 0)})
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def set_ratings_many(items):
+    """Rate things in PEK TV (a rating is per profile and syncs to PEK Cloud): items are {"kind" ("movie" by default, "episode" or "show"),
+    "title" (an episode's and a show's: the show's title), "year" (movies), "season" and "episode" (episodes), "rating", "at"} dicts;
+    rating 1 to 10 (0 removes the rating), at = when it was rated, seconds since 1970 (optional). Max 300, anything invalid is skipped.
+    Needs "watched": true."""
+    s = _sess()
+    s.need("watched")
+    clean = []
+    for it in list(items or [])[:_WATCHED_MAX]:
+        try:
+            kind = str(it.get("kind") or "movie")
+            if kind == "movie":
+                _watched_key("movie", it.get("title"), it.get("year", 0))
+            elif kind == "episode":
+                _watched_key("episode", it.get("title"), 0, it.get("season"), it.get("episode"))
+            elif kind != "show" or not str(it.get("title") or "").strip():
+                continue
+            rating = int(it.get("rating") or 0)
+        except (ValueError, TypeError, AttributeError):
+            continue
+        if not 0 <= rating <= 10:
+            continue
+        clean.append({"kind": kind, "title": _s(it.get("title"), 200), "year": int(it.get("year") or 0) if kind == "movie" else 0,
+                      "season": int(it.get("season") or 0) if kind == "episode" else 0,
+                      "episode": int(it.get("episode") or 0) if kind == "episode" else 0, "rating": rating, "at": _watch_time(it.get("at"))})
+    if clean:
+        s.effect("ratings.set_many", items=clean)
+
+
+def favorites():
+    """The open profile's favorites that are movies or shows: [{"kind" ("movie" | "show"), "title", "year", "tmdb" (0 when unknown)}].
+    Needs "watched": true."""
+    s = _sess()
+    s.need("watched")
+    out = []
+    for r in list(s.ctx.get("favorites") or [])[:4000]:
+        try:
+            kind = str(r.get("kind") or "")
+            if kind not in ("movie", "show"):
+                continue
+            out.append({"kind": kind, "title": str(r["title"]), "year": int(r.get("year") or 0), "tmdb": int(r.get("tmdb") or 0)})
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
+def set_favorites_many(items, value=True):
+    """Add (value=True) or remove (value=False) favorites in PEK TV: items are {"kind" ("movie" | "show"), "title", "year", "tmdb"}
+    dicts, "tmdb" being the title's TMDb id when the plugin knows it (a title that is not in the library can still be kept as a
+    favorite through it). With value=False, "at" is "the time I last looked" (seconds since 1970): a favorite changed here after that
+    time is kept. Max 300, anything invalid is skipped. Needs "watched": true."""
+    s = _sess()
+    s.need("watched")
+    clean = []
+    for it in list(items or [])[:_WATCHED_MAX]:
+        try:
+            kind = str(it.get("kind") or "")
+            title = _s(it.get("title"), 200)
+            if kind not in ("movie", "show") or not title.strip():
+                continue
+            clean.append({"kind": kind, "title": title, "year": int(it.get("year") or 0) if kind == "movie" else 0,
+                          "tmdb": max(0, int(it.get("tmdb") or 0)), "at": _watch_time(it.get("at"))})
+        except (ValueError, TypeError, AttributeError):
+            continue
+    if clean:
+        s.effect("favorites.set_many", items=clean, value=bool(value))
 
 
 # ---------------------------------------------------------------------------------------------------------

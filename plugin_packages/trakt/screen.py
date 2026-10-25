@@ -18,7 +18,7 @@ def trakt():
 def start():
     t = trakt()
     S["linked"] = t.linked()
-    S["set"] = {k: t.on(k) for k in ("scrobble", "push", "pull")}
+    S["set"] = {k: t.on(k) for k in ("scrobble", "push", "pull", "ratings", "favorites", "removals")}
     S["id"], S["secret"] = t.settings["client_id"], t.settings["client_secret"]
     if S["linked"]:
         ui.background(lambda: trakt().username(), got_user, quiet)
@@ -88,7 +88,7 @@ def first_run():
     t = trakt()
     name = t.username()
     if S["set"].get("pull"):
-        return name, t.pull(time.time() + 18)
+        return name, tuple(t.pull(time.time() + 18)) + ([],)      # (items, finished, error) + nothing removed yet
     return name, None
 
 
@@ -127,20 +127,25 @@ def sync():
 
 def sync_work():
     t = trakt()
-    result = t.pull(time.time() + 18)
-    t.flush_queue(time.time() + 5)
-    return result
+    items, finished, error = t.pull(time.time() + 14)
+    t.flush_queue(time.time() + 4)
+    gone = []
+    if finished and not error:
+        gone, f2, e2 = t.pull_removed(time.time() + 8, report=t.on("removals"))
+    return items, finished, error, gone
 
 
 def sync_done(res):
-    items, finished, error = res
+    items, finished, error, gone = res
     for i in range(0, len(items), 300):
         ui.set_watched_many(items[i:i + 300], True)
+    for i in range(0, len(gone), 300):
+        ui.set_watched_many(gone[i:i + 300], False)
     S["busy"] = ""
     if error:
         S["msg"] = "Import stopped: " + error
     elif finished:
-        S["msg"] = "Your Trakt history is in PEK TV (%d titles checked)." % len(items)
+        S["msg"] = "Your Trakt history is in PEK TV (%d titles checked)." % len(items) + (" %d removed on Trakt were removed here too." % len(gone) if gone else "")
     else:
         S["msg"] = "Imported %d titles so far. Tap Import again to continue." % len(items)
 
@@ -148,6 +153,61 @@ def sync_done(res):
 def sync_failed(message):
     S["busy"] = ""
     S["msg"] = "Import stopped: " + str(message)[:120]
+
+
+# ------------------------------------------------------------------------------------------------ ratings
+def send_ratings():
+    """Uploads every rating this profile has in PEK TV (the hooks only send new ones), and brings Trakt's in."""
+    S["busy"], S["msg"] = "ratings", ""
+    mine = ui.ratings()
+    ui.background(lambda: ratings_work(mine), ratings_done, sync_failed)
+
+
+def ratings_work(mine):
+    t = trakt()
+    sent, missed = 0, 0
+    for i in range(0, len(mine), 100):
+        a, b = t.push_ratings(mine[i:i + 100], time.time() + 8)
+        sent, missed = sent + a, missed + b
+    items, finished, error = t.pull_ratings(time.time() + 12)
+    return sent, missed, items, error
+
+
+def ratings_done(res):
+    sent, missed, items, error = res
+    for i in range(0, len(items), 300):
+        ui.set_ratings_many(items[i:i + 300])
+    S["busy"] = ""
+    S["msg"] = "Sent %d ratings to Trakt (%d not found there), received %d." % (sent, missed, len(items)) + (" Stopped: " + error if error else "")
+
+
+# ------------------------------------------------------------------------------------------------ favorites
+def send_favorites():
+    """Uploads every favorite movie / show this profile has in PEK TV (the hooks only send new ones), and brings Trakt's in."""
+    S["busy"], S["msg"] = "favs", ""
+    mine = ui.favorites()
+    ui.background(lambda: favorites_work(mine), favorites_done, sync_failed)
+
+
+def favorites_work(mine):
+    t = trakt()
+    sent, missed = 0, 0
+    for i in range(0, len(mine), 100):
+        a, b = t.push_favorites(mine[i:i + 100], True, time.time() + 8)
+        sent, missed = sent + a, missed + b
+    items, removed, finished, error = t.pull_favorites(time.time() + 12, removals=t.on("removals"))
+    return sent, missed, items, removed, error
+
+
+def favorites_done(res):
+    sent, missed, items, removed, error = res
+    for i in range(0, len(items), 300):
+        ui.set_favorites_many(items[i:i + 300], True)
+    for i in range(0, len(removed), 300):
+        ui.set_favorites_many(removed[i:i + 300], False)
+    S["busy"] = ""
+    S["msg"] = ("Sent %d favorites to Trakt (%d not found there), received %d." % (sent, missed, len(items)) + (" %d removed on Trakt were removed here too." % len(removed) if removed else "")
+                + (" Stopped: " + error if error else ""))
 
 
 # ------------------------------------------------------------------------------------------------ settings
@@ -201,13 +261,23 @@ def render():
         kids += [ui.text("Connected" + (" as " + S["user"] if S["user"] else "") + "."),
                  ui.toggle("Send what I watch to Trakt (scrobble)", S["set"].get("scrobble", True), lambda v: flip("scrobble", v)),
                  ui.toggle("Send my 'mark watched' changes to Trakt", S["set"].get("push", True), lambda v: flip("push", v)),
-                 ui.toggle("Import my Trakt history when PEK TV starts", S["set"].get("pull", True), lambda v: flip("pull", v))]
+                 ui.toggle("Import my Trakt history when PEK TV starts", S["set"].get("pull", True), lambda v: flip("pull", v)),
+                 ui.toggle("Share my ratings with Trakt (both ways)", S["set"].get("ratings", True), lambda v: flip("ratings", v)),
+                 ui.toggle("Share my favorite movies and shows with Trakt (both ways)", S["set"].get("favorites", True), lambda v: flip("favorites", v)),
+                 ui.toggle("Remove here what I remove on Trakt (watches, ratings, favorites)", S["set"].get("removals", True), lambda v: flip("removals", v))]
         if S["busy"] == "sync":
             kids.append(ui.spinner("Importing from Trakt..."))
+        elif S["busy"] == "ratings":
+            kids.append(ui.spinner("Syncing ratings..."))
+        elif S["busy"] == "favs":
+            kids.append(ui.spinner("Syncing favorites..."))
         elif S["busy"] == "out":
             kids.append(ui.spinner("Disconnecting..."))
         else:
-            kids += [ui.button("Import my Trakt history now", on=sync, primary=True), ui.button("Disconnect", on=disconnect)]
+            kids += [ui.button("Import my Trakt history now", on=sync, primary=True),
+                     ui.button("Send all my ratings to Trakt now", on=send_ratings),
+                     ui.button("Send all my favorites to Trakt now", on=send_favorites),
+                     ui.button("Disconnect", on=disconnect)]
     else:
         kids.append(ui.text("Connect your Trakt account to scrobble what you watch in PEK TV and to see your Trakt history here. "
                             "PEK TV shows you a code; you approve it on trakt.tv. Your password is never typed into PEK TV."))

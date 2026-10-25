@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'plugin_hooks.dart' show PluginHooks;
+
 /// On-device state for the Flutter UI (the web UI kept the same things in localStorage, which Flutter cannot read):
 /// watch progress (Resume Watching), favorites and the dashboard layout. The C++ backend is not involved.
 class Store {
@@ -61,7 +63,7 @@ class Store {
   /// Favorites stay unless [keepFavorites] is false: they only exist on this device (the cloud keeps no library favorites).
   static Future<void> removeProfileData(String id, {bool keepFavorites = false}) async {
     if (id == 'p1') {
-      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dashboard_v3', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_custom_skins', 'pek_skin_tombs', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1']) {
+      for (final k in const ['pek_history_v1', 'pek_progress_v1', 'pek_favorites_v1', 'pek_dashboard_v1', 'pek_dashboard_v3', 'pek_dash_v2', 'pek_skip_auto', 'pek_skip_online', 'pek_skin', 'pek_custom_skins', 'pek_skin_tombs', 'pek_layout', 'pek_poster', 'pek_sync_cursor', 'pek_sync_last', 'pek_sync_seen', 'pek_sync_pending', 'pek_sync_pendingf', 'pek_sync_setmeta', 'pek_fav_tombs', 'pek_plugin_favs_v1', 'pek_ratings_v1']) {
         if (keepFavorites && (k == 'pek_favorites_v1' || k == 'pek_fav_tombs' || k == 'pek_plugin_favs_v1')) continue;
         await _p.remove(k);
       }
@@ -307,6 +309,22 @@ class Store {
   static Future<void> writeProgressRaw(Map<String, dynamic> m) => _p.setString(_progressKey, jsonEncode(m));
   static void notifyChanged() => _bump();
 
+  // ---------------------------------------------------------------- movie ratings (see ratings.dart)
+
+  static String get _ratingsKey => _sc('pek_ratings_v1');
+
+  /// Raw map for ratings.dart and cloud sync: `m|title|year` -> rating entry, or `{deleted, updated}` after a removal.
+  static Map<String, dynamic> ratingsRaw() => _map(_ratingsKey);
+  static Future<void> writeRatingsRaw(Map<String, dynamic> m) => _p.setString(_ratingsKey, jsonEncode(m));
+
+  /// A batch of ratings (from a plugin) built in memory, written once by [flushRatings].
+  static Map<String, dynamic>? pendingRatings;
+  static Future<void> flushRatings() async {
+    final m = pendingRatings;
+    pendingRatings = null;
+    if (m != null) await writeRatingsRaw(m);
+  }
+
   /// The cross-device identity of a movie / episode (same text as histKey() in sync.js). Null for anything else.
   static String? keyFor({required String kind, String title = '', String showTitle = '', int year = 0, int season = 0, int episode = 0}) {
     if (kind == 'movie') return _norm(title).isEmpty ? null : 'm|${_norm(title)}|$year';
@@ -371,10 +389,14 @@ class Store {
 
   static bool isFavorite(String key) => _list(_favKey).any((e) => e['key'] == key);
 
-  static Future<void> toggleFavorite(Favorite f) async {
+  /// Adds [f] to the favorites, or removes it when it is one already. Plugins with the "playback" permission are told ([notify]),
+  /// except where a plugin's own change is being applied (it passes false and tells the others itself).
+  static Future<void> toggleFavorite(Favorite f, {bool notify = true}) async {
     final l = _list(_favKey);
     final i = l.indexWhere((e) => e['key'] == f.key);
     final now = DateTime.now().millisecondsSinceEpoch;
+    final added = i < 0;
+    final shown = i >= 0 ? Favorite.fromJson(l[i]) : f;
     if (i >= 0) {
       final gone = l.removeAt(i);
       final tm = (gone['tmdb'] as num?)?.toInt() ?? 0;
@@ -392,6 +414,9 @@ class Store {
     }
     await _p.setString(_favKey, jsonEncode(l));
     _bump();
+    if (notify && (shown.kind == 'movie' || shown.kind == 'show')) {
+      PluginHooks.favorited([(kind: shown.kind, title: shown.title, year: shown.kind == 'movie' ? shown.year : 0, tmdb: shown.tmdb > 0 ? shown.tmdb : 0)], added);
+    }
   }
 
   // ---------------------------------------------------------------- favorites saved by plugin screens
@@ -404,7 +429,7 @@ class Store {
 
   static List<String> pluginFavoriteKeys() => pluginFavorites().map((e) => '${e['key']}').toList();
 
-  static Future<void> addPluginFavorite({required String plugin, required String type, required int id, required String title, int year = 0, String posterPath = ''}) async {
+  static Future<void> addPluginFavorite({required String plugin, required String type, required int id, required String title, int year = 0, String posterPath = '', bool notify = true}) async {
     if ((type != 'movie' && type != 'tv') || id <= 0) return;
     final key = '$type:$id';
     final l = _list(_pluginFavKey);
@@ -416,11 +441,13 @@ class Store {
     final tombs = _map(_sc('pek_fav_tombs'));
     if (tombs.remove(key) != null) await _p.setString(_sc('pek_fav_tombs'), jsonEncode(tombs));
     _bump();
+    if (notify) PluginHooks.favorited([(kind: type == 'tv' ? 'show' : 'movie', title: title, year: type == 'tv' ? 0 : year, tmdb: id)], true);
   }
 
-  static Future<void> removePluginFavorite(String key) async {
+  static Future<void> removePluginFavorite(String key, {bool notify = true}) async {
     final l = _list(_pluginFavKey);
     final n = l.length;
+    final gone = l.where((e) => e['key'] == key).toList();
     l.removeWhere((e) => e['key'] == key);
     if (l.length == n) return;
     await _p.setString(_pluginFavKey, jsonEncode(l));
@@ -429,6 +456,11 @@ class Store {
     tombs[key] = DateTime.now().millisecondsSinceEpoch;
     await _p.setString(_sc('pek_fav_tombs'), jsonEncode(tombs));
     _bump();
+    if (notify && gone.isNotEmpty) {
+      final g = gone.first;
+      final tv = '${g['type']}' == 'tv';
+      PluginHooks.favorited([(kind: tv ? 'show' : 'movie', title: '${g['title'] ?? ''}', year: tv ? 0 : (g['year'] as num?)?.toInt() ?? 0, tmdb: (g['id'] as num?)?.toInt() ?? 0)], false);
+    }
   }
 
   /// Raw plugin favorites for the cloud sync.

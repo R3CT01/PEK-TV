@@ -34,6 +34,24 @@ class LibraryMatch {
     }
   }
 
+  /// The one library movie that [title] / [year] stands for (same rules as [resolve]), or null when none or several fit.
+  static Future<Movie?> movieFor(String title, int year) async {
+    try {
+      return (await _get())?.pickMovie(title, year);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// The library's own title of the one show [title] stands for, or null when it is not in the library (or two shows share the name).
+  static Future<String?> showFor(String title) async {
+    try {
+      return (await _get())?.showName(title);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The library as it was read a few minutes ago (a rescan shows up within [_keepFor]).
   static Future<_Index?> _get() {
     final now = DateTime.now();
@@ -79,25 +97,36 @@ class _Index {
     return p;
   }
 
+  String? showName(String title) {
+    final names = _shows[_key(title)];
+    return names != null && names.length == 1 ? names.first : null;
+  }
+
   Progress _movie(Progress p) {
-    final list = _movies[_key(p.title)];
-    if (list == null) return p;
+    final pick = pickMovie(p.title, p.year);
+    if (pick == null) return p;
+    if (pick.title == p.title && pick.year == p.year) return p;
+    return Progress(id: '', title: pick.title, kind: 'movie', position: 0, duration: 0, updated: p.updated, year: pick.year);
+  }
+
+  /// The one library movie a title (and year, 0 = any) stands for. A year may be one off; two fitting movies = no pick.
+  Movie? pickMovie(String title, int year) {
+    final list = _movies[_key(title)];
+    if (list == null) return null;
     Movie? pick;
     // The same year first, then a year off by one. No year on either side fits any year.
     for (final slack in const [0, 1]) {
       final fit = <String, Movie>{};
       for (final m in list) {
-        if (p.year == 0 || m.year == 0 || (m.year - p.year).abs() <= slack) fit['${m.title}|${m.year}'] = m;
+        if (year == 0 || m.year == 0 || (m.year - year).abs() <= slack) fit['${m.title}|${m.year}'] = m;
       }
       if (fit.length == 1) {
         pick = fit.values.first;
         break;
       }
-      if (fit.length > 1) return p; // two different library movies fit: do not guess
+      if (fit.length > 1) return null; // two different library movies fit: do not guess
     }
-    if (pick == null) return p;
-    if (pick.title == p.title && pick.year == p.year) return p;
-    return Progress(id: '', title: pick.title, kind: 'movie', position: 0, duration: 0, updated: p.updated, year: pick.year);
+    return pick;
   }
 
   Progress _episode(Progress p) {

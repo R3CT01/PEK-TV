@@ -12,6 +12,7 @@ dependencies:
   http: ^1.2.0
   shared_preferences: ^2.2.3
   crypto: ^3.0.3
+  share_plus: ^10.1.4               # sharing the history / ratings export file
   webview_flutter: ^4.10.0          # plugin trailers (YouTube, locked to youtube-nocookie.com)
   webview_flutter_android: ^4.3.0
 

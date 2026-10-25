@@ -1,8 +1,8 @@
 {
   "name": "Trakt",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "author": "PEK",
-  "description": "Scrobbles what you watch to Trakt, sends your \"mark watched\" changes there, and brings your Trakt history into PEK TV.",
+  "description": "Scrobbles what you watch to Trakt, shares your \"mark watched\" changes, ratings and favorites both ways, and carries what you remove on Trakt back into PEK TV.",
   "permissions": {
     "network": [
       "api.trakt.tv"

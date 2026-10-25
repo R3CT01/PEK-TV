@@ -26,11 +26,15 @@ CLIENT = "client.json"
 IDS = "ids.json"
 STATE = "sync.json"
 QUEUE = "queue.json"
+RQUEUE = "rqueue.json"
+FQUEUE = "fqueue.json"
+SNAP_MAX = 4000                      # most titles a "what Trakt held last time" snapshot keeps
 OOB = "urn:ietf:wg:oauth:2.0:oob"
 MAX_IDS = 3000
 MAX_QUEUE = 100
+MAX_RQUEUE = 300
 PAGE = 500
-DEFAULTS = {"scrobble": True, "push": True, "pull": True, "client_id": "", "client_secret": ""}   # client_secret: only for an old app of your own that still has one
+DEFAULTS = {"scrobble": True, "push": True, "pull": True, "ratings": True, "favorites": True, "removals": True, "client_id": "", "client_secret": ""}   # client_secret: only for an old app of your own that still has one
 NO_ANSWER = {"status": 0, "data": None, "page_count": 0, "retry_after": 0}
 
 
@@ -60,6 +64,7 @@ class Trakt:
             if k in stored and isinstance(stored[k], type(DEFAULTS[k])):
                 self.settings[k] = stored[k]
         self.auth = self.load(AUTH, {})
+        self.acts = None                     # Trakt's last_activities answer of this event (see activity())
 
     # ------------------------------------------------------------------------------------------ storage
     def load(self, name, default):
@@ -340,6 +345,343 @@ class Trakt:
         self.save(QUEUE, q[len(batch):])
         return max(0, len(q) - len(batch))
 
+    # ------------------------------------------------------------------------------------------ removals made on Trakt
+    # Trakt keeps no list of what was deleted. What it does is move the "last changed" time of a list when something is added OR removed,
+    # so after such a change the whole list is read again and compared with a snapshot of what it held the last time we looked. A title
+    # that was in the snapshot and is gone now was removed on Trakt. A title we never saw on Trakt (a rating made offline, a title Trakt
+    # could not match) is never in a snapshot, so it is never removed here. Snapshots: rsynced.json (ratings), wsynced.json (watched),
+    # fsynced.json (favorites).
+    def skey(self, it):
+        return "%s|%s|%d|%d|%d" % (it.get("kind") or "movie", norm(it.get("title")), int(it.get("year") or 0), int(it.get("season") or 0), int(it.get("episode") or 0))
+
+    def snapshot_diff(self, name, current):
+        """current = {key: item} Trakt holds now. Returns (items gone since the last snapshot, the time of that snapshot, suspicious).
+        The snapshot is replaced by current. A big part of the list vanishing at once is held back ONCE (it may be a bad answer, not a
+        clean-out): nothing is removed and the old snapshot stays; when the next look shows exactly the same, the removals are real."""
+        snap = self.load(name, {})
+        old = snap.get("items") if isinstance(snap.get("items"), dict) else {}
+        since = int(snap.get("at") or 0)
+        gone = [v for k, v in old.items() if k not in current]
+        sig = hashlib.sha1("|".join(sorted(current)).encode("utf-8")).hexdigest()[:16]
+        if len(gone) > 25 and len(gone) * 2 > len(old) and snap.get("doubt") != sig:
+            snap["doubt"] = sig
+            self.save(name, snap)
+            return [], since, True
+        self.save(name, {"at": int(time.time()), "items": current if len(current) <= SNAP_MAX else {}})
+        return gone, since, False
+
+    def gone_items(self, gone, since, **extra):
+        """Items for PEK TV: what was removed on Trakt. "at" is the time we last knew it was there (PEK TV keeps anything changed
+        on this device after that time)."""
+        out = []
+        for i in gone:
+            at = max(int(since or 0), int(i.get("seen") or 0))
+            if at > 0:
+                out.append(dict({k: v for k, v in i.items() if k != "seen"}, at=at, **extra))
+        return out
+
+    def snapshot_touch(self, name, add=(), drop=()):
+        """What we just sent to Trakt: it is on Trakt now (add) or is not any more (drop), so a later removal there is noticed."""
+        snap = self.load(name, {})
+        items = dict(snap["items"]) if isinstance(snap.get("items"), dict) else {}
+        now = int(time.time())
+        for it in add:
+            items[self.skey(it)] = dict(it, seen=now)       # "seen": when we knew it was on Trakt (it was just sent)
+        for it in drop:
+            items.pop(self.skey(it), None)
+        if len(items) > SNAP_MAX:
+            return
+        self.save(name, {"at": int(snap.get("at") or 0) or int(time.time()), "items": items})
+
+    # ------------------------------------------------------------------------------------------ ratings (movies, episodes, shows: 1 to 10 on both sides)
+    def rated_body(self, items, removing):
+        """The body of POST /sync/ratings (or /remove) for [(item, trakt id)]: movies, whole shows, and episodes grouped show > season."""
+        movies, shows, eps = [], [], {}
+        for it, tid in items:
+            kind = it.get("kind") or "movie"
+            rate = {}
+            if not removing:
+                at = int(it.get("at") or 0)
+                rate = {"rating": int(it["rating"]), "rated_at": iso(at) if at > 0 else iso()}
+            if kind == "movie":
+                movies.append(dict({"ids": {"trakt": tid}}, **rate))
+            elif kind == "show":
+                shows.append(dict({"ids": {"trakt": tid}}, **rate))
+            else:
+                seasons = eps.setdefault(tid, {})
+                seasons.setdefault(int(it.get("season") or 0), []).append(dict({"number": int(it.get("episode") or 0)}, **rate))
+        for tid, seasons in eps.items():
+            shows.append({"ids": {"trakt": tid}, "seasons": [{"number": n, "episodes": e} for n, e in sorted(seasons.items())]})
+        body = {}
+        if movies:
+            body["movies"] = movies
+        if shows:
+            body["shows"] = shows
+        return body
+
+    def push_ratings(self, items, deadline):
+        """PEK -> Trakt: items are {"kind" ("movie" by default, "episode", "show"), "title", "year", "season", "episode", "rating" (1 to 10;
+        0 removes it), "at" (seconds, optional)}. What does not get through (no network, out of time, Trakt busy) is kept in rqueue.json and
+        sent by flush_rqueue(). Returns (sent, no match)."""
+        todo, failed, missed = [], [], 0
+        for it in items:
+            if time.time() >= deadline:
+                failed.append(it)
+                continue
+            kind = it.get("kind") or "movie"
+            ref = {"kind": kind, "title": it["title"], "year": it.get("year", 0)}
+            if kind != "movie":
+                ref["kind"] = "show"
+            tid = self.resolve(ref)
+            if not tid:
+                missed += 1
+                continue
+            todo.append((it, tid))
+        sent = 0
+        for removing in (False, True):
+            group = [(it, tid) for it, tid in todo if (int(it.get("rating") or 0) <= 0) == removing]
+            if not group:
+                continue
+            r = self.call("POST", "/sync/ratings/remove" if removing else "/sync/ratings", self.rated_body(group, removing))
+            if r["status"] in (200, 201):
+                sent += len(group)
+                items_only = [it for it, tid in group]
+                self.snapshot_touch("rsynced.json", add=[] if removing else items_only, drop=items_only if removing else [])
+            else:
+                failed += [it for it, tid in group]
+        for it in failed:
+            self.rqueue_add(it)
+        return sent, missed
+
+    def rqueue_add(self, it):
+        q = self.load(RQUEUE, {})
+        kind = it.get("kind") or "movie"
+        key = "%s|%s|%d|%d|%d" % (kind, norm(it["title"]), int(it.get("year") or 0), int(it.get("season") or 0), int(it.get("episode") or 0))
+        q.pop(key, None)                     # the newest rating of a title wins
+        q[key] = {"kind": kind, "title": it["title"], "year": int(it.get("year") or 0), "season": int(it.get("season") or 0),
+                  "episode": int(it.get("episode") or 0), "rating": int(it.get("rating") or 0), "at": int(it.get("at") or 0)}
+        while len(q) > MAX_RQUEUE:
+            q.pop(next(iter(q)))
+        self.save(RQUEUE, q)
+
+    def flush_rqueue(self, deadline):
+        """Sends ratings that could not be sent earlier. Returns how many are still waiting."""
+        q = self.load(RQUEUE, {})
+        if not q or not self.linked():
+            return len(q)
+        self.save(RQUEUE, {})
+        self.push_ratings(list(q.values()), deadline)      # anything that fails again goes back in the queue
+        return len(self.load(RQUEUE, {}))
+
+    def pull_ratings(self, deadline, quick=False, removals=True):
+        """Trakt ratings (movies, shows, episodes) -> [{"kind", "title", "year", "season", "episode", "rating", "at"}] for PEK TV. quick=True
+        (the periodic check) asks nothing but last_activities when no rating changed on Trakt since the last finished pull.
+        removals=True also reports what was removed on Trakt since the last look, as items with "rating": 0 and "at" = when we last looked.
+        Returns (items, finished, error text)."""
+        state = self.load(STATE, {})
+        if not isinstance(self.acts, dict):
+            self.activity()
+        d = self.acts
+        act = None
+        if isinstance(d, dict):
+            act = []
+            for k in ("movies", "shows", "episodes"):
+                m = d.get(k)
+                act.append(str(m.get("rated_at") or "") if isinstance(m, dict) else "")
+        if quick and act is not None and state.get("ract") == act:
+            return [], True, ""
+        out = []
+        for kind, path in (("movie", "movies"), ("show", "shows"), ("episode", "episodes")):
+            page = 1
+            while True:
+                if time.time() >= deadline:
+                    return out, False, ""
+                r = self.call("GET", "/sync/ratings/%s?limit=%d&page=%d" % (path, PAGE, page))
+                if r["status"] != 200 or not isinstance(r["data"], list):
+                    return out, False, ("Trakt answered HTTP %d" % r["status"]) if r["status"] else "No answer from Trakt"
+                for row in r["data"]:
+                    if not isinstance(row, dict):
+                        continue
+                    rating = row.get("rating")
+                    thing = row.get("movie") if kind == "movie" else row.get("show")
+                    if not (isinstance(thing, dict) and thing.get("title") and isinstance(rating, int) and 1 <= rating <= 10):
+                        continue
+                    item = {"kind": kind, "title": str(thing["title"]), "year": int(thing.get("year") or 0) if kind == "movie" else 0,
+                            "rating": rating, "at": epoch(row.get("rated_at"))}
+                    if kind == "episode":
+                        ep = row.get("episode")
+                        if not (isinstance(ep, dict) and isinstance(ep.get("season"), int) and isinstance(ep.get("number"), int)):
+                            continue
+                        item["season"], item["episode"] = ep["season"], ep["number"]
+                    out.append(item)
+                if page >= max(1, r["page_count"]):
+                    break
+                page += 1
+        gone, since, odd = self.snapshot_diff("rsynced.json", {self.skey(i): i for i in out})
+        if removals:
+            out += self.gone_items(gone, since, rating=0)
+        if act is not None and not odd:
+            state = self.load(STATE, {})
+            state["ract"] = act
+            self.save(STATE, state)
+        return out, True, ""
+
+    # ------------------------------------------------------------------------------------------ history removed on Trakt
+    def watched_now(self, deadline):
+        """Everything Trakt says is watched: ({key: item}, error text). The item is None when Trakt did not answer properly."""
+        cur = {}
+        r = self.call("GET", "/sync/watched/movies")
+        if r["status"] != 200 or not isinstance(r["data"], list):
+            return None, ("Trakt answered HTTP %d" % r["status"]) if r["status"] else "No answer from Trakt"
+        for row in r["data"]:
+            m = row.get("movie") if isinstance(row, dict) else None
+            if isinstance(m, dict) and m.get("title") and int(row.get("plays") or 1) > 0:
+                it = {"kind": "movie", "title": str(m["title"]), "year": int(m.get("year") or 0), "season": 0, "episode": 0}
+                cur[self.skey(it)] = it
+        if time.time() >= deadline:
+            return None, ""
+        r = self.call("GET", "/sync/watched/shows")
+        if r["status"] != 200 or not isinstance(r["data"], list):
+            return None, ("Trakt answered HTTP %d" % r["status"]) if r["status"] else "No answer from Trakt"
+        for row in r["data"]:
+            s = row.get("show") if isinstance(row, dict) else None
+            if not (isinstance(s, dict) and s.get("title")):
+                continue
+            for se in row.get("seasons") or []:
+                for ep in (se.get("episodes") or []) if isinstance(se, dict) else []:
+                    if isinstance(ep, dict) and isinstance(se.get("number"), int) and isinstance(ep.get("number"), int) and int(ep.get("plays") or 1) > 0:
+                        it = {"kind": "episode", "title": str(s["title"]), "year": 0, "season": se["number"], "episode": ep["number"]}
+                        cur[self.skey(it)] = it
+        return cur, ""
+
+    def pull_removed(self, deadline, quick=False, report=True):
+        """Watches removed on Trakt since the last look -> items for ui.set_watched_many(items, False); each carries "at" = when we last
+        looked, so PEK TV keeps a title that was finished there since. quick=True costs nothing unless Trakt says a watch changed.
+        report=False only refreshes the snapshot. Returns (items, finished, error text)."""
+        state = self.load(STATE, {})
+        if not isinstance(self.acts, dict):
+            self.activity()
+        d = self.acts
+        act = None
+        if isinstance(d, dict) and isinstance(d.get("movies"), dict) and isinstance(d.get("episodes"), dict):
+            act = [str(d["movies"].get("watched_at") or ""), str(d["episodes"].get("watched_at") or "")]
+        if quick and act is not None and state.get("wact") == act:
+            return [], True, ""
+        cur, error = self.watched_now(deadline)
+        if cur is None:
+            return [], False, error
+        gone, since, odd = self.snapshot_diff("wsynced.json", cur)
+        if act is not None and not odd:
+            state = self.load(STATE, {})
+            state["wact"] = act
+            self.save(STATE, state)
+        items = self.gone_items(gone, since) if report else []
+        return items, True, ""
+
+    # ------------------------------------------------------------------------------------------ favorites (movies and shows)
+    def fav_ids(self, it):
+        tmdb = int(it.get("tmdb") or 0)
+        if tmdb > 0:
+            return {"tmdb": tmdb}
+        tid = self.resolve({"kind": "movie" if it.get("kind") == "movie" else "show", "title": it["title"], "year": it.get("year", 0)})
+        return {"trakt": tid} if tid else None
+
+    def push_favorites(self, items, value, deadline):
+        """PEK -> Trakt favorites: items are {"kind" ("movie" | "show"), "title", "year", "tmdb"}; value True adds, False removes.
+        What does not get through is kept in fqueue.json (see flush_fqueue). Returns (sent, no match)."""
+        movies, shows, sent_items, failed, missed = [], [], [], [], 0
+        for it in items:
+            if time.time() >= deadline:
+                failed.append(it)
+                continue
+            ids = self.fav_ids(it)
+            if not ids:
+                missed += 1
+                continue
+            (movies if it.get("kind") == "movie" else shows).append({"ids": ids})
+            sent_items.append(it)
+        sent = 0
+        if sent_items:
+            body = {}
+            if movies:
+                body["movies"] = movies
+            if shows:
+                body["shows"] = shows
+            r = self.call("POST", "/sync/favorites" if value else "/sync/favorites/remove", body)
+            if r["status"] in (200, 201):
+                sent = len(sent_items)
+                self.snapshot_touch("fsynced.json", add=sent_items if value else [], drop=[] if value else sent_items)
+            else:
+                failed += sent_items
+        for it in failed:
+            self.fqueue_add(it, value)
+        return sent, missed
+
+    def fqueue_add(self, it, value):
+        q = self.load(FQUEUE, {})
+        key = self.skey(it)
+        q.pop(key, None)                     # the newest change of a title wins
+        q[key] = {"item": {"kind": it.get("kind"), "title": it["title"], "year": int(it.get("year") or 0), "tmdb": int(it.get("tmdb") or 0)}, "value": bool(value)}
+        while len(q) > MAX_RQUEUE:
+            q.pop(next(iter(q)))
+        self.save(FQUEUE, q)
+
+    def flush_fqueue(self, deadline):
+        """Sends favorite changes that could not be sent earlier. Returns how many are still waiting."""
+        q = self.load(FQUEUE, {})
+        if not q or not self.linked():
+            return len(q)
+        self.save(FQUEUE, {})
+        for value in (True, False):
+            group = [v["item"] for v in q.values() if v.get("value") is value]
+            if group:
+                self.push_favorites(group, value, deadline)    # a failure goes back in the queue
+        return len(self.load(FQUEUE, {}))
+
+    def pull_favorites(self, deadline, quick=False, removals=True):
+        """Trakt favorites (movies, shows) -> (items, removed, finished, error text); both lists are {"kind", "title", "year", "tmdb"}.
+        removed = taken off the favorites on Trakt since the last look (each with "at" = when we last looked).
+        quick=True only costs the shared last_activities answer, and skips the list when Trakt does not report a favorites time."""
+        state = self.load(STATE, {})
+        if not isinstance(self.acts, dict):
+            self.activity()
+        d = self.acts
+        act = None
+        if isinstance(d, dict):
+            parts = [str(d[k].get("favorited_at") or "") for k in ("movies", "shows") if isinstance(d.get(k), dict) and "favorited_at" in d[k]]
+            act = parts if parts else None
+        if quick and (act is None or state.get("fact") == act):
+            return [], [], True, ""
+        out = []
+        page = 1
+        while True:
+            if time.time() >= deadline:
+                return out, [], False, ""
+            r = self.call("GET", "/sync/favorites?limit=%d&page=%d" % (PAGE, page))
+            if r["status"] != 200 or not isinstance(r["data"], list):
+                hint = " (favorites may need Trakt VIP)" if r["status"] in (402, 403) else ""
+                return out, [], False, (("Trakt answered HTTP %d" % r["status"]) + hint) if r["status"] else "No answer from Trakt"
+            for row in r["data"]:
+                if not isinstance(row, dict):
+                    continue
+                kind = row.get("type") if row.get("type") in ("movie", "show") else ("movie" if isinstance(row.get("movie"), dict) else "show" if isinstance(row.get("show"), dict) else "")
+                thing = row.get(kind) if kind else None
+                if not (isinstance(thing, dict) and thing.get("title")):
+                    continue
+                ids = thing.get("ids") if isinstance(thing.get("ids"), dict) else {}
+                out.append({"kind": kind, "title": str(thing["title"]), "year": int(thing.get("year") or 0) if kind == "movie" else 0,
+                            "tmdb": int(ids.get("tmdb") or 0)})
+            if page >= max(1, r["page_count"]):
+                break
+            page += 1
+        gone, since, odd = self.snapshot_diff("fsynced.json", {self.skey(i): i for i in out})
+        if act is not None and not odd:
+            state = self.load(STATE, {})
+            state["fact"] = act
+            self.save(STATE, state)
+        removed = self.gone_items(gone, since) if removals else []
+        return out, removed, True, ""
+
     # ------------------------------------------------------------------------------------------ history in
     def activity(self):
         """The two times Trakt last saw a watch (movies, episodes): one small request that tells whether anything changed.
@@ -348,6 +690,7 @@ class Trakt:
         d = r["data"]
         if r["status"] != 200 or not isinstance(d, dict):
             return None
+        self.acts = d                       # pull_ratings() reuses this answer: a tick still costs one request
         def at(k):
             v = d.get(k)
             return str(v.get("watched_at") or "") if isinstance(v, dict) else ""

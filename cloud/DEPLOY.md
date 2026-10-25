@@ -157,3 +157,8 @@ Sign-up has a required **Username** box: 3 to 20 characters (letters, numbers, `
 unique without regard to upper/lower case. Accounts made before this have none and are not asked for one. It is shown under
 Settings -> Cloud Sync once signed in. Sign-in still uses the email and password. Deploy the new `worker.js` (the `username` column and its
 unique index are created on the first request), then update the app.
+
+
+## Updating for ratings
+
+Movie, episode and show ratings sync as a new item kind (`r|m|<title>|<year>`, `r|e|<show>|<season>|<episode>`, `r|s|<show>`; rating 1 to 10) through the existing `POST /v1/sync`, and `GET /v1/export` lists them as `ratings`. Redeploy `worker.js`; no database change is needed (the `items` table already takes any kind). An app that has ratings talks fine to an older worker: it keeps the ratings on the device until the worker is updated.
