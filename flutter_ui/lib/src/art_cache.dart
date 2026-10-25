@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
 
 /// Keeps what was looked up online on the device, so posters, titles and synopses show at once after a restart and still
 /// show when the internet is gone.
@@ -24,14 +24,24 @@ class ArtCache {
   static Directory? _imgDir;
   static Directory? _dataDir;
   static Future<void>? _ready;
-  static final http.Client _client = http.Client();
+  // Own HTTP client: a request that times out is really cancelled (abort), so a stuck download can't keep a connection
+  // busy and slow down the pictures that come after it. The old shared client left those requests running.
+  static final HttpClient _http = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 8)
+    ..maxConnectionsPerHost = 8
+    ..idleTimeout = const Duration(seconds: 10);
 
   /// Addresses whose file is known to exist, so a grid that scrolls back does not wait on a disk check again.
   static final Map<String, File> _known = HashMap();
   static final Map<String, Future<File?>> _inflight = {};
   static int _running = 0;
-  static final Queue<Completer<void>> _waiting = Queue();
-  static const _parallel = 6;
+  static final List<Completer<void>> _waiting = []; // newest last: the newest request (what is on screen now) goes first
+  static const _parallel = 8;
+
+  /// Pictures that no widget wants any more (it was scrolled away / closed) are not downloaded while they wait in the queue.
+  static final Set<String> _dropped = HashSet();
+  static void want(String url) => _dropped.remove(url);
+  static void unwant(String url) => _dropped.add(url);
 
   static Future<void> init() => _ready ??= _init();
 
@@ -107,8 +117,9 @@ class ArtCache {
   static Future<File?> _withRetry(String url) async {
     for (var i = 0; i < _tryTimeouts.length; i++) {
       if (_gone.contains(url)) return null;
-      final f = await _limited(() => _fetch(url, _tryTimeouts[i]));
+      final f = await _limited(() => _dropped.contains(url) ? Future<File?>.value(null) : _fetch(url, _tryTimeouts[i]));
       if (f != null) return f;
+      if (_dropped.contains(url)) return null; // nobody is waiting for it any more
       if (i < _tryTimeouts.length - 1) await Future<void>.delayed(Duration(milliseconds: 500 * (i + 1)));
     }
     return null;
@@ -132,7 +143,7 @@ class ArtCache {
       return await job();
     } finally {
       _running--;
-      if (_waiting.isNotEmpty) _waiting.removeFirst().complete();
+      if (_waiting.isNotEmpty) _waiting.removeLast().complete(); // newest first
     }
   }
 
@@ -148,16 +159,40 @@ class ArtCache {
       }
     } catch (_) {}
     try {
-      final r = await _client.get(Uri.parse(url)).timeout(timeout);
+      final r = await _get(url, timeout);
+      if (r == null) return null;
       // Only "it is not there" is final. 403 / 429 / 5xx mean a busy or rate-limiting server: ask again later.
-      if (r.statusCode == 404 || r.statusCode == 410) _gone.add(url);
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+      if (r.status == 404 || r.status == 410) _gone.add(url);
+      if (r.status != 200 || r.bytes.isEmpty) return null;
       final tmp = File('${f.path}.part');
-      await tmp.writeAsBytes(r.bodyBytes, flush: true);
+      await tmp.writeAsBytes(r.bytes, flush: true);
       await tmp.rename(f.path);
       _known[url] = f;
       return f;
     } catch (_) {
+      return null;
+    }
+  }
+
+  /// One download that is cut off for real when [timeout] passes. null = it failed or timed out.
+  static Future<({int status, Uint8List bytes})?> _get(String url, Duration timeout) async {
+    HttpClientRequest? req;
+    try {
+      return await (() async {
+        req = await _http.getUrl(Uri.parse(url));
+        req!.headers.set('accept', 'image/*');
+        final resp = await req!.close();
+        final b = BytesBuilder(copy: false);
+        await for (final c in resp) {
+          b.add(c);
+        }
+        return (status: resp.statusCode, bytes: b.takeBytes());
+      })()
+          .timeout(timeout);
+    } catch (_) {
+      try {
+        req?.abort();
+      } catch (_) {}
       return null;
     }
   }
@@ -283,6 +318,7 @@ class _ArtImageState extends State<ArtImage> {
   @override
   void initState() {
     super.initState();
+    ArtCache.want(widget.url);
     _resolve();
     ArtCache.retryNow.addListener(_retryNow);
   }
@@ -304,6 +340,8 @@ class _ArtImageState extends State<ArtImage> {
   void didUpdateWidget(ArtImage old) {
     super.didUpdateWidget(old);
     if (old.url != widget.url) {
+      ArtCache.unwant(old.url);
+      ArtCache.want(widget.url);
       _retryTimer?.cancel();
       _retries = 0;
       _gaveUp = false;
@@ -314,14 +352,31 @@ class _ArtImageState extends State<ArtImage> {
 
   @override
   void dispose() {
+    ArtCache.unwant(widget.url);
+    _watchdog?.cancel();
     ArtCache.retryNow.removeListener(_retryNow);
     _retryTimer?.cancel();
     super.dispose();
   }
 
+  Timer? _watchdog;
+
   void _resolve() {
     _file = ArtCache.knownFile(widget.url);
     _pending = _file == null ? ArtCache.file(widget.url) : null;
+    // A picture still not there after 20 s is started over, so a stuck download never leaves a tile on its title card until
+    // the person scrolls it away and back.
+    _watchdog?.cancel();
+    if (_file == null) {
+      _watchdog = Timer(const Duration(seconds: 20), () {
+        if (!mounted || ArtCache.knownFile(widget.url) != null && _file != null) return;
+        setState(() {
+          _gen++;
+          _fileBroken = false;
+          _resolve();
+        });
+      });
+    }
   }
 
   /// Both the disk copy and the network picture failed: try the whole thing again shortly.
