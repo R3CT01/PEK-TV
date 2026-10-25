@@ -78,8 +78,10 @@ class _SearchPageState extends State<SearchPage> {
 
   String _genre = '';
   int _decade = 0;
+  int _year = 0; // one exact year (wins over the decade)
   String _actor = '';
-  String _pick = ''; // '' | 'genre' | 'decade' | 'actor'
+  String _director = '';
+  String _pick = ''; // '' | 'genre' | 'decade' (decades and single years) | 'actor' | 'director'
 
   bool _loading = false;
   String _message = 'Type a title, an actor, a genre or a year \u2014 or use the buttons above.';
@@ -96,7 +98,10 @@ class _SearchPageState extends State<SearchPage> {
     super.dispose();
   }
 
-  bool get _filtering => _genre.isNotEmpty || _decade > 0 || _actor.isNotEmpty;
+  bool get _filtering => _genre.isNotEmpty || _decade > 0 || _year > 0 || _actor.isNotEmpty || _director.isNotEmpty;
+
+  /// The pickers with a name list: typing in the search box narrows them.
+  bool get _namePick => _pick == 'actor' || _pick == 'director';
 
   Future<_LibData> _data() async {
     final c = _cache;
@@ -106,7 +111,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   void _onChanged(String v) {
-    if (_pick.isNotEmpty && _pick != 'actor') _pick = ''; // typing leaves the genre / year list
+    if (_pick.isNotEmpty && !_namePick) _pick = ''; // typing leaves the genre / year list
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 250), _run);
     setState(() {});
@@ -128,7 +133,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _loadFacets() async {
     final seq = ++_seq;
-    final f = await Api.libraryFacets(_pick == 'actor' ? _q.text.trim() : '');
+    final f = await Api.libraryFacets(_namePick ? _q.text.trim() : '');
     if (!mounted || seq != _seq) return;
     setState(() {
       _facets = f;
@@ -136,11 +141,19 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
-  void _choose({String? genre, int? decade, String? actor}) {
+  void _choose({String? genre, int? decade, int? year, String? actor, String? director}) {
     setState(() {
       if (genre != null) _genre = genre;
-      if (decade != null) _decade = decade;
+      if (decade != null) {
+        _decade = decade;
+        _year = 0; // a decade and one year replace each other
+      }
+      if (year != null) {
+        _year = year;
+        _decade = 0;
+      }
       if (actor != null) _actor = actor;
+      if (director != null) _director = director;
       _pick = '';
       _q.clear();
     });
@@ -150,15 +163,19 @@ class _SearchPageState extends State<SearchPage> {
   void _off(String what) {
     setState(() {
       if (what == 'genre') _genre = '';
-      if (what == 'decade') _decade = 0;
+      if (what == 'decade') {
+        _decade = 0;
+        _year = 0;
+      }
       if (what == 'actor') _actor = '';
+      if (what == 'director') _director = '';
     });
     _run();
   }
 
   Future<void> _run() async {
     if (_pick.isNotEmpty) {
-      if (_pick == 'actor') await _loadFacets();
+      if (_namePick) await _loadFacets();
       return;
     }
     final seq = ++_seq;
@@ -190,7 +207,7 @@ class _SearchPageState extends State<SearchPage> {
       }
       return;
     }
-    final meta = await Api.librarySearch(q, genre: _genre, decade: _decade, actor: _actor);
+    final meta = await Api.librarySearch(q, genre: _genre, decade: _decade, year: _year, actor: _actor, director: _director);
     if (!mounted || seq != _seq) return;
     if (_filtering && meta == null) {
       setState(() {
@@ -277,14 +294,16 @@ class _SearchPageState extends State<SearchPage> {
 
     final children = <Widget>[
       const Heading('Search', weather: true),
-      PekField(label: 'Search your library', controller: _q, hint: 'Title, actor, genre or year', onSubmitted: _run),
+      PekField(label: 'Search your library', controller: _q, hint: 'Title, actor, director, genre or year', onSubmitted: _run),
       Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
         filterBtn('Genre', 'genre'),
         filterBtn('Year', 'decade'),
         filterBtn('Actor', 'actor'),
+        filterBtn('Director', 'director'),
         if (_genre.isNotEmpty) chip(_genre, 'genre'),
-        if (_decade > 0) chip('${_decade}s', 'decade'),
+        if (_year > 0) chip('$_year', 'decade') else if (_decade > 0) chip('${_decade}s', 'decade'),
         if (_actor.isNotEmpty) chip(_actor, 'actor'),
+        if (_director.isNotEmpty) chip('Dir. $_director', 'director'),
       ]),
     ];
 
@@ -295,17 +314,17 @@ class _SearchPageState extends State<SearchPage> {
       } else if (f == null) {
         children.add(Padding(padding: EdgeInsets.only(top: rem), child: Text('Loading\u2026', style: TextStyle(color: t.textMuted))));
       } else {
-        final items = _pick == 'genre' ? f.genres : _pick == 'decade' ? f.decades : f.actors;
+        final items = _pick == 'genre' ? f.genres : _pick == 'decade' ? f.decades : _pick == 'director' ? f.directors : f.actors;
         if (f.indexingTotal > 0 && f.indexingDone < f.indexingTotal) {
           children.add(Padding(padding: EdgeInsets.only(top: rem), child: Text('Reading details from your files\u2026 ${f.indexingDone} of ${f.indexingTotal}. More will appear as it goes.', style: TextStyle(color: t.textMuted))));
         }
         if (items.isEmpty) {
           children.add(Padding(
             padding: EdgeInsets.only(top: rem),
-            child: Text(_pick == 'decade' ? 'No release years found yet.' : 'Nothing here yet. PEK TV reads genres and actors from .nfo files (the Kodi kind) saved next to your movies and shows, after a scan.', style: TextStyle(color: t.textMuted)),
+            child: Text(_pick == 'decade' ? 'No release years found yet.' : (_namePick && _q.text.trim().isNotEmpty ? 'No name matches \u201c${_q.text.trim()}\u201d.' : 'Nothing here yet. PEK TV reads genres, actors and directors from .nfo files (the Kodi kind) saved next to your movies and shows, after a scan.'), style: TextStyle(color: t.textMuted)),
           ));
         } else {
-          if (_pick == 'actor') children.add(Padding(padding: EdgeInsets.only(top: rem), child: Text('Type part of a name above to narrow the list.', style: TextStyle(color: t.textMuted))));
+          if (_namePick) children.add(Padding(padding: EdgeInsets.only(top: rem), child: Text('Type part of a name above to narrow the list.', style: TextStyle(color: t.textMuted))));
           children.add(SizedBox(height: rem));
           children.add(Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
             for (final e in items)
@@ -316,9 +335,17 @@ class _SearchPageState extends State<SearchPage> {
                   if (_pick == 'genre') _choose(genre: e.key);
                   if (_pick == 'decade') _choose(decade: int.tryParse(e.key) ?? 0);
                   if (_pick == 'actor') _choose(actor: e.key);
+                  if (_pick == 'director') _choose(director: e.key);
                 },
               ),
           ]));
+          if (_pick == 'decade' && f.years.isNotEmpty) {
+            // Or one exact year (the decades above are the quick way; this is for "1994").
+            children.add(heading('Or one year'));
+            children.add(Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
+              for (final e in f.years) PekButton(compact: true, label: '${e.key} (${e.value})', onTap: () => _choose(year: int.tryParse(e.key) ?? 0)),
+            ]));
+          }
         }
       }
     } else {

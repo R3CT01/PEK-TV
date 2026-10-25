@@ -219,6 +219,42 @@ static std::vector<std::string> splitArtists(const std::string& in) {
     return uniq;
 }
 
+// ================================================================ genre / year filter
+// A genre tag may hold several genres ("Rock; Pop", or several values separated by a NUL in ID3v2.4). A "/" is NOT a
+// separator ("R&B/Soul", "Hip-Hop/Rap" are single genres).
+std::vector<std::string> splitGenres(const std::string& in) {
+    std::vector<std::string> out;
+    std::string cur;
+    auto flush = [&]() {
+        std::string g = trimmed(cur);
+        cur.clear();
+        if (g.empty()) return;
+        for (auto& e : out) if (lower(e) == lower(g)) return;
+        out.push_back(g);
+    };
+    for (char c : in) { if (c == ';' || c == '\0') flush(); else cur += c; }
+    flush();
+    return out;
+}
+
+// What the genre= / year= / decade= query parameters ask for. Empty means "no filter".
+struct MusicFilter {
+    std::string genre;      // folded
+    int year = 0;           // exactly this year
+    int decade = 0;         // 1990 = 1990..1999 (ignored when year is set)
+    bool active() const { return !genre.empty() || year > 0 || decade > 0; }
+    bool yearOk(int y) const {
+        if (year > 0) return y == year;
+        if (decade > 0) return y >= decade && y < decade + 10;
+        return true;
+    }
+    bool genreOk(const std::vector<std::string>& folded) const {
+        if (genre.empty()) return true;
+        for (const auto& g : folded) if (g == genre) return true;
+        return false;
+    }
+};
+
 // ================================================================ data model
 struct Track {
     std::string id, path, filename;
@@ -237,6 +273,7 @@ struct Track {
     std::string rTitle, rArtist, rAlbum;
     std::string rPrimary;                   // the first (owning) artist of rArtist
     std::string nTA, nAl;                   // folded (lower-case, no accents) title+artist and album, for searching
+    std::vector<std::string> genres, nGenres; // the genre tag split into separate genres (display / folded), for the genre filter
     std::vector<std::string> rFeatured;     // everyone after the first artist
 };
 
@@ -249,6 +286,7 @@ struct Album {
     int64_t added = 0;
     std::vector<int> tracks;
     bool art = false;
+    std::vector<std::string> genres, nGenres; // every genre of its songs (display / folded), most common first
 };
 struct Artist {
     std::string id, name;
@@ -770,6 +808,9 @@ private:
             if (!t.disc) t.disc = t.fbDisc;
             t.nTA = pekdb::fold(t.rTitle + " " + t.rArtist);
             t.nAl = pekdb::fold(t.rAlbum);
+            t.genres = splitGenres(t.genre);
+            t.nGenres.clear();
+            for (const auto& g : t.genres) t.nGenres.push_back(pekdb::fold(g));
         }
         std::sort(s->tracks.begin(), s->tracks.end(), [](const Track& a, const Track& b) {
             std::string ka = sortKey(a.rTitle), kb = sortKey(b.rTitle);
@@ -797,6 +838,7 @@ private:
         std::map<std::string, int> albumIndexByKey;
         std::vector<Album> albums;
         std::vector<std::string> albumTitleKey;
+        std::map<std::string, std::vector<int>> genreCount;   // album id -> songs per genre (parallel to Album::genres)
         for (size_t i = 0; i < s->tracks.size(); ++i) {
             const Track& t = s->tracks[i];
             std::string aa;
@@ -825,6 +867,22 @@ private:
             a.added = std::max(a.added, t.mtime);
             if (t.year && (!a.year || t.year < a.year)) a.year = t.year;
             if (t.hasArt || !t.folderArt.empty()) a.art = true;
+            for (size_t g = 0; g < t.genres.size(); ++g) {
+                size_t k = 0;
+                while (k < a.nGenres.size() && a.nGenres[k] != t.nGenres[g]) ++k;
+                if (k == a.nGenres.size()) { a.nGenres.push_back(t.nGenres[g]); a.genres.push_back(t.genres[g]); genreCount[a.id].push_back(0); }
+                genreCount[a.id][k]++;
+            }
+        }
+        // Most common genre first (an album's own genre, then the odd song that differs).
+        for (auto& a : albums) {
+            auto& cnt = genreCount[a.id];
+            std::vector<size_t> ord(a.genres.size());
+            for (size_t k = 0; k < ord.size(); ++k) ord[k] = k;
+            std::stable_sort(ord.begin(), ord.end(), [&](size_t x, size_t y) { return cnt[x] > cnt[y]; });
+            std::vector<std::string> g2, n2;
+            for (size_t k : ord) { g2.push_back(a.genres[k]); n2.push_back(a.nGenres[k]); }
+            a.genres = std::move(g2); a.nGenres = std::move(n2);
         }
         for (auto& a : albums) {
             std::sort(a.tracks.begin(), a.tracks.end(), [&](int x, int y) {
@@ -1067,6 +1125,24 @@ bool matchWords(const std::vector<std::string>& words, const std::string& a, con
     return true;
 }
 
+// genre= / year= / decade= from the query string (the genre is matched folded: capitals and accents are ignored).
+MusicFilter filterFrom(const httplib::Request& req) {
+    MusicFilter f;
+    f.genre = pekdb::fold(trimmed(req.get_param_value("genre")));
+    f.year = std::max(0, std::atoi(req.get_param_value("year").c_str()));
+    f.decade = std::max(0, std::atoi(req.get_param_value("decade").c_str()));
+    return f;
+}
+bool trackPasses(const Track& t, const MusicFilter& f) { return f.genreOk(t.nGenres) && f.yearOk(t.year); }
+// An album's year is its earliest song's year (what the lists show), its genres are all its songs' genres.
+bool albumPasses(const Album& a, const MusicFilter& f) { return f.genreOk(a.nGenres) && f.yearOk(a.year); }
+// Albums of an artist that pass: with no filter that is all of them.
+int artistAlbumsPassing(const Snapshot& s, const Artist& a, const MusicFilter& f) {
+    int n = 0;
+    for (int ai : a.albums) if (albumPasses(s.albums[ai], f)) ++n;
+    return n;
+}
+
 std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
     const Track& t = s.tracks[ti];
     std::string j = "{\"id\":\"" + t.id + "\",\"title\":\"" + jsonEscape(t.rTitle) + "\",\"artist\":\"" + jsonEscape(t.rArtist) +
@@ -1080,12 +1156,28 @@ std::string trackJson(const Snapshot& s, int ti, bool withAlbum) {
             else j += ",\"albumId\":\"" + al.id + "\",\"art\":" + ((al.art || onlineOn()) ? "true" : "false");
         }
     }
-    return j + ",\"ext\":\"" + jsonEscape(fileExt(t.filename)) + "\"}";
+    return j + ",\"year\":" + std::to_string(t.year) + ",\"genres\":" + strArr(t.genres) + ",\"ext\":\"" + jsonEscape(fileExt(t.filename)) + "\"}";
 }
 std::string albumJson(const Album& a) {
     return "{\"id\":\"" + a.id + "\",\"title\":\"" + jsonEscape(a.title) + "\",\"artist\":\"" + jsonEscape(a.artist) + "\",\"featured\":" + strArr(a.featured) + ",\"year\":" + std::to_string(a.year) +
            ",\"tracks\":" + std::to_string(a.tracks.size()) + ",\"duration\":" + num(a.duration) + ",\"added\":" + std::to_string(a.added) +
-           ",\"art\":" + ((a.art || onlineOn()) ? "true" : "false") + ",\"singles\":" + (isSinglesTitle(a.title) ? "true" : "false") + "}";
+           ",\"art\":" + ((a.art || onlineOn()) ? "true" : "false") + ",\"singles\":" + (isSinglesTitle(a.title) ? "true" : "false") + ",\"genres\":" + strArr(a.genres) + "}";
+}
+// One artist for the lists. With a filter the album count is the albums that pass (the song count follows those albums).
+std::string artistJson(const Snapshot& s, const Artist& a, const MusicFilter& f) {
+    bool art = false;
+    int albums = 0, tracks = 0;
+    for (int ai : a.albums) {
+        const Album& al = s.albums[ai];
+        if (!albumPasses(al, f)) continue;
+        ++albums; tracks += (int)al.tracks.size();
+        if (al.art) art = true;
+    }
+    if (!f.active()) { albums = (int)a.albums.size(); tracks = a.trackCount; }
+    const std::string firstAlbum = a.albums.empty() ? "" : s.albums[a.albums[0]].id;
+    return "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(albums) +
+           ",\"tracks\":" + std::to_string(tracks) + ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") +
+           ",\"albumId\":\"" + firstAlbum + "\"}";
 }
 void jsonOut(httplib::Response& res, const std::string& body) {
     res.set_header("Cache-Control", "no-store");
@@ -1214,26 +1306,27 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
                          ",\"scanned\":" + std::to_string(lib->scannedCount()) + "}");
     });
 
-    svr.Get("/api/music/albums", [lib](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/api/music/albums", [lib](const httplib::Request& req, httplib::Response& res) {
         lib->scanOnceIfNeeded();
         auto s = lib->snapshot();
+        const MusicFilter f = filterFrom(req);                       // optional genre= / year= / decade=
         std::string j = std::string("{\"scanning\":") + (lib->scanning() ? "true" : "false") + ",\"albums\":[";
-        for (size_t i = 0; i < s->albums.size(); ++i) { if (i) j += ","; j += albumJson(s->albums[i]); }
+        size_t n = 0;
+        for (size_t i = 0; i < s->albums.size(); ++i) { if (!albumPasses(s->albums[i], f)) continue; if (n++) j += ","; j += albumJson(s->albums[i]); }
         jsonOut(res, j + "]}");
     });
 
-    svr.Get("/api/music/artists", [lib](const httplib::Request&, httplib::Response& res) {
+    svr.Get("/api/music/artists", [lib](const httplib::Request& req, httplib::Response& res) {
         lib->scanOnceIfNeeded();
         auto s = lib->snapshot();
+        const MusicFilter f = filterFrom(req);                       // optional genre= / year= / decade=: artists with a matching album
         std::string j = std::string("{\"scanning\":") + (lib->scanning() ? "true" : "false") + ",\"artists\":[";
+        size_t n = 0;
         for (size_t i = 0; i < s->artists.size(); ++i) {
             const Artist& a = s->artists[i];
-            if (i) j += ",";
-            bool art = false;
-            for (int ai : a.albums) if (s->albums[ai].art) { art = true; break; }
-            j += "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(a.albums.size()) +
-                 ",\"tracks\":" + std::to_string(a.trackCount) + ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albumId\":\"" +
-                 (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
+            if (f.active() && artistAlbumsPassing(*s, a, f) == 0) continue;
+            if (n++) j += ",";
+            j += artistJson(*s, a, f);
         }
         jsonOut(res, j + "]}");
     });
@@ -1264,6 +1357,7 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         lib->scanOnceIfNeeded();
         auto s = lib->snapshot();
         const std::vector<std::string> qw = searchWords(req.get_param_value("q"));
+        const MusicFilter f = filterFrom(req);                       // optional genre= / year= / decade=
         size_t offset = (size_t)std::max(0, std::atoi(req.get_param_value("offset").c_str()));
         size_t limit = (size_t)std::min(500, std::max(1, req.has_param("limit") ? std::atoi(req.get_param_value("limit").c_str()) : 200));
         size_t total = 0;
@@ -1271,34 +1365,73 @@ void registerMusicRoutes(httplib::Server& svr, MediaScanner* scanner, const std:
         for (size_t i = 0; i < s->tracks.size(); ++i) {
             const Track& t = s->tracks[i];
             if (!qw.empty() && !matchWords(qw, t.nTA, &t.nAl)) continue;     // every word in the title, artist or album
+            if (!trackPasses(t, f)) continue;
             if (total >= offset && total < offset + limit) { if (!items.empty()) items += ","; items += trackJson(*s, (int)i, true); }
             ++total;
         }
         jsonOut(res, "{\"total\":" + std::to_string(total) + ",\"offset\":" + std::to_string(offset) + ",\"songs\":[" + items + "]}");
     });
 
+    // q= and/or genre= / year= / decade=. A search with only a filter (no words) lists what matches the filter, with
+    // longer caps, because that is browsing ("all 1994 songs") and not looking for one name.
     svr.Get("/api/music/search", [lib](const httplib::Request& req, httplib::Response& res) {
         auto s = lib->snapshot();
         const std::vector<std::string> qw = searchWords(req.get_param_value("q"));
+        const MusicFilter f = filterFrom(req);
         std::string ar, al, so;
         int na = 0, nl = 0, ns = 0;
-        if (!qw.empty()) {
+        if (!qw.empty() || f.active()) {
+            const bool browse = qw.empty();
+            const size_t capA = browse ? 100 : 20, capL = browse ? 200 : 40, capS = browse ? 200 : 60;
             std::vector<int> ia, il, is;
-            for (size_t i = 0; i < s->artists.size() && ia.size() < 20; ++i) if (matchWords(qw, s->artists[i].norm)) ia.push_back((int)i);
-            for (size_t i = 0; i < s->albums.size() && il.size() < 40; ++i) if (matchWords(qw, s->albums[i].norm)) il.push_back((int)i);
-            for (size_t i = 0; i < s->tracks.size() && is.size() < 60; ++i) if (matchWords(qw, s->tracks[i].nTA)) is.push_back((int)i);
-            for (int i : ia) {
-                const Artist& a = s->artists[i];
-                if (na++) ar += ",";
-                bool art = false;
-                for (int ai : a.albums) if (s->albums[ai].art) { art = true; break; }
-                ar += "{\"id\":\"" + a.id + "\",\"name\":\"" + jsonEscape(a.name) + "\",\"albums\":" + std::to_string(a.albums.size()) + ",\"tracks\":" + std::to_string(a.trackCount) +
-                      ",\"art\":" + (art ? "true" : "false") + ",\"photo\":" + (onlineOn() ? "true" : "false") + ",\"albumId\":\"" + (a.albums.empty() ? "" : s->albums[a.albums[0]].id) + "\"}";
+            for (size_t i = 0; i < s->artists.size() && ia.size() < capA; ++i) {
+                if (!qw.empty() && !matchWords(qw, s->artists[i].norm)) continue;
+                if (f.active() && artistAlbumsPassing(*s, s->artists[i], f) == 0) continue;
+                ia.push_back((int)i);
             }
+            for (size_t i = 0; i < s->albums.size() && il.size() < capL; ++i) {
+                if (!qw.empty() && !matchWords(qw, s->albums[i].norm)) continue;
+                if (!albumPasses(s->albums[i], f)) continue;
+                il.push_back((int)i);
+            }
+            for (size_t i = 0; i < s->tracks.size() && is.size() < capS; ++i) {
+                if (!qw.empty() && !matchWords(qw, s->tracks[i].nTA)) continue;
+                if (!trackPasses(s->tracks[i], f)) continue;
+                is.push_back((int)i);
+            }
+            for (int i : ia) { if (na++) ar += ","; ar += artistJson(*s, s->artists[i], f); }
             for (int i : il) { if (nl++) al += ","; al += albumJson(s->albums[i]); }
             for (int i : is) { if (ns++) so += ","; so += trackJson(*s, i, true); }
         }
         jsonOut(res, "{\"artists\":[" + ar + "],\"albums\":[" + al + "],\"songs\":[" + so + "]}");
+    });
+
+    // The genres and years that exist in the library (with how many songs each), for the filter pickers.
+    //   { "genres": [{ "name", "count" }, ...] most songs first,  "years": [{ "year", "count" }, ...] newest first }
+    svr.Get("/api/music/facets", [lib](const httplib::Request&, httplib::Response& res) {
+        lib->scanOnceIfNeeded();
+        auto s = lib->snapshot();
+        std::map<std::string, std::pair<std::string, int>> genres;     // folded -> (display of the first song, songs)
+        std::map<int, int> years;
+        for (const auto& t : s->tracks) {
+            for (size_t g = 0; g < t.genres.size(); ++g) {
+                auto& e = genres[t.nGenres[g]];
+                if (e.first.empty()) e.first = t.genres[g];
+                ++e.second;
+            }
+            if (t.year > 0) ++years[t.year];
+        }
+        std::vector<std::pair<std::string, int>> gl;
+        for (auto& kv : genres) gl.push_back(kv.second);
+        std::sort(gl.begin(), gl.end(), [](const std::pair<std::string, int>& a, const std::pair<std::string, int>& b) {
+            return a.second != b.second ? a.second > b.second : sortKey(a.first) < sortKey(b.first);
+        });
+        std::string j = "{\"genres\":[";
+        for (size_t i = 0; i < gl.size(); ++i) { if (i) j += ","; j += "{\"name\":\"" + jsonEscape(gl[i].first) + "\",\"count\":" + std::to_string(gl[i].second) + "}"; }
+        j += "],\"years\":[";
+        bool first = true;
+        for (auto it = years.rbegin(); it != years.rend(); ++it) { if (!first) j += ","; first = false; j += "{\"year\":" + std::to_string(it->first) + ",\"count\":" + std::to_string(it->second) + "}"; }
+        jsonOut(res, j + "]}");
     });
 
     svr.Get("/api/music/art", [lib, art](const httplib::Request& req, httplib::Response& res) {

@@ -26,10 +26,11 @@ Files are picked up by the normal scan (**Rescan** after adding or editing them)
 After every scan PEK TV also reads these fields from the movie and `tvshow.nfo` files and keeps them in its library
 database (`library.db`): `genre`, `actor` (`name`, `role`), `director`, `studio`, `rating` (or `ratings`), `runtime`,
 `mpaa` and `set` (collection). Only titles that have an NFO have them; the title and year work for every file. The
-library **Search** has Genre, Year and Actor buttons next to the box, and typing "tom hanks", "drama 1995" or
+library **Search** has Genre, Year, Actor and Director buttons next to the box (Year offers decades and, below them, single years; the
+Actor and Director lists are narrowed by typing part of a name in the box), and typing "tom hanks", "drama 1995" or
 "nolan" finds titles by cast, genre, year, director, studio or collection (accents and capitals ignored). Details are
 read once per title and again only when its NFO changes (local folders) or the video changes (network sources), so a
-rescan stays quick; while the first read is running the Genre / Actor lists say how far it is.
+rescan stays quick; while the first read is running the Genre / Actor / Director lists say how far it is.
 API: `GET /api/library/search` and `GET /api/library/facets` (see `server.cpp`).
 
 ## Artwork (images)

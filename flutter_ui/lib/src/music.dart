@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'api.dart';
 import 'common.dart';
 import 'music_controller.dart';
+import 'music_filters.dart';
 import 'music_fullscreen.dart';
 import 'playlist_ui.dart';
 import 'store.dart';
@@ -101,12 +102,18 @@ class _MusicPageState extends State<MusicPage> {
   bool _polling = false;
   String _q = '';
   Future<MusicSearch>? _results;
+  MusicFilters _filters = MusicFilters.none; // Genre / Year, sent with every list and search
+
+  /// Words in the search box, or (in music mode's Search page, which has no tabs) only a filter: both show search results.
+  bool get _searching => _q.isNotEmpty || (widget.view == MusicView.search && _filters.active);
 
   // songs, loaded 200 at a time (the next page is fetched by itself when the list gets near its end)
   final List<Track> _songs = [];
   int _songTotal = 0;
   bool _songsLoading = false;
   bool _songsFailed = false;
+  bool _songsAsked = false; // the first page of the current filter has been answered (so "no matches" is true)
+  int _songGen = 0; // bumped when the filter changes, so an answer that was asked before it is dropped
 
   @override
   void initState() {
@@ -126,18 +133,23 @@ class _MusicPageState extends State<MusicPage> {
 
   Future<void> _moreSongs() async {
     if (_songsLoading) return;
+    final gen = _songGen;
     setState(() {
       _songsLoading = true;
       _songsFailed = false;
     });
     try {
-      final r = await Api.musicSongs(offset: _songs.length);
-      _songTotal = r.$1;
-      _songs.addAll(r.$2);
+      final r = await Api.musicSongs(offset: _songs.length, filters: _filters);
+      if (gen == _songGen) {
+        _songTotal = r.$1;
+        _songs.addAll(r.$2);
+        _songsAsked = true;
+      }
     } catch (_) {
-      _songsFailed = true; // the button below tries again; nothing retries by itself
+      if (gen == _songGen) _songsFailed = true; // the button below tries again; nothing retries by itself
     }
     if (mounted) setState(() => _songsLoading = false);
+    if (mounted && gen != _songGen && _tab == 2) _moreSongs(); // the filter changed while this was loading: ask again with the new one
   }
 
   /// Every 2 s: is the server scanning, and did the number of songs / albums / artists change? Then the lists are read
@@ -159,7 +171,7 @@ class _MusicPageState extends State<MusicPage> {
           _scanning = scanning;
           _scanned = st.scanned;
           if (changed) {
-            _lib = Api.musicLibrary();
+            _lib = Api.musicLibrary(_filters);
             _refreshSongs();
           }
         });
@@ -173,8 +185,10 @@ class _MusicPageState extends State<MusicPage> {
   /// Reads the songs already shown again, in place.
   Future<void> _refreshSongs() async {
     if (_songs.isEmpty || _songsLoading) return;
+    final gen = _songGen;
     try {
-      final r = await Api.musicSongs(offset: 0, limit: _songs.length.clamp(200, 500));
+      final r = await Api.musicSongs(offset: 0, limit: _songs.length.clamp(200, 500), filters: _filters);
+      if (gen != _songGen) return; // the filter changed meanwhile: these songs are for the old one
       _songTotal = r.$1;
       _songs
         ..clear()
@@ -189,9 +203,24 @@ class _MusicPageState extends State<MusicPage> {
       final q = v.trim();
       setState(() {
         _q = q;
-        _results = q.isEmpty ? null : Api.musicSearch(q);
+        _results = _searching ? Api.musicSearch(q, _filters) : null;
       });
     });
+  }
+
+  /// A new Genre / Year choice: every list is read again with it (the server does the filtering, so Songs stays paged).
+  void _onFilters(MusicFilters f) {
+    setState(() {
+      _filters = f;
+      _lib = Api.musicLibrary(f);
+      _songs.clear();
+      _songTotal = 0;
+      _songsFailed = false;
+      _songsAsked = false;
+      _songGen++;
+      _results = _searching ? Api.musicSearch(_q, f) : null;
+    });
+    if (_tab == 2) _moreSongs();
   }
 
   void _openAlbum(Album a) => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => AlbumScreen(albumId: a.id, title: a.title)));
@@ -225,8 +254,9 @@ class _MusicPageState extends State<MusicPage> {
                   contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
                 ),
               ),
-              if (widget.view != MusicView.library) SizedBox(height: rem),
-              if (_q.isEmpty && widget.view != MusicView.search) ...[
+              if (widget.view != MusicView.library) SizedBox(height: 0.75 * rem),
+              if (widget.view != MusicView.library && (_tab != 3 || _searching)) MusicFilterBar(filters: _filters, onChanged: _onFilters),
+              if (!_searching && widget.view != MusicView.search) ...[
                 PekTabs(
                   labels: tabs,
                   selected: _tab,
@@ -241,13 +271,13 @@ class _MusicPageState extends State<MusicPage> {
             ]),
           ),
         ),
-        if (_q.isNotEmpty)
+        if (_searching)
           SliverPadding(
             padding: side,
             sliver: SliverToBoxAdapter(child: Async<MusicSearch>(future: _results!, builder: (c, r) => _searchResults(c, r))),
           )
         else if (widget.view == MusicView.search)
-          SliverPadding(padding: side, sliver: const SliverToBoxAdapter(child: PekCard(title: 'Search your music', subtitle: 'Songs, albums and artists.')))
+          SliverPadding(padding: side, sliver: const SliverToBoxAdapter(child: PekCard(title: 'Search your music', subtitle: 'Songs, albums and artists. Pick a genre or year to browse.')))
         else
           SliverPadding(padding: side, sliver: _librarySliver(context)),
         SliverToBoxAdapter(child: SizedBox(height: 4 * rem + pad.bottom)), // room for the mini player
@@ -272,11 +302,14 @@ class _MusicPageState extends State<MusicPage> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               PekCard(title: 'Could not load your music', subtitle: why.length > 160 ? '${why.substring(0, 160)}\u2026' : why),
               SizedBox(height: p.rem),
-              FilledButton(autofocus: true, onPressed: () => setState(() => _lib = Api.musicLibrary()), child: const Text('Try again')),
+              FilledButton(autofocus: true, onPressed: () => setState(() => _lib = Api.musicLibrary(_filters)), child: const Text('Try again')),
             ]),
           );
         }
         final lib = snap.data!;
+        if (_filters.active && lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {
+          return SliverToBoxAdapter(child: PekCard(title: 'No matches', subtitle: 'No albums or artists match ${_filters.label}.'));
+        }
         if (lib.albums.isEmpty && lib.artists.isEmpty && _tab != 2) {
           return SliverToBoxAdapter(
             child: PekCard(
@@ -348,6 +381,9 @@ class _MusicPageState extends State<MusicPage> {
 
   Widget _songSliver(BuildContext context) {
     final rem = context.pek.rem;
+    if (_filters.active && _songsAsked && _songs.isEmpty && !_songsLoading && !_songsFailed) {
+      return SliverToBoxAdapter(child: PekCard(title: 'No matches', subtitle: 'No songs match ${_filters.label}.'));
+    }
     final more = _songs.length < _songTotal || _songs.isEmpty;
     return SliverList.builder(
       itemCount: _songs.length + (more ? 1 : 0),
@@ -371,7 +407,10 @@ class _MusicPageState extends State<MusicPage> {
 
   Widget _searchResults(BuildContext context, MusicSearch r) {
     final rem = context.pek.rem;
-    if (r.artists.isEmpty && r.albums.isEmpty && r.songs.isEmpty) return PekCard(title: 'No results', subtitle: 'Nothing matches \u201c$_q\u201d.');
+    if (r.artists.isEmpty && r.albums.isEmpty && r.songs.isEmpty) {
+      final what = [if (_q.isNotEmpty) '\u201c$_q\u201d', if (_filters.active) _filters.label].join(' in ');
+      return PekCard(title: 'No results', subtitle: 'Nothing matches $what.');
+    }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (r.artists.isNotEmpty) Section(title: 'Artists', children: [for (final a in r.artists) ListRow(title: a.name, subtitle: '${a.albums} albums', onTap: () => _openArtist(a))]),
       if (r.albums.isNotEmpty) Section(title: 'Albums', children: [for (final a in r.albums) ListRow(title: a.title, subtitle: a.artist, onTap: () => _openAlbum(a), trailing: Art(url: a.art ? Api.albumArt(a.id) : '', size: 2.5 * rem))]),

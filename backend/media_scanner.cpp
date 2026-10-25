@@ -1405,16 +1405,16 @@ std::string MediaScanner::facetsJson(const std::string& type, const std::string&
     const bool shows = type == "shows";
     const std::string prefix = shows ? "s:%" : "m:%";
     std::string out = "{\"indexing\":{\"done\":" + std::to_string(index_done_.load()) + ",\"total\":" + std::to_string(index_total_.load()) + "}";
-    if (!db_) return out + ",\"genres\":[],\"decades\":[],\"actors\":[],\"directors\":[]}";
+    if (!db_) return out + ",\"genres\":[],\"decades\":[],\"years\":[],\"actors\":[],\"directors\":[]}";
     limit = std::max(1, std::min(limit, 500));
 
-    auto list = [&](const std::string& name, const std::string& sql, const std::vector<std::string>& binds, bool numeric) {
+    auto list = [&](const std::string& name, const std::string& sql, const std::vector<std::string>& binds, bool numeric, const char* numKey = "decade") {
         pekdb::Stmt st(*db_, sql);
         for (size_t i = 0; i < binds.size(); ++i) st.text(static_cast<int>(i + 1), binds[i]);
         std::string items;
         while (st.step()) {
             if (!items.empty()) items += ",";
-            items += numeric ? "{\"decade\":" + std::to_string(st.num(0)) + ",\"count\":" + std::to_string(st.num(1)) + "}"
+            items += numeric ? std::string("{\"") + numKey + "\":" + std::to_string(st.num(0)) + ",\"count\":" + std::to_string(st.num(1)) + "}"
                              : "{\"name\":\"" + jsonEsc(st.str(0)) + "\",\"count\":" + std::to_string(st.num(1)) + "}";
         }
         out += ",\"" + name + "\":[" + items + "]";
@@ -1424,10 +1424,14 @@ std::string MediaScanner::facetsJson(const std::string& type, const std::string&
     list("decades", shows
         ? "SELECT (year/10)*10 d, count(*) FROM title_meta WHERE key LIKE ? AND year>0 GROUP BY d ORDER BY d DESC"
         : "SELECT (year/10)*10 d, count(*) FROM media WHERE kind=0 AND year>0 AND ? LIKE 'm:%' GROUP BY d ORDER BY d DESC", {prefix}, true);
+    list("years", shows
+        ? "SELECT year d, count(*) FROM title_meta WHERE key LIKE ? AND year>0 GROUP BY d ORDER BY d DESC"
+        : "SELECT year d, count(*) FROM media WHERE kind=0 AND year>0 AND ? LIKE 'm:%' GROUP BY d ORDER BY d DESC", {prefix}, true, "year");
     const std::string fp = pekdb::likeEscape(pekdb::fold(actorPrefix));
     list("actors", "SELECT MIN(name), count(*) c FROM title_person WHERE kind=0 AND key LIKE ? AND norm LIKE ? ESCAPE '\\' GROUP BY norm ORDER BY c DESC, norm" + lim,
          {prefix, "%" + fp + "%"}, false);
-    list("directors", "SELECT MIN(name), count(*) c FROM title_person WHERE kind=1 AND key LIKE ? GROUP BY norm ORDER BY c DESC, norm" + lim, {prefix}, false);
+    list("directors", "SELECT MIN(name), count(*) c FROM title_person WHERE kind=1 AND key LIKE ? AND norm LIKE ? ESCAPE '\\' GROUP BY norm ORDER BY c DESC, norm" + lim,
+         {prefix, "%" + fp + "%"}, false);   // the same name-part box narrows the director list too
     return out + "}";
 }
 

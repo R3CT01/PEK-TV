@@ -12,6 +12,17 @@ scan.
   remembered between sessions (paused, so nothing starts by itself).
 - TV remote / keyboard media keys (play-pause, next, previous, stop) work while music is queued.
 
+## Search and filters
+The search box finds artists, albums and songs by any words ("drake hotline"; capitals and accents are ignored). Under it, **Genre** and **Year**
+narrow whatever you are looking at: the Albums, Artists and Songs tabs, and the search results. **Year** offers decades ("1990s") and single years,
+**Genre** the genres found in your tags with a song count each; **Clear** removes both. In music mode's Search page, choosing only a genre or year lists
+what matches (so "all Rock from the 1990s" is two taps).
+- A genre tag such as `Rock; Pop` counts as both genres (`;` or the NUL separator of ID3v2.4 splits; a `/` does not, so `R&B/Soul` stays one genre).
+- An album's year is its earliest song's year; an album's genres are all its songs' genres; an artist passes a filter when one of their albums does.
+- Songs with no year tag are left out while a year is chosen; songs with no genre tag while a genre is chosen.
+- API: `genre=`, `year=` and `decade=` on `/api/music/albums`, `/artists`, `/songs` and `/search`; `/api/music/facets` lists the genres and years for the pickers.
+  Songs and albums also carry `year` / `genres` in their JSON. Code: `music.cpp` (`MusicFilter`), `music_filters.dart` (pickers), `music.dart` (`_onFilters`).
+
 ## How songs are recognised
 Tags are read straight from the files (no ffprobe, so it works on Android and on network shares): MP3 (ID3v1 / v2.2 /
 v2.3 / v2.4), FLAC, Ogg Vorbis / Opus, M4A / M4B. Embedded covers are used; otherwise `cover.jpg`, `folder.jpg`,

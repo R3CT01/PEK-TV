@@ -326,10 +326,11 @@ class Api {
   // ---------------------------------------------------------------- library search (the NFO database: genre, actor, year ...)
 
   /// {movies: [file ids], shows: [show titles]} or null when the server could not answer.
-  static Future<({List<String> movies, List<String> shows})?> librarySearch(String q, {String genre = '', int decade = 0, String actor = ''}) async {
+  static Future<({List<String> movies, List<String> shows})?> librarySearch(String q, {String genre = '', int decade = 0, int year = 0, String actor = '', String director = ''}) async {
     String qs(String type) =>
         '/api/library/search?type=$type&limit=60&q=${Uri.encodeQueryComponent(q)}${genre.isNotEmpty ? '&genre=${Uri.encodeQueryComponent(genre)}' : ''}'
-        '${decade > 0 ? '&decade=$decade' : ''}${actor.isNotEmpty ? '&actor=${Uri.encodeQueryComponent(actor)}' : ''}';
+        '${year > 0 ? '&year=$year' : (decade > 0 ? '&decade=$decade' : '')}${actor.isNotEmpty ? '&actor=${Uri.encodeQueryComponent(actor)}' : ''}'
+        '${director.isNotEmpty ? '&director=${Uri.encodeQueryComponent(director)}' : ''}';
     try {
       final r = await Future.wait([_get(qs('movies')), _get(qs('shows'))]);
       return (
@@ -341,7 +342,7 @@ class Api {
     }
   }
 
-  /// Genres, decades and actors found in the library (movies and shows together).
+  /// Genres, decades, years, actors and directors found in the library (movies and shows together).
   static Future<Facets?> libraryFacets(String actorQ) async {
     String u(String type) => '/api/library/facets?type=$type&limit=60&q=${Uri.encodeQueryComponent(actorQ)}';
     try {
@@ -370,7 +371,9 @@ class Api {
       return Facets(
         genres: top(sum('genres', 'name'), byCount),
         decades: top(sum('decades', 'decade'), (a, b) => (int.tryParse(b.key) ?? 0) - (int.tryParse(a.key) ?? 0)),
+        years: top(sum('years', 'year'), (a, b) => (int.tryParse(b.key) ?? 0) - (int.tryParse(a.key) ?? 0)),
         actors: top(sum('actors', 'name'), byCount),
+        directors: top(sum('directors', 'name'), byCount),
         indexingDone: (idx?['done'] as num?)?.toInt() ?? 0,
         indexingTotal: (idx?['total'] as num?)?.toInt() ?? 0,
       );
@@ -505,11 +508,11 @@ class Api {
     return MusicStatus(scanning: j['scanning'] == true, tracks: n('tracks'), albums: n('albums'), artists: n('artists'), scanned: n('scanned'));
   }
 
-  static Future<MusicLibrary> musicLibrary() async {
+  static Future<MusicLibrary> musicLibrary([MusicFilters f = MusicFilters.none]) async {
     // A big library (thousands of songs) on a busy phone can take longer than 20 s, and the server can be mid-scan: wait longer
     // and ask once more before giving up. The error that is thrown at the end says what went wrong (shown on the Music page).
     const wait = Duration(seconds: 60);
-    Future<List<dynamic>> ask() => Future.wait([_get('/api/music/albums', timeout: wait), _get('/api/music/artists', timeout: wait)]);
+    Future<List<dynamic>> ask() => Future.wait([_get('/api/music/albums${f.query('?')}', timeout: wait), _get('/api/music/artists${f.query('?')}', timeout: wait)]);
     List<dynamic> both;
     try {
       both = await ask();
@@ -526,8 +529,8 @@ class Api {
   }
 
   /// One page of songs; [total] says how many there are in all.
-  static Future<(int, List<Track>)> musicSongs({int offset = 0, int limit = 200, String q = ''}) async {
-    final j = await _get('/api/music/songs?limit=$limit&offset=$offset&q=${Uri.encodeQueryComponent(q)}');
+  static Future<(int, List<Track>)> musicSongs({int offset = 0, int limit = 200, String q = '', MusicFilters filters = MusicFilters.none}) async {
+    final j = await _get('/api/music/songs?limit=$limit&offset=$offset&q=${Uri.encodeQueryComponent(q)}${filters.query('&')}');
     return ((j['total'] as num?)?.toInt() ?? 0, ((j['songs'] as List?) ?? const []).map((e) => Track.fromJson(e as Map<String, dynamic>)).toList());
   }
 
@@ -543,12 +546,22 @@ class Api {
     return (Artist.fromJson(j as Map<String, dynamic>), ((j['albums'] as List?) ?? const []).map((e) => Album.fromJson(e as Map<String, dynamic>)).toList());
   }
 
-  static Future<MusicSearch> musicSearch(String q) async {
-    final j = await _get('/api/music/search?q=${Uri.encodeQueryComponent(q)}');
+  /// Words and/or filters: with only a filter (empty [q]) it lists what matches the filter.
+  static Future<MusicSearch> musicSearch(String q, [MusicFilters f = MusicFilters.none]) async {
+    final j = await _get('/api/music/search?q=${Uri.encodeQueryComponent(q)}${f.query('&')}');
     return MusicSearch(
       artists: ((j['artists'] as List?) ?? const []).map((e) => Artist.fromJson(e as Map<String, dynamic>)).toList(),
       albums: ((j['albums'] as List?) ?? const []).map((e) => Album.fromJson(e as Map<String, dynamic>)).toList(),
       songs: ((j['songs'] as List?) ?? const []).map((e) => Track.fromJson(e as Map<String, dynamic>)).toList(),
+    );
+  }
+
+  /// GET /api/music/facets: the genres and years in the library (with song counts) for the filter pickers.
+  static Future<MusicFacets> musicFacets() async {
+    final j = await _get('/api/music/facets');
+    return MusicFacets(
+      genres: ((j['genres'] as List?) ?? const []).map((e) => (name: '${(e as Map)['name']}', count: (e['count'] as num?)?.toInt() ?? 0)).toList(),
+      years: ((j['years'] as List?) ?? const []).map((e) => (year: ((e as Map)['year'] as num?)?.toInt() ?? 0, count: (e['count'] as num?)?.toInt() ?? 0)).toList(),
     );
   }
 
@@ -768,6 +781,36 @@ class MusicStatus {
   String get key => '$tracks/$albums/$artists';
 }
 
+/// The Music genre / year filter: sent as &genre= &year= &decade= to /api/music/{albums,artists,songs,search}.
+/// [year] is one exact year; [decade] (1990 = the 1990s) is used only when no [year] is chosen.
+class MusicFilters {
+  const MusicFilters({this.genre = '', this.year = 0, this.decade = 0});
+  static const none = MusicFilters();
+  final String genre;
+  final int year, decade;
+  bool get active => genre.isNotEmpty || year > 0 || decade > 0;
+  MusicFilters withGenre(String g) => MusicFilters(genre: g, year: year, decade: decade);
+  MusicFilters withYear({int year = 0, int decade = 0}) => MusicFilters(genre: genre, year: year, decade: decade);
+
+  /// The query-string part ('?' or '&' in front; empty with no filter).
+  String query(String lead) {
+    final parts = <String>[
+      if (genre.isNotEmpty) 'genre=${Uri.encodeQueryComponent(genre)}',
+      if (year > 0) 'year=$year' else if (decade > 0) 'decade=$decade',
+    ];
+    return parts.isEmpty ? '' : '$lead${parts.join('&')}';
+  }
+
+  /// What the filter bar and the empty-result card say, e.g. "Rock \u00b7 1990s".
+  String get label => [if (genre.isNotEmpty) genre, if (year > 0) '$year' else if (decade > 0) '${decade}s'].join(' \u00b7 ');
+}
+
+class MusicFacets {
+  const MusicFacets({required this.genres, required this.years});
+  final List<({String name, int count})> genres;
+  final List<({int year, int count})> years;
+}
+
 class MusicSearch {
   const MusicSearch({required this.artists, required this.albums, required this.songs});
   final List<Artist> artists;
@@ -801,10 +844,12 @@ class NetDiscovery {
 }
 
 class Facets {
-  const Facets({required this.genres, required this.decades, required this.actors, required this.indexingDone, required this.indexingTotal});
+  const Facets({required this.genres, required this.decades, required this.years, required this.actors, required this.directors, required this.indexingDone, required this.indexingTotal});
   final List<MapEntry<String, int>> genres;
   final List<MapEntry<String, int>> decades; // key = the decade year (1990)
+  final List<MapEntry<String, int>> years; // key = one release year (1994), newest first
   final List<MapEntry<String, int>> actors;
+  final List<MapEntry<String, int>> directors;
   final int indexingDone;
   final int indexingTotal;
 }

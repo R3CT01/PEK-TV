@@ -146,7 +146,7 @@ public:
     };
     // {"total":N,"movies":["<id>",...]}  or  {"total":N,"shows":["<show title>",...]}
     std::string searchJson(const SearchQuery& query);
-    // {"indexing":{"done":a,"total":b},"genres":[{"name","count"}],"decades":[{"decade","count"}],
+    // {"indexing":{"done":a,"total":b},"genres":[{"name","count"}],"decades":[{"decade","count"}],"years":[{"year","count"}],
     //  "actors":[...],"directors":[...],"studios":[...]}   actorPrefix narrows the actor list (the picker's own search box).
     std::string facetsJson(const std::string& type, const std::string& actorPrefix, int limit);
 

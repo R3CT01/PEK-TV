@@ -796,8 +796,8 @@ void PekServer::start(int port, const std::string& plugins_dir,
     //     (genre, people, studio ...) are read into the library database after each scan, so this is one indexed query.
     //     GET /api/library/search?type=movies|shows&q=&genre=&actor=&director=&studio=&collection=&year=&decade=&sort=&limit=&offset=
     //       -> {"total":N,"movies":["<id>",...]}  or  {"total":N,"shows":["<show title>",...]}
-    //     GET /api/library/facets?type=movies|shows&q=<actor name part>&limit=
-    //       -> genres, decades, actors, directors with counts, and how far the details are read ({"indexing":{"done","total"}})
+    //     GET /api/library/facets?type=movies|shows&q=<actor / director name part>&limit=
+    //       -> genres, decades, years, actors, directors with counts, and how far the details are read ({"indexing":{"done","total"}})
     svr.Get("/api/library/search", [scanner](const httplib::Request& req, httplib::Response& res) {
         MediaScanner::SearchQuery sq;
         sq.type = req.get_param_value("type") == "shows" ? "shows" : "movies";
