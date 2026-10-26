@@ -53,6 +53,9 @@ class MpvController(
     private var surfaceReady = false
 
     private var pendingUrl: String? = null
+    private var currentUrl: String? = null       // the file the running engine is playing (kept so a renderer change can reopen it)
+    private var embedActive = false              // true = the running engine draws with mediacodec_embed (smooth mode / direct HDR)
+    private var restarting = false
     private var startSec = 0.0
 
     private var loaded = false
@@ -119,6 +122,7 @@ class MpvController(
         position = 0.0
         duration = 0.0
         pendingUrl = url
+        currentUrl = url
         setFullscreen()                     // a new video always starts full screen
         surfaceView.visibility = View.VISIBLE
         keepScreenOn(true)                    // no sleep / screensaver while a video is open, playing or paused
@@ -184,16 +188,43 @@ class MpvController(
     private fun useEmbed() = (lite || hdrDirect) && !liteSuspended
 
     private fun applyRenderer(m: MPVLib) {
-        try {
-            if (useEmbed()) {
-                m.setPropertyString("hwdec", "mediacodec")
-                m.setPropertyString("vo", "mediacodec_embed")
-            } else {
-                m.setPropertyString("hwdec", "mediacodec,mediacodec-copy")
-                m.setPropertyString("vo", "gpu")
-            }
-        } catch (t: Throwable) { Log.w("PEK", "could not switch renderer", t) }
+        // Switching mpv's video output while it plays (gpu <-> mediacodec_embed) on the SAME Surface leaves the screen black
+        // with the audio still running: the old renderer's GL connection to the surface is not released in time, so MediaCodec
+        // cannot attach to it (and the other way round). A fresh engine on the surface always works - that is exactly what
+        // starting the next video does - so reopen the file at the current position with the renderer that is wanted.
+        if (useEmbed() != embedActive && currentUrl != null && surfaceReady && !restarting) {
+            restartEngine()
+            return
+        }
         applyColorMode(useEmbed() && hdrDirect)
+    }
+
+    private fun restartEngine() {
+        val url = currentUrl ?: return
+        val resumeAt = if (position.isNaN() || position < 0.0) 0.0 else position
+        val wasPaused = paused
+        val keepHdr = hdrDirect          // stopEngine() clears it; without this the HDR check would see "changed" and restart again
+        val keepLiteSuspended = liteSuspended
+        restarting = true
+        try {
+            stopEngine()
+            hdrDirect = keepHdr
+            liteSuspended = keepLiteSuspended
+            loaded = false
+            seeking = false
+            seekPending = false
+            pausedForCache = false
+            buffering = true
+            startSec = resumeAt
+            pendingUrl = url
+            emitState()
+            startPending()
+            applyColorMode(useEmbed() && hdrDirect)   // stopEngine() switched the screen back to SDR
+            if (wasPaused) mpv?.setPropertyBoolean("pause", true)
+        } finally {
+            restarting = false
+        }
+        Log.i("PEK", "renderer changed: reopened at " + resumeAt + "s, embed=" + embedActive)
     }
 
     // ---------------- refresh-rate matching ----------------
@@ -404,7 +435,8 @@ class MpvController(
         pendingUrl = null
         try {
             val m = MPVLib.create(activity) ?: throw IllegalStateException("mpv create returned null")
-            m.setOptionString("vo", if (useEmbed()) "mediacodec_embed" else "gpu")
+            embedActive = useEmbed()
+            m.setOptionString("vo", if (embedActive) "mediacodec_embed" else "gpu")
             m.setOptionString("gpu-context", "android")
             m.setOptionString("opengl-es", "yes")
             m.setOptionString("hwdec", if (useEmbed()) "mediacodec" else "mediacodec,mediacodec-copy")
@@ -501,7 +533,7 @@ class MpvController(
             mpv?.let {
                 it.attachSurface(holder.surface)
                 it.setPropertyString("force-window", "yes")
-                it.setPropertyString("vo", if (useEmbed()) "mediacodec_embed" else "gpu")
+                it.setPropertyString("vo", if (embedActive) "mediacodec_embed" else "gpu")
             }
         }
     }

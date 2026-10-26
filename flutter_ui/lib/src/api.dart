@@ -121,9 +121,11 @@ class Api {
   }
 
   static final Map<String, Future<Details>> _details = {};
-  static final _Pool _pool = _Pool(4);
+  static final _Pool _pool = _Pool(6);
 
-  /// Poster + synopsis for a movie. Cached, and at most 4 lookups run at once so a big grid does not flood the box.
+  /// Poster + synopsis for a movie. Cached, and at most 6 lookups run at once so a big grid does not flood the box.
+  /// Waiting lookups run newest first: the cards on screen now were built last, so they are served before the ones that were
+  /// scrolled past.
   static Future<Details> movieDetails(String id) => _cachedDetails('m:$id', () async {
         final j = await _get('/api/movie-details?id=${Uri.encodeQueryComponent(id)}');
         return Details(overview: (j['overview'] ?? '') as String, poster: abs((j['poster'] ?? '') as String));
@@ -595,7 +597,7 @@ class _Pool {
       return await job();
     } finally {
       _running--;
-      if (_waiting.isNotEmpty) _waiting.removeFirst().complete();
+      if (_waiting.isNotEmpty) _waiting.removeLast().complete(); // newest first: what is on screen now
     }
   }
 }

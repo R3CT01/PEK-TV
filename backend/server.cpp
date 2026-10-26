@@ -26,6 +26,7 @@
 #include <chrono>
 #include <random>
 #include <mutex>
+#include <memory>
 
 namespace fs = std::filesystem;
 
@@ -266,6 +267,44 @@ static void applyTls(httplib::Client& c) {
 #else
 static void applyTls(httplib::Client&) {}
 #endif
+
+// ---- TMDb search for the poster / synopsis lookups --------------------------------------------------------------------
+// Every poster on screen asks for one of these. Before, each request built a brand-new HTTPS client (a full TLS handshake to the
+// Worker, 5 s timeouts) and nothing was remembered, so a screenful of posters waited on dozens of handshakes and the same title
+// was looked up again every time the app restarted. Now: answers are kept for a few hours, and each server thread keeps its
+// connection to the Worker open between requests.
+static std::mutex g_tmdbMu;
+static std::map<std::string, std::pair<long long, std::string>> g_tmdbCache;   // path -> (when, body)
+
+static bool tmdbSearch(const std::string& path, std::string& body) {
+    const long long now = nowMs();
+    {
+        std::lock_guard<std::mutex> lk(g_tmdbMu);
+        auto it = g_tmdbCache.find(path);
+        if (it != g_tmdbCache.end() && now - it->second.first < 6LL * 3600 * 1000) { body = it->second.second; return true; }
+    }
+    thread_local std::unique_ptr<httplib::Client> client;
+    for (int attempt = 0; attempt < 2; attempt++) {
+        if (!client) {
+            client = std::make_unique<httplib::Client>(tmdbProxyUrl());
+            applyTls(*client);
+            client->set_keep_alive(true);
+            client->set_connection_timeout(5);
+            client->set_read_timeout(6);
+        }
+        auto r = client->Get(path.c_str());
+        if (r && r->status == 200) {
+            body = r->body;
+            std::lock_guard<std::mutex> lk(g_tmdbMu);
+            if (g_tmdbCache.size() > 3000) g_tmdbCache.clear();
+            g_tmdbCache[path] = {now, body};
+            return true;
+        }
+        client.reset();   // a dropped keep-alive connection looks like a failure: build a fresh one and try once more
+        if (r) return false;   // the Worker answered with an error: not a connection problem
+    }
+    return false;
+}
 
 std::string PekServer::resolveShowName(const std::string& guess) {
     if (guess.empty()) return "";
@@ -959,17 +998,11 @@ void PekServer::start(int port, const std::string& plugins_dir,
         };
         if (!local.plot.empty() && !art.empty()) { reply(local.plot, art); return; }
 
-        httplib::Client client(tmdbProxyUrl());
-
-        applyTls(client);
-        client.set_connection_timeout(5);
-        client.set_read_timeout(5);
-
         std::string query = "/search/movie?query=" + httplib::encode_uri(entry.title);
         if (entry.year > 0) query += "&year=" + std::to_string(entry.year);
 
-        auto tmdb_res = client.Get(query.c_str());
-        if (!tmdb_res || tmdb_res->status != 200) {
+        std::string tmdb_body;
+        if (!tmdbSearch(query, tmdb_body)) {
             if (!local.plot.empty() || !art.empty()) { reply(local.plot, art); return; }   // half an answer beats none
             res.status = 502;
             res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
@@ -979,7 +1012,7 @@ void PekServer::start(int port, const std::string& plugins_dir,
         // Grab the first result block only — good enough without a
         // real JSON parser, same "top result" heuristic used
         // elsewhere in this project.
-        std::string body = tmdb_res->body;
+        const std::string& body = tmdb_body;
         size_t results_pos = body.find("\"results\"");
         std::string first_result = results_pos != std::string::npos ? body.substr(results_pos) : body;
 
@@ -1006,18 +1039,14 @@ void PekServer::start(int port, const std::string& plugins_dir,
         };
         if (!local.plot.empty() && !art.empty()) { reply(local.plot, art); return; }
 
-        httplib::Client client(tmdbProxyUrl());
-        applyTls(client);
-        client.set_connection_timeout(5);
-        client.set_read_timeout(5);
-        auto tmdb_res = client.Get(("/search/tv?query=" + httplib::encode_uri(title)).c_str());
-        if (!tmdb_res || tmdb_res->status != 200) {
+        std::string tmdb_body;
+        if (!tmdbSearch("/search/tv?query=" + httplib::encode_uri(title), tmdb_body)) {
             if (!local.plot.empty() || !art.empty()) { reply(local.plot, art); return; }
             res.status = 502;
             res.set_content("{\"error\": \"TMDb lookup failed\"}", "application/json");
             return;
         }
-        const std::string& body = tmdb_res->body;
+        const std::string& body = tmdb_body;
         size_t results_pos = body.find("\"results\"");
         std::string first_result = results_pos != std::string::npos ? body.substr(results_pos) : body;
         std::string overview = extractJsonString(first_result, "overview");
