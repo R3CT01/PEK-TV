@@ -7,6 +7,8 @@ import 'api.dart' show Api, Details;
 import 'layouts.dart';
 import 'tokens.dart';
 import 'art_cache.dart';
+import 'ratings.dart';
+import 'store.dart';
 
 /// The `.focusable` of the web UI. On a remote / keyboard (focus highlight on) it gets `.focused`:
 /// border-focus colour, background surface-focused, and a glow (10px accent-glow) or, in TV mode, a 0.2rem ring.
@@ -327,6 +329,14 @@ class _PosterCardState extends State<PosterCard> {
   Timer? _lookupTimer;
   bool _plain = false; // the title card is showing (no picture yet)
 
+  /// This profile's star rating (1..10) of the title on this card, 0 when it has none. A card only knows its title and subtitle, so
+  /// a movie is looked up by title + the year in its subtitle, and anything else as a rated whole show.
+  int _rating() {
+    final year = int.tryParse(widget.subtitle.trim()) ?? 0;
+    final r = year > 0 ? Ratings.of(widget.title, year) : 0;
+    return r > 0 ? r : Ratings.ofShow(widget.title);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -389,7 +399,14 @@ class _PosterCardState extends State<PosterCard> {
         _plain = url.isEmpty || _failed;
         if (url.isEmpty && snap.connectionState == ConnectionState.done) _scheduleLookup(); // failed, or no picture yet
         if (url.isEmpty || _failed) {
-          return PekCard(title: widget.title, subtitle: widget.subtitle, onTap: widget.onTap, autofocus: widget.autofocus);
+          return ValueListenableBuilder<int>(
+            valueListenable: Store.changed,
+            builder: (_, __, ___) {
+              final r = _rating();
+              final sub = r > 0 ? (widget.subtitle.isEmpty ? '\u2605 $r/${Ratings.max}' : '${widget.subtitle} \u00b7 \u2605 $r/${Ratings.max}') : widget.subtitle;
+              return PekCard(title: widget.title, subtitle: sub, onTap: widget.onTap, autofocus: widget.autofocus);
+            },
+          );
         }
         final p = context.pek;
         final t = p.tokens;
@@ -431,6 +448,26 @@ class _PosterCardState extends State<PosterCard> {
                           });
                           return const SizedBox.shrink();
                         },
+                      ),
+                      Positioned(
+                        top: 0.4 * rem,
+                        right: 0.4 * rem,
+                        child: ValueListenableBuilder<int>(
+                          valueListenable: Store.changed,
+                          builder: (_, __, ___) {
+                            final r = _rating();
+                            if (r <= 0) return const SizedBox.shrink();
+                            return Container(
+                              padding: EdgeInsets.symmetric(horizontal: 0.45 * rem, vertical: 0.2 * rem),
+                              decoration: BoxDecoration(color: Colors.black.withAlpha(190), borderRadius: BorderRadius.circular(999)),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(Icons.star_rounded, size: 0.95 * rem, color: const Color(0xFFFFC107)),
+                                SizedBox(width: 0.15 * rem),
+                                Text('$r', style: TextStyle(fontSize: 0.75 * rem, fontWeight: FontWeight.w700, color: Colors.white, height: 1.1)),
+                              ]),
+                            );
+                          },
+                        ),
                       ),
                       if (widget.progress != null && widget.progress! > 0)
                         Positioned(
