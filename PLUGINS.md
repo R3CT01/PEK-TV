@@ -22,6 +22,7 @@ Plugins live in `plugins/<id>/`. Anything that is not bundled with PEK TV runs *
 - `storage`: a small private key/value store, plus read access to `plugins/<id>/data/`.
 - `live`: lets the plugin play live TV streams in PEK TV's player (`ui.live_play`) and add a channel guide to it (`"flutter": {"live": "live.py"}`). `epg`: lets it read TV guide (XMLTV) files from its `network` hosts (`pek_host.fetch_epg`). See `FLUTTER_PLUGINS.md`, "Live TV".
 - `library`: lets the plugin's **Python backend** call `pek_host.library_titles()` (titles and years only, never file names or folders). The install screen tells the user.
+- Other permissions, each explained in `FLUTTER_PLUGINS.md`: `watched` (read and change Watch History, ratings and favorites), `favorites`, `providers` (open a streaming service's app on a title), `plugins` (hand a title to another plugin), `torrent` (start a stream in PEK TV's player), `playback` and `send` (hooks that hear playback events and may send to the plugin's hosts), `live` and `epg` (above). `weather` and `skins` are reserved for the official plugins of the same name.
 - No permission listed means no access.
 - `flutter` (required): `{ "screen": "screen.py" }` names the Python screen PEK TV draws. See `FLUTTER_PLUGINS.md`.
 - `ui` (optional, only changes PEK TV's own screens): `navTab` (max 20 characters) adds a menu / More entry that opens the plugin.

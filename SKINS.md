@@ -14,7 +14,7 @@ A skin can't run code, can't contain CSS and can't reach the network.
   The repository must hold a skin (`skin.json`), the same layout as the zip below.
 - **Use it:** tap the skin in the Appearance list.
 - **Remove:** hold the skin's row (OK on a remote, or a long press on a phone), then confirm.
-  The skins that ship with PEK TV (PEK Ember, Cream, Night red, Green, Neon) can't be removed.
+  The skins that ship with PEK TV (PEK Ember, Mono, Cream, Night red, Green, Neon) can't be removed.
 - **A zip is a plugin or a skin, never both.** Installing a skin zip as a plugin, or a plugin
   zip as a skin, fails with a message that says which one it is.
 
