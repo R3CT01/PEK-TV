@@ -19,6 +19,7 @@ def pekBaseCode = 19
 android {
     namespace 'com.pektv.app'
     compileSdk 36
+    ndkVersion '28.2.13676358'
 
     defaultConfig {
         applicationId 'com.pektv.app'
