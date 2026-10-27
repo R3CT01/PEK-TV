@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'common.dart';
+import 'fields.dart' show DpadEscape;
 import 'music_controller.dart';
 import 'music_filters.dart';
 import 'music_fullscreen.dart';
@@ -248,13 +249,16 @@ class _MusicPageState extends State<MusicPage> {
           sliver: SliverList(
             delegate: SliverChildListDelegate([
               Heading(widget.title, weather: !Store.musicMode),
-              if (widget.view != MusicView.library) TextField(
+              if (widget.view != MusicView.library) DpadEscape(
                 controller: _search,
-                onChanged: _onSearch,
-                decoration: InputDecoration(
-                  hintText: 'Search',
-                  prefixIcon: const Icon(Icons.search, size: 20),
-                  contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
+                child: TextField(
+                  controller: _search,
+                  onChanged: _onSearch,
+                  decoration: InputDecoration(
+                    hintText: 'Search',
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    contentPadding: EdgeInsets.symmetric(vertical: 0.5 * rem),
+                  ),
                 ),
               ),
               if (widget.view != MusicView.library) SizedBox(height: 0.75 * rem),

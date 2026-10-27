@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
 
 import 'tokens.dart';
 import 'widgets.dart' show PekFocusable;
@@ -22,28 +23,72 @@ class PekField extends StatelessWidget {
     OutlineInputBorder border(Color c) => OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: c == Colors.transparent ? BorderSide.none : BorderSide(color: c));
     return Padding(
       padding: EdgeInsets.only(bottom: 0.75 * p.rem),
-      child: TextField(
+      // A text box keeps the arrow keys for its caret, so on a remote the focus went in and never came out (the GitHub install
+      // box, the library search ...). DpadEscape lets Up / Down (and Left / Right at the ends) move on.
+      child: DpadEscape(
         controller: controller,
-        obscureText: obscure,
-        autofocus: autofocus,
-        autocorrect: false,
-        enableSuggestions: false,
-        keyboardType: keyboardType,
-        onChanged: onChanged,
-        onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
-        style: TextStyle(color: t.text),
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          labelStyle: TextStyle(color: t.textMuted),
-          hintStyle: TextStyle(color: t.textMuted.withAlpha(180)),
-          filled: true,
-          fillColor: t.surface,
-          enabledBorder: border(Colors.transparent),
-          focusedBorder: border(t.text.withAlpha(70)),
-          border: border(Colors.transparent),
+        child: TextField(
+          controller: controller,
+          obscureText: obscure,
+          autofocus: autofocus,
+          autocorrect: false,
+          enableSuggestions: false,
+          keyboardType: keyboardType,
+          onChanged: onChanged,
+          onTapOutside: (_) {}, // a tap on a suggestion under the box must not drop the focus first
+          onSubmitted: onSubmitted == null ? null : (_) => onSubmitted!(),
+          style: TextStyle(color: t.text),
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            labelStyle: TextStyle(color: t.textMuted),
+            hintStyle: TextStyle(color: t.textMuted.withAlpha(180)),
+            filled: true,
+            fillColor: t.surface,
+            enabledBorder: border(Colors.transparent),
+            focusedBorder: border(t.text.withAlpha(70)),
+            border: border(Colors.transparent),
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// A text box takes the arrow keys for its caret, so on a remote the focus got stuck in it. Up and Down always leave the
+/// box; Left leaves it when the caret is at the start (or the box is empty) and Right when it is at the end. The move is a
+/// normal focus move, so it lands on whatever is next to the box (a suggestion list under it, the next button ...).
+class DpadEscape extends StatelessWidget {
+  const DpadEscape({super.key, required this.controller, required this.child});
+  final TextEditingController controller;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, KeyEvent e) {
+        if (e is KeyUpEvent) return KeyEventResult.ignored;
+        final k = e.logicalKey;
+        final sel = controller.selection;
+        final atStart = !sel.isValid || (sel.isCollapsed && sel.baseOffset <= 0);
+        final atEnd = !sel.isValid || (sel.isCollapsed && sel.baseOffset >= controller.text.length);
+        TraversalDirection? d;
+        if (k == LogicalKeyboardKey.arrowDown) {
+          d = TraversalDirection.down;
+        } else if (k == LogicalKeyboardKey.arrowUp) {
+          d = TraversalDirection.up;
+        } else if (k == LogicalKeyboardKey.arrowLeft && atStart) {
+          d = TraversalDirection.left;
+        } else if (k == LogicalKeyboardKey.arrowRight && atEnd) {
+          d = TraversalDirection.right;
+        }
+        if (d == null) return KeyEventResult.ignored;
+        if (e is KeyDownEvent) FocusManager.instance.primaryFocus?.focusInDirection(d);
+        return KeyEventResult.handled;
+      },
+      child: child,
     );
   }
 }

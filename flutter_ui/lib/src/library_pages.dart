@@ -9,6 +9,7 @@ import 'fields.dart';
 import 'ratings.dart';
 import 'ratings_export.dart';
 import 'store.dart';
+import 'suggest.dart';
 import 'tokens.dart';
 import 'watched.dart';
 import 'widgets.dart';
@@ -76,6 +77,7 @@ class _SearchPageState extends State<SearchPage> {
 
   final _q = TextEditingController();
   Timer? _debounce;
+  Timer? _sugTimer;
   int _seq = 0;
 
   String _genre = '';
@@ -96,6 +98,7 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _sugTimer?.cancel();
     _q.dispose();
     super.dispose();
   }
@@ -110,6 +113,65 @@ class _SearchPageState extends State<SearchPage> {
     if (c != null && DateTime.now().difference(c.at) < const Duration(minutes: 2)) return c;
     final r = await Future.wait([Api.movies(), Api.shows()]);
     return _cache = _LibData(r[0] as List<Movie>, r[1] as List<Show>);
+  }
+
+  /// Typing in the box: the drop-down under it is worked out from the library list (kept for two minutes), which is fetched
+  /// the first time anyone types. The results below the box still only change when the person presses Search.
+  void _typed(String v) {
+    setState(() {});
+    _sugTimer?.cancel();
+    _sugTimer = Timer(const Duration(milliseconds: 150), () async {
+      try {
+        await _data();
+      } catch (_) {
+        return;
+      }
+      if (mounted) setState(() {});
+    });
+  }
+
+  final Map<String, Future<String>> _thumbs = {}; // one poster look-up per title, so the list does not blink while typing
+
+  Future<String> _thumb(String key, Future<Details> Function() load) => _thumbs.putIfAbsent(key, () => load().then((x) => x.poster).catchError((_) => ''));
+
+  /// Up to six titles from the library that match what is typed (starts-with first), each with its poster at the side.
+  List<SuggestItem> _suggestions() {
+    final d = _cache;
+    if (d == null || _pick.isNotEmpty) return const [];
+    final q = foldText(_q.text.trim());
+    final words = q.split(' ').where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) return const [];
+    int rank(String f) => f.startsWith(q) ? 0 : (f.split(' ').any((w) => w.startsWith(words.first)) ? 1 : 2);
+    final hits = <(int, String, Object)>[];
+    for (final m in d.movies) {
+      final f = foldText(m.title);
+      if (words.every(f.contains)) hits.add((rank(f), f, m));
+    }
+    for (final sh in d.shows) {
+      final f = foldText(sh.title);
+      if (words.every(f.contains)) hits.add((rank(f), f, sh));
+    }
+    hits.sort((a, b) => a.$1 != b.$1 ? a.$1.compareTo(b.$1) : a.$2.compareTo(b.$2));
+    final out = <SuggestItem>[];
+    for (final h in hits.take(6)) {
+      final it = h.$3;
+      if (it is Movie) {
+        out.add(SuggestItem(
+          title: it.title,
+          sub: it.year > 0 ? '${it.year} \u00b7 Movie' : 'Movie',
+          imageLater: _thumb('m:${it.id}', () => Api.movieDetails(it.id)),
+          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => MovieScreen(movie: it))),
+        ));
+      } else if (it is Show) {
+        out.add(SuggestItem(
+          title: it.title,
+          sub: 'TV show',
+          imageLater: _thumb('s:${it.title}', () => Api.showDetails(it.title)),
+          onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ShowScreen(show: it))),
+        ));
+      }
+    }
+    return out;
   }
 
   void _onChanged(String v) {
@@ -296,7 +358,11 @@ class _SearchPageState extends State<SearchPage> {
 
     final children = <Widget>[
       const Heading('Search', weather: true),
-      PekField(label: 'Search your library', controller: _q, hint: 'Title, actor, director, genre or year', onSubmitted: _run),
+      SuggestAnchor(
+        controller: _q,
+        items: _suggestions(),
+        field: PekField(label: 'Search your library', controller: _q, hint: 'Title, actor, director, genre or year', onChanged: _typed, onSubmitted: _run),
+      ),
       Wrap(spacing: 0.5 * rem, runSpacing: 0.5 * rem, children: [
         filterBtn('Genre', 'genre'),
         filterBtn('Year', 'decade'),

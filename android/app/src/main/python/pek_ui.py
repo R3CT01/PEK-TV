@@ -115,7 +115,8 @@ def poster_card(title, sub="", poster="", on=None, badge="", autofocus="", year=
     for an exact match; without a year PEK TV looks for one in the title or the sub line, then (Settings > Plugin posters)
     matches by title alone. No "watched" permission is needed, and the plugin is never told the answer.
 
-    wide=True with backdrop= (a 16:9 picture) makes the card landscape on a TV; on a phone it stays the portrait poster."""
+    Cards are always portrait posters, on a phone and on a TV. wide= and backdrop= are still accepted (so older plugins keep
+    running) but are ignored: 16:9 cards came out too small on a TV."""
     try:
         yr = int(year or 0)
     except (TypeError, ValueError):
@@ -145,14 +146,36 @@ def tabs(items, active, on):
     return {"t": "tabs", "items": out, "active": _s(active, 60), "on": _sess().register(on, 1)}
 
 
-def text_input(label, value="", on_change=None, placeholder="", secret=False, on_submit=None, key=""):
+def suggestion(title, sub="", image="", on=None):
+    """One row of a search box's drop-down list (see text_input's suggestions=): a small poster at the side, the title and
+    a line of facts. on() runs when the row is chosen. The picture only loads from a host listed under permissions.network."""
+    return {"s": _s(title, 200), "sub": _s(sub, 200), "img": _s(image, 600), "on": _sess().register(on, 0)}
+
+
+def text_input(label, value="", on_change=None, placeholder="", secret=False, on_submit=None, key="", on_type=None, suggestions=None):
     """A text box. on_change(text) runs before the next tap's own callback (not on every keystroke);
-    on_submit(text) runs when the person presses Enter / Search on the keyboard."""
+    on_submit(text) runs when the person presses Enter / Search on the keyboard.
+
+    A box with no label is a search bar, and a search bar can show suggestions while the person types:
+      on_type(text)   runs a moment after the typing pauses (about 0.3 s), so the plugin can look up suggestions
+                      (ui.background) and keep them in its state;
+      suggestions=    [ui.suggestion(title, sub, image, on), ...] (the first 8 are shown) drawn as a drop-down list under the
+                      box. The D-pad can walk into it with Down, and OK opens the highlighted one.
+    A plugin that also runs on an older PEK TV catches the TypeError of an unknown argument and draws a plain box."""
     k = _s(key, 80) or (_s(label, 60) + "|" + _s(placeholder, 60))
     s = _sess()
     s.register_input(k, value, on_change)
+    known = s.next_handlers or {}
+    sug = []
+    for d in list(suggestions or [])[:8]:
+        if not isinstance(d, dict):
+            continue
+        hid = d.get("on")
+        sug.append({"s": _s(d.get("s"), 200), "sub": _s(d.get("sub"), 200), "img": _s(d.get("img"), 600),
+                    "on": hid if isinstance(hid, str) and hid in known else ""})
     return {"t": "input", "s": _s(label, 120), "value": _s(value, 2000), "ph": _s(placeholder, 120),
-            "secret": bool(secret), "key": k, "submit": s.register(on_submit, 1)}
+            "secret": bool(secret), "key": k, "submit": s.register(on_submit, 1),
+            "typ": s.register(on_type, 1), "sug": sug}
 
 
 def toggle(label, checked, on):

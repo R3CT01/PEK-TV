@@ -68,7 +68,7 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 | `ui.episodeRow({title, meta, text, image, dim, on})` | `ui.episode_row(title, meta, text, image, dim=, on=)`: episode picture + title + description |
 | `ui.card / listRow / posterCard / grid` | `ui.card / list_row / poster_card / grid(kids, min_col=, scroll=)` |
 | `ui.tabs(items, active, fn)` | `ui.tabs([(id, label)], active, fn)`, `fn(id)` |
-| `ui.textInput(label, value, onChange, {placeholder, type:'password', onSubmit})` | `ui.text_input(label, value, on_change, placeholder=, secret=, on_submit=, key=)` |
+| `ui.textInput(label, value, onChange, {placeholder, type:'password', onSubmit})` | `ui.text_input(label, value, on_change, placeholder=, secret=, on_submit=, key=, on_type=, suggestions=)`: a box with no label is a search bar; `on_type(text)` runs about 0.3 s after the typing pauses and `suggestions=[ui.suggestion(title, sub, image, on), ...]` (first 8) is drawn as a drop-down list under the bar with a small picture at the side. On a TV Down walks into the list and OK opens the highlighted row. On an older PEK TV catch the `TypeError` / `AttributeError` and draw a plain box. |
 | `ui.toggle(label, checked, fn)` | `ui.toggle(label, checked, fn)`, `fn(True/False)` |
 | `ui.providerButton({...})` (`providers`) | `ui.provider_button(name, logo, title, kind, tmdb_id, region)` (`providers`): opens the service's app, see below |
 | `pek.setBack(fn)` / `pek.scrollTop()` | `ui.set_back(fn_or_None)` / `ui.scroll_top()` |
@@ -86,7 +86,10 @@ def on_launch(intent):            # PEK opened the plugin on a title (optional)
 | `pek.onLaunch(fn)` | `def on_launch(intent)` |
 
 Text typed in a box reaches `on_change` just before the next tap's own callback (not on every key), so the screen needs no
-round trip per keystroke. Pictures (`poster_card`, provider logos) only load from hosts listed under `permissions.network`.
+round trip per keystroke.
+(`on_type` is the one exception, and only for a search bar that asks for it: it is sent once, after the typing pauses.)
+
+**Cards are portrait.** `ui.poster_card` is always a 2:3 poster, on a phone and on a TV; `wide=` and `backdrop=` are still accepted but ignored (16:9 cards came out too small on a TV). A row's card width is the grid's `min_col` (in 16 px units, scaled to the screen). Pictures (`poster_card`, provider logos) only load from hosts listed under `permissions.network`.
 
 ### What a screen can ask for (effects)
 A fixed list, each checked in Python against `plugin.json` before Flutter sees it: open an **https** link (`open_trailer`

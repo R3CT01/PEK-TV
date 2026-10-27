@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show Clipboard, ClipboardData, KeyDownEvent, KeyEvent, KeyUpEvent, LogicalKeyboardKey;
+import 'package:flutter/services.dart' show Clipboard, ClipboardData, HardwareKeyboard, KeyDownEvent, KeyEvent, LogicalKeyboardKey;
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
@@ -16,6 +16,7 @@ import 'plugin_host.dart';
 import 'skin_widgets.dart';
 import 'skins.dart';
 import 'settings_extra.dart' show ToggleRow;
+import 'suggest.dart';
 import 'store.dart';
 import 'torrent.dart';
 import 'tokens.dart';
@@ -70,6 +71,8 @@ class _InputState {
 
 class _PluginViewState extends State<PluginView> {
   final ScrollController _scroll = ScrollController();
+  final GlobalKey _listKey = GlobalKey();
+  double _heroH = 0; // height of the trailer at the top of the page (0 = none)
   final Map<String, _InputState> _inputs = {};
   final Set<String> _autofocused = {};
   late final bool Function() _backFn = _onBack;
@@ -89,6 +92,8 @@ class _PluginViewState extends State<PluginView> {
   @override
   void initState() {
     super.initState();
+    FocusManager.instance.addListener(_nearTop);
+    HardwareKeyboard.instance.addHandler(_upKey);
     // context.pek needs the inherited scope, so the first call waits for the first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _open();
@@ -97,6 +102,8 @@ class _PluginViewState extends State<PluginView> {
 
   @override
   void dispose() {
+    FocusManager.instance.removeListener(_nearTop);
+    HardwareKeyboard.instance.removeHandler(_upKey);
     _timer?.cancel();
     if (PluginBack.current == _backFn) PluginBack.current = null;
     for (final s in _inputs.values) {
@@ -107,6 +114,64 @@ class _PluginViewState extends State<PluginView> {
   }
 
   Map<String, dynamic> _ctx() => PluginHost.context(isTv: context.pek.isTv);
+
+  // ---------------------------------------------------------------- D-pad: back to the very top
+
+  /// A remote only scrolls far enough to show the card it moved to, so on a page that starts with a trailer (or a heading, a
+  /// search box ...) pressing Up to the first button left the top of the page cut off. When the focus is on something near
+  /// the top of the page, the page goes all the way back to the top.
+  bool _upKey(KeyEvent e) {
+    if (e is KeyDownEvent && e.logicalKey == LogicalKeyboardKey.arrowUp) {
+      // After the focus move (if there is one) has happened. Also covers Up on the first button, where nothing moves.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _nearTop());
+    }
+    return false; // never swallow the key
+  }
+
+  /// Is [c] drawn inside this page's list (and not in a dialog or another screen on top)?
+  bool _inList(BuildContext? c, BuildContext list) {
+    if (c == null || !c.mounted) return false;
+    var inside = false;
+    c.visitAncestorElements((a) {
+      if (identical(a, list)) {
+        inside = true;
+        return false;
+      }
+      return true;
+    });
+    return inside;
+  }
+
+  void _nearTop() {
+    if (!mounted || !_scroll.hasClients || _scroll.offset <= 0.5) return;
+    try {
+      final f = FocusManager.instance.primaryFocus;
+      final list = _listKey.currentContext;
+      if (f == null || list == null || !_inList(f.context, list)) return;
+      final ro = f.context?.findRenderObject();
+      final lo = list.findRenderObject();
+      if (ro is! RenderBox || lo is! RenderBox || !ro.attached || !lo.attached || !ro.hasSize) return;
+      final rem = context.pek.rem;
+      final contentY = _scroll.offset + ro.localToGlobal(Offset.zero, ancestor: lo).dy; // the focused thing, from the top of the whole page
+      // Nothing focusable above it? Then it is the first thing on the page and the page belongs at the very top.
+      final here = f.rect.top;
+      var first = true;
+      for (final n in f.nearestScope?.traversalDescendants ?? const <FocusNode>[]) {
+        if (identical(n, f)) continue;
+        final c = n.context;
+        if (c == null || !_inList(c, list)) continue;
+        if (n.rect.top < here - 0.5 * rem) {
+          first = false;
+          break;
+        }
+      }
+      if (first || contentY <= _heroH + 6 * rem) {
+        _scroll.animateTo(0, duration: const Duration(milliseconds: 220), curve: Curves.easeOut);
+      }
+    } catch (_) {
+      // a focus move while the page is being rebuilt: nothing to do
+    }
+  }
 
   // ---------------------------------------------------------------- talking to Python
 
@@ -495,7 +560,8 @@ class _PluginViewState extends State<PluginView> {
         final heroH = video == null
             ? 0.0
             : (p.isTv ? box.maxHeight * 0.5 : math.min(box.maxWidth * 9 / 16, box.maxHeight * 0.5));
-        return ListView(controller: _scroll, padding: EdgeInsets.zero, addAutomaticKeepAlives: false, children: [
+        _heroH = heroH;
+        return ListView(key: _listKey, controller: _scroll, padding: EdgeInsets.zero, addAutomaticKeepAlives: false, children: [
           if (video != null)
             SizedBox(
               height: heroH,
@@ -612,11 +678,9 @@ class _PluginViewState extends State<PluginView> {
       case 'listrow':
         return ListRow(title: '${n['s'] ?? ''}', subtitle: '${n['sub'] ?? ''}', autofocus: _af(n), onTap: on.isEmpty ? null : () => _send(on));
       case 'poster':
-        final img0 = '${n['img'] ?? ''}';
-        final wimg = '${n['wimg'] ?? ''}';
-        // On a TV a card that has a landscape picture (backdrop) is drawn 16:9; on a phone it stays a portrait poster.
-        final landscape = p.isTv && n['wide'] == true;
-        final img = landscape && wimg.isNotEmpty ? wimg : img0;
+        // Cards are always portrait posters (2:3), on a phone and on a TV. (A plugin may still send a landscape picture
+        // ("wide" / "wimg"); it is ignored, because 16:9 cards came out too small on a TV.)
+        final img = '${n['img'] ?? ''}';
         final ptitle = '${n['s'] ?? ''}';
         final psub = '${n['sub'] ?? ''}';
         final isMovie = '${n['k'] ?? 'movie'}' == 'movie';
@@ -628,7 +692,6 @@ class _PluginViewState extends State<PluginView> {
             title: ptitle,
             sub: psub,
             image: img.isNotEmpty && PluginHosts.allows(_hosts, img) ? img : '',
-            landscape: landscape,
             badge: '${n['badge'] ?? ''}',
             watched: isMovie && _posterWatched(ptitle, pyear),
             autofocus: _af(n),
@@ -659,19 +722,44 @@ class _PluginViewState extends State<PluginView> {
         if (st == null) return const SizedBox.shrink();
         final submit = '${n['submit'] ?? ''}';
         if ('${n['s'] ?? ''}'.isEmpty) {
-          return _DpadEscape(controller: st.controller, child: _SearchBar(
+          // A search bar. A plugin that asks for it (on_type=, suggestions=) is told what is being typed, a moment after the
+          // typing pauses, and answers with a drop-down list of suggestions that the D-pad can walk into.
+          final typ = '${n['typ'] ?? ''}';
+          final sugs = <SuggestItem>[
+            for (final s in ((n['sug'] as List?) ?? const []).whereType<Map>())
+              if ('${s['s'] ?? ''}'.isNotEmpty && '${s['on'] ?? ''}'.isNotEmpty)
+                SuggestItem(
+                  title: '${s['s']}',
+                  sub: '${s['sub'] ?? ''}',
+                  image: '${s['img'] ?? ''}'.isNotEmpty && PluginHosts.allows(_hosts, '${s['img']}') ? '${s['img']}' : '',
+                  onTap: () {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    _send('${s['on']}');
+                  },
+                ),
+          ];
+          return SuggestAnchor(
+            key: ValueKey('sug-${n['key']}'),
             controller: st.controller,
-            hint: '${n['ph'] ?? ''}'.isEmpty ? 'Search' : '${n['ph']}',
-            onSubmit: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
-          ));
+            items: sugs,
+            field: DpadEscape(
+              controller: st.controller,
+              child: _SearchBar(
+                controller: st.controller,
+                hint: '${n['ph'] ?? ''}'.isEmpty ? 'Search' : '${n['ph']}',
+                onSubmit: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
+                onType: typ.isEmpty ? null : (v) => _send(typ, value: v),
+              ),
+            ),
+          );
         }
-        return _DpadEscape(controller: st.controller, child: PekField(
+        return PekField(
           label: '${n['s'] ?? ''}',
           controller: st.controller,
           hint: '${n['ph'] ?? ''}',
           obscure: n['secret'] == true,
           onSubmitted: submit.isEmpty ? null : () => _send(submit, value: st.controller.text),
-        ));
+        );
       case 'toggle':
         final checked = n['on_'] == true;
         return ToggleRow(title: '${n['s'] ?? ''}', on: checked, onTap: () => _send(on, value: !checked));
@@ -739,17 +827,14 @@ class _PluginViewState extends State<PluginView> {
     final kids = _kids(n);
     final gap = (p.compact ? 0.6 : 0.9) * rem;
     if (kids.isEmpty) return const SizedBox.shrink();
-    // A grid of landscape cards (TV) is wider per tile and its pictures are 16:9.
-    final wide = p.isTv && kids.first['t'] == 'poster' && kids.first['wide'] == true;
-    // Landscape cards on a TV are a medium size: 8.5 rem wide (about 6 per row on a 1080p screen). A lone card (the
-    // featured one) keeps the size the plugin asked for.
-    final minW = wide && kids.length > 1 ? 8.5 * rem : ((n['min'] as num?) ?? 150).toDouble() * rem / 16;
+    // Cards are portrait posters everywhere: the plugin's own width (n['min'], in 16 px units) scaled to this screen.
+    final minW = ((n['min'] as num?) ?? 150).toDouble() * rem / 16;
     if (n['scroll'] == true) {
       // Row height = poster (2:3) + caption (title + sub line, scaled with the system text size) + list padding + slack,
       // so the card never overflows by a fraction of a pixel (the yellow/black "BOTTOM OVERFLOWED" stripes).
       final textScale = MediaQuery.textScalerOf(context).scale(1.0);
       return SizedBox(
-        height: minW / (wide ? 16 / 9 : 2 / 3) + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
+        height: minW / (2 / 3) + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
           padding: EdgeInsets.symmetric(vertical: 0.4 * rem, horizontal: 0.3 * rem),
@@ -760,8 +845,7 @@ class _PluginViewState extends State<PluginView> {
       );
     }
     return LayoutBuilder(builder: (context, box) {
-      var cols = math.max(1, ((box.maxWidth + gap) / (minW + gap)).floor());
-      if (wide) cols = cols.clamp(5, 7); // 5 to 7 landscape cards per row
+      final cols = math.max(1, ((box.maxWidth + gap) / (minW + gap)).floor());
       final w = (box.maxWidth - gap * (cols - 1)) / cols;
       return Wrap(spacing: gap, runSpacing: gap, children: [for (final k in kids) SizedBox(width: w, child: _node(k))]);
     });
@@ -910,11 +994,10 @@ class _PluginEpisode extends StatelessWidget {
 /// loads from a host the plugin listed under permissions.network; without one (or when it fails) the tile shows the
 /// title on a plain surface.
 class _PluginPoster extends StatelessWidget {
-  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap, this.watched = false, this.landscape = false, this.onLongPress});
+  const _PluginPoster({required this.title, required this.sub, required this.image, required this.badge, required this.autofocus, required this.onTap, this.watched = false, this.onLongPress});
   final String title, sub, image, badge;
   final bool autofocus;
   final bool watched; // in Watch History: a tick in the corner
-  final bool landscape; // TV: 16:9 backdrop card instead of a 2:3 poster
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
@@ -940,7 +1023,7 @@ class _PluginPoster extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AspectRatio(
-            aspectRatio: landscape ? 16 / 9 : 2 / 3,
+            aspectRatio: 2 / 3,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(p.compact ? 12 : 14),
               child: ColoredBox(
@@ -949,7 +1032,7 @@ class _PluginPoster extends StatelessWidget {
                   if (image.isEmpty)
                     plain()
                   else
-                    ArtImage(image, fit: BoxFit.cover, cacheWidth: landscape ? 640 : 400, placeholder: (_) => loading(), errorBuilder: (_, __, ___) => plain()),
+                    ArtImage(image, fit: BoxFit.cover, cacheWidth: 400, placeholder: (_) => loading(), errorBuilder: (_, __, ___) => plain()),
                   if (watched)
                     Positioned(
                       top: 6,
@@ -1047,16 +1130,22 @@ class _SegmentedTabs extends StatelessWidget {
 /// A text box with no label is a search bar: one rounded pill, magnifier at the left, clear and search at the right, and
 /// the keyboard's search key submits. (A box with a label stays a normal field.)
 class _SearchBar extends StatefulWidget {
-  const _SearchBar({required this.controller, required this.hint, required this.onSubmit});
+  const _SearchBar({required this.controller, required this.hint, required this.onSubmit, this.onType});
   final TextEditingController controller;
   final String hint;
   final VoidCallback? onSubmit;
+
+  /// Called with the text a moment after the person stops typing (for a plugin's suggestions); null = the plugin did not ask.
+  final ValueChanged<String>? onType;
 
   @override
   State<_SearchBar> createState() => _SearchBarState();
 }
 
 class _SearchBarState extends State<_SearchBar> {
+  Timer? _typing;
+  late String _told = widget.controller.text; // the last text the plugin heard about, so its own changes never echo back
+
   @override
   void initState() {
     super.initState();
@@ -1065,12 +1154,22 @@ class _SearchBarState extends State<_SearchBar> {
 
   @override
   void dispose() {
+    _typing?.cancel();
     widget.controller.removeListener(_changed);
     super.dispose();
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    if (widget.onType == null) return;
+    _typing?.cancel();
+    _typing = Timer(const Duration(milliseconds: 300), () {
+      final v = widget.controller.text;
+      if (!mounted || v == _told) return;
+      _told = v;
+      widget.onType?.call(v);
+    });
   }
 
   @override
@@ -1092,6 +1191,7 @@ class _SearchBarState extends State<_SearchBar> {
             autocorrect: false,
             enableSuggestions: false,
             textInputAction: TextInputAction.search,
+            onTapOutside: (_) {}, // a tap on a suggestion must not close the list before it is handled
             onSubmitted: widget.onSubmit == null ? null : (_) => widget.onSubmit!(),
             style: TextStyle(color: t.text, fontSize: 0.95 * rem),
             cursorColor: t.accent,
@@ -1170,44 +1270,5 @@ class _PluginSliderState extends State<_PluginSlider> {
       ),
       SizedBox(width: 3.5 * p.rem, child: Text('${_v.round()}${widget.unit}', style: TextStyle(color: t.textMuted))),
     ]);
-  }
-}
-
-
-/// A text box takes the arrow keys for its caret, so on a remote the focus got stuck in it. Up and Down always leave the
-/// box; Left leaves it when the caret is at the start (or the box is empty) and Right when it is at the end. The move is a
-/// normal focus move, so it lands on whatever is next to the box.
-class _DpadEscape extends StatelessWidget {
-  const _DpadEscape({required this.controller, required this.child});
-  final TextEditingController controller;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
-      onKeyEvent: (node, KeyEvent e) {
-        if (e is KeyUpEvent) return KeyEventResult.ignored;
-        final k = e.logicalKey;
-        final sel = controller.selection;
-        final atStart = !sel.isValid || (sel.isCollapsed && sel.baseOffset <= 0);
-        final atEnd = !sel.isValid || (sel.isCollapsed && sel.baseOffset >= controller.text.length);
-        TraversalDirection? d;
-        if (k == LogicalKeyboardKey.arrowDown) {
-          d = TraversalDirection.down;
-        } else if (k == LogicalKeyboardKey.arrowUp) {
-          d = TraversalDirection.up;
-        } else if (k == LogicalKeyboardKey.arrowLeft && atStart) {
-          d = TraversalDirection.left;
-        } else if (k == LogicalKeyboardKey.arrowRight && atEnd) {
-          d = TraversalDirection.right;
-        }
-        if (d == null) return KeyEventResult.ignored;
-        if (e is KeyDownEvent) FocusManager.instance.primaryFocus?.focusInDirection(d);
-        return KeyEventResult.handled;
-      },
-      child: child,
-    );
   }
 }

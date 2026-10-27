@@ -827,8 +827,7 @@ def poster(item, focus_key=""):
     mine = owned(item)
     return ui.poster_card(item["title"], sub + " \u00b7 In your library" if mine else sub, item["poster"],
                           lambda: open_detail(item), badge="In library" if mine else "", autofocus=focus_key,
-                          year=item["year"] or 0, kind="show" if item["type"] == "tv" else "movie",
-                          backdrop=item.get("backdrop", ""), wide=True)
+                          year=item["year"] or 0, kind="show" if item["type"] == "tv" else "movie")
 
 
 def poster_row(items, focus_key=""):
