@@ -541,6 +541,67 @@ def set_ratings_many(items):
         s.effect("ratings.set_many", items=clean)
 
 
+def _rate_norm(t):
+    return re.sub(r"[^a-z0-9]+", "", str(t or "").lower())
+
+
+def _rate_reported(s, kind, title, year, season, episode):
+    """The rating PEK reports for this title (0 = none)."""
+    want = _rate_norm(title)
+    for r in list(s.ctx.get("ratings") or [])[:4000]:
+        try:
+            if str(r.get("kind") or "movie") != kind or _rate_norm(r.get("title")) != want:
+                continue
+            if kind == "movie" and year and int(r.get("year") or 0) != year:
+                continue
+            if kind == "episode" and (int(r.get("season") or 0) != season or int(r.get("episode") or 0) != episode):
+                continue
+            return int(r["rating"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return 0
+
+
+def rating_stars(kind, title, year=0, season=0, episode=0, plain=False):
+    """Ready-made 'rate this' control for a detail page: a line of text and ten star buttons (two rows of five, so it fits a
+    phone). Tapping a star rates the title (1 to 10), tapping the star it already has takes the rating off. The rating is the
+    profile's, the same one PEK TV shows on its own pages and cards, and it syncs to PEK Cloud. kind: \"movie\", \"show\" or
+    \"episode\" (an episode's and a show's title is the show's title). plain=True labels the buttons 1 to 10 with no star symbols,
+    for a plugin that keeps symbols out of its buttons. Needs \"watched\": true. Returns one tree node: put it in a
+    column, e.g. `kids.append(ui.rating_stars(\"movie\", item[\"title\"], item[\"year\"]))`."""
+    s = _sess()
+    s.need("watched")
+    kind = kind if kind in ("movie", "show", "episode") else "movie"
+    title, year, season, episode = _s(title, 200), int(year or 0), int(season or 0), int(episode or 0)
+    if kind != "movie":
+        year = 0
+    if kind != "episode":
+        season = episode = 0
+    over = s.__dict__.setdefault("_rate_over", {})          # a rating just made, until PEK reports it back
+    key = (kind, _rate_norm(title), year, season, episode)
+    reported = _rate_reported(s, kind, title, year, season, episode)
+    cur = reported
+    ov = over.get(key)
+    if ov is not None:
+        if ov[1] == reported:
+            cur = ov[0]
+        else:
+            del over[key]
+
+    def rate(n):
+        n = 0 if n == cur else n
+        set_ratings_many([{"kind": kind, "title": title, "year": year, "season": season, "episode": episode, "rating": n}])
+        over[key] = (n, reported)
+
+    noun = {"movie": "movie", "show": "show", "episode": "episode"}[kind]
+    def label(i):
+        return str(i) if plain else ("\u2605 %d" if i <= cur else "\u2606 %d") % i
+
+    rows = [row([button(label(i), (lambda i=i: rate(i)), selected=i <= cur)
+                 for i in range(lo, lo + 5)]) for lo in (1, 6)]
+    return column(text("Your rating: %d / 10" % cur if cur else "Rate this " + noun), *rows)
+
+
 def favorites():
     """The open profile's favorites that are movies or shows: [{"kind" ("movie" | "show"), "title", "year", "tmdb" (0 when unknown)}].
     Needs "watched": true."""

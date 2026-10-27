@@ -75,3 +75,6 @@ movies and shows, a **Play with ...** button opens that plugin on the title.
 - Trailer is full width and covers the top half of the screen on a TV, plays with no YouTube controls, play button or icons, and scrolls away with the page instead of staying pinned over the buttons.
 - Remote: the D-pad no longer gets stuck in search boxes.
 - Movie and show cards are landscape on a TV and portrait on a phone.
+
+## 1.8.0
+- Rate what you watch: the detail page has a "Rate this movie / show" line with ten star buttons. It is your own rating in PEK TV (the same one shown on the posters and sent to Trakt); press the star you already gave to take the rating off.

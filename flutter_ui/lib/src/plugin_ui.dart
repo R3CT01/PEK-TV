@@ -11,6 +11,7 @@ import 'common.dart';
 import 'fields.dart';
 import 'live_tv.dart';
 import 'player.dart';
+import 'ratings.dart';
 import 'plugin_host.dart';
 import 'skin_widgets.dart';
 import 'skins.dart';
@@ -323,6 +324,20 @@ class _PluginViewState extends State<PluginView> {
           if (p != null) items.add(p);
         }
         if (items.isNotEmpty) await Watched.set(items, on, source: widget.pluginId);
+      } else if (op == 'ratings.set_many') {
+        // A rating made on a plugin screen (pek_ui.set_ratings_many): saved for the open profile like a rating made on PEK TV's own
+        // pages, so it shows on the cards, syncs to PEK Cloud and is passed on to plugins such as Trakt. (The permission was
+        // already checked in Python.)
+        final list = raw['items'] is List ? raw['items'] as List : const [];
+        for (final it in list.take(300)) {
+          if (it is! Map) continue;
+          final title = '${it['title'] ?? ''}'.trim();
+          if (title.isEmpty) continue;
+          int n(Object? v) => (v as num?)?.toInt() ?? 0;
+          final kind = '${it['kind'] ?? 'movie'}';
+          final RateTarget t = kind == 'episode' ? Ratings.episode(title, n(it['season']), n(it['episode'])) : kind == 'show' ? Ratings.show(title) : Ratings.movie(title, n(it['year']));
+          await Ratings.rateTarget(t, n(it['rating']));
+        }
       } else if (op == 'favorite.add') {
         await Store.addPluginFavorite(
           plugin: widget.pluginId,

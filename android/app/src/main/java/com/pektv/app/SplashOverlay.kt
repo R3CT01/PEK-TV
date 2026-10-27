@@ -31,10 +31,11 @@ import android.widget.FrameLayout
  *
  * Everything it does is logged under the tag "PEKSplash" (adb logcat -s PEKSplash).
  *
- * Use: `val s = SplashOverlay(activity) { ... }; s.show()` in onCreate (after super.onCreate), `s.flutterShown()` from
- * onFlutterUiDisplayed().
+ * [standalone] = true is how SplashActivity (the launcher) uses it: the video fills that activity's own window, there is no Flutter
+ * screen yet to wait for, and [onGone] opens the app. Android keeps its own launch screen (the app icon) over a Flutter activity until
+ * Flutter has drawn its first frame, so a video drawn on top of the Flutter activity itself could never be seen at boot.
  */
-class SplashOverlay(private val activity: Activity, private val onGone: () -> Unit) {
+class SplashOverlay(private val activity: Activity, private val standalone: Boolean = false, private val onGone: () -> Unit) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val root = FrameLayout(activity)
@@ -66,8 +67,19 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
             override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
         }
 
-        // Shown a moment after onCreate returns, once the activity's window exists (a dialog opened inside onCreate can fail).
-        handler.post { openWindow() }
+        if (standalone) {
+            // The launcher activity's own window: nothing to wait for on the Flutter side.
+            flutterReady = true
+            activity.setContentView(root, FrameLayout.LayoutParams(-1, -1))
+            @Suppress("DEPRECATION")
+            activity.window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
+            root.requestFocus()
+        } else {
+            // Shown a moment after onCreate returns, once the activity's window exists (a dialog opened inside onCreate can fail).
+            handler.post { openWindow() }
+        }
 
         // The server (Boot) is ready when this thread returns; Flutter calls flutterShown() on its first frame.
         Thread {
@@ -186,7 +198,7 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
         videoDone = true
         releasePlayer()
         // The orange cover stays until the app is ready (or the video, which stays on its last frame, if you prefer: the cover is brand colour).
-        texture.visibility = View.INVISIBLE
+        if (!standalone) texture.visibility = View.INVISIBLE   // standalone: the last frame stays until the app opens over it
         giveUp = Runnable { flutterReady = true; serverReady = true; maybeRemove() }.also { handler.postDelayed(it, MAX_WAIT_AFTER_VIDEO_MS) }
         maybeRemove()
     }
@@ -196,6 +208,7 @@ class SplashOverlay(private val activity: Activity, private val onGone: () -> Un
         removed = true
         giveUp?.let { handler.removeCallbacks(it) }
         Log.i(TAG, "removing splash")
+        if (standalone) { onGone(); return }
         root.animate().alpha(0f).setDuration(250).withEndAction {
             try { dialog?.dismiss() } catch (_: Throwable) {}
             dialog = null

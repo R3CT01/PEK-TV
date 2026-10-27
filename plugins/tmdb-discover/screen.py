@@ -909,6 +909,7 @@ def detail_view():
                                   lambda: toggle_watched(item), selected=seen))
         if S["fav_msg"]:
             kids.append(ui.text(S["fav_msg"]))
+        kids.append(ui.rating_stars("show" if item["type"] == "tv" else "movie", item["title"], item["year"]))
     kids.append(ui.heading(item["title"]))
     kids.append(ui.text(" \u00b7 ".join([m for m in meta if m])))
     if owned(item):

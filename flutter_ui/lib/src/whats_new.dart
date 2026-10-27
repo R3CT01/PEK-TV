@@ -37,7 +37,10 @@ class WhatsNew {
       'Trakt is now part of PEK TV. Connect your Trakt account to scrobble what you watch, keep watched marks, ratings and favorites in step with Trakt both ways, and bring your Trakt history into PEK TV.',
       'Every profile has its own Trakt account, so each person\u2019s history, ratings and favorites stay separate. Open the Trakt plugin while that profile is open to connect it.',
       'Opening a profile brings that profile\u2019s Trakt history up to date. Deleting a profile signs its Trakt account out.',
-      'Fixes for several bugs in the app\u2019s screens and layout.',
+      'Your star ratings now show on movie and show posters, and under the title on a movie\u2019s page. Plugins can rate too: TMDb Discover and Stream Media have a 1 to 10 rating on their detail pages.',
+      'Posters and descriptions load faster, and the PEK splash video now plays as soon as you open the app.',
+      'Smooth playback no longer leaves a black screen when it switches on.',
+      'Fixes for several bugs in the app\u2019s screens and layout, including plugin rows with three buttons running off the edge of a phone screen.',
       'This screen: after an update, PEK TV tells you what changed once.',
     ]),
   ];
