@@ -563,8 +563,8 @@ def _rate_reported(s, kind, title, year, season, episode):
 
 
 def rating_stars(kind, title, year=0, season=0, episode=0, plain=False):
-    """Ready-made 'rate this' control for a detail page: a line of text and ten star buttons (two rows of five, so it fits a
-    phone). Tapping a star rates the title (1 to 10), tapping the star it already has takes the rating off. The rating is the
+    """Ready-made 'rate this' control for a detail page: a line of text and ten stars side by side on one line (no numbers; the
+    row shrinks to fit a phone). Tapping a star rates the title (1 to 10), tapping the star it already has takes the rating off. The rating is the
     profile's, the same one PEK TV shows on its own pages and cards, and it syncs to PEK Cloud. kind: \"movie\", \"show\" or
     \"episode\" (an episode's and a show's title is the show's title). plain=True labels the buttons 1 to 10 with no star symbols,
     for a plugin that keeps symbols out of its buttons. Needs \"watched\": true. Returns one tree node: put it in a
@@ -594,12 +594,19 @@ def rating_stars(kind, title, year=0, season=0, episode=0, plain=False):
         over[key] = (n, reported)
 
     noun = {"movie": "movie", "show": "show", "episode": "episode"}[kind]
-    def label(i):
-        return str(i) if plain else ("\u2605 %d" if i <= cur else "\u2606 %d") % i
 
-    rows = [row([button(label(i), (lambda i=i: rate(i)), selected=i <= cur)
-                 for i in range(lo, lo + 5)]) for lo in (1, 6)]
-    return column(text("Your rating: %d / 10" % cur if cur else "Rate this " + noun), *rows)
+    def picked(v):
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return
+        if 1 <= n <= 10:
+            rate(n)
+
+    # One native node: ten stars on one line, no numbers (PEK TV draws it, the same control as its own pages). `plain` is kept
+    # so older plugins still call this the same way; the stars have no symbols or numbers in their labels either way.
+    return column(text("Your rating" if cur else "Rate this " + noun),
+                  {"t": "stars", "v": int(cur), "on": _sess().register(picked, 1)})
 
 
 def favorites():

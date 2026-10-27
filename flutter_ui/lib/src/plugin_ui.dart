@@ -603,6 +603,9 @@ class _PluginViewState extends State<PluginView> {
           autofocus: _af(n),
           onTap: on.isEmpty ? null : () => _send(on),
         );
+      case 'stars':
+        // ui.rating_stars: the same ten-star control PEK TV's own pages use. A star sends its number (1..10, 0 = take it off).
+        return StarRating(value: ((n['v'] as num?)?.toInt() ?? 0).clamp(0, Ratings.max), onChanged: on.isEmpty ? (_) {} : (v) => _send(on, value: v));
       case 'card':
         final sub = '${n['sub'] ?? ''}';
         return PekCard(title: '${n['s'] ?? ''}', subtitle: sub.isEmpty ? null : sub, autofocus: _af(n), onTap: on.isEmpty ? null : () => _send(on));

@@ -5,8 +5,8 @@
         <item name="android:windowBackground">@color/pek_splash_bg</item>
     </style>
 
-    <!-- The Flutter screen: see-through until it has drawn, so SplashActivity's video (the window below it) stays visible while Flutter
-         boots on top of it, invisible (SplashGate.kt). Without a splash it paints PEK orange itself (FlutterHostActivity.onCreate). -->
+    <!-- The Flutter screen: see-through until it has drawn, so SplashActivity's last video frame (the window below it) stays visible
+         until Flutter's first frame (SplashGate.kt). Without a splash it paints PEK orange itself (FlutterHostActivity.onCreate). -->
     <style name="Theme.PEK.Flutter" parent="Theme.PEK.Launch">
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowBackground">@android:color/transparent</item>

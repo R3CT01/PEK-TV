@@ -120,11 +120,7 @@ class MovieScreen extends StatelessWidget {
             Text(title, style: TextStyle(fontSize: 1.7 * rem, fontWeight: FontWeight.w800)),
             if (Ratings.of(movie.title, movie.year) > 0) ...[
               SizedBox(height: 0.35 * rem),
-              Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.star_rounded, size: 1.3 * rem, color: const Color(0xFFFFC107)),
-                SizedBox(width: 0.25 * rem),
-                Text('${Ratings.of(movie.title, movie.year)} / ${Ratings.max}', style: TextStyle(fontWeight: FontWeight.w700, color: t.text)),
-              ]),
+              StarDisplay(value: Ratings.of(movie.title, movie.year)),
             ],
             SizedBox(height: 0.75 * rem),
             FutureBuilder<Details>(future: details, builder: (_, snap) => Text(snap.data?.overview ?? '', style: TextStyle(color: t.textMuted, height: 1.4))),

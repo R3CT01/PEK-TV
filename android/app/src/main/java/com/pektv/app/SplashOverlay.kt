@@ -2,52 +2,45 @@ package com.pektv.app
 
 import android.app.Activity
 import android.content.res.Configuration
+import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.Gravity
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.Surface
+import android.view.TextureView
 import android.view.View
 import android.widget.FrameLayout
 
 /**
- * The splash video, full screen in SplashActivity's own window (the launcher). See [SplashGate] for how it works with the Flutter
- * screen, which boots at the same time, invisible, above this window.
+ * The splash video, full screen in SplashActivity's own window (the launcher).
  *
- * The splash is lifted ([onGone]) only when ALL of these are true:
- *  - the video has played to the end (it cannot be skipped: touches, keys and Back are swallowed here and by the Flutter window),
- *  - the server answers (Boot), and
- *  - the Flutter app says it has loaded ([appReady]).
- * It never waits longer than [MAX_WAIT_AFTER_VIDEO_MS] after the video for the last two, and a video that cannot play ends after
- * [VIDEO_TIMEOUT_MS], so a slow or broken start cannot trap the person. If the video cannot play at all, the PEK-orange cover
- * stays until the app is ready.
+ * It is drawn into a TextureView, not a SurfaceView: a SurfaceView punches a hole in the window that shows BLACK until the first
+ * video frame arrives (and stays black if no frame ever does), while a TextureView is an ordinary view, so the PEK-orange cover
+ * underneath shows until the first frame. A video that cannot play therefore leaves the orange screen, never a black one.
  *
- * The video is drawn with MediaPlayer into a SurfaceView: frames go to the screen without passing through the app's main thread,
- * so the video does not stutter while Flutter's activity is being created on that thread.
+ * [onVideoDone] runs exactly once, on the main thread, when the video has played to the end, failed, never started drawing
+ * ([FIRST_FRAME_TIMEOUT_MS]) or never finished ([VIDEO_TIMEOUT_MS]). Whatever happens, the splash cannot trap the person.
+ * The finished player is kept (not released) so its last frame stays on screen until the app covers it.
  *
  * Everything is logged under the tag "PEKSplash" (adb logcat -s PEKSplash).
  */
 class SplashOverlay(
     private val activity: Activity,
-    /** The video is on screen: time to start booting the Flutter screen behind it. Called once. */
-    private val onVideoStarted: () -> Unit,
-    /** Video over, server up, app ready: reveal the app. Called once. */
-    private val onGone: () -> Unit,
+    /** The video is over (or could not play): time to open the app. Called once. */
+    private val onVideoDone: () -> Unit,
 ) {
 
     private val handler = Handler(Looper.getMainLooper())
     private val root = FrameLayout(activity)
-    private val surfaceView = SurfaceView(activity)
+    private val textureView = TextureView(activity)
+    private var surface: Surface? = null
     private var player: MediaPlayer? = null
 
-    private var videoDone = false
-    private var serverReady = false
-    private var appReady = false
+    private var done = false
+    private var firstFrame = false
     private var removed = false
-    private var startedNotified = false
-    private var giveUp: Runnable? = null
 
     fun show() {
         Log.i(TAG, "show()")
@@ -56,19 +49,24 @@ class SplashOverlay(
         root.isFocusable = true
         root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, _, _ -> true }   // not skippable: keys (including Back) are swallowed
-        root.addView(surfaceView, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
+        root.addView(textureView, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER))
         root.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fit() }
 
-        surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-            override fun surfaceCreated(holder: SurfaceHolder) { Log.i(TAG, "surface ready"); startVideo(holder) }
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-            override fun surfaceDestroyed(holder: SurfaceHolder) {
-                // The window went away (Home pressed, screen off): the video cannot go on, so it counts as over.
-                Log.i(TAG, "surface destroyed")
-                releasePlayer()
-                if (!removed) endVideo()
+        textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+            override fun onSurfaceTextureAvailable(st: SurfaceTexture, width: Int, height: Int) {
+                Log.i(TAG, "texture ready ${width}x$height")
+                startVideo(st)
             }
-        })
+            override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, width: Int, height: Int) {}
+            override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+            override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                // The window went away (Home pressed, screen off): the video cannot go on, so it counts as over.
+                Log.i(TAG, "texture destroyed")
+                releasePlayer()
+                if (!removed) finishVideo()
+                return true
+            }
+        }
 
         activity.setContentView(root, FrameLayout.LayoutParams(-1, -1))
         @Suppress("DEPRECATION")
@@ -77,83 +75,53 @@ class SplashOverlay(
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION)
         root.requestFocus()
 
-        // Already told (Flutter was faster than this object, which cannot really happen, but costs nothing to handle).
-        appReady = SplashGate.wasAppReady()
-
-        // The server (Boot) is ready when this thread returns; Flutter calls SplashGate.appReady() when the app has loaded.
-        Thread {
-            val ok = try { Boot.await() } catch (e: Throwable) { false }
-            handler.post {
-                Log.i(TAG, "server ready=$ok")
-                serverReady = true
-                if (!ok) appReady = true   // the Flutter screen shows its own "server did not start" message: just stop waiting
-                maybeRemove()
-            }
-        }.start()
-
-        // Whatever happens with the video, the splash can never outlive this.
+        // Whatever happens with the video, the splash can never outlive these.
         handler.postDelayed({
-            if (!videoDone) { Log.w(TAG, "video never finished - ending it"); endVideo() }
+            if (!firstFrame && !done) { Log.w(TAG, "no video frame after ${FIRST_FRAME_TIMEOUT_MS} ms - skipping the video"); finishVideo() }
+        }, FIRST_FRAME_TIMEOUT_MS)
+        handler.postDelayed({
+            if (!done) { Log.w(TAG, "video never finished - ending it"); finishVideo() }
         }, VIDEO_TIMEOUT_MS)
     }
 
-    /** Flutter has loaded the app (server up, update check done, first real screen built). Safe from any thread. */
-    fun appReady() {
-        handler.post {
-            if (appReady) return@post
-            Log.i(TAG, "app ready")
-            appReady = true
-            maybeRemove()
-        }
-    }
-
-    private fun startVideo(holder: SurfaceHolder) {
-        if (videoDone || player != null) return
+    private fun startVideo(st: SurfaceTexture) {
+        if (done || player != null) return
         try {
             val portrait = activity.resources.configuration.orientation == Configuration.ORIENTATION_PORTRAIT
             val res = if (portrait) R.raw.pek_splash_portrait else R.raw.pek_splash
+            val s = Surface(st)
+            surface = s
             val mp = MediaPlayer()
             player = mp
             activity.resources.openRawResourceFd(res).use { mp.setDataSource(it.fileDescriptor, it.startOffset, it.length) }
-            mp.setDisplay(holder)
+            mp.setSurface(s)
             mp.setVolume(0f, 0f)
             mp.isLooping = false
-            mp.setVideoScalingMode(MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING)
             mp.setOnVideoSizeChangedListener { _, w, h -> Log.i(TAG, "video size ${w}x$h"); fit() }
             mp.setOnPreparedListener { p -> Log.i(TAG, "prepared, ${p.duration} ms"); fit(); p.start() }
             mp.setOnInfoListener { _, what, _ ->
-                if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
-                    Log.i(TAG, "first frame drawn")
-                    // A moment later, so the first frames are not competing with the Flutter screen's start-up on the main thread.
-                    handler.postDelayed({ notifyVideoStarted() }, FLUTTER_START_DELAY_MS)
-                }
+                if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) { Log.i(TAG, "first frame drawn"); firstFrame = true }
                 false
             }
-            mp.setOnCompletionListener { Log.i(TAG, "video finished"); endVideo() }
-            mp.setOnErrorListener { _, what, extra -> Log.e(TAG, "video error what=$what extra=$extra"); endVideo(); true }
+            mp.setOnCompletionListener { Log.i(TAG, "video finished"); finishVideo() }
+            mp.setOnErrorListener { _, what, extra -> Log.e(TAG, "video error what=$what extra=$extra"); finishVideo(); true }
             mp.prepareAsync()
         } catch (e: Throwable) {
             Log.e(TAG, "video could not start", e)
-            endVideo()
+            finishVideo()
         }
-    }
-
-    private fun notifyVideoStarted() {
-        if (startedNotified || removed) return
-        startedNotified = true
-        Log.i(TAG, "starting the app behind the video")
-        onVideoStarted()
     }
 
     /** Drops the video right away (the activity is going away). */
     fun dismissNow() {
         removed = true
-        giveUp?.let { handler.removeCallbacks(it) }
         handler.removeCallbacksAndMessages(null)
         releasePlayer()
+        try { surface?.release() } catch (_: Throwable) {}
+        surface = null
     }
 
-    // Both cuts are 16:9 / 9:16: scale so the video just covers the screen (centre-crop); the window clips the overflow.
+    // Both cuts are 16:9 / 9:16: size the view so the video just covers the screen (centre-crop); the window clips the overflow.
     private fun fit() {
         val sw = root.width
         val sh = root.height
@@ -164,8 +132,8 @@ class SplashOverlay(
         val scale = maxOf(sw / vw, sh / vh)
         val w = (vw * scale).toInt() + 1
         val h = (vh * scale).toInt() + 1
-        val lp = surfaceView.layoutParams
-        if (lp == null || lp.width != w || lp.height != h) surfaceView.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.CENTER)
+        val lp = textureView.layoutParams
+        if (lp == null || lp.width != w || lp.height != h) textureView.layoutParams = FrameLayout.LayoutParams(w, h, Gravity.CENTER)
     }
 
     private fun releasePlayer() {
@@ -173,31 +141,17 @@ class SplashOverlay(
         player = null
     }
 
-    private fun endVideo() {
-        if (videoDone) return
-        videoDone = true
-        // The player is NOT released here: a finished MediaPlayer leaves its last frame on the surface, and that frame is what
-        // stays on screen until the app is revealed (the cover is brand orange if the video never played).
-        notifyVideoStarted()   // a video that never played still has to start the app
-        giveUp = Runnable {
-            Log.w(TAG, "gave up waiting (server=$serverReady app=$appReady)")
-            serverReady = true; appReady = true; maybeRemove()
-        }.also { handler.postDelayed(it, MAX_WAIT_AFTER_VIDEO_MS) }
-        maybeRemove()
-    }
-
-    private fun maybeRemove() {
-        if (removed || !videoDone || !serverReady || !appReady) return
-        removed = true
-        giveUp?.let { handler.removeCallbacks(it) }
-        Log.i(TAG, "splash done - revealing the app")
-        onGone()
+    private fun finishVideo() {
+        if (done) return
+        done = true
+        // The player is NOT released here: the last video frame stays on the TextureView until the app covers it (the orange
+        // cover shows if the video never played).
+        if (!removed) onVideoDone()
     }
 
     companion object {
         const val TAG = "PEKSplash"
-        const val MAX_WAIT_AFTER_VIDEO_MS = 6000L
-        const val VIDEO_TIMEOUT_MS = 12000L          // the clips are 5 s; this only catches a player that never reports back
-        const val FLUTTER_START_DELAY_MS = 250L
+        const val FIRST_FRAME_TIMEOUT_MS = 4000L   // the video starts in well under a second; this only catches a player that never draws
+        const val VIDEO_TIMEOUT_MS = 12000L        // the clips are 5 s; this only catches a player that never reports back
     }
 }

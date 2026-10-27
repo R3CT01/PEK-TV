@@ -11,42 +11,43 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 
 /**
- * The launcher activity: plays the PEK splash video full screen, unskippable, while the whole app boots behind it.
+ * The launcher activity: plays the PEK splash video full screen, unskippable, while the server and the Python plugins start in the
+ * background (Boot). It is the only window on screen while the video plays.
  *
- * Why this is its own activity: Android draws its own launch screen (the app icon on the splash colour) over an activity until that
- * activity's first frame, and the Flutter activity does not draw until Flutter has rendered its first frame. A video placed on the
- * Flutter activity itself therefore stayed hidden for the whole boot. This activity draws at once.
+ * When the video is over it opens the Flutter screen (FlutterHostActivity) on top. That window is see-through until Flutter has drawn
+ * its first frame, so the video's last frame stays up instead of flashing a colour; this activity closes when the app says it has
+ * loaded (see [SplashGate]), or after [MAX_WAIT_MS] at the latest.
  *
- * Why Flutter is opened right away and not after the video: FlutterHostActivity is started as soon as the video is on screen, but
- * invisible (see [SplashGate]), so Flutter, the server and the update check all run during the video. When the video is over and the
- * app is ready, the Flutter window is revealed on top of this one, which then closes: no orange gap, no screens loading in the open.
+ * (An earlier version started Flutter invisible ON TOP of the playing video and lifted it afterwards. Hiding a whole window with
+ * alpha 0 and a see-through activity over a video surface is exactly what shows a black screen on many phones, so the two are now
+ * strictly one after the other.)
  */
 class SplashActivity : Activity() {
 
     private var overlay: SplashOverlay? = null
-    private var flutterOpened = false
-    private var flutterMissing = false
+    private var appOpened = false
+    private var leftForApp = false
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setBackgroundDrawable(ColorDrawable(getColor(R.color.pek_splash_bg)))
         Boot.ensureStarted(applicationContext)   // everything heavy starts now and runs while the video plays
-        val o = SplashOverlay(this, onVideoStarted = { openFlutterBehind() }, onGone = { revealApp() })
+        SplashGate.begin { handler.postDelayed({ closeSplash() }, CLOSE_DELAY_MS) }
+        val o = SplashOverlay(this) { openApp() }
         overlay = o
-        SplashGate.begin(o)
         o.show()
     }
 
-    /** The video is playing: start the Flutter screen under it. It hides itself (see FlutterHostActivity) until revealed. */
-    private fun openFlutterBehind() {
-        if (flutterOpened || isFinishing || isDestroyed) return
-        flutterOpened = true
+    /** The video is over (or never played): open the Flutter screen on top of this one. */
+    private fun openApp() {
+        if (appOpened || isFinishing || isDestroyed) return
+        appOpened = true
         val target = try {
             Intent(this, Class.forName("com.pektv.app.flutter.FlutterHostActivity")).putExtra(EXTRA_FROM_SPLASH, true)
         } catch (e: Throwable) {
             Log.e("PEKSplash", "Flutter screen not found, using the hand-over screen", e)
-            flutterMissing = true
+            handOver()
             return
         }
         target.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
@@ -55,42 +56,56 @@ class SplashActivity : Activity() {
             overridePendingTransition(0, 0)
         } catch (e: Throwable) {
             Log.e("PEKSplash", "could not open the app", e)
-            flutterMissing = true
-        }
-    }
-
-    /** Video over, server up, app ready (or the wait ran out): show the app and close this screen. */
-    private fun revealApp() {
-        if (isFinishing || isDestroyed) return
-        if (!flutterOpened) openFlutterBehind()
-        if (flutterMissing) {
-            // No Flutter screen: the plain hand-over screen shows a message with Try again.
-            try { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)) } catch (e: Throwable) { Log.e("PEKSplash", "hand-over failed", e) }
-            handler.postDelayed({ finish() }, 300)
+            handOver()
             return
         }
-        SplashGate.reveal()
-        // A moment after the reveal, so the app's first frame is on screen before this window (and its last video frame) goes.
-        handler.postDelayed({ finish() }, CLOSE_DELAY_MS)
+        Log.i("PEKSplash", "video over - app opened")
+        // Normally closed by SplashGate when the app is ready; the timeout covers a Flutter screen that never says so. When the app
+        // was already loaded in this process (a second launch of the splash) there is nothing to wait for.
+        handler.postDelayed({ closeSplash() }, if (SplashGate.wasAppReady()) CLOSE_DELAY_MS else MAX_WAIT_MS)
     }
 
-    // Swallow everything while the splash is up; the Flutter window above does the same once it exists.
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean = if (SplashGate.active) true else super.dispatchKeyEvent(event)
-    override fun dispatchTouchEvent(ev: MotionEvent): Boolean = if (SplashGate.active) true else super.dispatchTouchEvent(ev)
+    /** No Flutter screen: the plain hand-over screen shows a message with Try again. */
+    private fun handOver() {
+        try { startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)) } catch (e: Throwable) { Log.e("PEKSplash", "hand-over failed", e) }
+        handler.postDelayed({ closeSplash() }, 300)
+    }
+
+    private fun closeSplash() {
+        if (!isFinishing && !isDestroyed) finish()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        if (appOpened) leftForApp = true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Back from the app (its Back button closed it): this screen has nothing left to show.
+        if (leftForApp) closeSplash()
+    }
+
+    // Swallow everything while the video plays; once the app is open the window above takes input.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = if (!appOpened) true else super.dispatchKeyEvent(event)
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean = if (!appOpened) true else super.dispatchTouchEvent(ev)
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         overlay?.dismissNow()
-        SplashGate.end(overlay)   // never leave the Flutter screen hidden because this one went away
         overlay = null
+        SplashGate.end()
         super.onDestroy()
     }
 
     @Deprecated("The splash cannot be skipped")
-    override fun onBackPressed() {}
+    override fun onBackPressed() {
+        if (appOpened) closeSplash()   // while the video plays Back does nothing
+    }
 
     companion object {
         const val EXTRA_FROM_SPLASH = "pek_from_splash"
-        private const val CLOSE_DELAY_MS = 350L
+        private const val CLOSE_DELAY_MS = 350L    // after the app is ready, so its first frame is on screen before this window goes
+        private const val MAX_WAIT_MS = 15000L     // the longest this screen stays behind the app waiting for "ready"
     }
 }

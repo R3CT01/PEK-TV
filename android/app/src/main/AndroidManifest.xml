@@ -84,8 +84,8 @@
              Remove this line to try Impeller again once video is confirmed to show through. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
 
-        <!-- Launcher entry: plays the splash video (SplashOverlay.kt) full screen while the Flutter UI below boots invisible behind it
-             (SplashGate.kt), then reveals it. -->
+        <!-- Launcher entry: plays the splash video (SplashOverlay.kt) full screen while Boot starts the server and plugins, then opens the
+             Flutter UI on top of it (SplashGate.kt closes this screen once Flutter is ready). -->
         <activity
             android:name=".SplashActivity"
             android:exported="true"

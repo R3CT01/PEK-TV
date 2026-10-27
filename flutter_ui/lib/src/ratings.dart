@@ -216,8 +216,11 @@ RateTarget targetOfHistory(HistoryEntry e) => e.kind == 'episode' ? Ratings.epis
 
 // ====================================================================== UI
 
-/// Ten tappable stars. Tapping the star that is already the rating removes it. On a remote, left / right moves between the stars
-/// and select rates.
+const _starGold = Color(0xFFFFC107);
+
+/// Ten tappable stars, shoulder to shoulder on ONE line: no gaps, no numbers. When the screen is narrower than the row the whole row
+/// shrinks to fit (never wraps). Tapping the star that is already the rating removes it. On a remote, left / right moves between
+/// the stars and select rates.
 class StarRating extends StatelessWidget {
   const StarRating({super.key, required this.value, required this.onChanged, this.autofocus = false});
   final int value; // 0 = not rated
@@ -228,21 +231,51 @@ class StarRating extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = context.pek;
     final t = p.tokens;
-    final size = 1.9 * p.rem;
+    final size = 2.2 * p.rem; // the natural size of one star; the row scales down as one piece when the line is shorter than 10 of these
     return FittedBox(
       fit: BoxFit.scaleDown,
       alignment: Alignment.centerLeft,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         for (var i = 1; i <= Ratings.max; i++)
-          PekFocusable(
-            autofocus: autofocus && (value == 0 ? i == 1 : i == value),
-            radius: 999,
-            padding: EdgeInsets.all(0.15 * p.rem),
-            background: Colors.transparent,
-            onTap: () => onChanged(i == value ? 0 : i),
-            child: Icon(i <= value ? Icons.star_rounded : Icons.star_outline_rounded, size: size, color: i <= value ? const Color(0xFFFFC107) : t.textMuted),
+          Semantics(
+            button: true,
+            label: i == value ? 'Rated $i of ${Ratings.max} stars, tap to remove' : 'Rate $i of ${Ratings.max} stars',
+            excludeSemantics: true,
+            child: PekFocusable(
+              autofocus: autofocus && (value == 0 ? i == 1 : i == value),
+              radius: 999,
+              padding: EdgeInsets.zero, // no padding: the stars touch
+              background: Colors.transparent,
+              onTap: () => onChanged(i == value ? 0 : i),
+              child: Icon(i <= value ? Icons.star_rounded : Icons.star_outline_rounded, size: size, color: i <= value ? _starGold : t.textMuted),
+            ),
           ),
       ]),
+    );
+  }
+}
+
+/// The same ten stars, only to look at (no taps, no focus, no number): a movie's rating under its title.
+class StarDisplay extends StatelessWidget {
+  const StarDisplay({super.key, required this.value, this.size});
+  final int value; // 1..10
+  final double? size; // one star; default 1.3 rem
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final s = size ?? 1.3 * p.rem;
+    return Semantics(
+      label: 'Rated $value out of ${Ratings.max} stars',
+      excludeSemantics: true,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          for (var i = 1; i <= Ratings.max; i++) Icon(i <= value ? Icons.star_rounded : Icons.star_outline_rounded, size: s, color: i <= value ? _starGold : t.textMuted),
+        ]),
+      ),
     );
   }
 }
@@ -265,7 +298,7 @@ class RatingPanel extends StatelessWidget {
     final target = (kind: kind, title: title, year: year, season: season, episode: episode);
     final v = Ratings.ofTarget(target);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(v > 0 ? 'Your rating: $v / ${Ratings.max}' : 'Rate this ${_noun(kind)}', style: TextStyle(fontWeight: FontWeight.w700, color: t.text)),
+      Text(v > 0 ? 'Your rating' : 'Rate this ${_noun(kind)}', style: TextStyle(fontWeight: FontWeight.w700, color: t.text)),
       SizedBox(height: 0.35 * p.rem),
       StarRating(value: v, onChanged: (n) => Ratings.rateTarget(target, n)),
     ]);
@@ -286,7 +319,7 @@ Future<void> showRateDialog(BuildContext context, {required String title, int ye
         return AlertDialog(
           title: Text(heading),
           content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(v > 0 ? 'Your rating: $v / ${Ratings.max}' : 'Not rated yet'),
+            Text(v > 0 ? 'Your rating' : 'Not rated yet'),
             const SizedBox(height: 8),
             StarRating(value: v, autofocus: true, onChanged: (n) => Ratings.rateTarget(target, n)),
           ]),
