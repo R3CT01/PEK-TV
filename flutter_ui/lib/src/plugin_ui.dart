@@ -69,8 +69,57 @@ class _InputState {
   String sent; // what the plugin last heard from this box
 }
 
-class _PluginViewState extends State<PluginView> {
+class _PluginViewState extends State<PluginView> with WidgetsBindingObserver {
   final ScrollController _scroll = ScrollController();
+  _TrailerHolder? _trailer; // the trailer's web view (see _TrailerHolder)
+  bool _trailerSeen = true; // enough of the trailer is on screen
+  bool _covered = false; // another page (the player, a dialog) is on top of this one
+  bool _foreground = true; // the app itself is in front
+  Animation<double>? _secondary;
+
+  _TrailerHolder _holderFor(String id) => (_trailer != null && _trailer!.id == id) ? _trailer! : (_trailer = _TrailerHolder(id));
+
+  void _syncTrailer() => _trailer?.setActive(_trailerSeen && !_covered && _foreground);
+
+  void _onScrollTrailer() {
+    if (!_scroll.hasClients || _heroH <= 0) return;
+    final seen = _scroll.offset < _heroH * 0.8;
+    if (seen != _trailerSeen) {
+      _trailerSeen = seen;
+      _syncTrailer();
+    }
+  }
+
+  void _coverStatus(AnimationStatus s) {
+    final covered = s != AnimationStatus.dismissed;
+    if (covered != _covered) {
+      _covered = covered;
+      _syncTrailer();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final fg = state == AppLifecycleState.resumed;
+    if (fg != _foreground) {
+      _foreground = fg;
+      _syncTrailer();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The page below another route has a running "secondary animation": that is how a page knows something opened on top of it.
+    final a = ModalRoute.of(context)?.secondaryAnimation;
+    if (!identical(a, _secondary)) {
+      _secondary?.removeStatusListener(_coverStatus);
+      _secondary = a;
+      a?.addStatusListener(_coverStatus);
+      if (a != null) _coverStatus(a.status);
+    }
+  }
+
   final GlobalKey _listKey = GlobalKey();
   double _heroH = 0; // height of the trailer at the top of the page (0 = none)
   final Map<String, _InputState> _inputs = {};
@@ -94,6 +143,8 @@ class _PluginViewState extends State<PluginView> {
     super.initState();
     FocusManager.instance.addListener(_nearTop);
     HardwareKeyboard.instance.addHandler(_upKey);
+    WidgetsBinding.instance.addObserver(this);
+    _scroll.addListener(_onScrollTrailer);
     // context.pek needs the inherited scope, so the first call waits for the first frame.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _open();
@@ -104,6 +155,9 @@ class _PluginViewState extends State<PluginView> {
   void dispose() {
     FocusManager.instance.removeListener(_nearTop);
     HardwareKeyboard.instance.removeHandler(_upKey);
+    WidgetsBinding.instance.removeObserver(this);
+    _secondary?.removeStatusListener(_coverStatus);
+    _scroll.removeListener(_onScrollTrailer);
     _timer?.cancel();
     if (PluginBack.current == _backFn) PluginBack.current = null;
     for (final s in _inputs.values) {
@@ -546,6 +600,9 @@ class _PluginViewState extends State<PluginView> {
     // away with the page instead of staying pinned and squeezing the buttons under it. It is not restarted when the
     // screen is redrawn (same key), and it stops once it has scrolled well out of view.
     final video = (_error == null && _tree != null) ? _findVideo(_tree!) : null;
+    if (video == null) {
+      _trailer = null; // the page has no trailer any more: let go of its web view
+    }
     final Widget body;
     if (_error != null) {
       body = ListView(padding: widget.padding, children: [
@@ -566,7 +623,7 @@ class _PluginViewState extends State<PluginView> {
             SizedBox(
               height: heroH,
               child: Stack(fit: StackFit.expand, children: [
-                _PluginTrailer(key: ValueKey('trailer-${video['id']}'), id: '${video['id']}', autoplay: video['autoplay'] == true, muted: video['muted'] == true),
+                _PluginTrailer(key: ValueKey('trailer-${video['id']}'), id: '${video['id']}', autoplay: video['autoplay'] == true, muted: video['muted'] == true, holder: _holderFor('${video['id']}')),
                 Positioned(
                   left: 0,
                   right: 0,
@@ -578,7 +635,7 @@ class _PluginViewState extends State<PluginView> {
                 ),
               ]),
             ),
-          Padding(padding: widget.padding, child: _node(_tree!)),
+          Padding(padding: p.isTv ? widget.padding.copyWith(bottom: widget.padding.bottom + 1.2 * p.rem) : widget.padding, child: _node(_tree!)),
         ]);
       });
     }
@@ -833,11 +890,17 @@ class _PluginViewState extends State<PluginView> {
       // Row height = poster (2:3) + caption (title + sub line, scaled with the system text size) + list padding + slack,
       // so the card never overflows by a fraction of a pixel (the yellow/black "BOTTOM OVERFLOWED" stripes).
       final textScale = MediaQuery.textScalerOf(context).scale(1.0);
+      // The focused card is drawn up to 7% bigger than its box and a list clips at its own edge, so the row keeps that much
+      // room above, below and beside the cards (it used to cut off the top of the focused card).
+      final cardH = minW / (2 / 3) + 3.3 * rem;
+      final grow = p.isTv ? 0.035 : 0.015;
+      final vPad = 0.4 * rem + grow * cardH + 2;
+      final hPad = 0.3 * rem + grow * minW + 2;
       return SizedBox(
-        height: minW / (2 / 3) + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.8 + 0.6) * rem * math.max(1.0, textScale) + 6,
+        height: minW / (2 / 3) + (0.45 + 0.85 * 1.2 + 0.1 + 0.75 * 1.4 + 0.6) * rem * math.max(1.0, textScale) + 2 * vPad + 6,
         child: ListView.separated(
           scrollDirection: Axis.horizontal,
-          padding: EdgeInsets.symmetric(vertical: 0.4 * rem, horizontal: 0.3 * rem),
+          padding: EdgeInsets.symmetric(vertical: vPad, horizontal: hPad),
           itemCount: kids.length,
           separatorBuilder: (_, __) => SizedBox(width: gap),
           itemBuilder: (_, i) => Align(alignment: Alignment.topCenter, child: SizedBox(width: minW, child: _node(kids[i]))),
@@ -855,23 +918,52 @@ class _PluginViewState extends State<PluginView> {
 /// `ui.video`: a YouTube trailer in a web view that can only show www.youtube-nocookie.com (any other address, such
 /// as the YouTube logo's link, is refused). It starts by itself when the plugin says so; otherwise the person presses
 /// play. On a TV the web view is skipped by the D-pad, so the remote keeps moving through the page.
+/// Owns the trailer's web view for as long as the plugin page is open. The list drops the trailer's widget when it scrolls
+/// out of view (and a page above it can cover it), and a new widget used to build a NEW web view that started the video again
+/// from the beginning. The web view lives here instead, so a new widget just picks it up where it was, and the trailer is
+/// paused (never restarted) while it cannot be seen.
+class _TrailerHolder {
+  _TrailerHolder(this.id);
+  final String id;
+  WebViewController? controller;
+  bool _active = true;
+
+  void _command(String fn) {
+    final c = controller;
+    if (c == null) return;
+    try {
+      unawaited(c.runJavaScript("post({event:'command',func:'$fn',args:[]})").catchError((Object _) {}));
+    } catch (_) {}
+  }
+
+  /// false = cannot be seen (scrolled away, a player or dialog on top, app in the background): pause. true = play on.
+  void setActive(bool on) {
+    if (on == _active) return;
+    _active = on;
+    _command(on ? 'playVideo' : 'pauseVideo');
+  }
+}
+
 class _PluginTrailer extends StatefulWidget {
-  const _PluginTrailer({super.key, required this.id, required this.autoplay, required this.muted});
+  const _PluginTrailer({super.key, required this.id, required this.autoplay, required this.muted, required this.holder});
   final String id;
   final bool autoplay;
   final bool muted;
+  final _TrailerHolder holder;
 
   @override
   State<_PluginTrailer> createState() => _PluginTrailerState();
 }
 
 class _PluginTrailerState extends State<_PluginTrailer> {
-  WebViewController? _controller;
+  WebViewController? get _controller => widget.holder.controller;
+  set _controller(WebViewController? c) => widget.holder.controller = c;
 
   @override
   void initState() {
     super.initState();
-    if (widget.autoplay) _start(play: true);
+    // A web view that already exists (the widget was rebuilt after scrolling back, or after a page was closed) is reused as it is.
+    if (widget.autoplay && _controller == null) _start(play: true);
   }
 
   void _start({required bool play}) {
@@ -1019,6 +1111,8 @@ class _PluginPoster extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       focusScale: p.isTv ? 1.07 : 1.03,
+      // The focused card is drawn bigger than its box: scroll that extra edge into view too, so it is never cut off.
+      focusMargin: p.isTv ? 0.8 * rem : 0,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

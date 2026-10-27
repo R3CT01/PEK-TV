@@ -3,6 +3,7 @@ import 'package:flutter/services.dart' show KeyDownEvent, KeyEvent, KeyUpEvent, 
 
 import 'tokens.dart';
 import 'widgets.dart' show PekFocusable;
+import 'suggest.dart' show SuggestAnchor;
 
 /// A text box in the app's look (the web UI's `ui.textInput`).
 class PekField extends StatelessWidget {
@@ -76,6 +77,8 @@ class DpadEscape extends StatelessWidget {
         final atEnd = !sel.isValid || (sel.isCollapsed && sel.baseOffset >= controller.text.length);
         TraversalDirection? d;
         if (k == LogicalKeyboardKey.arrowDown) {
+          // A suggestions list under the box (search bars): go straight onto its first row.
+          if (e is KeyDownEvent && SuggestAnchor.focusFirst(context)) return KeyEventResult.handled;
           d = TraversalDirection.down;
         } else if (k == LogicalKeyboardKey.arrowUp) {
           d = TraversalDirection.up;

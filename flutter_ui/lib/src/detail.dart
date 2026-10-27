@@ -117,7 +117,7 @@ class MovieScreen extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: TextStyle(fontSize: 1.7 * rem, fontWeight: FontWeight.w800)),
+            Text(title, style: TextStyle(fontSize: (p.narrow ? 1.7 : 2.3) * rem, fontWeight: FontWeight.w800, height: 1.15)),
             if (Ratings.of(movie.title, movie.year) > 0) ...[
               SizedBox(height: 0.35 * rem),
               StarDisplay(value: Ratings.of(movie.title, movie.year)),
@@ -140,14 +140,19 @@ class MovieScreen extends StatelessWidget {
         );
       },
     );
+    final top = kToolbarHeight + MediaQuery.paddingOf(context).top; // wide screens: the page runs up behind the app bar
     return Scaffold(
       backgroundColor: t.bg,
+      extendBodyBehindAppBar: !p.narrow,
       appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, actions: weatherActions(context)),
       body: p.narrow
           ? SingleChildScrollView(padding: EdgeInsets.all(rem), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Center(child: poster), SizedBox(height: rem), info]))
-          : Padding(
-              padding: EdgeInsets.fromLTRB(2 * rem + p.safeX, rem, 2 * rem + p.safeX, rem),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [poster, SizedBox(width: 2 * rem), Expanded(child: SingleChildScrollView(child: info))]),
+          : BackdropHeader(
+              details: details,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(2 * rem + p.safeX, top + 0.5 * rem, 2 * rem + p.safeX, rem),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [poster, SizedBox(width: 2 * rem), Expanded(child: SingleChildScrollView(child: info))]),
+              ),
             ),
     );
   }
@@ -179,34 +184,56 @@ class _ShowScreenState extends State<ShowScreen> {
     final details = Api.showDetails(show.title);
     final seasons = show.seasons;
     final episodes = seasons.isEmpty ? const <Episode>[] : seasons[_season].episodes;
+    final wide = !p.narrow;
+    final top = kToolbarHeight + MediaQuery.paddingOf(context).top; // wide screens: the page runs up behind the app bar
     return Scaffold(
       backgroundColor: t.bg,
-      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, title: Text(show.title), actions: weatherActions(context)),
+      extendBodyBehindAppBar: wide,
+      appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0, foregroundColor: t.text, title: wide ? null : Text(show.title), actions: weatherActions(context)),
       body: ValueListenableBuilder<int>(
         valueListenable: Store.changed,
         builder: (context, _, __) {
           final fav = Store.isFavorite('s:${show.title}');
           final allSeen = seasonsWatched(show, seasons);
           final seasonSeen = seasons.isNotEmpty && seasonsWatched(show, [seasons[_season]]);
-          return ListView(
-            padding: EdgeInsets.fromLTRB(rem + p.safeX, 0, rem + p.safeX, rem),
-            children: [
-              FutureBuilder<Details>(future: details, builder: (_, snap) => ExpandableText(snap.data?.overview ?? '', maxLines: 4)),
-              SizedBox(height: 0.75 * rem),
-              Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
-                PekButton(compact: true, label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.show(show.title))),
-                PekButton(
-                  compact: true,
-                  label: allSeen ? 'Mark show as unwatched' : 'Mark show as watched',
-                  onTap: () => Watched.set([for (final se in seasons) for (final e in se.episodes) episodeItem(show, e)], !allSeen),
-                ),
-                if (seasons.isNotEmpty)
-                  PekButton(
-                    compact: true,
-                    label: seasonSeen ? 'Mark season as unwatched' : 'Mark season as watched',
-                    onTap: () => Watched.set([for (final e in episodes) episodeItem(show, e)], !seasonSeen),
+          final overview = FutureBuilder<Details>(future: details, builder: (_, snap) => ExpandableText(snap.data?.overview ?? '', maxLines: 4));
+          final actions = Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
+            PekButton(compact: true, label: fav ? '\u2665 Favorited' : '\u2661 Favorite', onTap: () => Store.toggleFavorite(Favorite.show(show.title))),
+            PekButton(
+              compact: true,
+              label: allSeen ? 'Mark show as unwatched' : 'Mark show as watched',
+              onTap: () => Watched.set([for (final se in seasons) for (final e in se.episodes) episodeItem(show, e)], !allSeen),
+            ),
+            if (seasons.isNotEmpty)
+              PekButton(
+                compact: true,
+                label: seasonSeen ? 'Mark season as unwatched' : 'Mark season as watched',
+                onTap: () => Watched.set([for (final e in episodes) episodeItem(show, e)], !seasonSeen),
+              ),
+          ]);
+          // Wide screens (TV): poster, big title, synopsis and buttons side by side. Phones keep the plain list.
+          final header = wide
+              ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  SizedBox(
+                    width: 12 * rem,
+                    child: AspectRatio(aspectRatio: 2 / 3, child: ClipRRect(borderRadius: BorderRadius.circular(t.radius), child: PosterImage(poster: details, title: show.title, width: 480))),
                   ),
-              ]),
+                  SizedBox(width: 2 * rem),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text(show.title, style: TextStyle(fontSize: 2.3 * rem, fontWeight: FontWeight.w800, height: 1.15)),
+                      SizedBox(height: 0.75 * rem),
+                      overview,
+                      SizedBox(height: 1 * rem),
+                      actions,
+                    ]),
+                  ),
+                ])
+              : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [overview, SizedBox(height: 0.75 * rem), actions]);
+          final list = ListView(
+            padding: EdgeInsets.fromLTRB(wide ? 2 * rem + p.safeX : rem + p.safeX, wide ? top + 0.5 * rem : 0, wide ? 2 * rem + p.safeX : rem + p.safeX, rem),
+            children: [
+              header,
               SizedBox(height: 0.75 * rem),
               RatingPanel(title: show.title, kind: 'show'),
               SizedBox(height: 0.75 * rem),
@@ -229,6 +256,7 @@ class _ShowScreenState extends State<ShowScreen> {
               for (final e in episodes) _episodeRow(context, show, e),
             ],
           );
+          return wide ? BackdropHeader(details: details, child: list) : list;
         },
       ),
     );

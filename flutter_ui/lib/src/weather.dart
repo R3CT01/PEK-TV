@@ -293,9 +293,9 @@ class _WeatherBadgeState extends State<WeatherBadge> {
           radius: 999,
           background: t.surface,
           borderColor: t.border,
-          minHeight: p.isTv ? 3 * rem : 2.5 * rem,
-          alignment: Alignment.center,
-          padding: EdgeInsets.symmetric(horizontal: 1.1 * rem, vertical: 0.45 * rem),
+          // No minHeight / alignment: an aligned box fills the whole line when something loose (an Align on a plugin screen)
+          // holds it, which is what stretched the pill across the page. The height comes from the padding instead.
+          padding: EdgeInsets.symmetric(horizontal: 1.1 * rem, vertical: (((p.isTv ? 2.4 : 2.5) * rem) - 1.05 * rem * 1.2) / 2),
           child: Text(text, maxLines: 1, style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600, color: t.text, height: 1.2)),
         ),
       ),

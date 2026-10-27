@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter, TileMode;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +28,7 @@ class PekFocusable extends StatefulWidget {
     this.borderColor,
     this.radius = 0,
     this.focusScale = 1.0,
+    this.focusMargin = 0,
     this.padding,
     this.minHeight,
     this.alignment,
@@ -46,6 +48,9 @@ class PekFocusable extends StatefulWidget {
   final Color? borderColor; // null = no border (poster cards)
   final double radius;
   final double focusScale;
+
+  /// Extra room (logical px) scrolled into view around the focused item, for a [focusScale] that draws it bigger than its box.
+  final double focusMargin;
   final EdgeInsetsGeometry? padding;
   final double? minHeight;
   final AlignmentGeometry? alignment;
@@ -59,6 +64,19 @@ class _PekFocusableState extends State<PekFocusable> {
   Timer? _hold;
   bool _heldFired = false;
   late final FocusNode _node = FocusNode(debugLabel: 'PekFocusable', onKeyEvent: _holdKey);
+  final GlobalKey _revealKey = GlobalKey();
+
+  /// The scrolling page only brings the item's own (unscaled) box into view, so the edge of a raised card could stay cut off at
+  /// the top / bottom of the screen. This brings a slightly larger invisible box around the card into view as well (and only
+  /// moves the page when that box is not already visible).
+  void _revealMargin() {
+    if (!mounted) return;
+    final c = _revealKey.currentContext;
+    if (c == null || !c.mounted) return;
+    const d = Duration(milliseconds: 90);
+    Scrollable.ensureVisible(c, duration: d, curve: Curves.easeOut, alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+    Scrollable.ensureVisible(c, duration: d, curve: Curves.easeOut, alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart);
+  }
 
   @override
   void dispose() {
@@ -101,7 +119,7 @@ class _PekFocusableState extends State<PekFocusable> {
     // On a TV the focus ring is drawn ON TOP of the box (foregroundDecoration). A solid BoxShadow behind a see-through focus
     // fill shines through it and turns the whole row deep orange. No fade either: the old item lets go at once, so two
     // items are never lit together.
-    final ringColor = (widget.focusBackground != null ? t.text : t.borderFocus).withAlpha(210);
+    final ringColor = (widget.focusBackground != null && widget.focusBackground != Colors.transparent ? t.text : t.borderFocus).withAlpha(210);
     final box = Container(
       padding: widget.padding,
       alignment: widget.alignment,
@@ -122,7 +140,10 @@ class _PekFocusableState extends State<PekFocusable> {
       autofocus: widget.autofocus,
       enabled: widget.enabled,
       focusNode: _node,
-      onShowFocusHighlight: (v) => setState(() => _focus = v),
+      onShowFocusHighlight: (v) {
+        setState(() => _focus = v);
+        if (v && widget.focusMargin > 0) WidgetsBinding.instance.addPostFrameCallback((_) => _revealMargin());
+      },
       actions: {
         ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: (_) {
           widget.onTap?.call();
@@ -133,11 +154,17 @@ class _PekFocusableState extends State<PekFocusable> {
         behavior: HitTestBehavior.opaque,
         onTap: widget.enabled ? widget.onTap : null,
         onLongPress: widget.enabled ? widget.onLongPress : null,
-        child: AnimatedScale(
-          scale: focused ? widget.focusScale : 1.0,
-          duration: const Duration(milliseconds: 120),
-          child: box,
-        ),
+        child: widget.focusMargin > 0
+            ? Stack(clipBehavior: Clip.none, fit: StackFit.passthrough, children: [
+                // Invisible, a little bigger than the card, never takes a touch: only used by _revealMargin.
+                Positioned(left: -widget.focusMargin, right: -widget.focusMargin, top: -widget.focusMargin, bottom: -widget.focusMargin, child: IgnorePointer(child: SizedBox(key: _revealKey))),
+                AnimatedScale(scale: focused ? widget.focusScale : 1.0, duration: const Duration(milliseconds: 120), child: box),
+              ])
+            : AnimatedScale(
+                scale: focused ? widget.focusScale : 1.0,
+                duration: const Duration(milliseconds: 120),
+                child: box,
+              ),
       ),
     );
   }
@@ -163,6 +190,13 @@ class PekButton extends StatelessWidget {
     final rem = p.rem;
     final fg = primary ? t.bg : t.text;
     final bg = primary ? t.accent : t.surface;
+    final tv = p.isTv;
+    // On a TV the button wraps its label (no full-width stretch inside a Wrap) and is slimmer: 2.4rem (2.1rem compact).
+    // Phones keep the old sizes.
+    final natural = shrink || tv;
+    final tvHeight = (compact ? 2.1 : 2.4) * rem;
+    final fontSize = (tv ? 0.85 : 0.9) * rem;
+    final height = tv ? tvHeight : (compact ? 2.5 : 2.6) * rem;
     return Opacity(
       opacity: onTap == null ? 0.5 : 1,
       child: PekFocusable(
@@ -172,11 +206,15 @@ class PekButton extends StatelessWidget {
         radius: 999,
         background: bg,
         focusBackground: primary ? t.accent : null,
-        // A shrink-wrapped button has no alignment (it would stretch to the full line) so its height comes from padding.
-        minHeight: shrink ? null : (p.isTv ? 3 * rem : (compact ? 2.5 : 2.75) * rem),
-        alignment: shrink ? null : Alignment.center,
-        padding: shrink
-            ? EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.2) * rem, vertical: ((p.isTv ? 3.0 : (compact ? 2.5 : 2.6)) * rem - 0.9 * rem * 1.2) / 2)
+        // Subtle outline on secondary TV buttons so they read as buttons, not floating text.
+        borderColor: tv && !primary ? t.border : null,
+        // A gentle lift on focus (TV only), so the selected button stands out without a bigger ring.
+        focusScale: tv ? 1.05 : 1.0,
+        // A natural-width button has no alignment (it would stretch to the full line) so its height comes from padding.
+        minHeight: natural ? null : 2.75 * rem,
+        alignment: natural ? null : Alignment.center,
+        padding: natural
+            ? EdgeInsets.symmetric(horizontal: (tv ? (compact ? 1.1 : 1.4) : (compact ? 1.0 : 1.2)) * rem, vertical: (height - fontSize * 1.2) / 2)
             : EdgeInsets.symmetric(horizontal: (compact ? 1.0 : 1.25) * rem, vertical: (compact ? 0.45 : 0.6) * rem),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -184,12 +222,65 @@ class PekButton extends StatelessWidget {
           children: [
             if (leading != null) ...[leading!, SizedBox(width: 0.5 * rem)],
             Flexible(
-              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.9 * rem, fontWeight: FontWeight.w600, color: fg, height: 1.2)),
+              child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: fontSize, fontWeight: FontWeight.w600, letterSpacing: tv ? 0.2 : 0, color: fg, height: 1.2)),
             ),
           ],
         ),
       ),
     );
+  }
+}
+
+/// A soft ambient backdrop for the wide (TV / tablet) detail pages: the title's own poster, blurred, dimmed and faded into
+/// the page colour behind the header. (The server only knows a poster, not a fan-art picture, so the poster is reused.)
+/// The blurred picture is drawn once (RepaintBoundary) and decoded small, so it is cheap even on a weak TV box.
+class BackdropHeader extends StatelessWidget {
+  const BackdropHeader({super.key, required this.details, required this.child});
+  final Future<Details> details;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    final t = p.tokens;
+    final dark = t.bg.computeLuminance() < 0.5;
+    return Stack(children: [
+      Positioned(
+        left: 0,
+        right: 0,
+        top: 0,
+        height: p.size.height * 0.7,
+        child: RepaintBoundary(
+          child: FutureBuilder<Details>(
+            future: details,
+            builder: (_, snap) {
+              final url = snap.data?.poster ?? '';
+              return Stack(fit: StackFit.expand, children: [
+                if (url.isNotEmpty)
+                  Opacity(
+                    opacity: dark ? 0.5 : 0.3,
+                    child: ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 22, sigmaY: 22, tileMode: TileMode.clamp),
+                      child: ArtImage(url, fit: BoxFit.cover, cacheWidth: 200, errorBuilder: (_, __, ___) => const SizedBox.shrink()),
+                    ),
+                  ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [t.bg.withAlpha(60), t.bg.withAlpha(150), t.bg],
+                      stops: const [0, 0.55, 1],
+                    ),
+                  ),
+                ),
+              ]);
+            },
+          ),
+        ),
+      ),
+      Positioned.fill(child: child),
+    ]);
   }
 }
 

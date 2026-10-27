@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'art_cache.dart';
 import 'tokens.dart';
@@ -32,12 +33,49 @@ class SuggestAnchor extends StatefulWidget {
   final List<SuggestItem> items;
   final int max;
 
+  /// Called by the text box when Down is pressed: puts the focus on the first suggestion. Geometry-based focus search from a
+  /// text box was not reliable on a TV (it could skip the list), so this goes straight there. false = no list is showing,
+  /// so the caller falls back to the normal "move down".
+  static bool focusFirst(BuildContext context) => context.findAncestorStateOfType<_SuggestAnchorState>()?._focusFirst() ?? false;
+
   @override
   State<SuggestAnchor> createState() => _SuggestAnchorState();
 }
 
 class _SuggestAnchorState extends State<SuggestAnchor> {
   bool _focused = false;
+
+  /// Watches the list: Focus() with canRequestFocus: false never takes the focus itself, but sees the keys of its rows.
+  final FocusNode _listNode = FocusNode(debugLabel: 'SuggestList', canRequestFocus: false, skipTraversal: true);
+  FocusNode? _back; // the text box's focus, so Up from the first row can return to it
+
+  @override
+  void dispose() {
+    _listNode.dispose();
+    super.dispose();
+  }
+
+  List<FocusNode> _rows() => _listNode.traversalDescendants.where((n) => n.canRequestFocus).toList();
+
+  bool _focusFirst() {
+    final rows = _rows();
+    if (rows.isEmpty) return false;
+    _back = FocusManager.instance.primaryFocus;
+    rows.first.requestFocus();
+    return true;
+  }
+
+  KeyEventResult _listKey(FocusNode node, KeyEvent e) {
+    if (e is! KeyDownEvent || e.logicalKey != LogicalKeyboardKey.arrowUp) return KeyEventResult.ignored;
+    final rows = _rows();
+    final back = _back;
+    // Up from the FIRST suggestion goes back into the text box (the others move up the list as usual).
+    if (rows.isNotEmpty && rows.first.hasPrimaryFocus && back != null && back.canRequestFocus) {
+      back.requestFocus();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,21 +97,25 @@ class _SuggestAnchorState extends State<SuggestAnchor> {
           return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             widget.field,
             if (open)
-              Container(
-                margin: EdgeInsets.only(top: 0.1 * p.rem, bottom: 0.4 * p.rem),
-                clipBehavior: Clip.antiAlias,
-                decoration: BoxDecoration(
-                  color: t.glassStrong,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: t.border),
-                  boxShadow: [BoxShadow(color: t.shadow, blurRadius: 18, offset: const Offset(0, 6))],
+              Focus(
+                focusNode: _listNode,
+                onKeyEvent: _listKey,
+                child: Container(
+                  margin: EdgeInsets.only(top: 0.1 * p.rem, bottom: 0.4 * p.rem),
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: t.glassStrong,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: t.border),
+                    boxShadow: [BoxShadow(color: t.shadow, blurRadius: 18, offset: const Offset(0, 6))],
+                  ),
+                  child: Column(children: [
+                    for (var i = 0; i < items.length; i++) ...[
+                      if (i > 0) Container(height: 1, color: t.border),
+                      _SuggestRow(item: items[i], query: q),
+                    ],
+                  ]),
                 ),
-                child: Column(children: [
-                  for (var i = 0; i < items.length; i++) ...[
-                    if (i > 0) Container(height: 1, color: t.border),
-                    _SuggestRow(item: items[i], query: q),
-                  ],
-                ]),
               ),
           ]);
         },
