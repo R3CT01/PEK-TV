@@ -43,6 +43,42 @@ class ArtCache {
   static void want(String url) => _dropped.remove(url);
   static void unwant(String url) => _dropped.add(url);
 
+  /// Downloads pictures nobody is looking at yet (the rest of a sideways row, the next rows down), so by the time they scroll
+  /// into view they come straight from disk. Only [_prefetchLanes] downloads run at once for this, which leaves the other
+  /// slots free for pictures that are on screen right now, and a picture that is already known or already downloading is
+  /// skipped. Safe to call again and again with the same list (the screen is redrawn often).
+  static const _prefetchLanes = 3;
+  static final List<String> _prefetchQueue = [];
+  static final Set<String> _prefetchQueued = HashSet();
+  static int _prefetchRunning = 0;
+
+  static void prefetch(Iterable<String> urls) {
+    for (final u in urls) {
+      if (!_cacheable(u) || _known.containsKey(u) || _inflight.containsKey(u) || _gone.contains(u) || !_prefetchQueued.add(u)) continue;
+      _prefetchQueue.add(u);
+    }
+    while (_prefetchRunning < _prefetchLanes && _prefetchQueue.isNotEmpty) {
+      _prefetchRunning++;
+      unawaited(_prefetchLane());
+    }
+  }
+
+  static Future<void> _prefetchLane() async {
+    try {
+      while (_prefetchQueue.isNotEmpty) {
+        final u = _prefetchQueue.removeAt(0); // first come, first served: the top row's pictures before the ones further down
+        _prefetchQueued.remove(u);
+        if (_known.containsKey(u)) continue;
+        _dropped.remove(u); // a card that was scrolled away earlier marked it unwanted; this asks for it on purpose
+        try {
+          await file(u);
+        } catch (_) {}
+      }
+    } finally {
+      _prefetchRunning--;
+    }
+  }
+
   static Future<void> init() => _ready ??= _init();
 
   static Future<void> _init() async {

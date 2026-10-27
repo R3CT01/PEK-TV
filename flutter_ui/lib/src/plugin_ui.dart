@@ -175,6 +175,7 @@ class _PluginViewState extends State<PluginView> {
         _busy = r['busy'] == true;
         _back = r['back'] == true;
       });
+      if (tree is Map<String, dynamic>) _prefetchPosters(tree);
       if (mark != _scrollMark) {
         _scrollMark = mark;
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -185,6 +186,24 @@ class _PluginViewState extends State<PluginView> {
     }
     _syncTimer();
     if (effects.isNotEmpty) unawaited(_run(effects));
+  }
+
+  /// Starts downloading every poster on the screen, not only the ones a sideways row has built so far: a row builds its cards as
+  /// they scroll into view, so without this each card began its download only when the finger got there.
+  void _prefetchPosters(Map<String, dynamic> tree) {
+    final urls = <String>[];
+    void walk(Map<String, dynamic> n) {
+      if (n['t'] == 'poster') {
+        final u = '${n['img'] ?? ''}';
+        if (u.isNotEmpty && PluginHosts.allows(_hosts, u)) urls.add(u);
+      }
+      for (final c in _kids(n)) {
+        walk(c);
+      }
+    }
+
+    walk(tree);
+    if (urls.isNotEmpty) ArtCache.prefetch(urls);
   }
 
   /// While the plugin has a fetch running, ask now and then whether it finished (the web sandbox's requestRender).
@@ -907,6 +926,8 @@ class _PluginPoster extends StatelessWidget {
             child: Text(title, textAlign: TextAlign.center, maxLines: 5, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.textMuted, fontWeight: FontWeight.w600, fontSize: 0.9 * rem)),
           ),
         );
+    // While the picture is still downloading: a quiet empty tile, so a slow connection does not look like a title with no artwork.
+    Widget loading() => Center(child: Icon(Icons.image_outlined, color: t.textMuted.withAlpha(90), size: 2 * rem));
     return PekFocusable(
       autofocus: autofocus,
       onTap: onTap,
@@ -925,7 +946,7 @@ class _PluginPoster extends StatelessWidget {
                   if (image.isEmpty)
                     plain()
                   else
-                    ArtImage(image, fit: BoxFit.cover, cacheWidth: landscape ? 640 : 400, placeholder: (_) => plain(), errorBuilder: (_, __, ___) => plain()),
+                    ArtImage(image, fit: BoxFit.cover, cacheWidth: landscape ? 640 : 400, placeholder: (_) => loading(), errorBuilder: (_, __, ___) => plain()),
                   if (watched)
                     Positioned(
                       top: 6,

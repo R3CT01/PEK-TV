@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 
 import 'src/activity.dart';
 import 'src/app_update.dart';
@@ -80,7 +81,23 @@ class _BootState extends State<_Boot> {
     final ok = await Api.waitForServer();
     _update = await check;
     _notes = await notes;
+    _announceReady();
     return ok;
+  }
+
+  /// Tells the native splash video that the app has loaded, so it can lift as soon as it has finished playing (the video covers
+  /// everything while this runs underneath, and cannot be skipped). Sent two frames from now, after the spinner has been
+  /// swapped for the real first screen (profile picker, update screen or home), so that is what appears when the video lifts.
+  /// If this never arrives the native side lifts the video a few seconds after it ends anyway.
+  void _announceReady() {
+    final b = WidgetsBinding.instance;
+    b.addPostFrameCallback((_) {
+      b.addPostFrameCallback((_) {
+        const MethodChannel('pek/host').invokeMethod<void>('splashReady').catchError((Object _) {});
+      });
+      b.ensureVisualUpdate();
+    });
+    b.ensureVisualUpdate();
   }
 
   @override

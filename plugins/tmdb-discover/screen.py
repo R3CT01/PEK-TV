@@ -7,6 +7,7 @@ holds PEK's key) and has an optional "use my own key" override kept in this plug
 
 Data: TMDb. Streaming availability: JustWatch (via TMDb). Trailers: YouTube.
 """
+import hashlib
 import json
 import re
 import time
@@ -25,6 +26,10 @@ IMG_LOGO = "https://image.tmdb.org/t/p/w92"
 PER_ROW = 18
 MAX_PAGES = 500          # TMDb does not serve pages past 500
 SETTINGS = "settings.json"
+ROWS = "rows.json"          # the last browse rows (page 1 of each list), so Discover opens with pictures to show at once
+ROWS_FRESH = 30 * 60        # younger than this: shown as is, no network call
+ROWS_STALE = 7 * 24 * 3600  # younger than this: shown at once, then quietly refreshed; older: loaded like the first time
+ROWS_MAX = 16
 LIBRARY = "library.json"
 
 PREFERRED = ["netflix", "hulu", "disney plus", "max", "hbo max", "amazon prime video", "prime video",
@@ -55,6 +60,7 @@ S = {
     "fav_msg": "",
     "autoplay": True,          # play the trailer when a detail page opens
     "sound": True,             # trailer sound (turn off if the device blocks sound autoplay)
+    "rcache": {},              # rows key -> {"t": saved at, "d": the page}, mirrors data/rows.json
     "seen_over": {},           # tmdb id -> {"value", "base"}: a watched mark that PEK has not reported back yet
 }
 
@@ -320,11 +326,62 @@ def extract(src, j):
             "total": max(1, min(int(j.get("total_pages") or 1), MAX_PAGES))}
 
 
+def rows_key(k):
+    return hashlib.sha1((lang() + "|" + k).encode("utf-8")).hexdigest()[:20]
+
+
+def load_rows():
+    try:
+        j = h.read_json(ROWS)
+    except Exception:  # noqa: BLE001
+        return
+    if isinstance(j, dict):
+        S["rcache"] = {k: v for k, v in j.items()
+                       if isinstance(v, dict) and isinstance(v.get("t"), (int, float)) and isinstance(v.get("d"), dict)
+                       and isinstance(v["d"].get("items"), list)}
+
+
+def save_rows(k, data):
+    rc = S["rcache"]
+    rc[rows_key(k)] = {"t": time.time(), "d": data}
+    if len(rc) > ROWS_MAX:
+        for old in sorted(rc, key=lambda x: rc[x]["t"])[:len(rc) - ROWS_MAX]:
+            del rc[old]
+    try:
+        h.write_json(ROWS, rc)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def rows_cacheable(src, page):
+    # Only the browse rows (page 1): not searches, an actor's credits or the deeper pages of "See all".
+    return page == 1 and src.get("paged", True) and not src.get("multi") and not src.get("credits")
+
+
+def page_arrived(k, page, data):
+    cur = S["list"]
+    # First page of a list just arrived: now the page count is known, so fetch the next one.
+    if cur and cur["page"] == page and page_key(cur["src"], page) == k:
+        cur["total"] = data["total"]
+        ensure_loaded()
+
+
 def load_page(src, page):
     k = page_key(src, page)
     if k in S["pages"]:
         return
-    S["pages"][k] = {"loading": True}
+    cacheable = rows_cacheable(src, page)
+    hit = S["rcache"].get(rows_key(k)) if cacheable else None
+    if hit and time.time() - hit["t"] >= ROWS_STALE:
+        hit = None
+    if hit:
+        S["pages"][k] = hit["d"]
+        if time.time() - hit["t"] < ROWS_FRESH:
+            page_arrived(k, page, hit["d"])
+            return
+        # Old but usable: it is on screen now and is replaced when the new answer arrives (a failure keeps it).
+    else:
+        S["pages"][k] = {"loading": True}
     p = dict(src.get("params") or {})
     if src.get("paged", True):
         p["page"] = page
@@ -333,16 +390,17 @@ def load_page(src, page):
         return api(src["path"], p)
 
     def done(j):
-        S["pages"][k] = extract(src, j)
-        cur = S["list"]
-        # First page of a list just arrived: now the page count is known, so fetch the next one.
-        if cur and cur["page"] == page and page_key(cur["src"], page) == k:
-            cur["total"] = S["pages"][k]["total"]
-            ensure_loaded()
+        data = extract(src, j)
+        S["pages"][k] = data
+        if cacheable:
+            save_rows(k, data)
+        page_arrived(k, page, data)
 
     def fail(msg):
         if is_auth(msg):
             S["auth_error"] = True
+        if hit:
+            return
         S["pages"][k] = {"error": err_text(msg)}
 
     ui.background(work, done, fail)
@@ -488,6 +546,7 @@ def all_services():
 
 
 def refresh():
+    S["rcache"] = {}
     reset_data()
     S["auth_error"] = False
     refresh_library()
@@ -1030,6 +1089,7 @@ def browse_view():
 # ---------------------------------------------------------------- entry points
 def start():
     load_settings()
+    load_rows()
     read_library()
     refresh_library()
     S["region_draft"] = region()

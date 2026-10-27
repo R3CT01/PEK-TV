@@ -78,3 +78,8 @@ movies and shows, a **Play with ...** button opens that plugin on the title.
 
 ## 1.8.0
 - Rate what you watch: the detail page has a "Rate this movie / show" line with ten star buttons. It is your own rating in PEK TV (the same one shown on the posters and sent to Trakt); press the star you already gave to take the rating off.
+
+## 1.8.1
+- Discover opens faster: the movie and TV rows are kept on the device and shown at once the next time (refreshed quietly when they are older than 30 minutes; the Refresh button always loads everything fresh).
+- Posters further along a row are downloaded ahead of time, so scrolling sideways shows pictures instead of empty tiles.
+- A poster that is still downloading shows a quiet empty tile, not its title, so a slow connection no longer looks like a title with no artwork.

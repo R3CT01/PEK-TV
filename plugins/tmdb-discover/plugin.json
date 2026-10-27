@@ -1,6 +1,6 @@
 {
   "name": "TMDb Discover",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "author": "PEK",
   "description": "Browse trending, top rated, popular and now playing movies and TV page by page, filter by streaming service, watch trailers, see the cast and related titles, and see what you already own.",
   "permissions": {

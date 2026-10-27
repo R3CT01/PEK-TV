@@ -16,6 +16,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.provider.OpenableColumns
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
@@ -25,6 +27,8 @@ import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
 import com.pektv.app.MpvController
 import com.pektv.app.Boot
+import com.pektv.app.R
+import com.pektv.app.SplashGate
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.android.FlutterActivityLaunchConfigs.BackgroundMode
 import io.flutter.embedding.android.RenderMode
@@ -66,7 +70,13 @@ class FlutterHostActivity : FlutterActivity() {
     private companion object {
         const val PICK_FILE = 4717              // request code of the .zip file picker
         const val MAX_PICK_BYTES = 16 * 1024 * 1024 // a plugin is at most 8 MB, a skin 6 MB
+        const val GATE_MAX_MS = 25_000L              // the longest this screen stays hidden behind the splash
     }
+
+    // Splash: while the PEK video plays in SplashActivity (the window below this one), this screen boots invisible (window alpha 0)
+    // and swallows every touch and key, so the video cannot be skipped. SplashGate reveals it when the video is over and the app
+    // has loaded. See SplashGate.kt.
+    private var gated = false
 
     private var mpv: MpvController? = null
     private var events: EventChannel.EventSink? = null
@@ -263,9 +273,21 @@ class FlutterHostActivity : FlutterActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Opened by SplashActivity while its video plays? Then stay see-through until SplashGate says the video is over and the
+        // app is ready. Set before anything is drawn, so not even one frame of Flutter shows over the video.
+        gated = intent.getBooleanExtra("pek_from_splash", false) && SplashGate.active
+        if (gated) window.attributes = window.attributes.also { it.alpha = 0f }
         // Start loading first (files, C++ server, Python plugins, Flutter's own initialisation); it all runs while the splash plays.
         Boot.ensureStarted(applicationContext)
         super.onCreate(savedInstanceState)
+        if (gated) {
+            SplashGate.registerHost { revealNow() }
+            // Last resort, in case SplashActivity was killed before it could reveal: never stay invisible.
+            Handler(Looper.getMainLooper()).postDelayed({ revealNow() }, GATE_MAX_MS)
+        } else {
+            // Not behind the splash (a widget or notification tap): brand colour until Flutter's first frame, then black.
+            window.setBackgroundDrawable(ColorDrawable(getColor(R.color.pek_splash_bg)))
+        }
         val surface = SurfaceView(this)
         surface.visibility = View.GONE
         surface.isFocusable = false
@@ -282,8 +304,24 @@ class FlutterHostActivity : FlutterActivity() {
         }
         hideSystemBars()
         // MainActivity's own prompt never runs when it hands over to this screen, so ask here: video + audio, once.
+        // Behind the splash it waits for the reveal: a permission dialog must not appear over the video.
+        if (!gated) MediaPermissions.askOnce(this)
+    }
+
+    /** The video is over and the app is ready (SplashGate): make this window visible and let it take touches and keys. */
+    private fun revealNow() {
+        if (!gated) return
+        gated = false
+        window.attributes = window.attributes.also { it.alpha = 1f }
+        hideSystemBars()
+        android.util.Log.i("PEKSplash", "app revealed")
         MediaPermissions.askOnce(this)
     }
+
+    // Eaten while the splash video is up: it cannot be skipped by touch, remote, keyboard or Back.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean = if (gated) true else super.dispatchKeyEvent(event)
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean = if (gated) true else super.dispatchTouchEvent(ev)
+    override fun dispatchGenericMotionEvent(ev: MotionEvent): Boolean = if (gated) true else super.dispatchGenericMotionEvent(ev)
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -454,6 +492,11 @@ class FlutterHostActivity : FlutterActivity() {
                 }
                 // Where the Flutter side keeps its artwork / title cache (art_cache.dart): files = kept, cache = may be cleared by Android.
                 "dirs" -> result.success(mapOf("files" to filesDir.absolutePath, "cache" to cacheDir.absolutePath))
+                // The app has loaded (server up, update check done, first real screen built): the splash video may lift once it has ended.
+                "splashReady" -> {
+                    SplashGate.appReady()
+                    result.success(null)
+                }
                 "exit" -> {
                     mpv?.destroy()
                     result.success(null)
@@ -472,6 +515,7 @@ class FlutterHostActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        SplashGate.unregisterHost()
         pluginPool.shutdown()
         AppUpdater.onStatus = null
         updateChannel = null

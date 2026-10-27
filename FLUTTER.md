@@ -3,7 +3,7 @@
 The C++ server, the Python plugins, libmpv and the cloud workers are unchanged. Only the screen layer is new:
 
 ```
-FlutterHostActivity (launcher: starts Boot, plays the splash video on top via SplashOverlay.kt while the app loads underneath) ; MainActivity (hand-over for widget/notification taps) ; Boot = assets, server on :8080, plugins
+SplashActivity (launcher: starts Boot, plays the unskippable splash video full screen via SplashOverlay.kt, and opens FlutterHostActivity behind it, invisible, so Flutter boots during the video; SplashGate.kt reveals it when the video is over and Flutter has sent pek/host splashReady) ; FlutterHostActivity ; MainActivity (hand-over for widget/notification taps) ; Boot = assets, server on :8080, plugins
    -> FlutterHostActivity            android/app/src/flutter/java/.../FlutterHostActivity.kt
         Flutter UI (flutter_ui/)  --HTTP-->  C++ server on 127.0.0.1:8080
         pek/mpv channels          ------->  MpvController (libmpv, same engine)  -- SurfaceView behind Flutter

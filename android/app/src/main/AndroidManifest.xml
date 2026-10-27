@@ -84,7 +84,8 @@
              Remove this line to try Impeller again once video is confirmed to show through. -->
         <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />
 
-        <!-- Launcher entry: plays the splash video (SplashOverlay.kt) while the app starts, then opens the Flutter UI below. -->
+        <!-- Launcher entry: plays the splash video (SplashOverlay.kt) full screen while the Flutter UI below boots invisible behind it
+             (SplashGate.kt), then reveals it. -->
         <activity
             android:name=".SplashActivity"
             android:exported="true"
@@ -113,7 +114,7 @@
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|navigation|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize"
-            android:theme="@style/Theme.PEK.Launch" />
+            android:theme="@style/Theme.PEK.Flutter" />
 
         <!-- PackageInstaller reports the outcome of an in-app update here (AppUpdater.kt). -->
         <receiver
