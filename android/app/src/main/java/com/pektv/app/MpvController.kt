@@ -78,6 +78,11 @@ class MpvController(
     // frames are being dropped, and remembered.
     private val prefs = activity.getSharedPreferences("pek_player", Context.MODE_PRIVATE)
     private var lite = prefs.getBoolean("lite", false)
+    // Set when the direct renderer produced no picture on this device: smooth mode is then never switched on by itself again
+    // (otherwise it flips on after dropped frames, gives no picture, flips off, drops frames again ... for ever).
+    private var embedBroken = prefs.getBoolean("embed_broken", false)
+    // A live stream has no length and nothing to seek to: never reopen it "at the current position".
+    private fun looksLive() = duration.isNaN() || duration <= 0.0
     private var liteSuspended = false          // a subtitle is showing: this video uses the normal renderer
     private var lastDrops = -1L
     private var watchUntil = 0L
@@ -180,7 +185,8 @@ class MpvController(
     fun setLite(on: Boolean) {
         lite = on
         liteSuspended = false
-        prefs.edit().putBoolean("lite", on).apply()
+        if (on) embedBroken = false           // the person asked for it: let it try again
+        prefs.edit().putBoolean("lite", on).putBoolean("embed_broken", embedBroken).apply()
         mpv?.let { applyRenderer(it) }
     }
     fun isLite(): Boolean = lite
@@ -201,7 +207,7 @@ class MpvController(
 
     private fun restartEngine() {
         val url = currentUrl ?: return
-        val resumeAt = if (position.isNaN() || position < 0.0) 0.0 else position
+        val resumeAt = if (looksLive() || position.isNaN() || position < 0.0) 0.0 else position
         val wasPaused = paused
         val keepHdr = hdrDirect          // stopEngine() clears it; without this the HDR check would see "changed" and restart again
         val keepLiteSuspended = liteSuspended
@@ -653,8 +659,8 @@ class MpvController(
             if (useEmbed() && !buffering && !paused && !seeking && position > 4.0) {
                 val w = m.getPropertyString("width")
                 if (w == null || w == "0" || w == "false") {
-                    lite = false; hdrOut = false; hdrDirect = false; liteSuspended = false
-                    prefs.edit().putBoolean("lite", false).putBoolean("hdr_out", false).apply()
+                    lite = false; hdrOut = false; hdrDirect = false; liteSuspended = false; embedBroken = true
+                    prefs.edit().putBoolean("lite", false).putBoolean("hdr_out", false).putBoolean("embed_broken", true).apply()
                     applyRenderer(m)
                     Toast.makeText(activity, "No picture from the direct renderer - switched to compatibility mode", Toast.LENGTH_LONG).show()
                     ui.postDelayed(stutterCheck, 4_000L)
@@ -663,7 +669,7 @@ class MpvController(
             }
             if (!buffering && !paused && !seeking) {
                 // 15 or more frames lost in 4 seconds of normal playback: the renderer cannot keep up.
-                if (lastDrops >= 0 && drops - lastDrops >= 15 && !lite) {
+                if (lastDrops >= 0 && drops - lastDrops >= 15 && !lite && !embedBroken && !looksLive()) {
                     val sid = m.getPropertyString("sid")
                     if (sid == null || sid == "no" || sid == "false") {
                         lite = true; liteSuspended = false

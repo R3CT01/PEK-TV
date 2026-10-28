@@ -752,6 +752,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
             children: [
               if (_live) const SizedBox(height: 8) else SizedBox(height: 30, child: ExcludeFocus(child: RepaintBoundary(child: _seekBar()))),
               const SizedBox(height: 4),
+              // On a narrow phone the live bar (LIVE + 3 round buttons + guide + captions) is wider than the screen:
+              // the LIVE label and the guide / captions buttons get their own row above the channel and play buttons.
+              if (_live && MediaQuery.sizeOf(context).width < 480) ...[
+                Row(children: [
+                  const Icon(Icons.circle, size: 10, color: Color(0xFFE5484D)),
+                  const SizedBox(width: 8),
+                  Text('LIVE', style: timeStyle.copyWith(letterSpacing: 1.6)),
+                  const Spacer(),
+                  if (_tv?.available ?? false) ...[
+                    _glassBtn(Icons.view_list, _openGuide),
+                    const SizedBox(width: 12),
+                  ],
+                  _glassBtn(Icons.subtitles_outlined, _tracks),
+                ]),
+                const SizedBox(height: 12),
+                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  _glassBtn(Icons.skip_previous, () { _step(-1); _poke(); }),
+                  const SizedBox(width: 24),
+                  ValueListenableBuilder<bool>(
+                    valueListenable: _player.playing,
+                    builder: (_, p, __) => _glassBtn(p ? Icons.pause : Icons.play_arrow, () { _player.togglePause(); _poke(); }, size: 56, icon_: 30, node: _playNode),
+                  ),
+                  const SizedBox(width: 24),
+                  _glassBtn(Icons.skip_next, () { _step(1); _poke(); }),
+                ]),
+              ] else
               Row(
                 children: [
                   Expanded(
