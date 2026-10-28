@@ -26,4 +26,12 @@ TABLE = [
     (r"^mubi\b", "MUBI", ["com.mubi"], "https://mubi.com/", None),
     (r"^kanopy\b", "Kanopy", ["com.kanopy"], "https://www.kanopy.com/", None),
     (r"^hoopla\b", "hoopla", ["com.hoopladigital.android"], "https://www.hoopladigital.com/", None),
+    # Sports: apps and sites that carry live games (added for the Sports plugin). A package that is not installed falls back to the site.
+    (r"^espn( plus)?\b", "ESPN", ["com.espn.gtv", "com.espn.score_center"], "https://www.espn.com/watch/", None),
+    (r"^(fox sports|fox one|fs1|fs2)\b", "Fox Sports", ["com.foxsports.videogo"], "https://www.foxsports.com/live", None),
+    (r"^nbc sports\b", "NBC Sports", [], "https://www.nbcsports.com/watch", None),
+    (r"^dazn\b", "DAZN", ["com.dazn"], "https://www.dazn.com/", None),
+    (r"^youtube tv\b", "YouTube TV", ["com.google.android.youtube.tvunplugged"], "https://tv.youtube.com/", None),
+    (r"^fubo( tv)?\b", "Fubo", [], "https://www.fubo.tv/", None),
+    (r"^sling( tv)?\b", "Sling TV", ["com.sling"], "https://www.sling.com/", None),
 ]

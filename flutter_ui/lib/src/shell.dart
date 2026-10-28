@@ -134,7 +134,7 @@ class _AppShellState extends State<AppShell> {
     Activity.begin('plugins', 'Loading plugins\u2026', detail: true);
     Api.plugins().then((l) {
       Activity.end('plugins', 'Loaded ${l.length} plugins');
-      PluginHost.streamers = [for (final e in l) if (e.flutterScreen && e.streamer) {'id': e.folder, 'name': e.name}];
+      PluginHost.streamers = [for (final e in l) if (e.flutterScreen && (e.streamer || e.liveProvider)) {'id': e.folder, 'name': e.name, 'stream': e.streamer ? 'true' : 'false', 'live': e.liveProvider ? 'true' : 'false'}];
       if (mounted) setState(() => _pluginScreens = l.where((e) => e.flutterScreen).toList());
     }).catchError((_) {
       Activity.end('plugins');

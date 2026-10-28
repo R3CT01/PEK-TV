@@ -1,0 +1,226 @@
+diff -ruN a/android/app/src/main/python/pek_flutter.py b/android/app/src/main/python/pek_flutter.py
+--- a/android/app/src/main/python/pek_flutter.py	2026-10-28 18:16:03.921172360 +0000
++++ b/android/app/src/main/python/pek_flutter.py	2026-10-28 18:16:03.922401490 +0000
+@@ -38,7 +38,7 @@
+ HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
+ HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited", "profile_removed"}
+ LIVE_LIMIT = 12.0                     # seconds one live query (the player asking for the channel list, now / next, the guide) may take
+-LIVE_OPS = {"list", "now", "guide", "url"}
++LIVE_OPS = {"list", "now", "guide", "url", "find"}
+ HOOK_EFFECTS = {"watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many"}   # all a hook may ask Flutter to do
+ ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many", "torrent.play", "toast", "exit",
+                    "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set", "live.play"}
+@@ -617,6 +617,9 @@
+         out["to"] = _int(q.get("to"), 0, 4102444800)
+     if q["op"] == "url":
+         out["id"] = str(q.get("id") or "")[:60]
++    if q["op"] == "find":
++        names = q.get("names")
++        out["names"] = [str(n)[:60] for n in (names if isinstance(names, list) else [])[:8] if str(n).strip()]
+     return out
+ 
+ 
+@@ -656,6 +659,37 @@
+     return {"ok": True, "data": value}
+ 
+ 
++def live_find(pid, names, ctx=None):
++    """Host call behind pek_ui.live_find(): asks plugin `pid`'s live file whether it has a channel for any of `names`.
++    Returns [[channel id, channel name, asked name], ...] (empty on any problem). Same sandbox, limits and 'answer only'
++    rule as a player query; the answer is plain text and ids only, nothing is played."""
++    query = _clean_query({"op": "find", "names": names})
++    if not _ID.match(str(pid)) or not query or not query["names"]:
++        return []
++    sess, err = _file_session(_LIVE, _LIVE_LOCK, pid, {}, "live", "live", "live TV")
++    if sess is None:
++        log("live_find: '%s': %s" % (pid, err))
++        return []
++    if not (sess.manifest.get("provides") or {}).get("live"):
++        return []
++    fn = getattr(sess.module, "on_query", None)
++    if not callable(fn):
++        return []
++    with sess.lock:
++        sess.ctx = ctx if isinstance(ctx, dict) else {}
++        sess.effects = []
++        value, err = _guarded(sess, lambda: fn(query), LIVE_LIMIT)
++        sess.effects = []
++    if err:
++        log("'%s' on_query(find) failed: %s" % (pid, err))
++        return []
++    out = []
++    for m in (value.get("matches") if isinstance(value, dict) else None) or []:
++        if isinstance(m, (list, tuple)) and len(m) >= 3:
++            out.append([str(m[0])[:60], str(m[1])[:120], str(m[2])[:60]])
++    return out[:5]
++
++
+ _OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close, "hook": _hook, "live": _live}
+ 
+ 
+diff -ruN a/android/app/src/main/python/pek_providers.py b/android/app/src/main/python/pek_providers.py
+--- a/android/app/src/main/python/pek_providers.py	2026-10-28 18:16:03.925951910 +0000
++++ b/android/app/src/main/python/pek_providers.py	2026-10-28 18:16:03.927056066 +0000
+@@ -26,4 +26,12 @@
+     (r"^mubi\b", "MUBI", ["com.mubi"], "https://mubi.com/", None),
+     (r"^kanopy\b", "Kanopy", ["com.kanopy"], "https://www.kanopy.com/", None),
+     (r"^hoopla\b", "hoopla", ["com.hoopladigital.android"], "https://www.hoopladigital.com/", None),
++    # Sports: apps and sites that carry live games (added for the Sports plugin). A package that is not installed falls back to the site.
++    (r"^espn( plus)?\b", "ESPN", ["com.espn.gtv", "com.espn.score_center"], "https://www.espn.com/watch/", None),
++    (r"^(fox sports|fox one|fs1|fs2)\b", "Fox Sports", ["com.foxsports.videogo"], "https://www.foxsports.com/live", None),
++    (r"^nbc sports\b", "NBC Sports", [], "https://www.nbcsports.com/watch", None),
++    (r"^dazn\b", "DAZN", ["com.dazn"], "https://www.dazn.com/", None),
++    (r"^youtube tv\b", "YouTube TV", ["com.google.android.youtube.tvunplugged"], "https://tv.youtube.com/", None),
++    (r"^fubo( tv)?\b", "Fubo", [], "https://www.fubo.tv/", None),
++    (r"^sling( tv)?\b", "Sling TV", ["com.sling"], "https://www.sling.com/", None),
+ ]
+diff -ruN a/android/app/src/main/python/pek_ui.py b/android/app/src/main/python/pek_ui.py
+--- a/android/app/src/main/python/pek_ui.py	2026-10-28 18:16:03.916065144 +0000
++++ b/android/app/src/main/python/pek_ui.py	2026-10-28 18:16:03.917399233 +0000
+@@ -340,11 +340,62 @@
+     s.need("plugins")
+     out = []
+     for e in s.ctx.get("streamers") or []:
+-        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id:
++        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id and e.get("stream") != "false":
+             out.append({"id": _s(e.get("id"), 40), "name": _s(e.get("name") or e.get("id"), 80)})
+     return out
+ 
+ 
++def live_providers():
++    """The other installed plugins that can tune a live channel by name: [{"id", "name"}] (their plugin.json has
++    "provides": {"live": true}, the "live" permission and a flutter.live file that answers "find"). Needs "plugins": true."""
++    s = _sess()
++    s.need("plugins")
++    out = []
++    for e in s.ctx.get("streamers") or []:
++        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id and e.get("live") == "true":
++            out.append({"id": _s(e.get("id"), 40), "name": _s(e.get("name") or e.get("id"), 80)})
++    return out
++
++
++def live_find(plugin_id, names):
++    """Asks one live provider (from live_providers()) whether it has a channel for any of these names (up to 8, for example
++    ["ESPN", "ESPN HD"]). Returns [{"channel": id, "name": the channel's own name, "asked": the name that matched}], best first,
++    at most 5. The provider answers from its own channel list; nothing is played. Call it inside ui.background(): it can wait
++    for another plugin (up to 12 seconds). Needs "plugins": true."""
++    s = _sess()
++    s.need("plugins")
++    if plugin_id not in [e["id"] for e in live_providers()]:
++        raise PermissionError("%r is not an installed plugin that can tune live channels" % plugin_id)
++    asked = [_s(n, 60) for n in (names if isinstance(names, (list, tuple)) else [names])[:8] if _s(n, 60).strip()]
++    if not asked:
++        return []
++    import pek_flutter                       # host code: imported late because pek_flutter imports this module
++    box = {}
++
++    def run():                                # a fresh thread: the other plugin's file is loaded without this plugin's guard
++        box["v"] = pek_flutter.live_find(plugin_id, asked, dict(s.ctx))
++
++    t = threading.Thread(target=run, name="pek-livefind-" + plugin_id, daemon=True)
++    t.start()
++    t.join(15)
++    out = box.get("v") or []
++    return [{"channel": _s(m[0], 60), "name": _s(m[1], 120), "asked": _s(m[2], 60)}
++            for m in out if isinstance(m, (list, tuple)) and len(m) >= 3][:5]
++
++
++def open_live(plugin_id, channel, title=""):
++    """Opens a live provider (from live_providers()) on one of its channels (an id from live_find()); the provider plays it in
++    PEK's own player. Call it from a tap handler. Needs "plugins": true."""
++    s = _sess()
++    s.need("plugins")
++    if plugin_id not in [e["id"] for e in live_providers()]:
++        raise PermissionError("%r is not an installed plugin that can tune live channels" % plugin_id)
++    ch = _s(channel, 60).strip()
++    if not ch:
++        raise ValueError("a channel id is needed")
++    s.effect("open_plugin", id=_s(plugin_id, 40), intent={"type": "live", "id": ch, "title": _s(title, 200)})
++
++
+ def open_plugin(plugin_id, kind, tmdb_id, title="", year=0):
+     """Open another plugin (one from streamers()) on a title. Needs "plugins": true. Call it from a tap handler."""
+     s = _sess()
+diff -ruN a/flutter_ui/lib/src/api.dart b/flutter_ui/lib/src/api.dart
+--- a/flutter_ui/lib/src/api.dart	2026-10-28 18:16:03.930866961 +0000
++++ b/flutter_ui/lib/src/api.dart	2026-10-28 18:16:03.931745401 +0000
+@@ -441,6 +441,7 @@
+       var name = folder, desc = '', version = '', navTab = '', icon = '';
+       var flutterScreen = false;
+       var streamer = false;
++      var liveProvider = false;
+       var hooks = false;
+       try {
+         final m = await _get('/plugins/${Uri.encodeComponent(folder)}/plugin.json');
+@@ -451,6 +452,7 @@
+         flutterScreen = m['flutter'] is Map;
+         final prov = m['provides'];
+         streamer = prov is Map && prov['stream'] == true; // can play a title another plugin hands over
++        liveProvider = prov is Map && prov['live'] == true; // can tune a live channel by name (live.py answers "find")
+         final perms = m['permissions'];
+         final fl = m['flutter'];
+         hooks = perms is Map && perms['playback'] == true && fl is Map && fl['hooks'] is String;
+@@ -459,7 +461,7 @@
+         final ic = '${m['icon'] ?? ''}';
+         if (RegExp(r'^[A-Za-z0-9._-]{1,60}\.(png|jpe?g|webp|gif)$', caseSensitive: false).hasMatch(ic)) icon = '$base/plugins/${Uri.encodeComponent(folder)}/$ic';
+       } catch (_) {}
+-      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer, hooks: hooks, builtin: e['builtin'] == true, icon: icon));
++      out.add(PluginInfo(folder: folder, name: name, description: desc, version: version, hasBackend: e['hasBackend'] == true, flutterScreen: flutterScreen, navTab: navTab, streamer: streamer, liveProvider: liveProvider, hooks: hooks, builtin: e['builtin'] == true, icon: icon));
+     }
+     return out;
+   }
+@@ -699,7 +701,7 @@
+ }
+ 
+ class PluginInfo {
+-  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false, this.hooks = false, this.builtin = false, this.icon = ''});
++  const PluginInfo({required this.folder, required this.name, required this.description, required this.version, required this.hasBackend, this.flutterScreen = false, this.navTab = '', this.streamer = false, this.liveProvider = false, this.hooks = false, this.builtin = false, this.icon = ''});
+   final String folder, name, description, version;
+ 
+   /// Ships with PEK TV (weather, tmdb-discover, skin-maker): it cannot be removed, only updated from the PEK Store.
+@@ -718,6 +720,9 @@
+   /// plugin.json "provides": {"stream": true}: other plugins may open it on a title ("Play with ...").
+   final bool streamer;
+ 
++  /// plugin.json "provides": {"live": true}: a live TV plugin that can be asked "do you have this channel?" and opened on it.
++  final bool liveProvider;
++
+   /// plugin.json has the "playback" permission and "flutter": {"hooks": "hooks.py"}: PEK TV tells it what is played (plugin_hooks.dart).
+   final bool hooks;
+ }
+diff -ruN a/flutter_ui/lib/src/plugin_host.dart b/flutter_ui/lib/src/plugin_host.dart
+--- a/flutter_ui/lib/src/plugin_host.dart	2026-10-28 18:16:03.935142392 +0000
++++ b/flutter_ui/lib/src/plugin_host.dart	2026-10-28 18:16:03.936069789 +0000
+@@ -32,7 +32,7 @@
+   static Future<void> refreshStreamers() async {
+     try {
+       final all = await Api.plugins();
+-      streamers = [for (final p in all) if (p.flutterScreen && p.streamer) {'id': p.folder, 'name': p.name}];
++      streamers = [for (final p in all) if (p.flutterScreen && (p.streamer || p.liveProvider)) {'id': p.folder, 'name': p.name, 'stream': p.streamer ? 'true' : 'false', 'live': p.liveProvider ? 'true' : 'false'}];
+     } catch (_) {
+       streamers ??= const [];
+     }
+diff -ruN a/flutter_ui/lib/src/plugin_ui.dart b/flutter_ui/lib/src/plugin_ui.dart
+--- a/flutter_ui/lib/src/plugin_ui.dart	2026-10-28 18:16:03.940064300 +0000
++++ b/flutter_ui/lib/src/plugin_ui.dart	2026-10-28 18:16:03.940987165 +0000
+@@ -444,7 +444,7 @@
+         final ok = await PluginHost.openApp('${raw['packages']}', '${raw['url']}');
+         if (!ok) _toast('Could not open that service on this device.');
+       } else if (op == 'open_plugin') {
+-        // Another plugin's screen on a title ("Play with ..."). Only plugins that declared "provides": {"stream": true}.
++        // Another plugin's screen on a title ("Play with ..."). Only plugins that declared "provides": {"stream": true} or {"live": true}.
+         final id = '${raw['id']}';
+         final known = (PluginHost.streamers ?? const <Map<String, String>>[]).where((e) => e['id'] == id).firstOrNull;
+         final intent = raw['intent'];
+diff -ruN a/flutter_ui/lib/src/shell.dart b/flutter_ui/lib/src/shell.dart
+--- a/flutter_ui/lib/src/shell.dart	2026-10-28 18:16:03.944403225 +0000
++++ b/flutter_ui/lib/src/shell.dart	2026-10-28 18:16:03.945315174 +0000
+@@ -134,7 +134,7 @@
+     Activity.begin('plugins', 'Loading plugins\u2026', detail: true);
+     Api.plugins().then((l) {
+       Activity.end('plugins', 'Loaded ${l.length} plugins');
+-      PluginHost.streamers = [for (final e in l) if (e.flutterScreen && e.streamer) {'id': e.folder, 'name': e.name}];
++      PluginHost.streamers = [for (final e in l) if (e.flutterScreen && (e.streamer || e.liveProvider)) {'id': e.folder, 'name': e.name, 'stream': e.streamer ? 'true' : 'false', 'live': e.liveProvider ? 'true' : 'false'}];
+       if (mounted) setState(() => _pluginScreens = l.where((e) => e.flutterScreen).toList());
+     }).catchError((_) {
+       Activity.end('plugins');

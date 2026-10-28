@@ -340,9 +340,60 @@ def streamers():
     s.need("plugins")
     out = []
     for e in s.ctx.get("streamers") or []:
-        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id:
+        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id and e.get("stream") != "false":
             out.append({"id": _s(e.get("id"), 40), "name": _s(e.get("name") or e.get("id"), 80)})
     return out
+
+
+def live_providers():
+    """The other installed plugins that can tune a live channel by name: [{"id", "name"}] (their plugin.json has
+    "provides": {"live": true}, the "live" permission and a flutter.live file that answers "find"). Needs "plugins": true."""
+    s = _sess()
+    s.need("plugins")
+    out = []
+    for e in s.ctx.get("streamers") or []:
+        if isinstance(e, dict) and e.get("id") and e.get("id") != s.id and e.get("live") == "true":
+            out.append({"id": _s(e.get("id"), 40), "name": _s(e.get("name") or e.get("id"), 80)})
+    return out
+
+
+def live_find(plugin_id, names):
+    """Asks one live provider (from live_providers()) whether it has a channel for any of these names (up to 8, for example
+    ["ESPN", "ESPN HD"]). Returns [{"channel": id, "name": the channel's own name, "asked": the name that matched}], best first,
+    at most 5. The provider answers from its own channel list; nothing is played. Call it inside ui.background(): it can wait
+    for another plugin (up to 12 seconds). Needs "plugins": true."""
+    s = _sess()
+    s.need("plugins")
+    if plugin_id not in [e["id"] for e in live_providers()]:
+        raise PermissionError("%r is not an installed plugin that can tune live channels" % plugin_id)
+    asked = [_s(n, 60) for n in (names if isinstance(names, (list, tuple)) else [names])[:8] if _s(n, 60).strip()]
+    if not asked:
+        return []
+    import pek_flutter                       # host code: imported late because pek_flutter imports this module
+    box = {}
+
+    def run():                                # a fresh thread: the other plugin's file is loaded without this plugin's guard
+        box["v"] = pek_flutter.live_find(plugin_id, asked, dict(s.ctx))
+
+    t = threading.Thread(target=run, name="pek-livefind-" + plugin_id, daemon=True)
+    t.start()
+    t.join(15)
+    out = box.get("v") or []
+    return [{"channel": _s(m[0], 60), "name": _s(m[1], 120), "asked": _s(m[2], 60)}
+            for m in out if isinstance(m, (list, tuple)) and len(m) >= 3][:5]
+
+
+def open_live(plugin_id, channel, title=""):
+    """Opens a live provider (from live_providers()) on one of its channels (an id from live_find()); the provider plays it in
+    PEK's own player. Call it from a tap handler. Needs "plugins": true."""
+    s = _sess()
+    s.need("plugins")
+    if plugin_id not in [e["id"] for e in live_providers()]:
+        raise PermissionError("%r is not an installed plugin that can tune live channels" % plugin_id)
+    ch = _s(channel, 60).strip()
+    if not ch:
+        raise ValueError("a channel id is needed")
+    s.effect("open_plugin", id=_s(plugin_id, 40), intent={"type": "live", "id": ch, "title": _s(title, 200)})
 
 
 def open_plugin(plugin_id, kind, tmdb_id, title="", year=0):

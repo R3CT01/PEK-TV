@@ -32,7 +32,7 @@ class PluginHost {
   static Future<void> refreshStreamers() async {
     try {
       final all = await Api.plugins();
-      streamers = [for (final p in all) if (p.flutterScreen && p.streamer) {'id': p.folder, 'name': p.name}];
+      streamers = [for (final p in all) if (p.flutterScreen && (p.streamer || p.liveProvider)) {'id': p.folder, 'name': p.name, 'stream': p.streamer ? 'true' : 'false', 'live': p.liveProvider ? 'true' : 'false'}];
     } catch (_) {
       streamers ??= const [];
     }

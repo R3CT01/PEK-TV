@@ -38,7 +38,7 @@ RESERVED_HOSTS = {RESERVED_HOST: OFFICIAL_PROXY_PLUGINS}   # host -> the only pl
 HOOK_LIMIT = 25.0                     # seconds one on_event() may take (a scrobble can need two requests)
 HOOK_EVENTS = {"app_start", "tick", "play", "pause", "resume", "stop", "watched", "rated", "favorited", "profile_removed"}
 LIVE_LIMIT = 12.0                     # seconds one live query (the player asking for the channel list, now / next, the guide) may take
-LIVE_OPS = {"list", "now", "guide", "url"}
+LIVE_OPS = {"list", "now", "guide", "url", "find"}
 HOOK_EFFECTS = {"watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many"}   # all a hook may ask Flutter to do
 ALLOWED_EFFECTS = {"open_url", "open_app", "open_plugin", "favorite.add", "favorite.remove", "watched.set", "watched.set_many", "ratings.set_many", "favorites.set_many", "torrent.play", "toast", "exit",
                    "skin.save", "skin.use", "skin.delete", "clipboard.copy", "weather.set", "live.play"}
@@ -617,6 +617,9 @@ def _clean_query(q):
         out["to"] = _int(q.get("to"), 0, 4102444800)
     if q["op"] == "url":
         out["id"] = str(q.get("id") or "")[:60]
+    if q["op"] == "find":
+        names = q.get("names")
+        out["names"] = [str(n)[:60] for n in (names if isinstance(names, list) else [])[:8] if str(n).strip()]
     return out
 
 
@@ -654,6 +657,37 @@ def _live(req):
     if len(text) > 1500000:
         return _fail("the answer is too big (over 1.5 MB)")
     return {"ok": True, "data": value}
+
+
+def live_find(pid, names, ctx=None):
+    """Host call behind pek_ui.live_find(): asks plugin `pid`'s live file whether it has a channel for any of `names`.
+    Returns [[channel id, channel name, asked name], ...] (empty on any problem). Same sandbox, limits and 'answer only'
+    rule as a player query; the answer is plain text and ids only, nothing is played."""
+    query = _clean_query({"op": "find", "names": names})
+    if not _ID.match(str(pid)) or not query or not query["names"]:
+        return []
+    sess, err = _file_session(_LIVE, _LIVE_LOCK, pid, {}, "live", "live", "live TV")
+    if sess is None:
+        log("live_find: '%s': %s" % (pid, err))
+        return []
+    if not (sess.manifest.get("provides") or {}).get("live"):
+        return []
+    fn = getattr(sess.module, "on_query", None)
+    if not callable(fn):
+        return []
+    with sess.lock:
+        sess.ctx = ctx if isinstance(ctx, dict) else {}
+        sess.effects = []
+        value, err = _guarded(sess, lambda: fn(query), LIVE_LIMIT)
+        sess.effects = []
+    if err:
+        log("'%s' on_query(find) failed: %s" % (pid, err))
+        return []
+    out = []
+    for m in (value.get("matches") if isinstance(value, dict) else None) or []:
+        if isinstance(m, (list, tuple)) and len(m) >= 3:
+            out.append([str(m[0])[:60], str(m[1])[:120], str(m[2])[:60]])
+    return out[:5]
 
 
 _OPS = {"open": _open, "event": _event, "poll": _poll, "close": _close, "hook": _hook, "live": _live}

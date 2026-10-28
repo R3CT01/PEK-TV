@@ -444,7 +444,7 @@ class _PluginViewState extends State<PluginView> with WidgetsBindingObserver {
         final ok = await PluginHost.openApp('${raw['packages']}', '${raw['url']}');
         if (!ok) _toast('Could not open that service on this device.');
       } else if (op == 'open_plugin') {
-        // Another plugin's screen on a title ("Play with ..."). Only plugins that declared "provides": {"stream": true}.
+        // Another plugin's screen on a title ("Play with ..."). Only plugins that declared "provides": {"stream": true} or {"live": true}.
         final id = '${raw['id']}';
         final known = (PluginHost.streamers ?? const <Map<String, String>>[]).where((e) => e['id'] == id).firstOrNull;
         final intent = raw['intent'];
