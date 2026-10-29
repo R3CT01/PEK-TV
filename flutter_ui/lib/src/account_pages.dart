@@ -6,7 +6,9 @@ import 'cloud.dart';
 import 'common.dart';
 import 'fields.dart';
 import 'profile_pages.dart';
+import 'plan_ui.dart';
 import 'plugin_backup_ui.dart';
+import 'plugin_host.dart';
 import 'profiles.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -36,6 +38,7 @@ class _AccountSectionState extends State<AccountSection> {
       _busy = true;
       _note = 'Syncing\u2026';
     });
+    await Cloud.refreshPlan(force: true);
     final r = await Cloud.sync();
     if (!mounted) return;
     setState(() {
@@ -78,7 +81,7 @@ class _AccountSectionState extends State<AccountSection> {
   }
 
   Future<void> _delete() async {
-    final ok = await _confirm('Delete the account?', 'This permanently deletes the cloud account with every profile\u2019s history and resume points. It cannot be undone.', 'Delete account');
+    final ok = await _confirm('Delete the account?', 'This permanently deletes the cloud account with every profile\u2019s history and resume points, and any PEK Cloud plan on it (a lifetime plan too). It cannot be undone.', 'Delete account');
     if (!ok) return;
     final r = await Cloud.deleteAccount();
     if (!mounted) return;
@@ -101,11 +104,11 @@ class _AccountSectionState extends State<AccountSection> {
         if (!Cloud.linked) {
           return Section(
             title: 'Account',
-            hint: 'One account for the household. Each profile keeps its own watch history and resume points, and they follow you to your other devices. Profiles need an account.',
+            hint: 'One account for the household. Each profile keeps its own watch history and resume points, and they follow you to your other devices. Profiles need an account. Accounts are created on our website (you need an invite code), then you sign in here.',
             children: [
               Wrap(spacing: 8, runSpacing: 8, children: [
                 PekButton(label: 'Sign in', primary: true, onTap: () => _open(AccountMode.signIn)),
-                PekButton(label: 'Create account', onTap: () => _open(AccountMode.signUp)),
+                PekButton(label: 'Create account', onTap: () => openSignUpPage(context)),
               ]),
             ],
           );
@@ -121,11 +124,16 @@ class _AccountSectionState extends State<AccountSection> {
               Expanded(child: Text('Watching as ${cur.name}', style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600))),
             ]),
             SizedBox(height: 0.75 * rem),
-            Text('Last synced: ${_ago(Cloud.lastSync)}', style: TextStyle(color: p.tokens.textMuted)),
+            Text(Cloud.entitled ? 'Plan: ${Cloud.planLabel}' : 'Plan: Free \u00b7 no cloud backup, 1 profile', style: TextStyle(color: p.tokens.textMuted)),
+            if (Cloud.entitled) Text('Last synced: ${_ago(Cloud.lastSync)}', style: TextStyle(color: p.tokens.textMuted)),
+            if (Cloud.username.isEmpty) Padding(padding: EdgeInsets.only(top: 0.4 * rem), child: Text('This account has no username yet. Every account needs one: choose it on the website.', style: TextStyle(color: p.tokens.textMuted))),
             if (_note.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.4 * rem), child: Text(_note, style: TextStyle(color: p.tokens.textMuted))),
             SizedBox(height: 0.75 * rem),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              PekButton(label: _busy ? 'Syncing\u2026' : 'Sync now', primary: true, onTap: _busy ? null : _syncNow),
+              if (Cloud.username.isEmpty) PekButton(label: 'Choose a username', primary: true, onTap: () => openSitePage(context, Cloud.accountPage)),
+              if (!Cloud.entitled) PekButton(label: 'Get PEK Cloud', primary: Cloud.username.isNotEmpty, onTap: () => showUpgradeDialog(context)),
+              if (Cloud.entitled) PekButton(label: _busy ? 'Syncing\u2026' : 'Sync now', primary: true, onTap: _busy ? null : _syncNow),
+              if (Cloud.entitled && Cloud.plan != 'grandfathered') PekButton(label: 'Manage plan', onTap: () => PluginHost.openUrl(Cloud.accountPage)),
               PekButton(label: 'Switch profile', onTap: () {
                 Navigator.of(context).popUntil((r) => r.isFirst);
                 Profiles.openPicker();
@@ -135,8 +143,8 @@ class _AccountSectionState extends State<AccountSection> {
               PekButton(label: 'Delete account', onTap: _delete),
             ]),
             SizedBox(height: 0.5 * rem),
-            Text('Library favorites stay on this device. The cloud keeps watch history and resume points.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.85 * rem)),
-            const PluginBackupSettings(),
+            Text(Cloud.entitled ? 'Library favorites stay on this device. The cloud keeps watch history and resume points.' : 'Your watch history stays on this device. PEK Cloud backs it up and adds up to 5 profiles.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.85 * rem)),
+            if (Cloud.entitled) const PluginBackupSettings(),
           ],
         );
       },
@@ -163,6 +171,7 @@ class ManageProfilesScreen extends StatelessWidget {
               trailing: ProfileAvatar(name: pr.name, color: pr.color, avatar: pr.avatar, size: 2.4 * p.rem, locked: pr.locked),
               onTap: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => ProfileEditor(existing: pr))),
             ),
+          if (Profiles.needsUpgradeToAdd) ListRow(title: 'More profiles', subtitle: 'Up to ${Profiles.max} people with PEK Cloud', onTap: () => showUpgradeDialog(context, why: 'More profiles are part of PEK Cloud.')),
           if (Profiles.canAdd) ListRow(title: 'Add profile', subtitle: 'Up to ${Profiles.max} people', onTap: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const ProfileEditor()))),
         ]),
       ),
@@ -170,7 +179,7 @@ class ManageProfilesScreen extends StatelessWidget {
   }
 }
 
-enum AccountMode { signIn, signUp, verify, forgot, reset }
+enum AccountMode { signIn, verify, forgot, reset }
 
 /// Sign in, create an account, enter the emailed 6-digit code, or reset a forgotten password.
 class AccountScreen extends StatefulWidget {
@@ -184,8 +193,6 @@ class _AccountScreenState extends State<AccountScreen> {
   late AccountMode _mode = widget.mode;
   final _email = TextEditingController();
   final _pass = TextEditingController();
-  final _invite = TextEditingController();
-  final _name = TextEditingController();
   final _code = TextEditingController();
   bool _busy = false;
   bool _created = false; // the code finishes a brand-new account
@@ -196,10 +203,20 @@ class _AccountScreenState extends State<AccountScreen> {
   void dispose() {
     _email.dispose();
     _pass.dispose();
-    _invite.dispose();
-    _name.dispose();
     _code.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Coming back from the website after creating an account: the email is filled in, the password is still typed here.
+    if (Cloud.prefillEmail.isNotEmpty && _mode == AccountMode.signIn) {
+      _email.text = Cloud.prefillEmail;
+      _info = Cloud.prefillName.isEmpty ? 'Your account is ready. Sign in with your email and password.' : 'Welcome, ${Cloud.prefillName}! Your account is ready. Sign in with your email and password.';
+      Cloud.prefillEmail = '';
+      Cloud.prefillName = '';
+    }
   }
 
   void _go(AccountMode m, {String info = ''}) => setState(() {
@@ -241,15 +258,6 @@ class _AccountScreenState extends State<AccountScreen> {
             _done();
           }
         });
-      case AccountMode.signUp:
-        _run(() => Cloud.signUp(_email.text, _pass.text, invite: _invite.text, name: _name.text), (r) {
-          if (r.needsVerify) {
-            _created = true;
-            _go(AccountMode.verify, info: 'We emailed a 6-digit code to ${Cloud.cleanEmail(_email.text)}.');
-          } else {
-            _done();
-          }
-        });
       case AccountMode.verify:
         _run(() => Cloud.verifyEmail(_email.text, _code.text, created: _created), (r) => _done());
       case AccountMode.forgot:
@@ -266,14 +274,12 @@ class _AccountScreenState extends State<AccountScreen> {
     final rem = p.rem;
     final title = switch (_mode) {
       AccountMode.signIn => 'Sign in',
-      AccountMode.signUp => 'Create account',
       AccountMode.verify => 'Enter the code',
       AccountMode.forgot => 'Forgot password',
       AccountMode.reset => 'Choose a new password',
     };
     final primary = switch (_mode) {
       AccountMode.signIn => 'Sign in',
-      AccountMode.signUp => 'Create account',
       AccountMode.verify => 'Verify',
       AccountMode.forgot => 'Email me a code',
       AccountMode.reset => 'Set password',
@@ -286,22 +292,17 @@ class _AccountScreenState extends State<AccountScreen> {
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             if (_info.isNotEmpty) Padding(padding: EdgeInsets.only(bottom: 0.75 * rem), child: Text(_info, style: TextStyle(color: t.textMuted))),
             PekField(label: 'Email', controller: _email, keyboardType: TextInputType.emailAddress, autofocus: true, onSubmitted: _mode == AccountMode.forgot ? _submit : null),
-            if (_mode == AccountMode.signIn || _mode == AccountMode.signUp || _mode == AccountMode.reset)
+            if (_mode == AccountMode.signIn || _mode == AccountMode.reset)
               PekField(label: _mode == AccountMode.reset ? 'New password (8 or more characters)' : 'Password', controller: _pass, obscure: true, onSubmitted: _mode == AccountMode.signIn ? _submit : null),
-            if (_mode == AccountMode.signUp) ...[
-              PekField(label: 'Invite code (while the cloud is invite-only)', controller: _invite),
-              PekField(label: 'Display name (optional)', controller: _name),
-            ],
             if (_mode == AccountMode.verify || _mode == AccountMode.reset) PekField(label: '6-digit code', controller: _code, keyboardType: TextInputType.number, onSubmitted: _mode == AccountMode.verify ? _submit : null),
             if (_error.isNotEmpty) Padding(padding: EdgeInsets.only(bottom: 0.75 * rem), child: Text(_error, style: const TextStyle(color: Colors.redAccent))),
             Align(alignment: Alignment.centerLeft, child: PekButton(label: _busy ? 'Please wait\u2026' : primary, primary: true, onTap: _busy ? null : _submit)),
             SizedBox(height: 1.25 * rem),
             Wrap(spacing: 8, runSpacing: 8, children: [
               if (_mode == AccountMode.signIn) ...[
-                PekButton(compact: true, label: 'Create account', onTap: () => _go(AccountMode.signUp)),
+                PekButton(compact: true, label: 'Create account (website)', onTap: () => openSignUpPage(context)),
                 PekButton(compact: true, label: 'Forgot password?', onTap: () => _go(AccountMode.forgot)),
               ],
-              if (_mode == AccountMode.signUp) PekButton(compact: true, label: 'I have an account', onTap: () => _go(AccountMode.signIn)),
               if (_mode == AccountMode.verify)
                 PekButton(
                   compact: true,

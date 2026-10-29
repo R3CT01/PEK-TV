@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'cloud.dart';
 import 'common.dart';
 import 'fields.dart';
+import 'plan_ui.dart';
 import 'profiles.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -248,7 +249,7 @@ class _ProfileGateState extends State<ProfileGate> {
                   SizedBox(height: 2 * rem),
                   Wrap(alignment: WrapAlignment.center, spacing: 1.5 * rem, runSpacing: 1.5 * rem, children: [
                     for (var i = 0; i < Profiles.list.length; i++) _tile(context, Profiles.list[i], size, autofocus: i == 0),
-                    if (Profiles.canAdd) _addTile(context, size),
+                    if (Profiles.canAdd) _addTile(context, size) else if (Profiles.needsUpgradeToAdd) _addTile(context, size, locked: true),
                   ]),
                   SizedBox(height: 2.5 * rem),
                   Wrap(spacing: 0.75 * rem, runSpacing: 0.75 * rem, alignment: WrapAlignment.center, children: [
@@ -285,11 +286,11 @@ class _ProfileGateState extends State<ProfileGate> {
     );
   }
 
-  Widget _addTile(BuildContext context, double size) {
+  Widget _addTile(BuildContext context, double size, {bool locked = false}) {
     final p = context.pek;
     final rem = p.rem;
     return PekFocusable(
-      onTap: () => _edit(null),
+      onTap: locked ? () => showUpgradeDialog(context, why: 'More profiles are part of PEK Cloud.') : () => _edit(null),
       radius: p.tokens.radius,
       padding: EdgeInsets.all(0.6 * rem),
       child: SizedBox(
@@ -299,10 +300,10 @@ class _ProfileGateState extends State<ProfileGate> {
             width: size,
             height: size,
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.tokens.textMuted, width: 2)),
-            child: Icon(Icons.add, size: size * 0.5, color: p.tokens.textMuted),
+            child: Icon(locked ? Icons.lock_outline : Icons.add, size: size * 0.5, color: p.tokens.textMuted),
           ),
           SizedBox(height: 0.6 * rem),
-          Text('Add profile', style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600, color: p.tokens.textMuted)),
+          Text(locked ? 'More profiles' : 'Add profile', style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600, color: p.tokens.textMuted)),
         ]),
       ),
     );

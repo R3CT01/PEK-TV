@@ -58,6 +58,11 @@ How the daily limit is protected:
   When the limit is reached the app says "Subtitle downloads are used up for today"; subtitles already stored still work.
 - If the worker is not on the sync address, set the `PEK_SUBS_URL` environment variable of the app's backend to its address.
 
+## Plans and payments (PEK Cloud)
+
+Cloud backup and extra profiles are a paid plan; accounts that already existed are grandfathered. The Stripe checkout lives in a
+second worker, `cloud/billing-worker.js`. See [BILLING-DEPLOY.md](BILLING-DEPLOY.md). Deploy this worker first.
+
 ## Plugin backup (no extra setup)
 
 The same worker and the same D1 database also store plugin backups. There is nothing new to configure:
@@ -150,6 +155,16 @@ A code is shown once when it is made and cannot be read back later (only its has
 confirmed it is used up for good. Unused codes also stop working after 14 days (`days` in the request; 0 = never).
 A person who starts sign-up and abandons it cannot finish later without a code.
 
+
+## Sign-up happens on the website (the app only signs in)
+
+Accounts are created on the website's Account page (`/account`, the Create account tab): email, **username (required)**, password and an
+invite code, then the emailed 6-digit code. The app has no sign-up screen; its Create account button opens that page.
+When the page was opened from the app (`?from=app`) it sends the person back with `pektv://account?email=...&username=...`, which opens the
+app's sign-in screen with the email filled in (no password or session travels in the link). On a device without a browser (a TV box), make the account on a phone
+or computer and sign in on the TV by hand.
+
+Usernames are required for every new account. Older accounts that have none are asked to choose one on the website (once; it cannot be changed after).
 
 ## Usernames
 

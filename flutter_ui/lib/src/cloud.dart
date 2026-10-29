@@ -41,6 +41,21 @@ class Cloud {
   static const _kEmail = 'pek_account_email';
   static const _kUser = 'pek_account_username';
   static const _kLastMail = 'pek_profiles_lastmail';
+  static const _kPlan = 'pek_plan';
+  static const _kPlanOk = 'pek_plan_ok';
+  static const _kPlanUntil = 'pek_plan_until';
+
+  /// The website where PEK Cloud is bought (never inside the app).
+  static const siteUrl = 'https://pekindustries.com/pektv';
+  static const accountPage = '$siteUrl/account';
+
+  /// Accounts are made on the website (an invite code is needed while the cloud is invite-only). "from=app" makes the page
+  /// open this app again when the account exists (pektv://account?email=...&username=..., see deep_link.dart).
+  static const signUpPage = '$siteUrl/account?signup=1&from=app';
+
+  /// Filled in by that link: shown on the sign-in screen once.
+  static String prefillEmail = '';
+  static String prefillName = '';
 
   static const _chunk = 800;
   static const _maxRounds = 20;
@@ -53,6 +68,67 @@ class Cloud {
   static final ValueNotifier<int> changes = ValueNotifier(0);
 
   static bool get linked => _token.isNotEmpty;
+
+  // ---------------------------------------------------------------- plan (PEK Cloud subscription)
+  // Free accounts: 1 profile and no cloud backup. PEK Cloud (monthly, yearly or lifetime, bought on the website) unlocks
+  // cloud backup and up to 5 profiles. Accounts made before plans existed are 'grandfathered' and have everything.
+  static int _planCheckedAt = 0;
+
+  /// 'free', 'grandfathered', 'monthly', 'yearly' or 'lifetime'; empty until the cloud has been asked.
+  static String get plan => Store.strGet(_kPlan, scoped: false) ?? '';
+  static bool get entitled => linked && Store.strGet(_kPlanOk, scoped: false) == '1';
+  /// When a monthly / yearly plan runs out unless it renews (ms since 1970), 0 for the other plans.
+  static int get planUntil => int.tryParse(Store.strGet(_kPlanUntil, scoped: false) ?? '') ?? 0;
+  static bool get renews => plan == 'monthly' || plan == 'yearly';
+
+  static String get planLabel {
+    switch (plan) {
+      case 'monthly':
+        return 'PEK Cloud (monthly)';
+      case 'yearly':
+        return 'PEK Cloud (yearly)';
+      case 'lifetime':
+        return 'PEK Cloud (lifetime)';
+      case 'grandfathered':
+        return 'PEK Cloud (included with your account)';
+      default:
+        return 'Free';
+    }
+  }
+
+  static Future<void> _savePlan(Map<String, dynamic> b) async {
+    final p = b['plan'];
+    if (p is! String || p.isEmpty) return; // an older cloud service that has no plans yet
+    final ok = b['entitled'] == true ? '1' : '0';
+    final until = '${(b['until'] as num?)?.toInt() ?? 0}';
+    final changed = plan != p || Store.strGet(_kPlanOk, scoped: false) != ok || Store.strGet(_kPlanUntil, scoped: false) != until;
+    await Store.strSet(_kPlan, p, scoped: false);
+    await Store.strSet(_kPlanOk, ok, scoped: false);
+    await Store.strSet(_kPlanUntil, until, scoped: false);
+    if (changed) changes.value++;
+  }
+
+  /// Asks the cloud which plan this account has (at most once a minute unless [force]). Returns whether cloud backup is unlocked.
+  static Future<bool> refreshPlan({bool force = false}) async {
+    if (!linked) return false;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && now - _planCheckedAt < 60 * 1000) return entitled;
+    _planCheckedAt = now;
+    try {
+      final r = await _request('GET', '/v1/me', withToken: true);
+      if (r.status == 200 && r.body['ok'] == true) {
+        final u = r.body['username'];
+        if (u is String && u.isNotEmpty && u != username) {
+          await Store.strSet(_kUser, u, scoped: false); // chosen on the website (older accounts had none)
+          changes.value++;
+        }
+        await _savePlan(r.body);
+      } else if (r.status == 404) {
+        await _savePlan({'plan': 'grandfathered', 'entitled': true, 'until': 0}); // a cloud service from before plans: nothing is locked
+      }
+    } catch (_) {}
+    return entitled;
+  }
   static String get _token => Store.strGet(_kToken, scoped: false) ?? '';
   static String get email => Store.strGet(_kEmail, scoped: false) ?? '';
   static String get username => Store.strGet(_kUser, scoped: false) ?? '';
@@ -106,6 +182,12 @@ class Cloud {
         return 'Sign in first.';
       case 'unknown_profile':
         return 'That profile was removed on another device.';
+      case 'subscription_required':
+        return 'Cloud backup is part of PEK Cloud. Subscribe on $siteUrl to turn it on.';
+      case 'email_not_verified':
+        return 'This account was never confirmed. Create it again on $siteUrl/account to finish.';
+      case 'cancel_subscription_first':
+        return 'Cancel your subscription on $accountPage first, then delete the account.';
       default:
         return 'The cloud could not do that ($code).';
     }
@@ -173,6 +255,9 @@ class Cloud {
     await Store.strDel(_kToken, scoped: false);
     await Store.strDel(_kEmail, scoped: false);
     await Store.strDel(_kUser, scoped: false);
+    await Store.strDel(_kPlan, scoped: false);
+    await Store.strDel(_kPlanOk, scoped: false);
+    await Store.strDel(_kPlanUntil, scoped: false);
     changes.value++;
   }
 
@@ -195,20 +280,12 @@ class Cloud {
     if (token is! String || token.isEmpty) return const CloudResult(ok: false, error: 'server');
     final mail = '${res.body['email'] ?? body['email']}'.toLowerCase();
     await _startSession(token, mail, '${res.body['username'] ?? ''}');
+    await _savePlan(res.body);
     await Profiles.afterSignIn(mail, created: created);
     return CloudResult(ok: true, body: res.body);
   }
 
-  static Future<CloudResult> signUp(String mail, String password, {String invite = '', String name = ''}) async {
-    if (!validEmail(mail)) return const CloudResult(ok: false, error: 'bad_email');
-    if (!validPassword(password)) return const CloudResult(ok: false, error: 'weak_password');
-    final body = <String, dynamic>{'email': cleanEmail(mail), 'password': password};
-    if (invite.trim().isNotEmpty) body['invite'] = invite.trim();
-    if (name.trim().isNotEmpty) body['username'] = name.trim();
-    return _session('/v1/auth/signup', body, created: true);
-  }
-
-  /// Finishes sign-up (or a sign-in that asks for it) with the 6-digit code from the email.
+  /// Finishes a sign-in with the 6-digit code from the email. (Accounts are created on the website, never in the app.)
   static Future<CloudResult> verifyEmail(String mail, String code, {bool created = true}) {
     if (!validEmail(mail)) return Future.value(const CloudResult(ok: false, error: 'bad_email'));
     return _session('/v1/auth/verify', {'email': cleanEmail(mail), 'code': code.replaceAll(RegExp(r'\D'), '')}, created: created);
@@ -327,14 +404,22 @@ class Cloud {
     if (running != null) return running;
     if (!linked) return Future.value(const CloudResult(ok: false, error: 'not_linked'));
     Activity.begin('sync', 'Syncing watch history\u2026');
-    final f = _syncInner(light).catchError((Object _) => const CloudResult(ok: false, error: 'offline')).then((res) async {
+    final f = _syncGuarded(light).catchError((Object _) => const CloudResult(ok: false, error: 'offline')).then((res) async {
       _inflight = null;
-      Activity.end('sync', res.ok ? 'Sync complete' : 'Sync failed');
+      Activity.end('sync', res.ok ? 'Sync complete' : (res.error == 'subscription_required' ? 'Cloud backup is off' : 'Sync failed'));
       if (res.error == 'session_expired') await _unlink(); // signed out elsewhere or expired: ask to sign in again
       return res;
     });
     _inflight = f;
     return f;
+  }
+
+  /// Cloud backup is part of PEK Cloud: a free account does not talk to the sync service at all.
+  static Future<CloudResult> _syncGuarded(bool light) async {
+    if (!entitled && !await refreshPlan()) return const CloudResult(ok: false, error: 'subscription_required');
+    final r = await _syncInner(light);
+    if (r.error == 'subscription_required') await _savePlan({'plan': 'free', 'entitled': false, 'until': 0}); // it ran out
+    return r;
   }
 
   static Future<CloudResult> _syncInner(bool light) async {

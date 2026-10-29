@@ -1,3 +1,4 @@
+import 'deep_link.dart';
 import 'pin_grid.dart';
 import 'plugin_pins.dart';
 import 'plugin_updates.dart';
@@ -164,6 +165,7 @@ class _AppShellState extends State<AppShell> {
     PluginHost.changed.addListener(_loadPluginScreens);
     PluginPins.changed.addListener(_pinsChanged);
     Store.profile.addListener(_pinsChanged);
+    unawaited(DeepLink.start()); // the website's "back to the app" link after creating an account
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) {
       unawaited(Cloud.sync());

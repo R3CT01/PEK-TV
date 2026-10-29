@@ -15,8 +15,15 @@
 //   INVITE_ONLY        (Text, optional)  1 = new accounts need a single-use invite code (existing accounts are not affected)
 //   ADMIN_KEY          (Secret, optional) a long random text (16+ characters); lets YOU make invite codes (see cloud/DEPLOY.md)
 //
+// Plans (paid with Stripe on the website by cloud/billing-worker.js, which shares this D1 database; see cloud/BILLING-DEPLOY.md):
+//   free         account only: no cloud backup (sync, profile sync, plugin backup answer 402 subscription_required), 1 profile in the app
+//   grandfathered accounts that existed before plans were added: everything unlocked, forever
+//   monthly / yearly  paid while plan_until is in the future (the billing worker moves it forward on every renewal)
+//   lifetime     paid once, everything unlocked, forever
+//
 // Routes:
-//   POST   /v1/auth/signup   { email, password, invite? }       -> { ok, needsVerify, email }   (code emailed; invite needed when INVITE_ONLY=1)
+//   POST   /v1/auth/signup   { email, username, password, invite? } -> { ok, needsVerify, email }   (username is required: 3 to 20 letters, digits . _ -; code emailed; invite needed when INVITE_ONLY=1)
+//                                                                  Sign-up is done on the website (public/pektv/account.html); the app only signs in.
 //   POST   /v1/invites/new   { count?, days?, note? }           -> { ok, codes }   (Authorization: Bearer <ADMIN_KEY>; codes are shown once)
 //   POST   /v1/invites/list  {}                                 -> { ok, invites }   (same key)   POST /v1/invites/revoke { id } -> { ok }
 //   POST   /v1/auth/verify   { email, code }                    -> { ok, token, email }   (finishes a sign-up OR a sign-in)
@@ -28,6 +35,8 @@
 //   POST   /v1/subs/search   { title, year?, season?, episode?, lang?, file? } -> { ok, results }   (shared OpenSubtitles account, no sign-in)
 //   POST   /v1/subs/get      { id }                                            -> { ok, text, cached }  (see "subtitles" below)
 //   POST   /v1/auth/logout                                      -> { ok }
+//   POST   /v1/account/username { username }                    -> { ok, username }   (only for an older account that has none yet; it cannot be changed afterwards)
+//   GET    /v1/me                                               -> { ok, email, username, plan, entitled, until, cancelling }   (works on every plan)
 //   POST   /v1/auth/confirm  { password }                      -> { ok }   (re-checks the signed-in account's password, e.g. to reset a forgotten profile passcode; rate limited)
 //   POST   /v1/profiles/sync { profiles: [{id,name,color,updated,deleted,avatar,pin}] } -> { ok, profiles, rejected }   (the household's profiles, last writer wins;
 //                                                                  avatar = built-in picture id or a small photo, pin = salted passcode hash, both optional)
@@ -37,8 +46,8 @@
 //   POST   /v1/plugins/commit  { id, fp, total, name, version, size, updated } -> { ok, stored }  (finishes a backup)
 //   GET    /v1/plugins/chunk?id=&fp=&i=                         -> { ok, data }
 //   POST   /v1/plugins/delete  { id, updated }                  -> { ok }
-//   GET    /v1/export        everything stored for the account (JSON)
-//   DELETE /v1/account       permanently delete the account and all its data
+//   GET    /v1/export        everything stored for the account (JSON; works on every plan)
+//   DELETE /v1/account       permanently delete the account and all its data (409 cancel_subscription_first while a renewing subscription is active)
 //
 //   Plugin Store (see DEPLOY.md). Uploads need a GitHub sign-in, done on the GitHub Pages site:
 //   GET    /v1/gh/login?ret=upload|owner  -> redirects to GitHub;  GET /v1/gh/callback -> back to the site with #token=
@@ -105,6 +114,12 @@ async function init(db) {
     try { await db.prepare('ALTER TABLE users ADD COLUMN gf INTEGER NOT NULL DEFAULT 1').run(); } catch (e) { /* already there */ }
     // Username (3 to 20 characters, required at sign-up), unique ignoring upper/lower case. Older accounts have none ('').
     try { await db.prepare("ALTER TABLE users ADD COLUMN username TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    // Plans. Rows that already exist when these columns are added get 'grandfathered' (the column default); sign-up stores 'free'.
+    try { await db.prepare("ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'grandfathered'").run(); } catch (e) { /* already there */ }
+    try { await db.prepare('ALTER TABLE users ADD COLUMN plan_until INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
+    try { await db.prepare('ALTER TABLE users ADD COLUMN plan_cancel INTEGER NOT NULL DEFAULT 0').run(); } catch (e) { /* already there */ }
+    try { await db.prepare("ALTER TABLE users ADD COLUMN stripe_customer TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    try { await db.prepare("ALTER TABLE users ADD COLUMN stripe_sub TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
     await db.prepare("CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE) WHERE username <> ''").run();
     await db.prepare('CREATE TABLE IF NOT EXISTS invites (hash TEXT PRIMARY KEY, created INTEGER NOT NULL, expires INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT \'\', reserved_by TEXT, reserved_until INTEGER NOT NULL DEFAULT 0, used_by TEXT, used_at INTEGER)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS verifs (user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL, expires INTEGER NOT NULL, tries INTEGER NOT NULL DEFAULT 0)').run();
@@ -387,7 +402,7 @@ async function handleSignup(request, env) {
     // Username (required for new accounts): checked before an invite is held, so a taken name never ties up a code.
     const username = cleanUsername(body.username);
     if (username === null) return json({ error: 'bad_username' }, 400);
-    if (!username && !(existing && existing.gf)) return json({ error: 'username_required' }, 400);   // accounts from before usernames existed (gf = 1) may finish without one
+    if (!username) return json({ error: 'username_required' }, 400);   // a username is required for every new account (3 to 20 characters)
     if (username && await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?').bind(username, existing ? existing.id : '').first()) return json({ error: 'username_taken' }, 409);
 
     // Invite-only: a new address (or one left unconfirmed since the switch) needs an unused code. Accounts that already
@@ -410,7 +425,7 @@ async function handleSignup(request, env) {
     } else {
         id = userId;
         try {
-            await db.prepare('INSERT INTO users (id, email, pw, created, last_seen, verified, gf, username) VALUES (?, ?, ?, ?, ?, 0, 0, ?)')
+            await db.prepare("INSERT INTO users (id, email, pw, created, last_seen, verified, gf, username, plan) VALUES (?, ?, ?, ?, ?, 0, 0, ?, 'free')")
                 .bind(id, email, pw, now, now, username).run();
         } catch (e) {
             await db.prepare('UPDATE invites SET reserved_by = NULL, reserved_until = 0 WHERE reserved_by = ? AND used_by IS NULL').bind(userId).run();   // give the code back
@@ -443,7 +458,7 @@ async function handleVerify(request, env) {
         db.prepare('UPDATE users SET verified = 1, last_seen = ? WHERE id = ?').bind(now, user.id),
         db.prepare('DELETE FROM verifs WHERE user_id = ?').bind(user.id)
     ]);
-    return json({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' });
+    return json(Object.assign({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' }, await planOf(db, user.id, now)));
 }
 
 // Sends a new code: to an unverified account, or to a sign-in that is waiting for its code. Always answers ok.
@@ -545,12 +560,52 @@ async function handleReset(request, env) {
         db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(user.id)      // everyone is signed out
     ]);
     await clearLimit(db, 'login:mail:' + email);
-    return json({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' });
+    return json(Object.assign({ ok: true, token: await startSession(db, user.id, now), email, username: user.username || '' }, await planOf(db, user.id, now)));
 }
 
 async function handleLogout(env, sess) {
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(sess.tokenHash).run();
     return json({ ok: true });
+}
+
+// ---------------------------------------------------------------- plans
+// Same rules as cloud/billing-worker.js (that worker is the only one that ever changes a plan).
+function isEntitled(u, now) {
+    if (!u) return false;
+    if (u.plan === 'grandfathered' || u.plan === 'lifetime') return true;
+    return (u.plan === 'monthly' || u.plan === 'yearly') && Number(u.plan_until) > now;
+}
+async function planOf(db, userId, now) {
+    const u = await db.prepare('SELECT plan, plan_until, plan_cancel FROM users WHERE id = ?').bind(userId).first();
+    if (!u) return { plan: 'free', entitled: false, until: 0, cancelling: false };
+    return { plan: u.plan, entitled: isEntitled(u, now), until: (u.plan === 'monthly' || u.plan === 'yearly') ? Number(u.plan_until) : 0, cancelling: !!u.plan_cancel };
+}
+
+// POST /v1/account/username { username } -> { ok, username }
+// Accounts made before usernames were required have none ('') and choose one here, once. After that it is fixed.
+async function handleSetUsername(request, env, userId) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB;
+    const username = cleanUsername(body.username);
+    if (username === null) return json({ error: 'bad_username' }, 400);
+    if (!username) return json({ error: 'username_required' }, 400);
+    const me = await db.prepare('SELECT username FROM users WHERE id = ?').bind(userId).first();
+    if (!me) return json({ error: 'bad_session' }, 401);
+    if (me.username) return json({ error: 'username_set' }, 409);
+    if (await db.prepare('SELECT id FROM users WHERE username = ? COLLATE NOCASE AND id <> ?').bind(username, userId).first()) return json({ error: 'username_taken' }, 409);
+    try {
+        await db.prepare("UPDATE users SET username = ? WHERE id = ? AND username = ''").bind(username, userId).run();
+    } catch (e) {
+        return json({ error: 'username_taken' }, 409);          // lost a race with someone taking the same name
+    }
+    return json({ ok: true, username });
+}
+
+// GET /v1/me -> { ok, email, username, plan, entitled, until, cancelling }
+async function handleMe(env, userId) {
+    const u = await env.DB.prepare('SELECT email, username FROM users WHERE id = ?').bind(userId).first();
+    if (!u) return json({ error: 'bad_session' }, 401);
+    return json(Object.assign({ ok: true, email: u.email, username: u.username || '' }, await planOf(env.DB, userId, Date.now())));
 }
 
 // ---------------------------------------------------------------- sync handlers
@@ -837,6 +892,9 @@ async function handleExport(env, acct) {
 }
 
 async function handleDelete(env, acct) {
+    // A renewing subscription keeps charging after the account is gone, so it has to be cancelled first (on the website).
+    const pl = await env.DB.prepare('SELECT plan, plan_until, plan_cancel, stripe_sub FROM users WHERE id = ?').bind(acct).first();
+    if (pl && (pl.plan === 'monthly' || pl.plan === 'yearly') && pl.stripe_sub && !pl.plan_cancel && Number(pl.plan_until) > Date.now()) return json({ error: 'cancel_subscription_first' }, 409);
     await env.DB.batch([
         env.DB.prepare('DELETE FROM items WHERE acct = ? OR acct LIKE ?').bind(acct, likeProfiles(acct)),
         env.DB.prepare('DELETE FROM profiles WHERE acct = ?').bind(acct),
@@ -1337,6 +1395,12 @@ export default {
             if (!sess) return json({ error: 'bad_session' }, 401);
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
+            if (method === 'GET' && path === '/v1/me') return await handleMe(env, sess.userId);
+            if (method === 'POST' && path === '/v1/account/username') return await handleSetUsername(request, env, sess.userId);
+            // Cloud backup (profile sync, watch-history sync, plugin backup) is a paid feature. Export and account deletion stay free.
+            if (path === '/v1/profiles/sync' || path === '/v1/sync' || path.indexOf('/v1/plugins') === 0) {
+                if (!(await planOf(env.DB, sess.userId, Date.now())).entitled) return json({ error: 'subscription_required' }, 402);
+            }
             if (method === 'POST' && path === '/v1/auth/confirm') return await handleConfirm(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/profiles/sync') return await handleProfiles(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/sync') return await handleSync(request, env, sess.userId);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 
+import 'src/deep_link.dart';
 import 'src/activity.dart';
 import 'src/app_update.dart';
 import 'src/api.dart';
@@ -46,6 +47,7 @@ class PekApp extends StatelessWidget {
           title: 'PEK TV',
           debugShowCheckedModeBanner: false,
           scaffoldMessengerKey: Net.messenger,
+          navigatorKey: DeepLink.navKey,
           theme: pekTheme(tokens),
           // Tokens, TV mode and the rem size are available to every route (dialogs and the player included).
           builder: (context, child) => PekRoot(isPhone: isPhone, tokens: tokens, child: KeyGuard(child: Stack(fit: StackFit.expand, children: [child ?? const SizedBox.shrink(), const NetDot(), const ActivityOverlay(), const BusyRing()]))),

@@ -30,6 +30,7 @@ class Profile {
 /// appears while a cloud account is signed in; signed out the app just runs as the active profile.
 class Profiles {
   static const max = 5;
+  static const freeMax = 1; // without PEK Cloud
   static const nameMax = 20;
   static const colors = ['#E04A00', '#C2185B', '#7B1FA2', '#3949AB', '#0277BD', '#00897B', '#689F38', '#F9A825'];
 
@@ -135,7 +136,11 @@ class Profiles {
   static Iterable<String> get ids => _list.map((p) => p.id).toList();
   static String get currentId => _active;
   static Profile get current => _list.firstWhere((p) => p.id == _active, orElse: () => _list.first);
-  static bool get canAdd => _list.length < max;
+  static int get limit => Cloud.entitled ? max : freeMax;
+  static bool get canAdd => _list.length < limit;
+
+  /// True when another profile would be allowed with PEK Cloud (the screens then show an upgrade tile instead of Add).
+  static bool get needsUpgradeToAdd => Cloud.linked && !Cloud.entitled && _list.length >= freeMax && _list.length < max;
 
   /// The first-time screen (name + picture) comes before anything else for an account whose main profile was never set up.
   static bool get needsSetup => Cloud.linked && !setupDone;

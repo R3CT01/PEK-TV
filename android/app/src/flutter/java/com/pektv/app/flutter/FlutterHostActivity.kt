@@ -83,6 +83,22 @@ class FlutterHostActivity : FlutterActivity() {
     private var updateChannel: MethodChannel? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
+    // pektv://account?... from the website (after creating an account): handed to Dart (deep_link.dart) once it asks, or pushed when it is running.
+    private var hostChannel: MethodChannel? = null
+    private var pendingLink: String? = null
+
+    private fun linkOf(i: Intent?): String? {
+        val d = i?.dataString
+        return if (d != null && d.startsWith("pektv://")) d else null
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val l = linkOf(intent) ?: return
+        val ch = hostChannel
+        if (ch != null) ch.invokeMethod("link", l) else pendingLink = l
+    }
+
     // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
     private val pluginPool = Executors.newCachedThreadPool()
 
@@ -272,6 +288,7 @@ class FlutterHostActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         fromSplash = intent.getBooleanExtra("pek_from_splash", false)
+        pendingLink = linkOf(intent)
         // The server and the plugins normally started while the splash video played; this is a no-op then.
         Boot.ensureStarted(applicationContext)
         super.onCreate(savedInstanceState)
@@ -458,8 +475,13 @@ class FlutterHostActivity : FlutterActivity() {
             }
         }
 
+        hostChannel = MethodChannel(messenger, "pek/host")
         MethodChannel(messenger, "pek/host").setMethodCallHandler { call, result ->
             when (call.method) {
+                "initialLink" -> {
+                    result.success(pendingLink)
+                    pendingLink = null
+                }
                 // The same test as MainActivity.phone: false on Android TV / leanback boxes (html.pek-tv in the web UI).
                 "isPhone" -> {
                     val ui = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager

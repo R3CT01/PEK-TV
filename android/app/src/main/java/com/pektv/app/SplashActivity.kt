@@ -31,6 +31,17 @@ class SplashActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A pektv:// link while the app is already loaded (the website after sign-up): no splash video, straight to the app.
+        val link = intent?.data
+        if (link != null && SplashGate.wasAppReady()) {
+            try {
+                startActivity(Intent(this, Class.forName("com.pektv.app.flutter.FlutterHostActivity")).setData(link).addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION))
+            } catch (e: Throwable) {
+                Log.e("PEKSplash", "could not open the link", e)
+            }
+            finish()
+            return
+        }
         window.setBackgroundDrawable(ColorDrawable(getColor(R.color.pek_splash_bg)))
         Boot.ensureStarted(applicationContext)   // everything heavy starts now and runs while the video plays
         SplashGate.begin { handler.postDelayed({ closeSplash() }, CLOSE_DELAY_MS) }
@@ -51,6 +62,7 @@ class SplashActivity : Activity() {
             return
         }
         target.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+        intent?.data?.let { target.data = it }   // a pektv:// link that started the app (cold start) goes on to the Flutter screen
         try {
             startActivity(target)
             overridePendingTransition(0, 0)

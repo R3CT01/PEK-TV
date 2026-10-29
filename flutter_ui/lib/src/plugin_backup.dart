@@ -216,6 +216,7 @@ class PluginBackup {
 
   static Future<BackupRun> _run(bool force) async {
     if (!Cloud.linked) return const BackupRun(ok: false, error: 'not_linked');
+    if (!Cloud.entitled && !await Cloud.refreshPlan()) return const BackupRun(ok: false, error: 'subscription_required'); // part of PEK Cloud
     final email = Cloud.email;
     var state = Store.jsonMap(_kSeen, scoped: false);
     if (state['email'] != email) state = {'email': email, 'plugins': <String, dynamic>{}}; // a different account: start fresh
@@ -340,7 +341,7 @@ class PluginBackup {
 
   /// The person removed this plugin here: tell the cloud so their other devices stop offering it.
   static Future<void> forget(String id) async {
-    if (!enabled || !Cloud.linked || !validId(id)) return;
+    if (!enabled || !Cloud.entitled || !validId(id)) return;
     final r = await Cloud.call('POST', '/v1/plugins/delete', {'id': id, 'updated': DateTime.now().millisecondsSinceEpoch});
     if (!r.ok) return;
     final state = Store.jsonMap(_kSeen, scoped: false);
