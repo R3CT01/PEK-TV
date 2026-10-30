@@ -39,7 +39,9 @@ class WhatsNew {
       'Everyone gets the free plan with 1 profile. Settings \u2192 Account now shows whether your account is Free or Paid. On a free account it shows a QR code to scan with your phone, and the web address to type into a browser, to get a plan. Payment only ever happens on the website, never in the app.',
       'The app notices by itself when your payment goes through: the Account page switches to Paid and your first backup starts, with no need to restart.',
       'Creating an account has moved to the website (an invite code is needed for now). In the app you sign in with your email and password, or on a TV with your phone, no typing needed.',
-      'A new Updates section in Settings brings you news about PEK TV, app updates and coupon codes. It shows how many messages are new, and a coupon code can be copied with one tap.',
+      'A new Updates button brings you news about PEK TV, app updates and coupon codes. It sits in the bottom bar on a phone and in the side menu on a TV, with a dot when something is new, and a coupon code can be copied with one tap.',
+      'Resume Watching and Watch History are now one screen called Watch History. What you stopped partway through is at the top under Continue watching, and everything you finished is below it.',
+      'Before anything is removed from your watch history, PEK TV now asks you to confirm. Cancel is selected first, so a slip of the remote will not delete anything.',
     ]),
   ];
 
