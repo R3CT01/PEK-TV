@@ -33,15 +33,12 @@ class WhatsNew {
 
   /// Newest first.
   static const releases = <ReleaseNotes>[
-    ReleaseNotes('2.2.0', 'Trakt, one account per profile', [
-      'Trakt is now part of PEK TV. Connect your Trakt account to scrobble what you watch, keep watched marks, ratings and favorites in step with Trakt both ways, and bring your Trakt history into PEK TV.',
-      'Every profile has its own Trakt account, so each person\u2019s history, ratings and favorites stay separate. Open the Trakt plugin while that profile is open to connect it.',
-      'Opening a profile brings that profile\u2019s Trakt history up to date. Deleting a profile signs its Trakt account out.',
-      'Your star ratings now show on movie and show posters, and under the title on a movie\u2019s page. Plugins can rate too: TMDb Discover and Stream Media have a 1 to 10 rating on their detail pages.',
-      'Posters and descriptions load faster, and the PEK splash video now plays as soon as you open the app.',
-      'Smooth playback no longer leaves a black screen when it switches on.',
-      'Fixes for several bugs in the app\u2019s screens and layout, including plugin rows with three buttons running off the edge of a phone screen.',
-      'This screen: after an update, PEK TV tells you what changed once.',
+    ReleaseNotes('2.2.1', 'PEK Cloud plans and a friendlier dashboard', [
+      'A new greeting at the top of the Dashboard. It changes every time you open it and fits the time of day and the profile you are using.',
+      'PEK Cloud is now a paid plan on our website, paid securely through Stripe: \$5.99 a month, \$48 a year (just \$4 a month, so you save about 33%), or \$199 once for lifetime. It adds cloud backup of your watch history, resume points and plugins, and up to 5 profiles. Accounts that already existed keep what they have.',
+      'Everyone gets the free plan with 1 profile. Settings \u2192 Account now shows whether your account is Free or Paid. On a free account it shows a QR code to scan with your phone, and the web address to type into a browser, to get a plan. Payment only ever happens on the website, never in the app.',
+      'The app notices by itself when your payment goes through: the Account page switches to Paid and your first backup starts, with no need to restart.',
+      'Creating an account has moved to the website (an invite code is needed for now). In the app you sign in with your email and password, or on a TV with your phone, no typing needed.',
     ]),
   ];
 

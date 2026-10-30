@@ -62,10 +62,10 @@ Do this **before** deploying the billing worker or the new app.
 
 ## 5. Test it (no real money)
 
-1. Make a brand-new account in the app (you need an invite code). It starts **Free**: Settings -> Account shows "Get PEK Cloud", and a second profile is locked.
+1. Make a brand-new account in the app (you need an invite code). It starts **Free**: Settings -> Account shows a FREE badge with a QR code and the web address for getting PEK Cloud, and a second profile is locked.
 2. Open the website -> Account -> sign in (a code is emailed) -> pick a plan -> pay with card `4242 4242 4242 4242`, any
    future expiry, any CVC, any postcode.
-3. You come back to the account page; within a few seconds it shows the plan. In the app: Settings -> Account -> **Sync now**.
+3. You come back to the account page; within a few seconds it shows the plan. The app (with Settings -> Account open) notices by itself: the badge changes to PAID and the first backup starts. You can also tap **I have subscribed** or **Sync now**.
 4. Try the other cards: `4000 0000 0000 0002` (declined), `4000 0027 6000 3184` (3D Secure).
 5. Test renewals and cancellations without waiting: Stripe dashboard -> Billing -> **Test clocks**.
 6. Stripe -> Developers -> Webhooks -> your endpoint shows every delivery and lets you resend one.

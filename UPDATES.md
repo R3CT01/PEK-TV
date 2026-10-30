@@ -7,7 +7,7 @@ screen comes up before the app. **Update now** downloads the apk and hands it to
 ## Publishing a release (what the app looks for)
 
 1. In `android/app/build.gradle` raise `pekBaseCode` by 1 (18 -> 19). Android refuses an install whose versionCode is not higher.
-2. Push a tag: `git tag v2.2.0 && git push origin v2.2.0`.
+2. Push a tag: `git tag v2.2.1 && git push origin v2.2.1`.
 3. `build_android.yml` builds a signed release and publishes a GitHub release with
    `PEK-TV-<version>-release-arm64-v8a.apk` and `PEK-TV-<version>-release-armeabi-v7a.apk`.
    The tag (without the `v`) becomes the app's versionName and is what installed apps compare against.
@@ -34,8 +34,10 @@ After the app was updated, the first start shows a **What's new in PEK TV x.y.z*
 
 Every release, **before you push the tag**:
 
-1. Add a `ReleaseNotes('x.y.z', 'Short title', ['line', 'line', ...])` at the TOP of `releases` in
-   `flutter_ui/lib/src/whats_new.dart`. `x.y.z` must be the tag you push, without the `v`.
+1. Replace the entry in `releases` in `flutter_ui/lib/src/whats_new.dart` with a `ReleaseNotes('x.y.z', 'Short title', ['line', 'line', ...])`
+   for this release (or add it at the TOP to keep older notes for people who skip versions). `x.y.z` must be the tag you push, without the `v`.
+   The current entry is 2.2.1: the dashboard greeting, PEK Cloud plans (Stripe, on the website), the Free / Paid badge with a QR code, and
+   sign-up moving to the website.
 2. Raise `version:` in `flutter_ui/pubspec.yaml` and `pekBaseCode` in `android/app/build.gradle` (see "Publishing a release").
 
 How it behaves:

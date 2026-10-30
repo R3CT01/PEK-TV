@@ -34,6 +34,12 @@ class _AccountSectionState extends State<AccountSection> {
   bool _busy = false;
   String _note = '';
 
+  @override
+  void initState() {
+    super.initState();
+    unawaited(Cloud.refreshPlan()); // paid on the website since the app was last open? (at most once a minute)
+  }
+
   Future<void> _syncNow() async {
     setState(() {
       _busy = true;
@@ -126,14 +132,18 @@ class _AccountSectionState extends State<AccountSection> {
               Expanded(child: Text('Watching as ${cur.name}', style: TextStyle(fontSize: 1.05 * rem, fontWeight: FontWeight.w600))),
             ]),
             SizedBox(height: 0.75 * rem),
-            Text(Cloud.entitled ? 'Plan: ${Cloud.planLabel}' : 'Plan: Free \u00b7 no cloud backup, 1 profile', style: TextStyle(color: p.tokens.textMuted)),
+            const PlanBadge(),
+            SizedBox(height: 0.4 * rem),
             if (Cloud.entitled) Text('Last synced: ${_ago(Cloud.lastSync)}', style: TextStyle(color: p.tokens.textMuted)),
             if (Cloud.username.isEmpty) Padding(padding: EdgeInsets.only(top: 0.4 * rem), child: Text('This account has no username yet. Every account needs one: choose it on the website.', style: TextStyle(color: p.tokens.textMuted))),
             if (_note.isNotEmpty) Padding(padding: EdgeInsets.only(top: 0.4 * rem), child: Text(_note, style: TextStyle(color: p.tokens.textMuted))),
+            if (!Cloud.entitled) ...[
+              SizedBox(height: 0.75 * rem),
+              const SubscribeBox(), // updates by itself, and this page with it, when the payment goes through
+            ],
             SizedBox(height: 0.75 * rem),
             Wrap(spacing: 8, runSpacing: 8, children: [
               if (Cloud.username.isEmpty) PekButton(label: 'Choose a username', primary: true, onTap: () => openSitePage(context, Cloud.accountPage)),
-              if (!Cloud.entitled) PekButton(label: 'Get PEK Cloud', primary: Cloud.username.isNotEmpty, onTap: () => showUpgradeDialog(context)),
               if (Cloud.entitled) PekButton(label: _busy ? 'Syncing\u2026' : 'Sync now', primary: true, onTap: _busy ? null : _syncNow),
               if (Cloud.entitled && Cloud.plan != 'grandfathered') PekButton(label: 'Manage plan', onTap: () => PluginHost.openUrl(Cloud.accountPage)),
               PekButton(label: 'Switch profile', onTap: () {

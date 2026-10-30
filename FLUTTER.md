@@ -29,7 +29,7 @@ Swipe navigation on phones and tablets: **Home, Movies, Shows, Music and More ar
 bottom bar). "More" is a page of its own with tiles for Resume Watching, Favorites, Duplicates, Unknown, Plugins and
 Settings; a tap opens that screen on top and Back returns. On a TV the sidebar lists everything and switches the content.
 
-- Dashboard: clock, Continue Watching, Recently Added, Favorites rows (press and hold a widget: Move / Delete; Add widget button)
+- Dashboard: a random greeting on top (see "Dashboard greeting"), then the clock, Continue Watching, Recently Added, Favorites rows (press and hold a widget: Move / Delete; Add widget button)
 - Movies, TV Shows: poster grids, Refresh (rescan), movie and show / season / episode pages, Favorite button
 - Player: libmpv engine, audio + subtitle pick, buffering, auto-hiding controls, records progress for Resume Watching
 - Resume Watching, Favorites (long-press a poster to remove)
@@ -51,6 +51,9 @@ Resume progress, favorites and the dashboard layout are stored on the device wit
 - `flutter_ui/lib/src/shell.dart` - swipe pages, bottom bar, More page, TV sidebar
 - `flutter_ui/lib/src/store.dart` - on-device progress, favorites, dashboard layout
 - `flutter_ui/lib/src/{dashboard,music,music_controller,pages,common}.dart` - the screens above
+- `flutter_ui/lib/src/greeting.dart` - the dashboard greeting
+- `flutter_ui/lib/src/{account_pages,plan_ui,link_login}.dart` - Settings > Account: sign in, Free / Paid badge, how to get PEK Cloud
+- `flutter_ui/lib/src/whats_new.dart` - the "What's new" screen shown once after an update
 - `android/app/src/main/java/com/pektv/app/MpvController.kt` - events can now go to a Flutter sink (webView is optional)
 - `android/settings.gradle`, `android/app/build.gradle` - conditional Flutter module include, Flutter maven repo
 
@@ -66,7 +69,7 @@ Resume progress, favorites and the dashboard layout are stored on the device wit
 
 ## Added in phase 3
 - **Profiles** (`profiles.dart`, `profile_pages.dart`): Who's watching? picker, first-time setup, add / edit / delete, 4-digit passcode (hashed), 5 profiles max. Each profile has its own history, resume points, favorites, skip settings and skin. Profiles need a signed-in account.
-- **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign up / sign in with the emailed 6-digit code, forgot password, sign out (asks first), delete account. Watch history, resume points and favorites sync per profile through the existing worker; the profile list syncs too. Favorites are keyed by TMDb id, looked up once through the same TMDb worker the backend uses.
+- **Cloud account and sync** (`cloud.dart`, `account_pages.dart`): sign in with email and password (a 6-digit code is emailed on a new device), sign in with your phone on a TV (QR code, no typing), forgot password, sign out (asks first), delete account. Accounts are created on the website, not in the app (see "PEK Cloud plans in the app"). Watch history, resume points and favorites sync per profile through the existing worker; the profile list syncs too. Favorites are keyed by TMDb id, looked up once through the same TMDb worker the backend uses.
 - **Layouts** (`layouts.dart`): Classic, Top bar, Wall, Compact (menu position and poster size, TV/tablet) plus a poster-size setting that phones also get. Per profile.
 - **Torrent search** (`torrent_search.dart`): search the https sites you list (address with `{q}`), fetched through the existing `/api/torrent/fetch` route, plus an optional Torznab provider; results are filtered and ranked like the web engine.
 - **Torrents** (`torrent.dart`): More > Torrents plays a magnet / .torrent link with a loading screen (peers, speed, progress), a loading card inside the player while it buffers or scrubs, and Resume Watching that restarts the same release (also from other devices).
@@ -179,3 +182,37 @@ Details and limits: `MUSIC.md` > "Files that cannot be played".
 `android/app/src/main/java/com/pektv/app/MusicWidget.kt` plus the widget resources (layout, provider info, drawables, `ember_*` colours,
 strings) and a receiver in `AndroidManifest.xml`. It is native only: no Flutter screen and no channel. `MusicService` pushes `MusicState` to
 it whenever it redraws the notification. Details: `MUSIC.md` > "Home-screen widget".
+
+## Dashboard greeting
+`greeting.dart`. A line at the top of the Dashboard, above the "Dashboard" heading, picked at random each time the Dashboard opens
+(it never repeats the previous line). Lines are templates with three placeholders: `{user}` (the active profile's name),
+`{greeting}` ("Good morning" / "Good afternoon" / "Good evening" / "Good night") and `{tod}` ("this morning", "this afternoon",
+"this evening", "tonight"). Examples: "Hello Sam, how are we feeling this evening?", "Good morning, Sam. We are up early, aren't we?".
+
+- The day is split into six parts (late night, early morning, morning, afternoon, evening, night). Each part has its own lines on top of
+  lines that fit any time. The time is read in the Clock widget's time zone (this device's own zone unless one is chosen).
+- A profile with no real name yet ("Profile 1") is greeted without a name: "Hello, how are we feeling this evening?". The name follows
+  the active profile if it changes while the Dashboard is open.
+- To add or change lines edit `_any` (any time) and `_byPart` (one list per part of the day) in `greeting.dart`. Tests: `test/greeting_test.dart`.
+
+## PEK Cloud plans in the app
+Accounts are free and are created on the website (an invite code is needed while sign-up is invite-only); the app only signs in.
+**PEK Cloud** is the paid part: cloud backup (watch history, resume points, plugins) and up to 5 profiles. A free account has 1 profile
+and no cloud backup. Plans, bought on the website with Stripe (never inside the app): **$5.99 a month**, **$48 a year** (just $4 a month:
+it saves $23.88 a year, 33%, compared with paying monthly) or **$199 once** (lifetime). Accounts made before plans existed are
+"grandfathered" and have everything. The prices shown in the app are in `PlanPrices` (`plan_ui.dart`); keep them in step with Stripe
+(`cloud/billing-worker.js`) and the website's account page.
+
+Settings > Account (signed in), `account_pages.dart` and `plan_ui.dart`:
+
+- A **FREE** or **PAID** badge (`PlanBadge`) with the plan name, and for monthly and yearly plans the date the period ends.
+- On a free account, `SubscribeBox` shows the prices (with the yearly saving), a **QR code** that opens the website's account page on a
+  phone, the **address written out** (`pekindustries.com/pektv/account`) for people who would rather type it into a browser, and the
+  buttons Open the website and I have subscribed. The same box is the "Get PEK Cloud" dialog that the profile limit opens
+  (`showUpgradeDialog`).
+- **It updates by itself after paying.** While a `SubscribeBox` is on screen it asks the cloud for the plan every 5 seconds (every 30
+  seconds after 10 minutes) and the moment the app comes back from the browser (`Cloud.refreshPlan(force: true)`). When the plan changes
+  `Cloud.changes` fires, the badge turns to PAID, the box goes away, the dialog closes itself and the first backup starts. Opening
+  the Account page also checks once (at most once a minute).
+- Signing in on a TV: **Sign in with your phone** (QR code and 6-digit code, no typing) or **Sign in with email**, which works with a
+  remote and the TV's on-screen keyboard (`AccountScreen`).

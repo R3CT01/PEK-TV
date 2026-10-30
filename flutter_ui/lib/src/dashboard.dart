@@ -9,6 +9,7 @@ import 'clock.dart';
 import 'common.dart';
 import 'dash_widgets.dart';
 import 'detail.dart';
+import 'greeting.dart';
 import 'plugin_pins.dart';
 import 'plugin_host.dart' show PluginBack;
 import 'plugin_ui.dart';
@@ -350,6 +351,7 @@ class _DashboardPageState extends State<DashboardPage> {
         return ListView(
           padding: widget.padding,
           children: [
+            const GreetingBanner(),
             Heading(
               'Dashboard',
               weather: true,
