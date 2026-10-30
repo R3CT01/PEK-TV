@@ -36,8 +36,8 @@ Every release, **before you push the tag**:
 
 1. Replace the entry in `releases` in `flutter_ui/lib/src/whats_new.dart` with a `ReleaseNotes('x.y.z', 'Short title', ['line', 'line', ...])`
    for this release (or add it at the TOP to keep older notes for people who skip versions). `x.y.z` must be the tag you push, without the `v`.
-   The current entry is 2.2.1: the dashboard greeting, PEK Cloud plans (Stripe, on the website), the Free / Paid badge with a QR code, and
-   sign-up moving to the website.
+   The current entry is 2.2.1: the dashboard greeting, PEK Cloud plans (Stripe, on the website), the Free / Paid badge with a QR code,
+   sign-up moving to the website, Updates as a main button (phone bottom bar, TV side menu), the merged Watch History screen with its delete confirmation, and the Recommended dashboard widget (genre picks saved with the dashboard setting, TMDb rows).
 2. Raise `version:` in `flutter_ui/pubspec.yaml` and `pekBaseCode` in `android/app/build.gradle` (see "Publishing a release").
 
 How it behaves:

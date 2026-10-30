@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'api.dart';
 import 'clock.dart';
+import 'cloud.dart';
 import 'common.dart';
 import 'dash_widgets.dart';
 import 'detail.dart';
@@ -13,6 +14,7 @@ import 'greeting.dart';
 import 'plugin_pins.dart';
 import 'plugin_host.dart' show PluginBack;
 import 'plugin_ui.dart';
+import 'recs.dart';
 import 'store.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -68,7 +70,31 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    unawaited(_offerRecs());
+    Store.profile.addListener(_onProfile); // another profile: it gets the widget offered too
+  }
+
+  void _onProfile() => unawaited(_offerRecs());
+
+  /// The Recommended widget goes onto every profile's dashboard once: new profiles have it in the default layout, a layout saved
+  /// before it existed gets it added here. After that it is the person's: removing it keeps it removed.
+  Future<void> _offerRecs() async {
+    if (Store.musicMode || Recs.offered) return;
+    if (Cloud.linked) {
+      // Let the cloud's copy land first, so a widget removed (or genres picked) on another device is not undone from here.
+      try {
+        await Cloud.sync().timeout(const Duration(seconds: 15));
+      } catch (_) {/* offline: carry on */}
+      if (!mounted || Recs.offered) return;
+    }
+    await Recs.offerWidget();
+  }
+
+  @override
   void dispose() {
+    Store.profile.removeListener(_onProfile);
     _auto?.cancel();
     _scroll.dispose();
     if (PluginBack.current == _backFn) PluginBack.current = null;
@@ -474,6 +500,8 @@ class _DashboardPageState extends State<DashboardPage> {
         return (w: LibraryStatsTile(onLongPress: hold), span: span, full: false);
       case 'surprise':
         return (w: SurpriseTile(onLongPress: hold), span: span, full: false);
+      case 'recommend':
+        return (w: RecommendWidget(onLongPress: hold, onRemove: () => _delete('recommend')), span: 1, full: true);
       case 'pinned':
         final pinned = <PluginInfo>[
           for (final f in PluginPins.all)

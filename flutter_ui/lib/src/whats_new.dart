@@ -40,6 +40,7 @@ class WhatsNew {
       'The app notices by itself when your payment goes through: the Account page switches to Paid and your first backup starts, with no need to restart.',
       'Creating an account has moved to the website (an invite code is needed for now). In the app you sign in with your email and password, or on a TV with your phone, no typing needed.',
       'A new Updates button brings you news about PEK TV, app updates and coupon codes. It sits in the bottom bar on a phone and in the side menu on a TV, with a dot when something is new, and a coupon code can be copied with one tap.',
+      'A new Recommended widget on the Dashboard. Pick the genres you like once (it is saved to your account, so you are not asked again) and you get a row of movies and shows for each genre, stacked one under the other. As you watch and rate things, \u201cBecause you liked \u2026\u201d rows appear too. It also works if you only use plugins. Press and hold a title to add it to Favorites or hide it. You can edit the genres or remove the widget at any time.',
       'Resume Watching and Watch History are now one screen called Watch History. What you stopped partway through is at the top under Continue watching, and everything you finished is below it.',
       'Before anything is removed from your watch history, PEK TV now asks you to confirm. Cancel is selected first, so a slip of the remote will not delete anything.',
     ]),

@@ -12,6 +12,7 @@ import 'api.dart';
 import 'profiles.dart';
 import 'store.dart';
 import 'layouts.dart' show Layouts;
+import 'recs.dart' show Recs;
 import 'ratings.dart' show RatingEntry;
 import 'skins.dart' show Skins;
 import 'weather.dart' show Weather;
@@ -788,7 +789,7 @@ class Cloud {
   static Map<String, dynamic>? _settingRead(String n) {
     switch (n) {
       case 'dashboard':
-        return Store.dashboardChosen ? _dashValue(Store.dashboardItems()) : null;
+        return Store.dashboardChosen || Recs.touched ? _dashValue(Store.dashboardItems()) : null;
       case 'look':
         return Layouts.syncValue();
       case 'skin':
@@ -799,19 +800,23 @@ class Cloud {
     }
   }
 
-  static Map<String, dynamic> _dashValue(List<DashItem> items) {
+  /// The dashboard setting: the widget list, plus the Recommended widget's picks (`recs`: genres, "not interested", offered).
+  /// [recs] is what came from the cloud; without it the picks on this device go up.
+  static Map<String, dynamic> _dashValue(List<DashItem> items, {Map<String, dynamic>? recs, bool localRecs = true}) {
     final l = [for (final w in items) w.toJson()];
-    while (l.isNotEmpty && jsonEncode({'list': l}).length > _dashBudget) {
+    final r = localRecs ? Recs.syncValue() : recs;
+    Map<String, dynamic> value() => {'list': l, if (r != null) 'recs': r};
+    while (l.isNotEmpty && jsonEncode(value()).length > _dashBudget) {
       l.removeLast();
     }
-    return {'list': l};
+    return value();
   }
 
   /// Checks a value that came from the cloud. Null when nothing in it is usable.
   static Map<String, dynamic>? _settingClean(String n, dynamic o) {
     switch (n) {
       case 'dashboard':
-        return o is Map && o['list'] is List ? _dashValue(Store.cleanDashboard(o['list'])) : null;
+        return o is Map && o['list'] is List ? _dashValue(Store.cleanDashboard(o['list']), recs: Recs.cleanSync(o['recs']), localRecs: false) : null;
       case 'look':
         return Layouts.cleanSync(o);
       case 'skin':
@@ -828,6 +833,7 @@ class Cloud {
     switch (n) {
       case 'dashboard':
         unawaited(Store.applyDashboardFromCloud(Store.cleanDashboard(o['list'])));
+        unawaited(Recs.applySynced(o['recs']));
       case 'look':
         Layouts.applySynced(o);
       case 'skin':

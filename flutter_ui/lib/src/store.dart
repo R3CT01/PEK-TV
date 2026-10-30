@@ -494,14 +494,15 @@ class Store {
     'surprise': ('Surprise me', 'Opens a random movie from your library'),
     'upnext': ('Up Next', 'The next episode of the shows you are watching'),
     'watched': ('Recently Watched', 'What you finished lately'),
+    'recommend': ('Recommended', 'Movies and shows to watch next, by genre and by what you watch and rate'),
   };
-  static const dashDefault = ['clock', 'weather', 'continue', 'recent', 'favorites'];
+  static const dashDefault = ['clock', 'weather', 'continue', 'recommend', 'recent', 'favorites'];
 
   /// What the Add widget list offers, in groups (the built-in widgets; plugin shortcuts are listed under them).
   static const dashGroups = <(String, List<String>)>[
     ('Music', ['nowplaying', 'playlists', 'albums']),
     ('Weather and time', ['clock', 'weather']),
-    ('Movies and shows', ['continue', 'upnext', 'recent', 'watched', 'shows', 'favorites', 'stats', 'surprise']),
+    ('Movies and shows', ['continue', 'recommend', 'upnext', 'recent', 'watched', 'shows', 'favorites', 'stats', 'surprise']),
     ('Plugins', ['pinned']),
   ];
 
