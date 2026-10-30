@@ -98,6 +98,18 @@ chaquopy {
     }
 }
 
+// hesper_guard.py has ONE source of truth now: backend/hesper_guard.py (the same file the
+// C++/Termux build loads, see backend/core.cpp). It used to be hand-copied into this Python
+// source set and the two drifted apart; this task copies the real file in before every build
+// instead, so there is nothing left to keep in sync by hand. The copy lands in
+// src/main/python/hesper_guard.py, which is .gitignore'd (see android/.gitignore) so no one
+// commits a second copy by accident.
+tasks.register('copyHesperGuard', Copy) {
+    from new File(rootDir, '../backend/hesper_guard.py')
+    into 'src/main/python'
+}
+preBuild.dependsOn copyHesperGuard
+
 // Branding artwork (launcher icon, TV banner, splash videos) lives in the repo's top-level assets/ folder.
 android.sourceSets.main.res.srcDir new File(rootDir, '../assets/android/res')
 

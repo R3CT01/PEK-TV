@@ -8,3 +8,6 @@ openssl/
 app/src/main/assets/hesper/
 libsmb2/
 libnfs/
+# copied in at build time from backend/hesper_guard.py (single source of truth, see
+# app/build.gradle's copyHesperGuard task) - never commit a copy here again
+app/src/main/python/hesper_guard.py

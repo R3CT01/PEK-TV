@@ -1,0 +1,7 @@
+Delete this from your repo as part of applying this patch:
+  android/app/src/main/python/hesper_guard.py
+
+It is now generated at build time (android/app/build.gradle: copyHesperGuard task)
+from the single source of truth at backend/hesper_guard.py. Keeping the old
+committed copy around would make Chaquopy use the stale duplicate instead of the
+generated one.
