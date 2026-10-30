@@ -62,13 +62,13 @@ import java.util.concurrent.Executors
  *   pek/plugins     (MethodChannel)  call(json) -> json: a plugin's Python screen (plugins/<id>/screen.py, run by
  *                                    python/pek_flutter.py through Chaquopy); openUrl(url): an https link in the
  *                                    YouTube app or the browser; openApp({packages, url}): a streaming app. See FLUTTER_PLUGINS.md.
- *                                    pickFile(): Android's own file picker for a plugin / skin .zip (no storage permission needed);
+ *                                    pickFile({ext}): Android's own file picker for a plugin .PEK (ext "pek") or a skin .zip (ext "zip"; no storage permission needed);
  *                                    answers {name, bytes}, null when cancelled, or the error "no_picker" on a TV with no picker.
  */
 class FlutterHostActivity : FlutterActivity() {
 
     private companion object {
-        const val PICK_FILE = 4717              // request code of the .zip file picker
+        const val PICK_FILE = 4717              // request code of the .PEK / .zip file picker
         const val MAX_PICK_BYTES = 16 * 1024 * 1024 // a plugin is at most 8 MB, a skin 6 MB
     }
 
@@ -104,23 +104,28 @@ class FlutterHostActivity : FlutterActivity() {
     // Plugin screens: each call can wait on the network inside Python, so they never run on the UI thread.
     private val pluginPool = Executors.newCachedThreadPool()
 
-    // Install from .zip: the system file picker (Storage Access Framework). The person picks the file and Android hands this
-    // app just that one file, so no storage permission is needed and "All files access" is not required to see .zip files.
+    // Install from .PEK (plugins) or .zip (skins): the system file picker (Storage Access Framework). The person picks the file
+    // and Android hands this app just that one file, so no storage permission is needed and "All files access" is not required.
     private var pickResult: MethodChannel.Result? = null
+    private var pickExt = "pek"
 
-    private fun pickFile(result: MethodChannel.Result) {
+    private fun pickFile(ext: String, result: MethodChannel.Result) {
         if (pickResult != null) {
             result.error("busy", "A file is already being chosen.", null)
             return
         }
+        pickExt = if (ext == "zip") "zip" else "pek"
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             // Zips come with several types depending on the app that saved them; octet-stream is what many downloads get.
-            putExtra(
-                Intent.EXTRA_MIME_TYPES,
-                arrayOf("application/zip", "application/x-zip-compressed", "application/x-zip", "multipart/x-zip", "application/octet-stream"),
-            )
+            // Android has no type for .PEK, so a plugin picker shows every file: the app checks the name and the contents.
+            if (pickExt == "zip") {
+                putExtra(
+                    Intent.EXTRA_MIME_TYPES,
+                    arrayOf("application/zip", "application/x-zip-compressed", "application/x-zip", "multipart/x-zip", "application/octet-stream"),
+                )
+            }
         }
         pickResult = result
         try {
@@ -149,7 +154,7 @@ class FlutterHostActivity : FlutterActivity() {
         }
         pluginPool.execute {
             try {
-                var name = "plugin.zip"
+                var name = if (pickExt == "zip") "plugin.zip" else "plugin.PEK"
                 contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
                     if (c.moveToFirst()) c.getString(0)?.let { if (it.isNotBlank()) name = it }
                 }
@@ -443,7 +448,7 @@ class FlutterHostActivity : FlutterActivity() {
                         runOnUiThread { result.success(answer) }
                     }
                 }
-                "pickFile" -> pickFile(result)
+                "pickFile" -> pickFile(call.argument<String>("ext") ?: "pek", result)
                 "openUrl" -> result.success(openUrl(call.arguments as? String ?: ""))
                 "openApp" -> result.success(openStreamingApp(call.argument<String>("packages") ?: "", call.argument<String>("url") ?: ""))
                 else -> result.notImplemented()

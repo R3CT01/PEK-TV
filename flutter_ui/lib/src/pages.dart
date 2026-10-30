@@ -241,7 +241,7 @@ class _PluginsPageState extends State<PluginsPage> {
       const Heading('Plugins', weather: true),
       Wrap(spacing: 0.6 * rem, runSpacing: 0.6 * rem, children: [
         PekButton(label: 'Browse the plugin store', primary: true, onTap: () => openPluginStore(context)),
-        PekButton(label: 'Install from .zip', onTap: () => openZipInstall(context)),
+        PekButton(label: 'Install from .PEK', onTap: () => openZipInstall(context)),
         PekButton(label: 'Install from GitHub', onTap: () => openGithubInstall(context)),
       ]),
       SizedBox(height: rem),
@@ -249,7 +249,7 @@ class _PluginsPageState extends State<PluginsPage> {
       Async<List<PluginInfo>>(
         future: _list,
         builder: (context, list) {
-          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Open the plugin store, or install one from a .zip file or GitHub.');
+          if (list.isEmpty) return const PekCard(title: 'No plugins installed', subtitle: 'Open the plugin store, or install one from a .PEK file or GitHub.');
           return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             for (final pl in list)
               ListRow(

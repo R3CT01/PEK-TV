@@ -56,14 +56,16 @@ Plugins that ship with PEK TV are **official** and are listed above a separator 
 PEK TV's server only answers the device it runs on. To let other devices on your network reach its API:
 `PEK_BIND=0.0.0.0 PEK_TOKEN=choose-a-secret`. Other devices must send the token with every request. There is no web page to open: the server is API only and the screens are the Flutter app.
 
-## Installing a plugin from a .zip
+## Installing a plugin from a .PEK
 
-In the app: **Plugins -> Install from .zip -> Choose a file** (Android's own file picker, so no "All files access" permission is needed), pick the file, check the permissions PEK TV
+Plugins are `.PEK` files (see `PEK_FORMAT.md`). **A plain `.zip` is not accepted anywhere for plugins**: the app refuses it in red, by name and by content. Turn a plugin zip or folder into a `.PEK` with `python tools/pektool.py convert myplugin.zip` (or `pack myfolder`); `info` shows what is inside and `verify` checks it.
+
+In the app: **Plugins -> Install from .PEK -> Choose a file** (Android's own file picker, so no "All files access" permission is needed), pick the file, check the permissions PEK TV
 shows, and confirm. To remove an installed plugin, hold its row on the Plugins page. Plugins that ship
 with PEK TV (`weather`, `tmdb-discover` and `skin-maker`; the ids `sample_scraper` and `sample_counter` are also reserved) can't be replaced or removed.
 
-The zip must contain `plugin.json` (with a `"flutter": {"screen": "screen.py"}` entry) and `screen.py` (a plugin that only has a `ui.js`, or contains any `.js` / `.mjs` file, is refused), either at the top of the zip or inside one folder
-(the folder name becomes the plugin id: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:
+The plugin must contain `plugin.json` (with a `"flutter": {"screen": "screen.py"}` entry) and `screen.py` (a plugin that only has a `ui.js`, or contains any `.js` / `.mjs` file, is refused), at the top level
+(the plugin id is stored in the `.PEK`: lowercase letters, digits, `-` and `_`). Installed plugins are sandboxed:
 
 - allowed files: `.json .css .md .txt .png .jpg .jpeg .gif .webp .ico .woff .woff2 .ttf .otf`, and `.py` for the backend
 - a `backend.py` is not trusted: it only runs if `plugin.json` declares its permissions and the code passes the
@@ -80,7 +82,7 @@ Termux you can still drop a folder into `plugins/` yourself. A build that must n
 
 ## Backing plugins up to PEK Cloud
 
-When you are signed in (Settings > Account), plugins you installed from a .zip are backed up to your account
+When you are signed in (Settings > Account), plugins you installed from a .PEK are backed up to your account
 automatically; switch it off with **Back up my plugins**. Built-in plugins are not backed up, and neither is a
 plugin's `data/` folder. On another device (or after reinstalling PEK TV) the same screen lists your backed-up
 plugins. **Restore** opens the usual install screen with the plugin's permissions, runs the same server checks and
@@ -121,10 +123,9 @@ Users can install a plugin straight from a public GitHub repository: **Plugins -
 then type `owner/repo` (a pasted github.com link works too). PEK TV keeps no list of repositories, so there is
 nothing to submit anywhere. To make yours installable:
 
-1. Put `plugin.json` and `screen.py` at the top of your plugin's zip, or inside one folder (same rules as a .zip install).
-2. Make a **GitHub Release** and attach the zip as a release file (an `.zip` asset up to 8 MB). PEK TV installs the
-   *latest* release. With no .zip file attached it can offer the release's source code instead, but then the
-   plugin files must be at the top of the repository.
+1. Build your plugin into a `.PEK` with `python tools/pektool.py pack myfolder` (it must pass `pektool.py verify`).
+2. Make a **GitHub Release** and attach the `.PEK` as a release file (up to 8 MB). PEK TV installs the
+   *latest* release. A release with no `.PEK` file, a `.zip`, or the repository's source code is **not** installable as a plugin.
 3. Keep your plugin's folder name or `plugin.json` name the same across versions, so an update replaces the old one.
 
 Plugins installed this way show as **unverified** on the Plugins page and on the install screen, which names the

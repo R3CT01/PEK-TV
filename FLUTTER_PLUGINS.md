@@ -250,7 +250,7 @@ Install screen: `live` -> "Can play live TV streams in PEK TV's player, from web
 can see your internet address"; `epg` -> "Can download TV guide files (XMLTV) from the sites listed above".
 
 ## M3U8 (official, 1.0.0)
-`plugin_packages/m3u8/` (zipped as `plugin_packages/m3u8.zip`) takes `.m3u` / `.m3u8` playlists and turns them into a TV directory. It is an official plugin
+`plugin_packages/m3u8/` (packed with `tools/pektool.py pack`) takes `.m3u` / `.m3u8` playlists and turns them into a TV directory. It is an official plugin
 that is not bundled in the app: the owner publishes it on the PEK Store's Official shelf (`m3u8` is in the store worker's owner-only list, so nobody else can use the id)
 and people install it from there. It runs sandboxed; the `live` and `epg` permissions above are open to any plugin.
 
@@ -298,24 +298,21 @@ PEK TV once.
 
 Not in the Flutter plugin store: **skins** (the store has a skin shelf; skin install is a separate flow, `skin_install.h`).
 
-## Install from a .zip file or from GitHub
-Plugins > **Install from .zip** and **Install from GitHub** (`plugin_install_ui.dart`) are the zip picker and the GitHub
-install. Both end on the same install screen as the store
+## Install from a .PEK file or from GitHub
+Plugins > **Install from .PEK** and **Install from GitHub** (`plugin_install_ui.dart`) are the .PEK picker and the GitHub
+install. **Plugins are .PEK only; a .zip is refused in red** (the skin installer is the only thing left that opens a .zip). Both end on the same install screen as the store
 (`PluginInstallPage`: server dry run -> the author's warning -> permissions -> Install), so nothing installs by itself.
 
-- **.zip**: **Choose a file** opens Android's own file picker (`pek/plugins` `pickFile` -> `FlutterHostActivity`, the Storage Access
-  Framework: the app is handed just the chosen file, so **no storage permission and no "All files access"** is needed to see .zip
-  files). On a device with no system picker (some TV boxes) it says so, and **Browse this device** is PEK TV's own browser, on
+- **.PEK**: **Choose a file** opens Android's own file picker (`pek/plugins` `pickFile` -> `FlutterHostActivity`, the Storage Access
+  Framework: the app is handed just the chosen file, so **no storage permission and no "All files access"** is needed. Android has no file type for .PEK, so the picker shows every file and the app checks the name and the contents). On a device with no system picker (some TV boxes) it says so, and **Browse this device** is PEK TV's own browser, on
   `POST /api/plugins/browse` + `/api/plugins/fetch` (also used for network folders and your media sources; on Android 11+ it only
-  lists .zip files once All files access is allowed). `plugin_zip.dart` unpacks it in memory with the same limits as the server
-  (2 MB per file, 8 MB total, 400 files, CRC checked, inflate stops at the limit; no ZIP64 / encrypted / split zips). It needs no
-  extra package (`dart:io` raw inflate). plugin.json at the top or inside one folder; a zip with `skin.json` is refused.
-- **GitHub**: type `owner/repo` or paste a link. `plugin_github.dart` asks `api.github.com` for the latest release (its .zip files
-  and its source), or the default branch's source if there is no release; you pick one when there are several. The download goes
+  lists .PEK files once All files access is allowed; the routes take `ext=pek`, the default, or `ext=zip`, used only by the skin installer). `plugin_pek.dart` opens the .PEK in memory and verifies it completely
+  (signature, header CRC, whole-file SHA-256, a table of contents that tiles the data exactly, every file's SHA-256, 2 MB per file, 8 MB total, inflate stops at the declared size). A zip, or a .zip renamed to .PEK, is refused.
+- **GitHub**: type `owner/repo` or paste a link. `plugin_github.dart` asks `api.github.com` for the latest release and offers only its .PEK files (never a .zip or the source code); you pick one when there are several.
+  A repository whose latest release has no .PEK file is refused in red. The download goes
   through `POST /api/plugins/github-zip` (backend/github_install.h). A first-time warning is shown once; the switch is Settings >
-  *Plugins from GitHub* (`PEK_ALLOW_GITHUB=0` still turns it off in the server). Source zips are
-  installed under the repository name so an update replaces the same plugin.
-- The Plugins page labels where each plugin came from ("unverified - from GitHub owner/repo", "third party - from a .zip file").
+  *Plugins from GitHub* (`PEK_ALLOW_GITHUB=0` still turns it off in the server).
+- The Plugins page labels where each plugin came from ("unverified - from GitHub owner/repo", "third party - from a .PEK file").
 - Not in the zip picker: the system file picker, and finding network devices from inside it (add the device as a media
   source in Settings, then it shows up under the picker's start list). Skins install from Settings > Appearance (see `SKINS.md`).
 
@@ -352,10 +349,10 @@ What it needed from the host, all in `pek_ui`:
 - `flutter_ui/lib/src/plugin_host.dart` - Dart client, host allow-list for pictures, TV Back hook
 - `flutter_ui/lib/src/plugin_ui.dart` - the renderer, effects, polling, "Saved from plugins"
 - `flutter_ui/lib/src/plugin_store.dart` / `plugin_store_ui.dart` - the plugin store: client, fingerprint, install upload; shelves, list and the shared install screen
-- `flutter_ui/lib/src/plugin_zip.dart` / `plugin_github.dart` / `plugin_install_ui.dart` - install from a .zip file / from GitHub: zip reader + picker client, GitHub client, screens and the Settings switch
+- `flutter_ui/lib/src/plugin_pek.dart` (the .PEK reader) / `plugin_zip.dart` (skins only now: zip reader + picker client) / `plugin_github.dart` / `plugin_install_ui.dart` - install from a .PEK file / from GitHub: GitHub client, screens and the Settings switch
 - `flutter_ui/lib/src/shell.dart`, `pages.dart`, `store.dart`, `api.dart`, `cloud.dart` - menu / More entries, Plugins > Open, plugin favorites and their cloud sync
 - `flutter_ui/pubspec.yaml` - adds `webview_flutter` / `webview_flutter_android` (trailer player); run `flutter pub get`
-- `backend/plugin_install.h` - a zip needs a `screen.py`; any `.js` is refused
+- `backend/plugin_install.h` - a plugin needs a `screen.py`; any `.js` is refused
 - `plugins/tmdb-discover/{screen.py,plugin.json}` - the port (1.6.0)
 
 ## Plugin pictures, built-in plugins and updates (Fixes 4)

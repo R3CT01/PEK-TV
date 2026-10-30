@@ -409,7 +409,7 @@ void PekServer::start(int port, const std::string& plugins_dir,
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
-    // Plugin .zip uploads (POST /api/plugins/install); plugin_install.h caps a plugin at 8 MB.
+    // Plugin uploads (POST /api/plugins/install, the files of a .PEK the app opened); plugin_install.h caps a plugin at 8 MB.
     svr.set_payload_max_length(12 * 1024 * 1024);
 
     svr.set_default_headers({
@@ -616,16 +616,21 @@ void PekServer::start(int port, const std::string& plugins_dir,
         res.set_content(outcomeJson(out), "application/json");
     });
 
-    // 3c. In-app file picker for plugin .zip files. PEK draws its own picker because TV
-    //     boxes have no system one. These two routes can only (1) list folders and .zip files
-    //     and (2) read ONE .zip of at most 8 MB, on this device or on a network share
+    // 3c. In-app file picker for plugin .PEK files. PEK draws its own picker because TV
+    //     boxes have no system one. These two routes can only (1) list folders and .PEK files
+    //     and (2) read ONE .PEK of at most 8 MB, on this device or on a network share
     //     (smb://, nfs://, ftp://, dav://). Nothing else can be read through them.
+    //     Plugins are .PEK ONLY: a .zip is never listed or read unless the caller says ext=zip, and
+    //     only the SKIN installer does that (skins are still .zip files).
     static constexpr uint64_t kZipPickMax = 8u * 1024 * 1024;
-    auto isZipName = [](const std::string& n) {
-        if (n.size() < 5) return false;
-        std::string t = n.substr(n.size() - 4);
+    auto pickExt = [](const httplib::Request& req) -> std::string {
+        return req.get_param_value("ext") == "zip" ? ".zip" : ".pek";
+    };
+    auto hasExt = [](const std::string& n, const std::string& ext) {
+        if (n.size() <= ext.size()) return false;
+        std::string t = n.substr(n.size() - ext.size());
         for (auto& c : t) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-        return t == ".zip";
+        return t == ext;
     };
     auto localRoot = []() -> std::string {
         std::error_code ec;
@@ -635,7 +640,8 @@ void PekServer::start(int port, const std::string& plugins_dir,
         return "/";
     };
 
-    svr.Post("/api/plugins/browse", [isZipName, localRoot](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/api/plugins/browse", [hasExt, pickExt, localRoot](const httplib::Request& req, httplib::Response& res) {
+        const std::string ext = pickExt(req);
         auto fail = [&res](const std::string& msg, bool auth) {
             res.set_content("{\"ok\": false, \"auth\": " + std::string(auth ? "true" : "false") +
                             ", \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
@@ -671,7 +677,7 @@ void PekServer::start(int port, const std::string& plugins_dir,
                 for (const auto& e : list) {
                     if (e.name.empty() || e.name[0] == '.') continue;
                     if (e.is_dir) items.push_back({e.name, vfs::join(shown, e.name), true, 0});
-                    else if (isZipName(e.name) && e.size <= kZipPickMax) items.push_back({e.name, vfs::join(shown, e.name), false, e.size});
+                    else if (hasExt(e.name, ext) && e.size <= kZipPickMax) items.push_back({e.name, vfs::join(shown, e.name), false, e.size});
                 }
             }
         } else {
@@ -689,7 +695,7 @@ void PekServer::start(int port, const std::string& plugins_dir,
                 std::error_code e2;
                 if (it->is_directory(e2)) {
                     items.push_back({name, it->path().string(), true, 0});
-                } else if (it->is_regular_file(e2) && isZipName(name)) {
+                } else if (it->is_regular_file(e2) && hasExt(name, ext)) {
                     const uint64_t sz = it->file_size(e2);
                     if (!e2 && sz <= kZipPickMax) items.push_back({name, it->path().string(), false, sz});
                 }
@@ -717,13 +723,18 @@ void PekServer::start(int port, const std::string& plugins_dir,
     peksubs::registerSubtitleRoutes(svr);   // automatic subtitle look-up (subtitles.h)
     pekgithub::registerGithubRoutes(svr);   // install a plugin from GitHub by name (github_install.h)
 
-    svr.Post("/api/plugins/fetch", [isZipName](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/api/plugins/fetch", [hasExt, pickExt](const httplib::Request& req, httplib::Response& res) {
+        const std::string ext = pickExt(req);
         auto fail = [&res](const std::string& msg) {
             res.status = 400;
             res.set_content("{\"ok\": false, \"error\": \"" + jsonEscape(msg) + "\"}", "application/json");
         };
         const std::string path = req.get_param_value("path");
-        if (!isZipName(path)) { fail("Only .zip files can be installed as plugins."); return; }
+        if (!hasExt(path, ext)) {
+            fail(ext == ".pek" ? "Only .PEK files can be installed as plugins. Zip files are not accepted."
+                               : "Only .zip files can be installed as skins.");
+            return;
+        }
         std::string data;
 
         if (vfs::isRemote(path)) {
@@ -758,8 +769,15 @@ void PekServer::start(int port, const std::string& plugins_dir,
             in.read(&data[0], static_cast<std::streamsize>(size));
             if (static_cast<uint64_t>(in.gcount()) != size) { fail("The file could not be read completely."); return; }
         }
-        if (data.size() < 4 || data[0] != 'P' || data[1] != 'K') { fail("That is not a valid .zip file."); return; }
-        res.set_content(data, "application/zip");
+        const bool looksZip = data.size() >= 4 && data[0] == 'P' && data[1] == 'K';
+        if (ext == ".pek") {
+            // A .PEK starts with 89 'P' 'E' 'K' 0D 0A 1A 0A. A zip renamed to .PEK is refused here, loudly.
+            if (looksZip) { fail("REJECTED: that is a .zip file renamed to .PEK. PEK TV only installs real .PEK plugins."); return; }
+            if (data.size() < 8 || static_cast<unsigned char>(data[0]) != 0x89 || data.compare(1, 3, "PEK") != 0) { fail("REJECTED: that is not a valid .PEK file."); return; }
+        } else if (!looksZip) {
+            fail("That is not a valid .zip file."); return;
+        }
+        res.set_content(data, "application/octet-stream");
     });
 
     // 4. Movies — flat list, classified from embedded container tags

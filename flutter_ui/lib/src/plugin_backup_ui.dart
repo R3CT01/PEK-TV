@@ -141,7 +141,7 @@ class _PluginBackupSettingsState extends State<PluginBackupSettings> {
           Padding(
             padding: EdgeInsets.only(top: 0.3 * rem),
             child: Text(
-              'Keeps a copy of the plugins you installed from a .zip or GitHub in your cloud account, so you can bring them back on another device. Only the plugin\u2019s own files are saved, never its data. Getting a plugin back always asks you first.',
+              'Keeps a copy of the plugins you installed from a .PEK file or GitHub in your cloud account, so you can bring them back on another device. Only the plugin\u2019s own files are saved, never its data. Getting a plugin back always asks you first.',
               style: TextStyle(color: p.tokens.textMuted, fontSize: 0.85 * rem),
             ),
           ),

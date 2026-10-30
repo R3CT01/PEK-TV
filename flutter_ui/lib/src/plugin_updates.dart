@@ -100,7 +100,8 @@ class PluginUpdates {
       final owner = '${src['owner']}', repo = '${src['repo']}', tag = '${src['tag'] ?? ''}';
       if (owner.isEmpty || repo.isEmpty) continue;
       try {
-        final rel = await PekGithub.findRelease(owner, repo);
+        final rel = await PekGithub.findRelease(owner, repo, pek: true);
+        if (rel.options.isEmpty) continue; // no .PEK file in the release: nothing PEK TV could install
         if (rel.tag.isEmpty || rel.tag == tag) continue; // no release, or the one that is installed
         if (tag.isNotEmpty && !newer(rel.tag, tag) && RegExp(r'\d').hasMatch(rel.tag) && RegExp(r'\d').hasMatch(tag)) continue; // an older / same number
         found[p.folder] = GithubUpdate(plugin: p, release: rel, kind: '${src['kind'] ?? 'source'}');

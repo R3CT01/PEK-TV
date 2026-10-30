@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'api.dart';
 import 'plugin_store.dart';
+import 'plugin_pek.dart';
 import 'plugin_zip.dart';
 import 'store.dart';
 
@@ -65,8 +66,10 @@ class PekGithub {
     return const {};
   }
 
-  /// What can be installed from owner/repo: the latest release's .zip files and its source code.
-  static Future<GithubRelease> findRelease(String owner, String repo) async {
+  /// What can be installed from owner/repo.
+  /// [pek] true (a PLUGIN): only the latest release's .PEK files, never a .zip and never the repository's source code.
+  /// [pek] false (a SKIN): the release's .zip files and its source code.
+  static Future<GithubRelease> findRelease(String owner, String repo, {bool pek = false}) async {
     final name = '$owner/$repo';
     final base = '/repos/$owner/$repo';
     final res = await _api('$base/releases/latest');
@@ -98,7 +101,7 @@ class PekGithub {
       if (rr.statusCode == 404) throw StoreException('GitHub has no public repository called $name. Check the spelling.');
       if (rr.statusCode != 200) throw StoreException('GitHub gave an unexpected answer (HTTP ${rr.statusCode}).');
       final branch = '${_json(rr)['default_branch'] ?? ''}';
-      if (branch.isNotEmpty && _seg.hasMatch(Uri.encodeComponent(branch))) {
+      if (!pek && branch.isNotEmpty && _seg.hasMatch(Uri.encodeComponent(branch))) {
         options.add(GithubOption(kind: 'source', label: 'Source code ($branch branch, no release)', size: 0, url: 'https://api.github.com$base/zipball/${Uri.encodeComponent(branch)}'));
       }
       return GithubRelease(owner: owner, repo: repo, tag: '', options: options);
@@ -112,12 +115,12 @@ class PekGithub {
       final url = '${a['browser_download_url'] ?? ''}';
       final file = '${a['name'] ?? ''}';
       final size = (a['size'] as num?)?.toInt() ?? 0;
-      if (!file.toLowerCase().endsWith('.zip') || !url.toLowerCase().startsWith(prefix)) continue;
+      if (!file.toLowerCase().endsWith(pek ? '.pek' : '.zip') || !url.toLowerCase().startsWith(prefix)) continue;
       if (size <= 0 || size > maxZip) continue; // empty, or too big to be a plugin
       options.add(GithubOption(kind: 'asset', label: file, size: size, url: url));
     }
     final zipball = '${rel['zipball_url'] ?? ''}';
-    if (zipball.startsWith('https://api.github.com$base/zipball/')) {
+    if (!pek && zipball.startsWith('https://api.github.com$base/zipball/')) {
       options.add(GithubOption(kind: 'source', label: 'Source code of ${tag.isEmpty ? 'this release' : tag}', size: 0, url: zipball));
     }
     return GithubRelease(owner: owner, repo: repo, tag: tag, options: options);
@@ -142,23 +145,20 @@ class PekGithub {
     return r.bodyBytes;
   }
 
-  /// Downloads one option through the server and unpacks it like a picked .zip.
+  /// Downloads one release file through the server and opens it as a plugin. Only a .PEK release file is accepted:
+  /// a repository's source code or a .zip is refused.
   static Future<PreparedPlugin> download(GithubRelease rel, GithubOption opt) async {
-    final bytes = await downloadBytes(rel, opt);
-    var prep = PluginZip.prepare(bytes, fileName: opt.kind == 'asset' ? opt.label : '${rel.repo}.zip');
-    // A source zip unpacks into a folder named after the commit, which changes every time: use the repository name so
-    // a later update replaces the same plugin.
-    if (opt.kind == 'source') {
-      final id = PluginZip.slug(rel.repo);
-      if (id.isNotEmpty) prep = PluginZip.withId(prep, id);
+    if (opt.kind != 'asset') {
+      throw StoreException('${PluginPek.rejected}PEK TV installs plugins only from a .PEK release file, not from a repository\u2019s source code.');
     }
-    return prep;
+    final bytes = await downloadBytes(rel, opt);
+    return PluginPek.prepare(bytes, fileName: opt.label);
   }
 }
 
 class GithubOption {
   const GithubOption({required this.kind, required this.label, required this.size, required this.url});
-  final String kind; // 'asset' (a .zip attached to the release) or 'source'
+  final String kind; // 'asset' (a .PEK, or for a skin a .zip, attached to the release) or 'source' (skins only)
   final String label, url;
   final int size;
 }

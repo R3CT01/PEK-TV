@@ -285,10 +285,10 @@ class PreparedPlugin {
   /// What the confirm screen lists, in plain words (the same sentences as the web UI's install screen).
   List<String> describe({required bool replaced, required String shelf, List<String> notice = const []}) {
     final l = <String>[
-      // shelf: 'official' / 'community' (the PEK Store), 'zip' (a file the person picked) or 'github' (notice has the details).
+      // shelf: 'official' / 'community' (the PEK Store), 'zip' (a .PEK file the person picked; the name 'zip' is only a stored label) or 'github' (notice has the details).
       if (shelf == 'official') 'From the PEK Store, Official shelf (published by the PEK owner).',
       if (shelf == 'community') 'From the PEK Store, Community shelf: made by another person and approved by the owner.',
-      if (shelf == 'zip') 'Unverified plugin from a .zip file you chose. PEK TV did not make, review or approve it; its developer is responsible for it.',
+      if (shelf == 'zip') 'Unverified plugin from a .PEK file you chose. PEK TV did not make, review or approve it; its developer is responsible for it.',
       ...notice,
       [if (version.isNotEmpty) 'Version $version', if (author.isNotEmpty) 'by $author'].join(' \u00b7 '),
       description,
@@ -391,7 +391,7 @@ class PluginInstaller {
     final s = sourceOf(id);
     if (s == 'official') return 'PEK Store official';
     if (s == 'community') return 'approved \u00b7 community store';
-    if (s == 'zip') return 'third party \u00b7 from a .zip file';
+    if (s == 'zip') return 'third party \u00b7 from a .PEK file';
     if (s is Map && s['type'] == 'github') return 'unverified \u00b7 from GitHub ${s['owner']}/${s['repo']}';
     if (stockIds.contains(id)) return 'built in \u00b7 updates from the PEK Store';
     return null;

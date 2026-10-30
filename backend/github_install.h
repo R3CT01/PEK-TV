@@ -59,6 +59,12 @@ inline bool endsWithZip(const std::string& s) {
     return l.size() > 4 && l.compare(l.size() - 4, 4, ".zip") == 0;
 }
 
+// Plugins are .PEK release files; skins are still .zip. The app only ever offers a plugin its .PEK files.
+inline bool endsWithPek(const std::string& s) {
+    std::string l = lowerStr(s);
+    return l.size() > 4 && l.compare(l.size() - 4, 4, ".pek") == 0;
+}
+
 // Splits "a/b/c" into parts. Rejects empty parts, so "a//b" and a trailing slash are refused.
 inline bool splitPath(const std::string& p, std::vector<std::string>& out) {
     out.clear();
@@ -82,11 +88,11 @@ inline bool allowedUrl(const std::string& url, const std::string& owner, const s
     const std::string gh = "https://github.com/", api = "https://api.github.com/";
     std::vector<std::string> parts;
     if (url.rfind(gh, 0) == 0) {
-        // <owner>/<repo>/releases/download/<tag>/<file>.zip
+        // <owner>/<repo>/releases/download/<tag>/<file>.PEK  (or .zip, for a skin)
         if (!splitPath(url.substr(gh.size()), parts) || parts.size() != 6) return false;
         if (lowerStr(parts[0]) != lowerStr(owner) || lowerStr(parts[1]) != lowerStr(repo)) return false;
         if (parts[2] != "releases" || parts[3] != "download") return false;
-        if (!segOk(parts[4]) || !segOk(parts[5]) || !endsWithZip(parts[5])) return false;
+        if (!segOk(parts[4]) || !segOk(parts[5]) || !(endsWithPek(parts[5]) || endsWithZip(parts[5]))) return false;
         host = "github.com";
         path = url.substr(std::string("https://github.com").size());
         return true;
@@ -169,7 +175,7 @@ inline void registerGithubRoutes(httplib::Server& svr) {
         if (r->status == 403 || r->status == 429) { jsonError(res, 429, "GitHub is limiting requests from this connection. Try again in a few minutes."); return; }
         if (r->status != 200) { jsonError(res, 502, "GitHub answered HTTP " + std::to_string(r->status) + "."); return; }
         if (r->body.size() > kMaxZipBytes) { jsonError(res, 413, "That file is too large to be a plugin or skin (limit 8 MB)."); return; }
-        res.set_content(r->body, "application/zip");
+        res.set_content(r->body, "application/octet-stream");
 #else
         jsonError(res, 501, "This build has no HTTPS support, so it can't install from GitHub.");
 #endif

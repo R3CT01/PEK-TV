@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'art_cache.dart';
 import 'common.dart';
 import 'plugin_store.dart';
+import 'plugin_pek.dart' show PluginPek;
 import 'plugin_ui.dart';
 import 'tokens.dart';
 import 'widgets.dart';
@@ -116,13 +117,21 @@ class _InstallPageState extends State<PluginInstallPage> {
 
   Widget _para(BuildContext context, String t) {
     final p = context.pek;
-    return Padding(padding: EdgeInsets.only(bottom: 0.5 * p.rem), child: Text(t, style: TextStyle(fontSize: 0.95 * p.rem, height: 1.4, color: p.tokens.text)));
+    final bad = t.startsWith(PluginPek.rejected); // a file that is not a correct .PEK plugin: red
+    return Padding(
+      padding: EdgeInsets.only(bottom: 0.5 * p.rem),
+      child: Text(t, style: TextStyle(fontSize: 0.95 * p.rem, height: 1.4, color: bad ? const Color(0xFFE53935) : p.tokens.text, fontWeight: bad ? FontWeight.w700 : null)),
+    );
   }
 
   Widget _panel(BuildContext context, List<String> lines) {
     final p = context.pek;
     return DecoratedBox(
-      decoration: BoxDecoration(color: p.tokens.surface, borderRadius: BorderRadius.circular(14)),
+      decoration: BoxDecoration(
+        color: p.tokens.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: lines.isNotEmpty && lines.first.startsWith(PluginPek.rejected) ? Border.all(color: const Color(0xFFE53935), width: 2) : null,
+      ),
       child: Padding(
         padding: EdgeInsets.fromLTRB(p.rem, p.rem, p.rem, 0.5 * p.rem),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [for (final l in lines) _para(context, l)]),

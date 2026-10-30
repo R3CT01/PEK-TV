@@ -8,8 +8,9 @@ import 'package:http/http.dart' as http;
 import 'api.dart';
 import 'plugin_store.dart';
 
-/// A small .zip reader and the "unpack a plugin .zip" step of the plugin installer.
-/// Opens a plugin .zip in memory, with these limits:
+/// A small .zip reader. PLUGINS NO LONGER USE IT: a plugin is a .PEK file (plugin_pek.dart) and a .zip is refused. It stays
+/// only because skins are still installed from a .zip (skin_install.dart).
+/// Opens a skin .zip in memory, with these limits:
 /// 2 MB per file, 8 MB in total, 400 files. It checks every file's CRC and stops inflating as soon as a file grows past its
 /// limit (so a "zip bomb" cannot use up memory). Not supported, and reported as an error: ZIP64, encrypted and split zips.
 class PluginZip {
@@ -129,64 +130,15 @@ class PluginZip {
     return (crc ^ 0xFFFFFFFF) & 0xFFFFFFFF;
   }
 
-  // ------------------------------------------------------------------ prepare (plugin_installer.js)
+  // ------------------------------------------------------------------ helpers
 
   /// Same id rule as the web UI: lower case letters and digits, "-" between, at most 40 characters.
   static String slug(String text) {
-    var s = text.toLowerCase().replaceFirst(RegExp(r'\.zip$'), '');
+    var s = text.toLowerCase().replaceFirst(RegExp(r'\.(zip|pek)$'), '');
     s = s.replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
     if (s.length > 40) s = s.substring(0, 40);
     return s.replaceAll(RegExp(r'-+$'), '');
   }
-
-  static bool _junk(String path) => path.split('/').any((part) => part.startsWith('.') || part.toLowerCase() == '__macosx');
-
-  /// Unpacks a plugin .zip in memory, finds plugin.json (at the top, or inside one folder) and works out the plugin id.
-  /// [fileName] is only used to name the plugin when nothing else does. A zip with a skin.json is a skin, not a plugin.
-  static PreparedPlugin prepare(Uint8List bytes, {required String fileName}) {
-    if (bytes.length > maxZipBytes) throw const StoreException('that file is too large to be a plugin (limit 8 MB)');
-    var entries = read(bytes);
-    entries = [for (final e in entries) if (!_junk(e.path)) e];
-    if (entries.isEmpty) throw const StoreException('the zip is empty');
-
-    bool has(String p) => entries.any((e) => e.path == p);
-    bool hasAt(String name) {
-      if (has(name)) return true;
-      final tops = {for (final e in entries) e.path.split('/').first};
-      if (tops.length != 1) return false;
-      final top = tops.first;
-      return entries.every((e) => e.path.startsWith('$top/')) && has('$top/$name');
-    }
-
-    if (hasAt('skin.json')) {
-      throw StoreException(hasAt('plugin.json')
-          ? 'This zip has both plugin.json and skin.json, so PEK TV can\u2019t tell whether it is a plugin or a skin.'
-          : 'This is a skin, not a plugin. PEK TV does not install skins.');
-    }
-    var prefix = '', folder = '';
-    if (!has('plugin.json')) {
-      final tops = {for (final e in entries) e.path.split('/').first};
-      if (tops.length == 1) {
-        final top = tops.first;
-        if (entries.every((e) => e.path.startsWith('$top/')) && has('$top/plugin.json')) {
-          prefix = '$top/';
-          folder = top;
-        }
-      }
-    }
-    if (!has('${prefix}plugin.json')) {
-      throw const StoreException('plugin.json was not found. It must be at the top of the zip, or inside one folder.');
-    }
-    final files = [for (final e in entries) PluginFile(e.path.substring(prefix.length), e.data)];
-    // Read plugin.json once to learn the name, then settle the id the way the web UI does: folder, name, file name.
-    final named = PreparedPlugin.fromFiles('plugin', files);
-    final id = [slug(folder), slug(named.name == 'plugin' ? '' : named.name), slug(fileName), 'plugin'].firstWhere((s) => s.isNotEmpty);
-    return PreparedPlugin.fromFiles(id, files);
-  }
-
-  /// A new copy of [p] under another id (a GitHub source zip unpacks into a folder named after the commit, so the
-  /// repository name is used instead and a later update replaces the same plugin).
-  static PreparedPlugin withId(PreparedPlugin p, String id) => PreparedPlugin.fromFiles(id, p.files);
 }
 
 class _Entry {
@@ -239,13 +191,13 @@ class ZipPicker {
   /// Android's own file picker (no storage permission, so no "All files access" needed): the person picks a .zip anywhere
   /// (Downloads, Drive, a USB stick) and the app gets just that file. Null when they cancel. Throws [NoSystemPicker] when
   /// this device has none (some TV boxes), and the screen then offers the in-app browser instead.
-  static Future<({String name, Uint8List bytes})?> pickNative() async {
+  static Future<({String name, Uint8List bytes})?> pickNative({String ext = 'zip'}) async {
     try {
-      final r = await _channel.invokeMethod<Map<Object?, Object?>>('pickFile');
+      final r = await _channel.invokeMethod<Map<Object?, Object?>>('pickFile', {'ext': ext});
       if (r == null) return null;
       final bytes = r['bytes'];
       if (bytes is! Uint8List || bytes.isEmpty) throw const StoreException('the file could not be read');
-      final name = '${r['name'] ?? 'plugin.zip'}';
+      final name = '${r['name'] ?? 'plugin.$ext'}';
       return (name: name, bytes: bytes);
     } on MissingPluginException {
       throw const NoSystemPicker();
@@ -255,11 +207,12 @@ class ZipPicker {
     }
   }
 
-  /// [path] is '@local' (this device), a library folder, or a network address.
-  static Future<ZipListing> browse(String path) async {
+  /// [path] is '@local' (this device), a library folder, or a network address. [ext] is the file type listed: 'pek'
+  /// (plugins, the default of the server) or 'zip' (skins only).
+  static Future<ZipListing> browse(String path, {String ext = 'zip'}) async {
     http.Response r;
     try {
-      r = await http.post(Uri.parse('${Api.base}/api/plugins/browse'), body: {'path': path}).timeout(const Duration(seconds: 30));
+      r = await http.post(Uri.parse('${Api.base}/api/plugins/browse'), body: {'path': path, 'ext': ext}).timeout(const Duration(seconds: 30));
     } catch (_) {
       throw const StoreException("Couldn't reach PEK TV's server.");
     }
@@ -283,11 +236,11 @@ class ZipPicker {
     );
   }
 
-  /// The bytes of one .zip the person chose in [browse].
-  static Future<Uint8List> fetch(String path) async {
+  /// The bytes of one file the person chose in [browse] (a .PEK for a plugin, a .zip for a skin: see [ext]).
+  static Future<Uint8List> fetch(String path, {String ext = 'zip'}) async {
     http.Response r;
     try {
-      r = await http.post(Uri.parse('${Api.base}/api/plugins/fetch'), body: {'path': path}).timeout(const Duration(seconds: 60));
+      r = await http.post(Uri.parse('${Api.base}/api/plugins/fetch'), body: {'path': path, 'ext': ext}).timeout(const Duration(seconds: 60));
     } catch (_) {
       throw const StoreException("Couldn't reach PEK TV's server.");
     }

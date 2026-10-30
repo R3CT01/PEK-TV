@@ -9,6 +9,7 @@ import 'fields.dart';
 import 'plugin_github.dart';
 import 'plugin_store.dart';
 import 'plugin_store_ui.dart';
+import 'plugin_pek.dart';
 import 'plugin_zip.dart';
 import 'settings_extra.dart' show ToggleRow;
 import 'skin_install.dart';
@@ -18,14 +19,22 @@ import 'widgets.dart';
 
 String _kb(int n) => n >= 1048576 ? '${(n / 1048576).toStringAsFixed(1)} MB' : '${n < 1024 ? 1 : (n / 1024).round()} KB';
 
+const _rejectRed = Color(0xFFE53935);
+
+/// A message that starts with [PluginPek.rejected] (a file that is not a correct .PEK plugin, or any .zip) is drawn in red.
 Widget _panel(BuildContext context, List<String> lines) {
   final p = context.pek;
+  final bad = lines.isNotEmpty && lines.first.startsWith(PluginPek.rejected);
   return DecoratedBox(
-    decoration: BoxDecoration(color: p.tokens.surface, borderRadius: BorderRadius.circular(14)),
+    decoration: BoxDecoration(color: p.tokens.surface, borderRadius: BorderRadius.circular(14), border: bad ? Border.all(color: _rejectRed, width: 2) : null),
     child: Padding(
       padding: EdgeInsets.fromLTRB(p.rem, p.rem, p.rem, 0.5 * p.rem),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        for (final l in lines) Padding(padding: EdgeInsets.only(bottom: 0.5 * p.rem), child: Text(l, style: TextStyle(fontSize: 0.95 * p.rem, height: 1.4, color: p.tokens.text))),
+        for (final l in lines)
+          Padding(
+            padding: EdgeInsets.only(bottom: 0.5 * p.rem),
+            child: Text(l, style: TextStyle(fontSize: 0.95 * p.rem, height: 1.4, color: bad ? _rejectRed : p.tokens.text, fontWeight: bad ? FontWeight.w700 : null)),
+          ),
       ]),
     ),
   );
@@ -36,16 +45,16 @@ Widget _muted(BuildContext context, String t) {
   return Padding(padding: EdgeInsets.only(bottom: 0.75 * p.rem), child: Text(t, style: TextStyle(color: p.tokens.textMuted, fontSize: 0.95 * p.rem, height: 1.4)));
 }
 
-// ============================================================================ Install from a .zip file
+// ============================================================================ Install from a .PEK file
 
-/// Plugins > Install from .zip: pick a plugin .zip on this device or on a network folder, then the usual install screens.
-/// Nothing is installed until the person confirms on the permissions screen.
+/// Plugins > Install from .PEK: pick a plugin .PEK file on this device or on a network folder, then the usual install screens.
+/// A .zip is refused (in red). Nothing is installed until the person confirms on the permissions screen.
 ///
-/// [skin] true: the same picker, but the file is opened as a skin (Settings > Appearance > Install skin from .zip).
+/// [skin] true: the same picker, but for a skin, which is still a .zip (Settings > Appearance > Install skin from .zip).
 Future<void> openZipInstall(BuildContext context, {bool skin = false}) {
   return Navigator.push<void>(
     context,
-    MaterialPageRoute<void>(builder: (_) => SubScreen(title: 'Install from .zip', body: Builder(builder: (c) => _ZipPicker(padding: c.pek.pagePad, skin: skin)))),
+    MaterialPageRoute<void>(builder: (_) => SubScreen(title: skin ? 'Install from .zip' : 'Install from .PEK', body: Builder(builder: (c) => _ZipPicker(padding: c.pek.pagePad, skin: skin)))),
   );
 }
 
@@ -60,6 +69,7 @@ class _ZipPicker extends StatefulWidget {
 class _ZipPickerState extends State<_ZipPicker> {
   List<String> _sources = const [];
   ZipListing? _listing; // null = the home list
+  String get _ext => widget.skin ? 'zip' : 'pek'; // the file type this picker lists
   bool _loading = false;
   String _error = '';
 
@@ -83,7 +93,7 @@ class _ZipPickerState extends State<_ZipPicker> {
       _error = '';
     });
     try {
-      final l = await ZipPicker.browse(path);
+      final l = await ZipPicker.browse(path, ext: _ext);
       if (mounted) setState(() => _listing = l);
     } on StoreException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -99,7 +109,7 @@ class _ZipPickerState extends State<_ZipPicker> {
       _error = '';
     });
     try {
-      final f = await ZipPicker.pickNative();
+      final f = await ZipPicker.pickNative(ext: _ext);
       if (f != null) await _open(f.name, f.bytes);
     } on NoSystemPicker {
       if (mounted) setState(() => _error = 'This device has no file picker. Use This device below to browse for the file.');
@@ -116,7 +126,7 @@ class _ZipPickerState extends State<_ZipPicker> {
       _error = '';
     });
     try {
-      final bytes = await ZipPicker.fetch(e.path);
+      final bytes = await ZipPicker.fetch(e.path, ext: _ext);
       if (!mounted) return;
       await _open(e.name, bytes);
     } on StoreException catch (err) {
@@ -125,7 +135,7 @@ class _ZipPickerState extends State<_ZipPicker> {
     if (mounted) setState(() => _loading = false);
   }
 
-  /// The install screens for a .zip that was read (picked with the system picker or from the in-app browser).
+  /// The install screens for a file that was read (picked with the system picker or from the in-app browser).
   Future<void> _open(String name, Uint8List bytes) async {
     if (!mounted) return;
     setState(() => _loading = false);
@@ -151,7 +161,7 @@ class _ZipPickerState extends State<_ZipPicker> {
               title: name,
               shelf: 'zip',
               source: 'zip',
-              load: (_) async => PluginZip.prepare(bytes, fileName: name),
+              load: (_) async => PluginPek.prepare(bytes, fileName: name),
               padding: c.pek.pagePad,
             ),
           ),
@@ -167,12 +177,12 @@ class _ZipPickerState extends State<_ZipPicker> {
     final children = <Widget>[];
     if (l == null) {
       children.addAll([
-        const Heading('Install from .zip'),
+        Heading(widget.skin ? 'Install from .zip' : 'Install from .PEK'),
         _muted(context, widget.skin
             ? 'Choose the skin\u2019s .zip file. You will see what it is before anything is installed.'
-            : 'Choose the plugin\u2019s .zip file. You will see what it asks for before anything is installed.'),
-        ListRow(autofocus: true, title: 'Choose a file', subtitle: 'Pick the .zip with Android\u2019s file picker (Downloads, Drive, a USB stick). No extra permission needed.', onTap: _pick),
-        ListRow(title: 'Browse this device', subtitle: 'Folders on this device. Android only shows .zip files here after you allow All files access', onTap: () => _go('@local')),
+            : 'Choose the plugin\u2019s .PEK file. You will see what it asks for before anything is installed. Plain .zip files are not accepted.'),
+        ListRow(autofocus: true, title: 'Choose a file', subtitle: 'Pick the ${widget.skin ? '.zip' : '.PEK'} with Android\u2019s file picker (Downloads, Drive, a USB stick). No extra permission needed.', onTap: _pick),
+        ListRow(title: 'Browse this device', subtitle: 'Folders on this device. Android only shows ${widget.skin ? '.zip' : '.PEK'} files here after you allow All files access', onTap: () => _go('@local')),
         for (final s in _sources) ListRow(title: s, subtitle: 'Media source', onTap: () => _go(s)),
       ]);
     } else {
@@ -183,7 +193,7 @@ class _ZipPickerState extends State<_ZipPicker> {
           PekButton(compact: true, label: 'Start', onTap: () => setState(() => _listing = null)),
         ]),
         SizedBox(height: p.rem),
-        if (l.entries.isEmpty && !_loading) _muted(context, 'No folders or .zip files here.'),
+        if (l.entries.isEmpty && !_loading) _muted(context, 'No folders or ${widget.skin ? '.zip' : '.PEK'} files here.'),
         for (final e in l.entries)
           ListRow(
             title: e.dir ? '${e.name}/' : e.name,
@@ -258,10 +268,12 @@ class _GithubFlowState extends State<_GithubFlow> {
       _note = 'Looking up ${parsed.owner}/${parsed.repo}\u2026';
     });
     try {
-      final rel = await PekGithub.findRelease(parsed.owner, parsed.repo);
+      final rel = await PekGithub.findRelease(parsed.owner, parsed.repo, pek: !widget.skin);
       if (!mounted) return;
       if (rel.options.isEmpty) {
-        throw StoreException('There is nothing in ${parsed.owner}/${parsed.repo} that PEK TV can install (no .zip release file).');
+        throw StoreException(widget.skin
+            ? 'There is nothing in ${parsed.owner}/${parsed.repo} that PEK TV can install (no .zip release file).'
+            : '${PluginPek.rejected}there is nothing in ${parsed.owner}/${parsed.repo} that PEK TV can install: its latest release has no .PEK file. PEK TV does not install .zip files or source code as plugins.');
       }
       setState(() {
         _busy = false;
@@ -289,7 +301,6 @@ class _GithubFlowState extends State<_GithubFlow> {
     final out = <String>[
       'Unverified plugin from GitHub: ${rel.owner}/${rel.repo}${rel.tag.isNotEmpty ? ' \u00b7 ${rel.tag}' : ''}${opt.size > 0 ? ' \u00b7 ${_kb(opt.size)}' : ''}',
       'PEK TV did not make, review or approve it. It is published by its developer, who is responsible for it.',
-      if (opt.kind == 'source') 'This is the repository\u2019s source code, not a packaged release.',
     ];
     if (replaced) {
       final prev = PluginInstaller.sourceOf(prep.id);
@@ -368,7 +379,7 @@ class _GithubFlowState extends State<_GithubFlow> {
           const Heading('Install from GitHub'),
           _muted(context, widget.skin
               ? 'Type the developer\u2019s GitHub name, a slash, and the skin\u2019s repository name, like someone/my-skin. Pasting a github.com link works too.'
-              : 'Type the developer\u2019s GitHub name, a slash, and the plugin\u2019s repository name, like someone/my-plugin. Pasting a github.com link works too.'),
+              : 'Type the developer\u2019s GitHub name, a slash, and the plugin\u2019s repository name, like someone/my-plugin. Pasting a github.com link works too. The repository\u2019s latest release must have a .PEK file attached.'),
           PekField(label: 'GitHub repository', controller: _text, hint: 'owner/repo', autofocus: true, onSubmitted: _find),
           _muted(context, widget.skin ? 'These skins are unverified: PEK TV does not review them.' : 'These plugins are unverified: PEK TV does not review them.'),
           if (_error.isNotEmpty) Padding(padding: EdgeInsets.only(bottom: p.rem), child: _panel(context, [_error])),
