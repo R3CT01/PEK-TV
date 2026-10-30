@@ -24,6 +24,9 @@
 // Routes:
 //   POST   /v1/auth/signup   { email, username, password, invite? } -> { ok, needsVerify, email }   (username is required: 3 to 20 letters, digits . _ -; code emailed; invite needed when INVITE_ONLY=1)
 //                                                                  Sign-up is done on the website (public/pektv/account.html); the app only signs in.
+//   GET    /v1/news                                             -> { ok, items }   (public: the app's Updates screen)
+//   POST   /v1/news/post     { title, body?, kind?, code?, link?, days? }  (Authorization: Bearer <ADMIN_KEY>; kind = news | update | coupon)
+//   POST   /v1/news/list  and  /v1/news/delete { id }           (same key)
 //   POST   /v1/invites/new   { count?, days?, note? }           -> { ok, codes }   (Authorization: Bearer <ADMIN_KEY>; codes are shown once)
 //   POST   /v1/invites/list  {}                                 -> { ok, invites }   (same key)   POST /v1/invites/revoke { id } -> { ok }
 //   POST   /v1/auth/verify   { email, code }                    -> { ok, token, email }   (finishes a sign-up OR a sign-in)
@@ -82,6 +85,7 @@ const SESSION_REFRESH_BELOW = 60 * 24 * 3600 * 1000;
 const RESET_TTL = 15 * 60 * 1000;
 const RESET_MAX_TRIES = 5;
 const VERIFY_TTL = 30 * 60 * 1000;
+const REJECT_TTL = 3 * 24 * 3600 * 1000;   // the "Wasn't you? Reject this login" link in an email works for 3 days
 const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 31 characters, no 0 / O / 1 / I / L
 const INVITE_MAX_NEW = 20;          // codes made per request
 const INVITE_DEFAULT_DAYS = 14;     // an unused code stops working after this many days (0 = never)
@@ -143,6 +147,15 @@ async function init(db) {
     // TV link login: a TV asks for a 6-digit code, the person approves it on the website, the TV collects a session.
     await db.prepare('CREATE TABLE IF NOT EXISTS device_links (poll_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL, dtype TEXT NOT NULL, dname TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, user_id TEXT)').run();
     await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS device_links_code ON device_links (code_hash)').run();
+    // Where the TV asked for its code (its IP address and the approximate place that IP is in), shown to the person who approves.
+    try { await db.prepare("ALTER TABLE device_links ADD COLUMN ip TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    try { await db.prepare("ALTER TABLE device_links ADD COLUMN loc TEXT NOT NULL DEFAULT ''").run(); } catch (e) { /* already there */ }
+    // Which TV-link a session came from, so rejecting that login can sign that one device out again.
+    try { await db.prepare('ALTER TABLE sessions ADD COLUMN dev_ref TEXT').run(); } catch (e) { /* already there */ }
+    // One-time links in emails: "Wasn't you? Reject this login". Only the hash of the token is stored.
+    await db.prepare('CREATE TABLE IF NOT EXISTS reject_tokens (hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT NOT NULL DEFAULT \'\', created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
+    // The app's Updates screen: messages you post (news, new coupon codes). Anyone can read them, only the ADMIN_KEY can post.
+    await db.prepare("CREATE TABLE IF NOT EXISTS announcements (id INTEGER PRIMARY KEY AUTOINCREMENT, created INTEGER NOT NULL, expires INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'news', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', code TEXT NOT NULL DEFAULT '', link TEXT NOT NULL DEFAULT '')").run();
     await db.prepare('CREATE TABLE IF NOT EXISTS subs_cache (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL)').run();
     ready = true;
 }
@@ -279,16 +292,17 @@ async function useInvite(env, db, user, now) {
 }
 
 // ---------------------------------------------------------------- sessions
-async function startSession(db, userId, now) {
+async function startSession(db, userId, now, devRef) {
     const token = randomToken();
-    await db.prepare('INSERT INTO sessions (token_hash, user_id, created, expires) VALUES (?, ?, ?, ?)')
-        .bind(await sha256Hex('hesper:session:' + token), userId, now, now + SESSION_TTL).run();
+    await db.prepare('INSERT INTO sessions (token_hash, user_id, created, expires, dev_ref) VALUES (?, ?, ?, ?, ?)')
+        .bind(await sha256Hex('hesper:session:' + token), userId, now, now + SESSION_TTL, devRef || null).run();
     // tidy up: expired sessions, expired throttle rows, expired reset codes
     await db.batch([
         db.prepare('DELETE FROM sessions WHERE expires < ?').bind(now),
         db.prepare('DELETE FROM throttle WHERE reset_at < ?').bind(now),
         db.prepare('DELETE FROM resets WHERE expires < ?').bind(now),
         db.prepare('DELETE FROM verifs WHERE expires < ?').bind(now),
+        db.prepare('DELETE FROM reject_tokens WHERE expires < ?').bind(now),
         // half-finished plugin uploads (never committed) older than a day
         db.prepare('DELETE FROM plugin_chunks WHERE created < ? AND NOT EXISTS (SELECT 1 FROM plugins p WHERE p.acct = plugin_chunks.acct AND p.id = plugin_chunks.id AND p.fp = plugin_chunks.fp)').bind(now - 24 * 3600 * 1000)
     ]);
@@ -347,7 +361,15 @@ function deviceFrom(raw, now, request) {
     if (!raw || typeof raw !== 'object') return null;
     const type = cleanDeviceText(raw.type, 24) || 'Device';
     const name = cleanDeviceText(raw.name, 60) || 'Unnamed device';
-    return { type, name, when: whenText(now, request) };
+    const g = geoFrom(request);
+    return { type, name, when: whenText(now, request), ip: g.ip, location: g.location };
+}
+// The caller's IP address and the approximate place it is in (Cloudflare's own lookup: city, region, country). Either may be empty.
+function geoFrom(request) {
+    let ip = clientIp(request); if (ip === 'unknown') ip = '';
+    let parts = [];
+    try { const cf = request && request.cf; if (cf) parts = [cf.city, cf.region, cf.country].filter(Boolean); } catch (e) { /* none */ }
+    return { ip: cleanDeviceText(ip, 45), location: cleanDeviceText(parts.join(', '), 80) };
 }
 function whenText(now, request) {
     let tz = '';
@@ -376,7 +398,7 @@ async function postMail(env, to, subject, text, html) {
     return true;
 }
 
-function mailHtml(title, lead, code, device, foot) {
+function mailHtml(title, lead, code, device, foot, rejectUrl) {
     return '<div style="font-family:Arial,Helvetica,sans-serif;max-width:420px;margin:0 auto;padding:24px;color:#111">' +
         '<h2 style="margin:0 0 12px">' + title + '</h2>' +
         '<p style="margin:0 0 16px">' + lead + '</p>' +
@@ -384,28 +406,44 @@ function mailHtml(title, lead, code, device, foot) {
         (device ? '<table style="border-collapse:collapse;margin:0 0 16px;font-size:15px">' +
             '<tr><td style="padding:2px 14px 2px 0;color:#555">Device</td><td style="padding:2px 0"><b>' + escHtml(device.type) + '</b></td></tr>' +
             '<tr><td style="padding:2px 14px 2px 0;color:#555">Name</td><td style="padding:2px 0"><b>' + escHtml(device.name) + '</b></td></tr>' +
+            (device.location ? '<tr><td style="padding:2px 14px 2px 0;color:#555">Location</td><td style="padding:2px 0"><b>' + escHtml(device.location) + '</b></td></tr>' : '') +
+            (device.ip ? '<tr><td style="padding:2px 14px 2px 0;color:#555">IP address</td><td style="padding:2px 0"><b>' + escHtml(device.ip) + '</b></td></tr>' : '') +
             '<tr><td style="padding:2px 14px 2px 0;color:#555">Time</td><td style="padding:2px 0"><b>' + escHtml(device.when) + '</b></td></tr></table>' : '') +
         '<p style="margin:0;color:#555;font-size:14px">' + foot + '</p>' +
+        (rejectUrl ? '<p style="margin:14px 0 0;font-size:12px"><a href="' + escHtml(rejectUrl) + '" style="color:#a33">Wasn\'t you? Reject this login</a></p>' : '') +
         '</div>';
 }
 function deviceText(device) {
-    return device ? '\nDevice: ' + device.type + '\nName: ' + device.name + '\nTime: ' + device.when + '\n' : '';
+    return device ? '\nDevice: ' + device.type + '\nName: ' + device.name +
+        (device.location ? '\nLocation: ' + device.location : '') + (device.ip ? '\nIP address: ' + device.ip : '') +
+        '\nTime: ' + device.when + '\n' : '';
 }
 
 // [device] (optional) = where the sign-in is happening; the email then says which device, what it is called and when.
-async function sendCodeEmail(env, to, code, kind, device) {
+async function sendCodeEmail(env, to, code, kind, device, rejectUrl) {
     const m = MAILS[kind];
     let text = m.text.replace('{code}', code);
     if (device) text = text.replace('\n\n', deviceText(device) + '\n');
-    return postMail(env, to, m.subject, text, mailHtml(m.title, m.lead, code, device, m.foot));
+    if (rejectUrl) text += '\n\nWasn\'t you? Reject this login: ' + rejectUrl;
+    return postMail(env, to, m.subject, text, mailHtml(m.title, m.lead, code, device, m.foot, rejectUrl));
 }
 
 // Tells the owner that a device was just signed in with the TV link (QR / 6-digit code). No code in it: the TV is already in.
-async function sendDeviceNotice(env, to, device) {
+async function sendDeviceNotice(env, to, device, rejectUrl) {
     const foot = 'If this was you, there is nothing to do. If it was not you, choose \"Forgot password\" in the app or on the website to set a new password: that signs every other device out.';
     return postMail(env, to, 'New sign-in on PEK TV: ' + device.name,
-        'A device was just signed in to your PEK TV account.\n' + deviceText(device) + '\nIf this was you, there is nothing to do. If it was not you, choose \"Forgot password\" in the app or on the website to set a new password: that signs every other device out.',
-        mailHtml('A device was signed in', 'Your PEK TV account was just signed in on this device:', '', device, foot));
+        'A device was just signed in to your PEK TV account.\n' + deviceText(device) + '\nIf this was you, there is nothing to do. If it was not you, choose \"Forgot password\" in the app or on the website to set a new password: that signs every other device out.' + (rejectUrl ? '\n\nWasn\'t you? Reject this login: ' + rejectUrl : ''),
+        mailHtml('A device was signed in', 'Your PEK TV account was just signed in on this device:', '', device, foot, rejectUrl));
+}
+
+// The website page that confirms a rejection (a button there does the POST, so an email scanner opening the link changes nothing).
+function webUrl(env) { return String(env.WEB_URL || 'https://pekindustries.com/pektv').replace(/\/+$/, ''); }
+// Makes the one-time link for "Wasn't you? Reject this login". kind 'login' = a sign-in code was sent; kind 'device' = a TV was approved (ref = its poll hash).
+async function makeRejectUrl(env, db, userId, kind, ref, now) {
+    const token = randomToken();
+    await db.prepare('INSERT INTO reject_tokens (hash, user_id, kind, ref, created, expires) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(await sha256Hex('hesper:reject:' + token), userId, kind, ref || '', now, now + REJECT_TTL).run();
+    return webUrl(env) + '/reject.html?t=' + token;
 }
 
 function emailReady(env) { return !!(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL); }
@@ -432,7 +470,10 @@ async function issueLoginCode(env, db, userId, email, now, device) {
     await db.prepare('INSERT INTO verifs (user_id, code_hash, expires, tries) VALUES (?, ?, ?, 0) ' +
         'ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires = excluded.expires, tries = 0')
         .bind(userId, await sha256Hex('hesper:verify:' + userId + ':' + code), now + VERIFY_TTL).run();
-    try { return (await sendCodeEmail(env, email, code, 'login', device || null)) ? 'sent' : 'failed'; }
+    try {
+        const rejectUrl = device ? await makeRejectUrl(env, db, userId, 'login', '', now) : '';
+        return (await sendCodeEmail(env, email, code, 'login', device || null, rejectUrl)) ? 'sent' : 'failed';
+    }
     catch (e) { console.error('Brevo request error', String(e)); return 'failed'; }
 }
 
@@ -628,14 +669,14 @@ async function handleDeviceStart(request, env) {
     const db = env.DB, now = Date.now();
     if (await limited(db, 'device:start:' + clientIp(request), 20, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
     await db.prepare('DELETE FROM device_links WHERE expires < ?').bind(now).run();
-    const dev = deviceFrom(body.device || body, now, request) || { type: 'Device', name: 'Unnamed device' };
+    const dev = deviceFrom(body.device || body, now, request) || { type: 'Device', name: 'Unnamed device', ip: geoFrom(request).ip, location: geoFrom(request).location };
     const poll = randomToken();
     const pollHash = await sha256Hex('hesper:device:poll:' + poll);
     for (let i = 0; i < 6; i++) {
         const code = sixDigits();
         try {
-            await db.prepare('INSERT INTO device_links (poll_hash, code_hash, dtype, dname, created, expires, user_id) VALUES (?, ?, ?, ?, ?, ?, NULL)')
-                .bind(pollHash, await sha256Hex('hesper:device:code:' + code), dev.type, dev.name, now, now + DEVICE_TTL).run();
+            await db.prepare('INSERT INTO device_links (poll_hash, code_hash, dtype, dname, created, expires, user_id, ip, loc) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)')
+                .bind(pollHash, await sha256Hex('hesper:device:code:' + code), dev.type, dev.name, now, now + DEVICE_TTL, dev.ip || '', dev.location || '').run();
         } catch (e) { continue; }   // another live TV has this code: draw another one
         return json({ ok: true, poll, code, expiresIn: Math.floor(DEVICE_TTL / 1000), interval: 3 });
     }
@@ -657,7 +698,7 @@ async function handleDevicePoll(request, env) {
     if (!del.meta || del.meta.changes !== 1) return json({ ok: true, status: 'pending' });
     const user = await db.prepare('SELECT email, username FROM users WHERE id = ?').bind(row.user_id).first();
     if (!user) return json({ error: 'expired' }, 410);
-    return json(Object.assign({ ok: true, status: 'approved', token: await startSession(db, row.user_id, now), email: user.email, username: user.username || '' }, await planOf(db, row.user_id, now)));
+    return json(Object.assign({ ok: true, status: 'approved', token: await startSession(db, row.user_id, now, pollHash), email: user.email, username: user.username || '' }, await planOf(db, row.user_id, now)));
 }
 
 // Finds the waiting TV for a typed / scanned code. Wrong codes are counted so the 6 digits can't be guessed.
@@ -671,7 +712,7 @@ async function deviceByCode(request, env, userId, now) {
         if (lim && lim.reset_at > now && lim.n >= max) return { err: json({ error: 'rate_limited' }, 429) };
     }
     const row = code.length === 6
-        ? await db.prepare('SELECT poll_hash, dtype, dname, created, expires, user_id FROM device_links WHERE code_hash = ? AND expires > ?')
+        ? await db.prepare('SELECT poll_hash, dtype, dname, created, expires, user_id, ip, loc FROM device_links WHERE code_hash = ? AND expires > ?')
             .bind(await sha256Hex('hesper:device:code:' + code), now).first()
         : null;
     if (!row) {
@@ -688,7 +729,7 @@ async function handleDeviceInfo(request, env, userId) {
     const found = await deviceByCode(request, env, userId, now); if (found.err) return found.err;
     const row = found.row;
     const user = await env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first();
-    return json({ ok: true, device: { type: row.dtype, name: row.dname }, created: row.created, expires: row.expires, done: !!row.user_id, email: user ? user.email : '' });
+    return json({ ok: true, device: { type: row.dtype, name: row.dname, ip: row.ip || '', location: row.loc || '' }, created: row.created, expires: row.expires, done: !!row.user_id, email: user ? user.email : '' });
 }
 
 async function handleDeviceApprove(request, env, userId) {
@@ -701,10 +742,52 @@ async function handleDeviceApprove(request, env, userId) {
     // tell the owner (best effort: the TV is linked either way)
     const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first();
     if (user && emailReady(env)) {
-        try { await sendDeviceNotice(env, user.email, { type: row.dtype, name: row.dname, when: whenText(now, request) }); }
+        try {
+            const rejectUrl = await makeRejectUrl(env, db, userId, 'device', row.poll_hash, now);
+            await sendDeviceNotice(env, user.email, { type: row.dtype, name: row.dname, ip: row.ip || '', location: row.loc || '', when: whenText(now, request) }, rejectUrl);
+        }
         catch (e) { console.error('Brevo request error', String(e)); }
     }
     return json({ ok: true, device: { type: row.dtype, name: row.dname }, email: user ? user.email : '' });
+}
+
+// "Wasn't you?" on the approve page: the signed-in person throws away a waiting (or just approved, not yet collected) TV link.
+async function handleDeviceReject(request, env, userId) {
+    const db = env.DB, now = Date.now();
+    const found = await deviceByCode(request, env, userId, now); if (found.err) return found.err;
+    const row = found.row;
+    if (row.user_id && row.user_id !== userId) return json({ error: 'already_linked' }, 409);
+    await db.batch([
+        db.prepare('DELETE FROM device_links WHERE poll_hash = ?').bind(row.poll_hash),
+        db.prepare('DELETE FROM sessions WHERE dev_ref = ? AND user_id = ?').bind(row.poll_hash, userId)
+    ]);
+    return json({ ok: true });
+}
+
+// The one-time link from an email (public: the token is the proof, and it only ever makes things safer).
+//   'device': the TV is unlinked and, if it already collected its session, that one session is deleted.
+//   'login' : the waiting sign-in code is deleted, and sessions made since the code was sent are signed out.
+async function handleRejectToken(request, env) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    if (await limited(db, 'reject:ip:' + clientIp(request), 20, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
+    const token = typeof body.token === 'string' ? body.token : '';
+    if (token.length < 20 || token.length > 100) return json({ error: 'bad_reject' }, 404);
+    const hash = await sha256Hex('hesper:reject:' + token);
+    const row = await db.prepare('SELECT user_id, kind, ref, created FROM reject_tokens WHERE hash = ? AND expires > ?').bind(hash, now).first();
+    if (!row) return json({ error: 'bad_reject' }, 404);
+    let signedOut = 0;
+    if (row.kind === 'device') {
+        const r = await db.prepare('DELETE FROM sessions WHERE dev_ref = ? AND user_id = ?').bind(row.ref, row.user_id).run();
+        signedOut = (r.meta && r.meta.changes) || 0;
+        await db.prepare('DELETE FROM device_links WHERE poll_hash = ?').bind(row.ref).run();
+    } else {
+        await db.prepare('DELETE FROM verifs WHERE user_id = ?').bind(row.user_id).run();
+        const r = await db.prepare('DELETE FROM sessions WHERE user_id = ? AND created >= ?').bind(row.user_id, row.created).run();
+        signedOut = (r.meta && r.meta.changes) || 0;
+    }
+    await db.prepare('DELETE FROM reject_tokens WHERE hash = ?').bind(hash).run();
+    return json({ ok: true, kind: row.kind, signedOut });
 }
 
 // ---------------------------------------------------------------- plans
@@ -1478,6 +1561,48 @@ async function handleInvites(request, env, path) {
     return json({ error: 'not_found' }, 404);
 }
 
+// ---------------------------------------------------------------- news (the app's Updates screen)
+// GET /v1/news is public and returns the newest 30 messages that have not expired. Posting needs the ADMIN_KEY.
+const NEWS_KINDS = ['news', 'update', 'coupon'];
+function cleanNewsText(v, max) {
+    return String(v == null ? '' : v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
+}
+async function handleNewsList(env) {
+    const now = Date.now();
+    const rows = (await env.DB.prepare('SELECT id, created, kind, title, body, code, link FROM announcements WHERE expires = 0 OR expires > ? ORDER BY id DESC LIMIT 30').bind(now).all()).results || [];
+    return json({ ok: true, items: rows.map(r => ({ id: r.id, created: r.created, kind: r.kind, title: r.title, body: r.body, code: r.code, link: r.link })) });
+}
+async function handleNews(request, env, path) {
+    const db = env.DB, now = Date.now(), DAY_MS = 24 * 3600 * 1000;
+    const auth = await adminCheck(request, env, db, now);
+    if (auth === 'limited') return json({ error: 'rate_limited' }, 429);
+    if (auth !== 'ok') return json({ error: 'not_found' }, 404);
+    const { body, err } = await readJson(request); if (err) return err;
+    if (path === '/v1/news/post') {
+        const title = cleanNewsText(body.title, 80).replace(/\n/g, ' ');
+        if (!title) return json({ error: 'title_required' }, 400);
+        const kind = NEWS_KINDS.indexOf(body.kind) >= 0 ? body.kind : 'news';
+        const text = cleanNewsText(body.body, 1500);
+        const code = cleanNewsText(body.code, 40).replace(/\s+/g, '');
+        const link = /^https:\/\/[^\s<>"]{3,200}$/.test(String(body.link || '')) ? String(body.link) : '';
+        const days = body.days == null ? 0 : Math.max(0, Math.min(365, Math.floor(Number(body.days) || 0)));   // 0 = never expires
+        const r = await db.prepare('INSERT INTO announcements (created, expires, kind, title, body, code, link) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .bind(now, days ? now + days * DAY_MS : 0, kind, title, text, code, link).run();
+        return json({ ok: true, id: r.meta && r.meta.last_row_id, expiresInDays: days || null });
+    }
+    if (path === '/v1/news/list') {
+        const rows = (await db.prepare('SELECT id, created, expires, kind, title, code FROM announcements ORDER BY id DESC LIMIT 100').all()).results || [];
+        return json({ ok: true, items: rows.map(r => ({ id: r.id, created: new Date(r.created).toISOString(), expires: r.expires ? new Date(r.expires).toISOString() : null, live: !r.expires || r.expires > now, kind: r.kind, title: r.title, code: r.code })) });
+    }
+    if (path === '/v1/news/delete') {
+        const id = Math.floor(Number(body.id));
+        if (!(id > 0)) return json({ error: 'bad_id' }, 400);
+        const r = await db.prepare('DELETE FROM announcements WHERE id = ?').bind(id).run();
+        return r.meta && r.meta.changes ? json({ ok: true }) : json({ error: 'not_found' }, 404);
+    }
+    return json({ error: 'not_found' }, 404);
+}
+
 export default {
     async fetch(request, env) {
         if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
@@ -1496,9 +1621,12 @@ export default {
             if (method === 'POST' && path === '/v1/auth/login') return await handleLogin(request, env);
             if (method === 'POST' && path === '/v1/auth/forgot') return await handleForgot(request, env);
             if (method === 'POST' && path === '/v1/auth/reset') return await handleReset(request, env);
+            if (method === 'POST' && path === '/v1/auth/reject') return await handleRejectToken(request, env);
             if (method === 'POST' && path === '/v1/device/start') return await handleDeviceStart(request, env);
             if (method === 'POST' && path === '/v1/device/poll') return await handleDevicePoll(request, env);
             if (method === 'POST' && path.indexOf('/v1/invites/') === 0) return await handleInvites(request, env, path);
+            if (method === 'GET' && path === '/v1/news') return await handleNewsList(env);
+            if (method === 'POST' && path.indexOf('/v1/news/') === 0) return await handleNews(request, env, path);
 
             // Subtitles: no sign-in needed (everyone shares the server's OpenSubtitles account)
             if (method === 'POST' && path === '/v1/subs/search') return await handleSubsSearch(request, env);
@@ -1539,6 +1667,7 @@ export default {
             if (method === 'GET' && path === '/v1/me') return await handleMe(env, sess.userId);
             if (method === 'POST' && path === '/v1/device/info') return await handleDeviceInfo(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/device/approve') return await handleDeviceApprove(request, env, sess.userId);
+            if (method === 'POST' && path === '/v1/device/reject') return await handleDeviceReject(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/account/username') return await handleSetUsername(request, env, sess.userId);
             // Cloud backup (profile sync, watch-history sync, plugin backup) is a paid feature. Export and account deletion stay free.
             if (path === '/v1/profiles/sync' || path === '/v1/sync' || path.indexOf('/v1/plugins') === 0) {

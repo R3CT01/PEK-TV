@@ -27,6 +27,7 @@ stops working nobody can sign in on a new device (devices that are already signe
    - Type **Secret**, name `BREVO_API_KEY`, value = the key from step A2
    - Type **Text**, name `BREVO_SENDER_EMAIL`, value = the sender address verified in step A1
    - Type **Text**, name `BREVO_SENDER_NAME`, value = `PEK TV` (optional)
+   - Type **Text**, name `WEB_URL`, value = `https://pekindustries.com/pektv` (optional; this is where the "Wasn't you? Reject this login" link in sign-in emails points, to `reject.html`. No slash at the end)
    Then **Deploy** so they take effect.
 4. Visit the worker URL in a browser. It should say: `hesper-sync ok`
    (tables are created automatically on the first request).
@@ -193,3 +194,16 @@ unique index are created on the first request), then update the app.
 ## Updating for ratings
 
 Movie, episode and show ratings sync as a new item kind (`r|m|<title>|<year>`, `r|e|<show>|<season>|<episode>`, `r|s|<show>`; rating 1 to 10) through the existing `POST /v1/sync`, and `GET /v1/export` lists them as `ratings`. Redeploy `worker.js`; no database change is needed (the `items` table already takes any kind). An app that has ratings talks fine to an older worker: it keeps the ratings on the device until the worker is updated.
+
+
+## Posting to the app's Updates screen (news and coupon codes)
+The app has Settings > Updates. It shows the messages you post, with "N new" next to it until they are opened. It needs `ADMIN_KEY` (the same one used for invite codes).
+
+- **Easiest:** open `https://pekindustries.com/pektv/news-admin` (not linked anywhere), type your admin key, fill in the form, press Post. A coupon message can carry a code, which the app shows with a Copy code button.
+- **From a terminal:**
+  ```
+  curl -X POST https://YOUR-WORKER/v1/news/post -H "Authorization: Bearer YOUR_ADMIN_KEY" -H "Content-Type: application/json" \
+    -d '{"title":"10% off your first month","body":"Use this code at checkout.","kind":"coupon","code":"WELCOME10","days":14}'
+  ```
+  `kind` is `news`, `update` or `coupon`. `days` makes it disappear by itself (leave it out to keep it). `/v1/news/list` and `/v1/news/delete` (`{"id":3}`) manage them.
+- The coupon code itself is made in Stripe (Product catalog > Coupons > Create promotion code); this screen only tells people about it.

@@ -9,6 +9,7 @@ import 'common.dart';
 import 'detail.dart';
 import 'mpv.dart';
 import 'net_folders.dart';
+import 'news.dart';
 import 'music_mode.dart';
 import 'plugin_backup.dart';
 import 'plugin_backup_ui.dart';
@@ -337,6 +338,10 @@ class SettingsPage extends StatelessWidget {
       row('Mode', music ? 'Music mode is on. Switch back to regular PEK TV here' : 'Turn on music mode: the app becomes a music player', Icons.music_note_outlined, () => const _SettingsList(children: [ModeSection()])),
       row('Library', music ? 'The folders and network folders PEK TV scans for music' : 'The folders PEK TV scans for movies, shows and music', Icons.folder_outlined, () => _LibrarySettings(music: music)),
       row('Account', 'Sign in, profiles and sync', Icons.person_outline, () => const _SettingsList(children: [AccountSection()])),
+      ValueListenableBuilder<int>(
+        valueListenable: News.unread,
+        builder: (context, n, _) => row('Updates', n > 0 ? '$n new' : 'News, offers and coupon codes', Icons.campaign_outlined, () => const _SettingsList(children: [NewsSection()])),
+      ),
       row('Appearance', 'Skins, layout and the activity display', Icons.palette_outlined, () => const _SettingsList(children: [AppearanceSection(), LayoutSection(), ActivitySection()])),
       if (music)
         row('Playback', 'Online art and lyrics', Icons.play_circle_outline, () => const _SettingsList(children: [MusicOnlineSection()]))

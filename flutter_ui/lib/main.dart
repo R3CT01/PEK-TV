@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 
@@ -13,6 +15,7 @@ import 'src/skins.dart';
 import 'src/mpv.dart';
 import 'src/music_controller.dart';
 import 'src/net.dart';
+import 'src/news.dart';
 import 'src/shell.dart';
 import 'src/store.dart';
 import 'src/theme.dart';
@@ -80,6 +83,7 @@ class _BootState extends State<_Boot> {
   Future<bool> _start() async {
     final check = AppUpdate.check(); // gives up after a few seconds; any problem = no update screen
     final notes = WhatsNew.pending(); // local, instant; any problem = no screen
+    unawaited(News.refresh()); // the Updates feed (news.dart): fetched in the background so Settings can show "N new"
     final ok = await Api.waitForServer();
     _update = await check;
     _notes = await notes;
