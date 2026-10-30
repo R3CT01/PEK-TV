@@ -109,9 +109,12 @@ String _date(int ms) {
 
 IconData _icon(String kind) => kind == 'coupon' ? Icons.local_offer_outlined : kind == 'update' ? Icons.system_update_alt : Icons.campaign_outlined;
 
-/// Settings > Updates.
+/// The Updates feed. As a main screen (`page: true`, see [UpdatesPage]) it has no section title of its own; in Settings
+/// (music mode) it is a titled section.
 class NewsSection extends StatefulWidget {
-  const NewsSection({super.key});
+  const NewsSection({super.key, this.page = false, this.markSeen = true});
+  final bool page;
+  final bool markSeen; // false on a phone swipe page: it is built before it is shown, so the shell marks it read when it is swiped to
   @override
   State<NewsSection> createState() => _NewsSectionState();
 }
@@ -132,7 +135,7 @@ class _NewsSectionState extends State<NewsSection> {
     await News.refresh(force: true);
     if (!mounted) return;
     setState(() => _loading = false);
-    await News.markAllSeen();
+    if (widget.markSeen) await News.markAllSeen();
   }
 
   Future<void> _open(NewsItem i) async {
@@ -192,23 +195,38 @@ class _NewsSectionState extends State<NewsSection> {
   Widget build(BuildContext context) {
     final t = context.pek.tokens;
     final items = News.items;
-    return Section(
-      title: 'Updates',
-      hint: 'News about PEK TV, offers and coupon codes.',
-      children: [
-        if (items.isEmpty)
-          Text(_loading ? 'Loading\u2026' : 'Nothing here yet. Check back later.', style: TextStyle(color: t.textMuted))
-        else
-          for (final i in items)
-            ListRow(
-              leading: Icon(_icon(i.kind), color: t.accent),
-              title: i.title,
-              subtitle: [_date(i.created), if (i.code.isNotEmpty) 'Code ${i.code}'].where((x) => x.isNotEmpty).join(' \u00b7 '),
-              highlight: i.id > _seenBefore,
-              trailing: Icon(Icons.chevron_right, color: t.textMuted),
-              onTap: () => _open(i),
-            ),
-      ],
-    );
+    final rows = <Widget>[
+      if (items.isEmpty)
+        Text(_loading ? 'Loading\u2026' : 'Nothing here yet. Check back later.', style: TextStyle(color: t.textMuted))
+      else
+        for (final i in items)
+          ListRow(
+            leading: Icon(_icon(i.kind), color: t.accent),
+            title: i.title,
+            subtitle: [_date(i.created), if (i.code.isNotEmpty) 'Code ${i.code}'].where((x) => x.isNotEmpty).join(' \u00b7 '),
+            highlight: i.id > _seenBefore,
+            trailing: Icon(Icons.chevron_right, color: t.textMuted),
+            onTap: () => _open(i),
+          ),
+    ];
+    if (widget.page) return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+    return Section(title: 'Updates', hint: 'News about PEK TV, offers and coupon codes.', children: rows);
+  }
+}
+
+/// Updates as a main screen: the news feed (news, update notes, coupon codes), reached from the phone's bottom bar or the TV menu.
+class UpdatesPage extends StatelessWidget {
+  const UpdatesPage({super.key, required this.padding, this.markSeen = true});
+  final EdgeInsets padding;
+  final bool markSeen;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.pek;
+    return ListView(padding: padding, children: [
+      const Heading('Updates', weather: true),
+      Padding(padding: EdgeInsets.only(bottom: 0.75 * p.rem), child: Text('News about PEK TV, offers and coupon codes.', style: TextStyle(color: p.tokens.textMuted, fontSize: 0.9 * p.rem))),
+      NewsSection(page: true, markSeen: markSeen),
+    ]);
   }
 }

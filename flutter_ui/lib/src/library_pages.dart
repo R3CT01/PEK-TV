@@ -6,6 +6,8 @@ import 'api.dart';
 import 'common.dart';
 import 'detail.dart';
 import 'fields.dart';
+import 'pages.dart' show ResumeThumb;
+import 'plugin_ui.dart' show PluginFavoritesSection;
 import 'ratings.dart';
 import 'ratings_export.dart';
 import 'store.dart';
@@ -461,7 +463,40 @@ class _SearchPageState extends State<SearchPage> {
   }
 }
 
-// ====================================================================== Watch History
+// ====================================================================== Watch History (also holds what Resume Watching used to)
+
+/// Asks before something is taken out of Watch History. Cancel has the focus, so a stray OK press on a remote keeps it.
+Future<bool> confirmRemoveFromHistory(BuildContext context, String title) async {
+  final p = context.pek;
+  final t = p.tokens;
+  final rem = p.rem;
+  final yes = await showDialog<bool>(
+    context: context,
+    barrierColor: t.overlay,
+    builder: (c) => Dialog(
+      backgroundColor: t.glassStrong,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.radius), side: BorderSide(color: t.border)),
+      child: Padding(
+        padding: EdgeInsets.all(1.5 * rem),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Delete from watch history?', style: TextStyle(fontSize: 1.25 * rem, fontWeight: FontWeight.w700)),
+            SizedBox(height: 0.75 * rem),
+            Text('Are you sure you want to delete "$title" from your watch history? Your files are not touched.', style: TextStyle(color: t.textMuted)),
+            SizedBox(height: 1.25 * rem),
+            Wrap(spacing: 0.75 * rem, runSpacing: 0.75 * rem, children: [
+              PekButton(label: 'Yes, delete', primary: true, onTap: () => Navigator.pop(c, true)),
+              PekButton(label: 'Cancel', autofocus: true, onTap: () => Navigator.pop(c, false)),
+            ]),
+          ],
+        ),
+      ),
+    ),
+  );
+  return yes == true;
+}
 
 class HistoryPage extends StatelessWidget {
   const HistoryPage({super.key, required this.padding});
@@ -506,11 +541,32 @@ class HistoryPage extends StatelessWidget {
       valueListenable: Store.changed,
       builder: (context, _, __) {
         final items = Store.history();
+        final resume = Store.resumeItems();
+        Widget sub(String text) => Padding(padding: EdgeInsets.only(top: 0.25 * rem, bottom: 0.6 * rem), child: Text(text, style: TextStyle(fontSize: 1.1 * rem, fontWeight: FontWeight.w600, letterSpacing: -0.2)));
         return ListView(padding: padding, children: [
           const Heading('Watch History', weather: true),
-          if (items.isEmpty)
-            const PekCard(title: 'Nothing watched yet', subtitle: 'Movies and episodes show up here once you finish them.')
-          else ...[
+          if (resume.isNotEmpty) ...[
+            sub('Continue watching'),
+            for (final it in resume)
+              ListRow(
+                leading: ResumeThumb(item: it),
+                title: it.title,
+                subtitle: it.duration > 0 ? '${formatTime(it.position)} of ${formatTime(it.duration)}' : 'Stopped at ${formatTime(it.position)}',
+                onTap: () => playResumeOrStart(context, it),
+                trailing: IconButton(
+                  tooltip: 'Remove',
+                  icon: Icon(Icons.close, color: p.tokens.textMuted),
+                  onPressed: () async {
+                    if (await confirmRemoveFromHistory(context, it.title)) await Store.removeProgress(it.id);
+                  },
+                ),
+              ),
+            SizedBox(height: rem),
+            if (items.isNotEmpty) sub('Finished'),
+          ],
+          if (items.isEmpty && resume.isEmpty)
+            const PekCard(title: 'Nothing watched yet', subtitle: 'Anything you stop partway through, and every movie or episode you finish, shows up here.')
+          else if (items.isNotEmpty) ...[
             Padding(
               padding: EdgeInsets.only(bottom: rem),
               child: Wrap(spacing: 0.75 * rem, runSpacing: 0.5 * rem, children: [
@@ -529,12 +585,14 @@ class HistoryPage extends StatelessWidget {
                     onPressed: () => showRateDialog(context, title: e.title, year: e.year, kind: e.kind, season: e.season, episode: e.episode),
                   ),
                   IconButton(tooltip: 'Remove', icon: const Icon(Icons.close), onPressed: () async {
+                    if (!await confirmRemoveFromHistory(context, e.label)) return;
                     await Store.removeHistory(e.key);
                     Watched.syncSoon();
                   }),
                 ]),
               ),
           ],
+          const PluginFavoritesSection(),
         ]);
       },
     );

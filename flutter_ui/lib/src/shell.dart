@@ -17,6 +17,7 @@ import 'library_pages.dart';
 import 'mpv.dart';
 import 'music.dart';
 import 'music_mode.dart';
+import 'news.dart';
 import 'pages.dart';
 import 'plugin_backup.dart';
 import 'plugin_hooks.dart';
@@ -28,14 +29,14 @@ import 'tokens.dart';
 import 'weather.dart' show Weather;
 import 'widgets.dart';
 
-/// NAV_ITEMS in app_config.js, plus Resume Watching (the web UI only inserts it once there is something to resume).
+/// NAV_ITEMS in app_config.js. Watch History also holds what Resume Watching used to; Updates is the news feed.
 const _navItems = <(String, String)>[
   ('dashboard', 'Dashboard'),
   ('movies', 'Movies'),
   ('shows', 'TV Shows'),
   ('music', 'Music'),
+  ('updates', 'Updates'),
   ('search', 'Search'),
-  ('resume', 'Resume Watching'),
   ('history', 'Watch History'),
   ('favorites', 'Favorites'),
   ('duplicates', 'Duplicates'),
@@ -46,16 +47,16 @@ const _navItems = <(String, String)>[
 
 /// The pages you swipe between on a phone, in order. "More" is a page of its own (not a pop-up sheet): it holds every
 /// other screen as a tile, and a tap opens that screen on top.
-const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'more'];
+const _swipePages = ['dashboard', 'movies', 'shows', 'music', 'updates', 'more'];
 
 /// Music mode (Settings > Mode): the same shell with four music pages instead.
 const _musicPages = ['mhome', 'msearch', 'mlibrary', 'msettings'];
 const _musicNav = <(String, String)>[('mhome', 'Home'), ('msearch', 'Search'), ('mlibrary', 'Your Library'), ('msettings', 'Settings')];
-const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outlined, 'shows': Icons.tv_outlined, 'music': Icons.music_note_outlined, 'more': Icons.more_horiz, 'mhome': Icons.home_outlined, 'msearch': Icons.search, 'mlibrary': Icons.library_music_outlined, 'msettings': Icons.settings_outlined};
-const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'more': 'More', 'mhome': 'Home', 'msearch': 'Search', 'mlibrary': 'Your Library', 'msettings': 'Settings'};
+const _swipeIcon = {'dashboard': Icons.home_outlined, 'movies': Icons.movie_outlined, 'shows': Icons.tv_outlined, 'music': Icons.music_note_outlined, 'updates': Icons.campaign_outlined, 'more': Icons.more_horiz, 'mhome': Icons.home_outlined, 'msearch': Icons.search, 'mlibrary': Icons.library_music_outlined, 'msettings': Icons.settings_outlined};
+const _swipeLabel = {'dashboard': 'Home', 'movies': 'Movies', 'shows': 'Shows', 'music': 'Music', 'updates': 'Updates', 'more': 'More', 'mhome': 'Home', 'msearch': 'Search', 'mlibrary': 'Your Library', 'msettings': 'Settings'};
 
 /// Everything that is not a swipe page.
-const _moreIds = ['search', 'resume', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
+const _moreIds = ['search', 'history', 'favorites', 'duplicates', 'unknown', 'plugins', 'settings'];
 
 String _titleOf(String id) => _navItems.firstWhere((e) => e.$1 == id, orElse: () => ('', 'PEK TV')).$2;
 
@@ -165,6 +166,10 @@ class _AppShellState extends State<AppShell> {
     PluginHost.changed.addListener(_loadPluginScreens);
     PluginPins.changed.addListener(_pinsChanged);
     Store.profile.addListener(_pinsChanged);
+    if (!_music) {
+      News.loadCache();
+      unawaited(News.refresh()); // the unread dot on Updates
+    }
     unawaited(DeepLink.start()); // the website's "back to the app" link after creating an account
     // Cloud sync: once at the start, then every 5 minutes when something changed on this device.
     if (Cloud.linked) {
@@ -295,7 +300,7 @@ class _AppShellState extends State<AppShell> {
       case 'msettings':
         return SettingsPage(padding: pad);
       case 'dashboard':
-        return DashboardPage(padding: pad, onOpenResume: () => _open('resume'), onOpenFavorites: () => _open('favorites'), onOpenMusic: () => _open('music'));
+        return DashboardPage(padding: pad, onOpenResume: () => _open('history'), onOpenFavorites: () => _open('favorites'), onOpenMusic: () => _open('music'));
       case 'movies':
       case 'shows':
         return LibraryPage(key: ValueKey(id), tab: id, title: _titleOf(id), padding: pad);
@@ -316,8 +321,8 @@ class _AppShellState extends State<AppShell> {
         return SearchPage(padding: pad);
       case 'history':
         return HistoryPage(padding: pad);
-      case 'resume':
-        return ResumePage(padding: pad);
+      case 'updates':
+        return UpdatesPage(padding: pad, markSeen: context.pek.sidebar);
       case 'favorites':
         return FavoritesPage(padding: pad);
       case 'duplicates':
@@ -348,7 +353,7 @@ class _AppShellState extends State<AppShell> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               for (var i = 0; i < _pages.length; i++)
-                Expanded(child: _BarItem(label: _swipeLabel[_pages[i]]!, icon: _swipeIcon[_pages[i]]!, active: i == page, onTap: () => _goTo(i))),
+                Expanded(child: _BarItem(label: _swipeLabel[_pages[i]]!, icon: _swipeIcon[_pages[i]]!, active: i == page, badge: _pages[i] == 'updates', onTap: () => _goTo(i))),
             ],
           ),
         ),
@@ -364,6 +369,7 @@ class _AppShellState extends State<AppShell> {
             onPageChanged: (i) {
               _page = i;
               _pageN.value = i;
+              if (_pages[i] == 'updates') unawaited(News.markAllSeen()); // swiped to Updates: everything counts as read
             },
             children: [for (final id in _pages) RepaintBoundary(child: _KeepAlive(child: _body(context, id)))],
           ),
@@ -480,8 +486,7 @@ class _MorePage extends StatelessWidget {
 
   static const _hint = {
     'search': 'Titles, actors, genres, years',
-    'history': 'Everything you finished watching',
-    'resume': 'Pick up where you stopped',
+    'history': 'Pick up where you stopped, and everything you finished',
     'favorites': 'Your saved movies and shows',
     'duplicates': 'Files that appear twice',
     'unknown': 'Files PEK TV could not sort',
@@ -613,7 +618,8 @@ class _NavItem extends StatelessWidget {
 
 /// `.bb-item` in the phone tab bar: an icon over a small label; the active item is bright, the rest are muted.
 class _BarItem extends StatelessWidget {
-  const _BarItem({required this.label, required this.icon, required this.active, required this.onTap});
+  const _BarItem({required this.label, required this.icon, required this.active, required this.onTap, this.badge = false});
+  final bool badge; // shows a dot while there are unread Updates
   final String label;
   final IconData icon;
   final bool active;
@@ -630,7 +636,16 @@ class _BarItem extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 22, color: c),
+          if (badge)
+            ValueListenableBuilder<int>(
+              valueListenable: News.unread,
+              builder: (context, n, _) => Stack(clipBehavior: Clip.none, children: [
+                Icon(icon, size: 22, color: c),
+                if (n > 0) Positioned(right: -3, top: -1, child: Container(width: 9, height: 9, decoration: BoxDecoration(color: t.accent, shape: BoxShape.circle))),
+              ]),
+            )
+          else
+            Icon(icon, size: 22, color: c),
           const SizedBox(height: 3),
           Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 0.68 * p.rem, fontWeight: active ? FontWeight.w600 : FontWeight.w500, color: c)),
         ],

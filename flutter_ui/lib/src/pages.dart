@@ -28,37 +28,6 @@ import 'tokens.dart';
 import 'widgets.dart';
 import 'art_cache.dart';
 
-// ====================================================================== Resume Watching
-
-class ResumePage extends StatelessWidget {
-  const ResumePage({super.key, required this.padding});
-  final EdgeInsets padding;
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.pek;
-    return ValueListenableBuilder<int>(
-      valueListenable: Store.changed,
-      builder: (context, _, __) {
-        final items = Store.resumeItems();
-        return ListView(padding: padding, children: [
-          const Heading('Resume Watching', weather: true),
-          if (items.isEmpty) const PekCard(title: 'Nothing to resume', subtitle: 'Anything you stop partway through shows up here.'),
-          for (final it in items)
-            ListRow(
-              leading: _ResumeThumb(item: it),
-              title: it.title,
-              subtitle: it.duration > 0 ? '${formatTime(it.position)} of ${formatTime(it.duration)}' : 'Stopped at ${formatTime(it.position)}',
-              onTap: () => playResumeOrStart(context, it),
-              trailing: IconButton(tooltip: 'Remove', onPressed: () => Store.removeProgress(it.id), icon: Icon(Icons.close, color: p.tokens.textMuted)),
-            ),
-          const PluginFavoritesSection(),
-        ]);
-      },
-    );
-  }
-}
-
 // ====================================================================== Favorites
 
 class FavoritesPage extends StatefulWidget {
@@ -338,10 +307,12 @@ class SettingsPage extends StatelessWidget {
       row('Mode', music ? 'Music mode is on. Switch back to regular PEK TV here' : 'Turn on music mode: the app becomes a music player', Icons.music_note_outlined, () => const _SettingsList(children: [ModeSection()])),
       row('Library', music ? 'The folders and network folders PEK TV scans for music' : 'The folders PEK TV scans for movies, shows and music', Icons.folder_outlined, () => _LibrarySettings(music: music)),
       row('Account', 'Sign in, profiles and sync', Icons.person_outline, () => const _SettingsList(children: [AccountSection()])),
-      ValueListenableBuilder<int>(
-        valueListenable: News.unread,
-        builder: (context, n, _) => row('Updates', n > 0 ? '$n new' : 'News, offers and coupon codes', Icons.campaign_outlined, () => const _SettingsList(children: [NewsSection()])),
-      ),
+      // Regular mode: Updates is a main screen (bottom bar on a phone, side menu on a TV). Music mode has no such bar entry.
+      if (music)
+        ValueListenableBuilder<int>(
+          valueListenable: News.unread,
+          builder: (context, n, _) => row('Updates', n > 0 ? '$n new' : 'News, offers and coupon codes', Icons.campaign_outlined, () => const _SettingsList(children: [NewsSection()])),
+        ),
       row('Appearance', 'Skins, layout and the activity display', Icons.palette_outlined, () => const _SettingsList(children: [AppearanceSection(), LayoutSection(), ActivitySection()])),
       if (music)
         row('Playback', 'Online art and lyrics', Icons.play_circle_outline, () => const _SettingsList(children: [MusicOnlineSection()]))
@@ -519,10 +490,10 @@ class _FolderPickerState extends State<FolderPicker> {
 }
 
 
-/// The poster at the left of a Resume Watching row: large (about 6.5 rem wide), with a thin progress bar along the bottom.
+/// The poster at the left of an in-progress row in Watch History: large (about 6.5 rem wide), with a thin progress bar along the bottom.
 /// A library title uses its library artwork; a stream started from a plugin brings its own picture.
-class _ResumeThumb extends StatelessWidget {
-  const _ResumeThumb({required this.item});
+class ResumeThumb extends StatelessWidget {
+  const ResumeThumb({required this.item});
   final Progress item;
 
   @override
