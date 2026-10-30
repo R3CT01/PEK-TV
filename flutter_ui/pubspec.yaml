@@ -17,6 +17,7 @@ dependencies:
   webview_flutter_android: ^4.3.0
   image_picker: ^1.1.2              # choosing a playlist picture from the gallery
   path_provider: ^2.1.4             # where the chosen playlist pictures are kept
+  qr_flutter: ^4.1.0                # the QR code on the "Sign in with your phone" screen
 
 dev_dependencies:
   flutter_test:

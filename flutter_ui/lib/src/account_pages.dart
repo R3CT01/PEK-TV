@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'cloud.dart';
 import 'common.dart';
 import 'fields.dart';
+import 'link_login.dart';
 import 'profile_pages.dart';
 import 'plan_ui.dart';
 import 'plugin_backup_ui.dart';
@@ -104,10 +105,11 @@ class _AccountSectionState extends State<AccountSection> {
         if (!Cloud.linked) {
           return Section(
             title: 'Account',
-            hint: 'One account for the household. Each profile keeps its own watch history and resume points, and they follow you to your other devices. Profiles need an account. Accounts are created on our website (you need an invite code), then you sign in here.',
+            hint: 'One account for the household. Each profile keeps its own watch history and resume points, and they follow you to your other devices. Profiles need an account. Accounts are created on our website (you need an invite code), then you sign in here. On a TV the easiest way is to sign in with your phone: no typing.',
             children: [
               Wrap(spacing: 8, runSpacing: 8, children: [
-                PekButton(label: 'Sign in', primary: true, onTap: () => _open(AccountMode.signIn)),
+                PekButton(label: 'Sign in with your phone', primary: true, onTap: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => const LinkScreen()))),
+                PekButton(label: 'Sign in with email', onTap: () => _open(AccountMode.signIn)),
                 PekButton(label: 'Create account', onTap: () => openSignUpPage(context)),
               ]),
             ],
@@ -300,6 +302,7 @@ class _AccountScreenState extends State<AccountScreen> {
             SizedBox(height: 1.25 * rem),
             Wrap(spacing: 8, runSpacing: 8, children: [
               if (_mode == AccountMode.signIn) ...[
+                PekButton(compact: true, label: 'Sign in with your phone', onTap: () => Navigator.pushReplacement<void, void>(context, MaterialPageRoute<void>(builder: (_) => const LinkScreen()))),
                 PekButton(compact: true, label: 'Create account (website)', onTap: () => openSignUpPage(context)),
                 PekButton(compact: true, label: 'Forgot password?', onTap: () => _go(AccountMode.forgot)),
               ],

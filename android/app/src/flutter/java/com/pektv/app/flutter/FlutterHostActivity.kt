@@ -11,11 +11,13 @@ import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.SurfaceView
 import android.view.View
 import android.widget.FrameLayout
@@ -488,6 +490,18 @@ class FlutterHostActivity : FlutterActivity() {
                     val isTv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
                         packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
                     result.success(!isTv && packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN))
+                }
+                // What this device is and what it is called: shown in the sign-in email and on the website's verify page
+                // ("Android TV" / "Living room TV"). The name is the one the owner gave the device in Android's settings, if any.
+                "deviceInfo" -> {
+                    val ui = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+                    val isTv = ui?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+                    val type = if (isTv) "Android TV" else if (resources.configuration.smallestScreenWidthDp >= 600) "Android tablet" else "Android phone"
+                    val given = try { Settings.Global.getString(contentResolver, "device_name") } catch (e: Exception) { null }
+                    val model = listOf(Build.MANUFACTURER ?: "", Build.MODEL ?: "").filter { it.isNotBlank() }
+                        .let { if (it.size == 2 && it[1].startsWith(it[0], ignoreCase = true)) it[1] else it.joinToString(" ") }
+                    result.success(mapOf("type" to type, "name" to (given?.takeIf { it.isNotBlank() } ?: model.ifBlank { "Android device" })))
                 }
                 "setMulticast" -> {
                     setMulticast(call.argument<Boolean>("on") ?: false)

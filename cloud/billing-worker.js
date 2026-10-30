@@ -13,6 +13,13 @@
 //                          The origin of SITE_URL (https://pekindustries.com) is always allowed.
 //   STRIPE_PRICE_MONTHLY / STRIPE_PRICE_YEARLY / STRIPE_PRICE_LIFETIME  (Text, optional) price_... ids from the Stripe dashboard.
 //                          Leave them out and the worker uses the prices written below.
+//   BREVO_API_KEY          (Secret, optional) Brevo API key, needed to email customers (see below).
+//   BREVO_SENDER_EMAIL     (Text, optional)   a sender address verified in Brevo.
+//   BREVO_SENDER_NAME      (Text, optional)   shown as the sender name, default "PEK TV".
+//
+// Customer emails (sent from the webhook, only when BREVO_API_KEY and BREVO_SENDER_EMAIL are set; a failed email never fails the webhook):
+//   "Your services have been canceled"                       when a renewing subscription ends (not when someone upgrades to lifetime)
+//   "Your services have lapsed ... {days} to pay"            when a renewal payment fails: says how many days are left before access stops
 //
 // Routes:
 //   GET   /                         -> "pek-billing ok"
@@ -160,6 +167,71 @@ async function handlePortal(request, env, cors) {
     return json({ ok: true, url: s.url }, 200, cors);
 }
 
+// ---------------------------------------------------------------- customer emails (Brevo)
+const DAY_MS = 24 * 3600 * 1000;
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+async function billingUser(db, userId, customer) {
+    let u = userId ? await db.prepare('SELECT id, email, plan, plan_until, stripe_sub FROM users WHERE id = ?').bind(userId).first() : null;
+    if (!u && customer) u = await db.prepare('SELECT id, email, plan, plan_until, stripe_sub FROM users WHERE stripe_customer = ?').bind(customer).first();
+    return u;
+}
+
+function mailFor(kind, d) {
+    if (kind === 'canceled') {
+        return {
+            subject: 'Your PEK Cloud services have been canceled',
+            title: 'Your services have been canceled',
+            lines: [
+                'Your PEK Cloud subscription has ended, so your PEK Cloud services are now off.',
+                'Your free PEK TV account stays open, and you can subscribe again any time from your account page.'
+            ]
+        };
+    }
+    const days = Math.max(0, Math.min(14, Number(d.days) || 0));
+    return {
+        subject: 'Your PEK Cloud services have lapsed',
+        title: 'Your services have lapsed',
+        lines: [
+            days > 0
+                ? 'Your services have lapsed and you have ' + days + (days === 1 ? ' day' : ' days') + ' to pay or your subscription will be canceled.'
+                : 'Your services have lapsed and are paused. Pay now to turn them back on, or your subscription will be canceled.',
+            'We could not take your latest PEK Cloud payment. Open your account page, choose Manage billing, and update your payment method.'
+        ]
+    };
+}
+
+// Emails a customer. Never throws: a failed email must not fail the webhook, or Stripe would resend the event and the customer would get it twice.
+async function sendCustomerEmail(env, to, kind, data) {
+    try {
+        if (!to) return;
+        if (!env.BREVO_API_KEY || !env.BREVO_SENDER_EMAIL) { console.error('customer email skipped: BREVO_API_KEY or BREVO_SENDER_EMAIL is not set'); return; }
+        const m = mailFor(kind, data || {});
+        const link = siteUrl(env) + '/account';
+        const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: { 'api-key': env.BREVO_API_KEY, 'accept': 'application/json', 'content-type': 'application/json' },
+            body: JSON.stringify({
+                sender: { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'PEK TV' },
+                to: [{ email: to }],
+                subject: m.subject,
+                textContent: m.title + '\n\n' + m.lines.join('\n\n') + '\n\nYour account: ' + link,
+                htmlContent:
+                    '<div style="font-family:Arial,Helvetica,sans-serif;max-width:440px;margin:0 auto;padding:24px;color:#111">' +
+                    '<h2 style="margin:0 0 12px">' + esc(m.title) + '</h2>' +
+                    m.lines.map(l => '<p style="margin:0 0 14px;line-height:1.5">' + esc(l) + '</p>').join('') +
+                    '<p style="margin:18px 0 0"><a href="' + esc(link) + '" style="background:#2b2420;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;display:inline-block">Open your account</a></p>' +
+                    '</div>'
+            })
+        });
+        if (!res.ok) {
+            let detail = '';
+            try { detail = (await res.text()).slice(0, 300); } catch (e) { /* ignore */ }
+            console.error('customer email failed', res.status, detail);
+        }
+    } catch (e) { console.error('customer email error', String(e)); }
+}
+
 // ---------------------------------------------------------------- webhook
 async function verifySignature(raw, header, secret) {
     if (!secret || !header) return false;
@@ -216,7 +288,23 @@ async function handleEvent(env, ev) {
     } else if (ev.type === 'customer.subscription.created' || ev.type === 'customer.subscription.updated') {
         await applySubscription(db, await freshSubscription(env, obj));
     } else if (ev.type === 'customer.subscription.deleted') {
+        const customer = typeof obj.customer === 'string' ? obj.customer : (obj.customer && obj.customer.id);
+        const before = await billingUser(db, obj.metadata && obj.metadata.user_id, customer);    // read first: applySubscription clears the plan
         await applySubscription(db, Object.assign({}, obj, { status: 'canceled' }));
+        // Email only when this was the account's current renewing plan (not an old replaced one, and not a lifetime upgrade).
+        if (before && (before.plan === 'monthly' || before.plan === 'yearly') && before.stripe_sub === obj.id) {
+            await sendCustomerEmail(env, before.email, 'canceled', {});
+        }
+    } else if (ev.type === 'invoice.payment_failed') {
+        if (obj.billing_reason !== 'subscription_cycle') return;                 // only a failed renewal; not the first payment at checkout
+        const customer = typeof obj.customer === 'string' ? obj.customer : (obj.customer && obj.customer.id);
+        const u = await billingUser(db, null, customer);
+        if (!u || (u.plan !== 'monthly' && u.plan !== 'yearly')) return;
+        const invSub = obj.subscription || (obj.parent && obj.parent.subscription_details && obj.parent.subscription_details.subscription);
+        if (invSub && u.stripe_sub && invSub !== u.stripe_sub) return;           // an old, replaced subscription
+        if (Number(obj.attempt_count || 1) > 3) return;                          // a few reminders, not one for every retry
+        const days = Math.ceil((Number(u.plan_until) - Date.now()) / DAY_MS);    // days left before access stops (renewal date + grace)
+        await sendCustomerEmail(env, u.email, 'lapsed', { days });
     }
 }
 

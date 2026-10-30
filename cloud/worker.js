@@ -85,6 +85,7 @@ const VERIFY_TTL = 30 * 60 * 1000;
 const INVITE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';   // 31 characters, no 0 / O / 1 / I / L
 const INVITE_MAX_NEW = 20;          // codes made per request
 const INVITE_DEFAULT_DAYS = 14;     // an unused code stops working after this many days (0 = never)
+const DEVICE_TTL = 10 * 60 * 1000;   // a TV's link code works for 10 minutes
 const MIN_PASSWORD = 8;
 const MAX_PASSWORD = 200;
 
@@ -139,6 +140,9 @@ async function init(db) {
     await db.prepare('CREATE TABLE IF NOT EXISTS store_chunks (owner TEXT NOT NULL, id TEXT NOT NULL, fp TEXT NOT NULL, idx INTEGER NOT NULL, data TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY (owner, id, fp, idx))').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_states (state TEXT PRIMARY KEY, ret TEXT NOT NULL, created INTEGER NOT NULL)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS gh_sessions (token_hash TEXT PRIMARY KEY, gh_id TEXT NOT NULL, login TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL)').run();
+    // TV link login: a TV asks for a 6-digit code, the person approves it on the website, the TV collects a session.
+    await db.prepare('CREATE TABLE IF NOT EXISTS device_links (poll_hash TEXT PRIMARY KEY, code_hash TEXT NOT NULL, dtype TEXT NOT NULL, dname TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, user_id TEXT)').run();
+    await db.prepare('CREATE UNIQUE INDEX IF NOT EXISTS device_links_code ON device_links (code_hash)').run();
     await db.prepare('CREATE TABLE IF NOT EXISTS subs_cache (id TEXT PRIMARY KEY, text TEXT NOT NULL, created INTEGER NOT NULL)').run();
     ready = true;
 }
@@ -316,7 +320,7 @@ const MAILS = {
     login: {
         subject: 'Your PEK TV sign-in code',
         title: 'Confirm your sign-in',
-        lead: 'Enter this code in the app to finish signing in:',
+        lead: 'Enter this code to finish signing in:',
         foot: 'It works for 30 minutes. If you did not just try to sign in, someone has your password: use \"Forgot password\" in the app to choose a new one.',
         text: 'Your PEK TV sign-in code is {code}\n\nIt works for 30 minutes. If you did not just try to sign in, someone has your password: use \"Forgot password\" in the app to choose a new one.'
     },
@@ -329,25 +333,39 @@ const MAILS = {
     }
 };
 
-async function sendCodeEmail(env, to, code, kind) {
-    const m = MAILS[kind];
+function escHtml(v) {
+    return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// A device (TV, phone, browser) as the apps and the website describe it. Anything the caller sends is cut down to plain
+// short text first: it ends up in an email and on the approve page, so it must never carry markup or look like a sentence.
+function cleanDeviceText(v, max) {
+    return String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f<>`]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+// Returns { type, name, when } or null when the caller sent no device. [request] gives the time zone of whoever is asking.
+function deviceFrom(raw, now, request) {
+    if (!raw || typeof raw !== 'object') return null;
+    const type = cleanDeviceText(raw.type, 24) || 'Device';
+    const name = cleanDeviceText(raw.name, 60) || 'Unnamed device';
+    return { type, name, when: whenText(now, request) };
+}
+function whenText(now, request) {
+    let tz = '';
+    try { tz = (request && request.cf && request.cf.timezone) || ''; } catch (e) { /* none */ }
+    for (const zone of [tz, 'UTC']) {
+        if (zone === '' ) continue;
+        try { return new Intl.DateTimeFormat('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: zone, timeZoneName: 'short' }).format(new Date(now)); }
+        catch (e) { /* unknown zone: try UTC */ }
+    }
+    return new Date(now).toISOString();
+}
+
+async function postMail(env, to, subject, text, html) {
     const sender = { email: env.BREVO_SENDER_EMAIL, name: env.BREVO_SENDER_NAME || 'PEK TV' };
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
         method: 'POST',
         headers: { 'api-key': env.BREVO_API_KEY, 'accept': 'application/json', 'content-type': 'application/json' },
-        body: JSON.stringify({
-            sender,
-            to: [{ email: to }],
-            subject: m.subject,
-            textContent: m.text.replace('{code}', code),
-            htmlContent:
-                '<div style="font-family:Arial,Helvetica,sans-serif;max-width:420px;margin:0 auto;padding:24px;color:#111">' +
-                '<h2 style="margin:0 0 12px">' + m.title + '</h2>' +
-                '<p style="margin:0 0 16px">' + m.lead + '</p>' +
-                '<p style="font-size:34px;letter-spacing:8px;font-weight:bold;margin:0 0 16px">' + code + '</p>' +
-                '<p style="margin:0;color:#555;font-size:14px">' + m.foot + '</p>' +
-                '</div>'
-        })
+        body: JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text, htmlContent: html })
     });
     if (!res.ok) {
         let detail = '';
@@ -356,6 +374,38 @@ async function sendCodeEmail(env, to, code, kind) {
         return false;
     }
     return true;
+}
+
+function mailHtml(title, lead, code, device, foot) {
+    return '<div style="font-family:Arial,Helvetica,sans-serif;max-width:420px;margin:0 auto;padding:24px;color:#111">' +
+        '<h2 style="margin:0 0 12px">' + title + '</h2>' +
+        '<p style="margin:0 0 16px">' + lead + '</p>' +
+        (code ? '<p style="font-size:34px;letter-spacing:8px;font-weight:bold;margin:0 0 16px">' + code + '</p>' : '') +
+        (device ? '<table style="border-collapse:collapse;margin:0 0 16px;font-size:15px">' +
+            '<tr><td style="padding:2px 14px 2px 0;color:#555">Device</td><td style="padding:2px 0"><b>' + escHtml(device.type) + '</b></td></tr>' +
+            '<tr><td style="padding:2px 14px 2px 0;color:#555">Name</td><td style="padding:2px 0"><b>' + escHtml(device.name) + '</b></td></tr>' +
+            '<tr><td style="padding:2px 14px 2px 0;color:#555">Time</td><td style="padding:2px 0"><b>' + escHtml(device.when) + '</b></td></tr></table>' : '') +
+        '<p style="margin:0;color:#555;font-size:14px">' + foot + '</p>' +
+        '</div>';
+}
+function deviceText(device) {
+    return device ? '\nDevice: ' + device.type + '\nName: ' + device.name + '\nTime: ' + device.when + '\n' : '';
+}
+
+// [device] (optional) = where the sign-in is happening; the email then says which device, what it is called and when.
+async function sendCodeEmail(env, to, code, kind, device) {
+    const m = MAILS[kind];
+    let text = m.text.replace('{code}', code);
+    if (device) text = text.replace('\n\n', deviceText(device) + '\n');
+    return postMail(env, to, m.subject, text, mailHtml(m.title, m.lead, code, device, m.foot));
+}
+
+// Tells the owner that a device was just signed in with the TV link (QR / 6-digit code). No code in it: the TV is already in.
+async function sendDeviceNotice(env, to, device) {
+    const foot = 'If this was you, there is nothing to do. If it was not you, choose \"Forgot password\" in the app or on the website to set a new password: that signs every other device out.';
+    return postMail(env, to, 'New sign-in on PEK TV: ' + device.name,
+        'A device was just signed in to your PEK TV account.\n' + deviceText(device) + '\nIf this was you, there is nothing to do. If it was not you, choose \"Forgot password\" in the app or on the website to set a new password: that signs every other device out.',
+        mailHtml('A device was signed in', 'Your PEK TV account was just signed in on this device:', '', device, foot));
 }
 
 function emailReady(env) { return !!(env.BREVO_API_KEY && env.BREVO_SENDER_EMAIL); }
@@ -376,13 +426,13 @@ async function issueVerification(env, db, userId, email, now) {
 // Every sign-in of a confirmed account asks for an emailed code too (the password alone is not enough).
 // Same table and check as the sign-up code: the app exchanges it at /v1/auth/verify for the session token.
 // Returns 'sent', 'limited' (too many codes this hour) or 'failed' (the email could not be sent).
-async function issueLoginCode(env, db, userId, email, now) {
+async function issueLoginCode(env, db, userId, email, now, device) {
     if (await limited(db, 'login:code:' + email, 6, 3600 * 1000, now)) return 'limited';
     const code = sixDigits();
     await db.prepare('INSERT INTO verifs (user_id, code_hash, expires, tries) VALUES (?, ?, ?, 0) ' +
         'ON CONFLICT(user_id) DO UPDATE SET code_hash = excluded.code_hash, expires = excluded.expires, tries = 0')
         .bind(userId, await sha256Hex('hesper:verify:' + userId + ':' + code), now + VERIFY_TTL).run();
-    try { return (await sendCodeEmail(env, email, code, 'login')) ? 'sent' : 'failed'; }
+    try { return (await sendCodeEmail(env, email, code, 'login', device || null)) ? 'sent' : 'failed'; }
     catch (e) { console.error('Brevo request error', String(e)); return 'failed'; }
 }
 
@@ -475,7 +525,7 @@ async function handleResend(request, env) {
         // A confirmed account: only while a sign-in is waiting for its code (the password was right in the last few hours),
         // so nobody can use this to fill someone else's inbox.
         const pending = await db.prepare('SELECT expires FROM verifs WHERE user_id = ?').bind(user.id).first();
-        if (pending && pending.expires + 2 * 3600 * 1000 > now) await issueLoginCode(env, db, user.id, email, now);
+        if (pending && pending.expires + 2 * 3600 * 1000 > now) await issueLoginCode(env, db, user.id, email, now, deviceFrom(body.device, now, request));
     }
     return json({ ok: true });
 }
@@ -508,7 +558,7 @@ async function handleLogin(request, env) {
     }
     // Right password: now prove it is you with a code from the email. No session until the code is entered.
     if (!emailReady(env)) return json({ error: 'email_not_configured' }, 500);
-    const sent = await issueLoginCode(env, db, row.id, email, now);
+    const sent = await issueLoginCode(env, db, row.id, email, now, deviceFrom(body.device, now, request));
     if (sent === 'limited') return json({ error: 'rate_limited' }, 429);
     if (sent === 'failed') return json({ error: 'email_failed' }, 502);
     return json({ ok: true, needsVerify: true, email });
@@ -566,6 +616,95 @@ async function handleReset(request, env) {
 async function handleLogout(env, sess) {
     await env.DB.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(sess.tokenHash).run();
     return json({ ok: true });
+}
+
+// ---------------------------------------------------------------- TV link login (6-digit code + QR)
+// 1. The TV asks /v1/device/start for a code and keeps the secret `poll` value; it shows the code (and a QR with it) on screen.
+// 2. The person opens the website's verify page signed in, sees which device it is (/v1/device/info) and approves it (/v1/device/approve).
+// 3. The TV polls /v1/device/poll with its secret; once approved it gets a normal session token (made at that moment, never stored).
+// The code alone gives nothing: it only works together with a signed-in account approving it, for DEVICE_TTL.
+async function handleDeviceStart(request, env) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    if (await limited(db, 'device:start:' + clientIp(request), 20, 3600 * 1000, now)) return json({ error: 'rate_limited' }, 429);
+    await db.prepare('DELETE FROM device_links WHERE expires < ?').bind(now).run();
+    const dev = deviceFrom(body.device || body, now, request) || { type: 'Device', name: 'Unnamed device' };
+    const poll = randomToken();
+    const pollHash = await sha256Hex('hesper:device:poll:' + poll);
+    for (let i = 0; i < 6; i++) {
+        const code = sixDigits();
+        try {
+            await db.prepare('INSERT INTO device_links (poll_hash, code_hash, dtype, dname, created, expires, user_id) VALUES (?, ?, ?, ?, ?, ?, NULL)')
+                .bind(pollHash, await sha256Hex('hesper:device:code:' + code), dev.type, dev.name, now, now + DEVICE_TTL).run();
+        } catch (e) { continue; }   // another live TV has this code: draw another one
+        return json({ ok: true, poll, code, expiresIn: Math.floor(DEVICE_TTL / 1000), interval: 3 });
+    }
+    return json({ error: 'server_busy' }, 503);
+}
+
+async function handleDevicePoll(request, env) {
+    const { body, err } = await readJson(request); if (err) return err;
+    const db = env.DB, now = Date.now();
+    const poll = typeof body.poll === 'string' ? body.poll : '';
+    if (poll.length < 20 || poll.length > 100) return json({ error: 'expired' }, 410);
+    const pollHash = await sha256Hex('hesper:device:poll:' + poll);
+    if (await limited(db, 'device:poll:' + pollHash, 400, DEVICE_TTL, now)) return json({ error: 'rate_limited' }, 429);
+    const row = await db.prepare('SELECT user_id, expires FROM device_links WHERE poll_hash = ?').bind(pollHash).first();
+    if (!row || row.expires < now) return json({ error: 'expired' }, 410);
+    if (!row.user_id) return json({ ok: true, status: 'pending' });
+    // take the approval exactly once: only the call that deletes the row gets the session
+    const del = await db.prepare('DELETE FROM device_links WHERE poll_hash = ? AND user_id IS NOT NULL').bind(pollHash).run();
+    if (!del.meta || del.meta.changes !== 1) return json({ ok: true, status: 'pending' });
+    const user = await db.prepare('SELECT email, username FROM users WHERE id = ?').bind(row.user_id).first();
+    if (!user) return json({ error: 'expired' }, 410);
+    return json(Object.assign({ ok: true, status: 'approved', token: await startSession(db, row.user_id, now), email: user.email, username: user.username || '' }, await planOf(db, row.user_id, now)));
+}
+
+// Finds the waiting TV for a typed / scanned code. Wrong codes are counted so the 6 digits can't be guessed.
+async function deviceByCode(request, env, userId, now) {
+    const { body, err } = await readJson(request); if (err) return { err };
+    const db = env.DB;
+    const code = String(body.code == null ? '' : body.code).replace(/\D/g, '');
+    const userKey = 'device:miss:' + userId, ipKey = 'device:missip:' + clientIp(request);
+    for (const [k, max] of [[userKey, 10], [ipKey, 30]]) {
+        const lim = await db.prepare('SELECT n, reset_at FROM throttle WHERE k = ?').bind(k).first();
+        if (lim && lim.reset_at > now && lim.n >= max) return { err: json({ error: 'rate_limited' }, 429) };
+    }
+    const row = code.length === 6
+        ? await db.prepare('SELECT poll_hash, dtype, dname, created, expires, user_id FROM device_links WHERE code_hash = ? AND expires > ?')
+            .bind(await sha256Hex('hesper:device:code:' + code), now).first()
+        : null;
+    if (!row) {
+        await limited(db, userKey, 10, 15 * 60 * 1000, now);
+        await limited(db, ipKey, 30, 15 * 60 * 1000, now);
+        return { err: json({ error: 'bad_code' }, 404) };
+    }
+    return { row };
+}
+
+// Shows which TV the code belongs to, so the person can check it before approving. Changes nothing.
+async function handleDeviceInfo(request, env, userId) {
+    const now = Date.now();
+    const found = await deviceByCode(request, env, userId, now); if (found.err) return found.err;
+    const row = found.row;
+    const user = await env.DB.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first();
+    return json({ ok: true, device: { type: row.dtype, name: row.dname }, created: row.created, expires: row.expires, done: !!row.user_id, email: user ? user.email : '' });
+}
+
+async function handleDeviceApprove(request, env, userId) {
+    const db = env.DB, now = Date.now();
+    const found = await deviceByCode(request, env, userId, now); if (found.err) return found.err;
+    const row = found.row;
+    if (row.user_id) return json(row.user_id === userId ? { ok: true, done: true } : { error: 'already_linked' }, row.user_id === userId ? 200 : 409);
+    const upd = await db.prepare('UPDATE device_links SET user_id = ? WHERE poll_hash = ? AND user_id IS NULL').bind(userId, row.poll_hash).run();
+    if (!upd.meta || upd.meta.changes !== 1) return json({ error: 'already_linked' }, 409);
+    // tell the owner (best effort: the TV is linked either way)
+    const user = await db.prepare('SELECT email FROM users WHERE id = ?').bind(userId).first();
+    if (user && emailReady(env)) {
+        try { await sendDeviceNotice(env, user.email, { type: row.dtype, name: row.dname, when: whenText(now, request) }); }
+        catch (e) { console.error('Brevo request error', String(e)); }
+    }
+    return json({ ok: true, device: { type: row.dtype, name: row.dname }, email: user ? user.email : '' });
 }
 
 // ---------------------------------------------------------------- plans
@@ -1357,6 +1496,8 @@ export default {
             if (method === 'POST' && path === '/v1/auth/login') return await handleLogin(request, env);
             if (method === 'POST' && path === '/v1/auth/forgot') return await handleForgot(request, env);
             if (method === 'POST' && path === '/v1/auth/reset') return await handleReset(request, env);
+            if (method === 'POST' && path === '/v1/device/start') return await handleDeviceStart(request, env);
+            if (method === 'POST' && path === '/v1/device/poll') return await handleDevicePoll(request, env);
             if (method === 'POST' && path.indexOf('/v1/invites/') === 0) return await handleInvites(request, env, path);
 
             // Subtitles: no sign-in needed (everyone shares the server's OpenSubtitles account)
@@ -1396,6 +1537,8 @@ export default {
 
             if (method === 'POST' && path === '/v1/auth/logout') return await handleLogout(env, sess);
             if (method === 'GET' && path === '/v1/me') return await handleMe(env, sess.userId);
+            if (method === 'POST' && path === '/v1/device/info') return await handleDeviceInfo(request, env, sess.userId);
+            if (method === 'POST' && path === '/v1/device/approve') return await handleDeviceApprove(request, env, sess.userId);
             if (method === 'POST' && path === '/v1/account/username') return await handleSetUsername(request, env, sess.userId);
             // Cloud backup (profile sync, watch-history sync, plugin backup) is a paid feature. Export and account deletion stay free.
             if (path === '/v1/profiles/sync' || path === '/v1/sync' || path.indexOf('/v1/plugins') === 0) {

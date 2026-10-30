@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'activity.dart';
+import 'device_info.dart';
 
 import 'api.dart';
 import 'profiles.dart';
@@ -17,12 +18,13 @@ import 'weather.dart' show Weather;
 
 /// The answer of one cloud call.
 class CloudResult {
-  const CloudResult({required this.ok, this.error = '', this.status = 0, this.body = const {}, this.needsVerify = false, this.pushed = 0, this.changed = false});
+  const CloudResult({required this.ok, this.error = '', this.status = 0, this.body = const {}, this.needsVerify = false, this.pending = false, this.pushed = 0, this.changed = false});
   final bool ok;
   final String error; // a short code, see [Cloud.errorText]
   final int status;
   final Map<String, dynamic> body;
   final bool needsVerify; // account made, the emailed code still has to be entered
+  final bool pending; // TV link login: not approved on the website yet
   final int pushed;
   final bool changed;
 }
@@ -48,6 +50,9 @@ class Cloud {
   /// The website where PEK Cloud is bought (never inside the app).
   static const siteUrl = 'https://pekindustries.com/pektv';
   static const accountPage = '$siteUrl/account';
+
+  /// Where the 6-digit TV code is entered. The QR code on the TV opens it with the code filled in (`?code=123456`).
+  static const verifyPage = '$siteUrl/verify';
 
   /// Accounts are made on the website (an invite code is needed while the cloud is invite-only). "from=app" makes the page
   /// open this app again when the account exists (pektv://account?email=...&username=..., see deep_link.dart).
@@ -180,6 +185,12 @@ class Cloud {
         return 'The cloud service needs updating before other profiles can sync.';
       case 'not_linked':
         return 'Sign in first.';
+      case 'expired':
+        return 'That code ran out. Here is a new one.';
+      case 'already_linked':
+        return 'That code was already used.';
+      case 'server_busy':
+        return 'The PEK cloud is busy. Try again in a minute.';
       case 'unknown_profile':
         return 'That profile was removed on another device.';
       case 'subscription_required':
@@ -293,13 +304,32 @@ class Cloud {
 
   static Future<CloudResult> resendCode(String mail) async {
     if (!validEmail(mail)) return const CloudResult(ok: false, error: 'bad_email');
-    final r = await _auth('/v1/auth/resend', {'email': cleanEmail(mail)});
+    final r = await _auth('/v1/auth/resend', {'email': cleanEmail(mail), 'device': await DeviceInfo.read()});
     return r.ok ? const CloudResult(ok: true) : r;
   }
 
-  static Future<CloudResult> signIn(String mail, String password) {
-    if (!validEmail(mail) || password.isEmpty) return Future.value(const CloudResult(ok: false, error: 'bad_credentials'));
-    return _session('/v1/auth/login', {'email': cleanEmail(mail), 'password': password});
+  static Future<CloudResult> signIn(String mail, String password) async {
+    if (!validEmail(mail) || password.isEmpty) return const CloudResult(ok: false, error: 'bad_credentials');
+    // The device goes along so the sign-in email can say which device is signing in, what it is called and when.
+    return _session('/v1/auth/login', {'email': cleanEmail(mail), 'password': password, 'device': await DeviceInfo.read()});
+  }
+
+  /// TV link login, step 1: asks for a 6-digit code to show on screen. The body has `code`, `poll` (the secret this device
+  /// keeps and sends back in [devicePoll]), `expiresIn` and `interval` in seconds.
+  static Future<CloudResult> deviceStart() async => _auth('/v1/device/start', {'device': await DeviceInfo.read()});
+
+  /// TV link login, step 2 (repeat every few seconds): ok + [CloudResult.pending] while nobody has approved the code on the
+  /// website yet; ok without it once approved, and this device is then signed in. An `expired` error means: ask for a new code.
+  static Future<CloudResult> devicePoll(String poll) async {
+    final res = await _auth('/v1/device/poll', {'poll': poll});
+    if (!res.ok) return res;
+    final token = res.body['token'];
+    if (res.body['status'] != 'approved' || token is! String || token.isEmpty) return const CloudResult(ok: true, pending: true);
+    final mail = '${res.body['email'] ?? ''}'.toLowerCase();
+    await _startSession(token, mail, '${res.body['username'] ?? ''}');
+    await _savePlan(res.body);
+    await Profiles.afterSignIn(mail, created: false);
+    return CloudResult(ok: true, body: res.body);
   }
 
   static Future<CloudResult> forgotPassword(String mail) async {

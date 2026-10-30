@@ -35,6 +35,22 @@ stops working nobody can sign in on a new device (devices that are already signe
 6. Recommended: Worker -> Security / WAF -> rate limiting rule on `/v1/auth/*` per IP. The worker
    already limits sign-ups, sign-ins, reset requests and code guesses itself.
 
+## Sign in with your phone (TV link login)
+
+The TV shows a 6-digit code and a QR code (Settings > Account > Sign in with your phone). The person scans the QR code (or opens
+`https://pekindustries.com/pektv/verify` and types the code), signs in on the website if needed, checks which device it is and taps
+**Approve**. The TV signs in by itself a moment later. No extra setup: paste the new `worker.js` and deploy; the `device_links` table
+is created on the first request. Deploy the website too (it has the new `verify` page).
+
+- A code works for 10 minutes and only once. The TV makes a new one by itself.
+- Wrong codes are counted (10 per account and 30 per IP address every 15 minutes), so the 6 digits can't be guessed.
+- The approving person must be signed in. The code alone never signs anything in, and the website always asks for a tap on
+  **Approve** (the QR code only fills the code in), so a stranger's code can't silently link a TV to your account.
+- Emails (Brevo, same as the other codes): approving sends the owner "A device was signed in" with the device type, its name and
+  the time. The normal email sign-in code (email + password) now also lists the device, its name and the time. The time uses the
+  time zone of the person's request.
+- The app and the website send the device as `{"device": {"type": "Android TV", "name": "Living room TV"}}` with sign-in.
+
 ## Subtitles (one shared OpenSubtitles account for every user)
 
 Users set nothing up. The worker holds one OpenSubtitles.com account and the app asks the worker.
